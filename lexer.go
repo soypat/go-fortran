@@ -18,6 +18,7 @@ import (
 type Lexer90 struct {
 	input bufio.Reader
 	ch    rune // current character (utf8)
+	peek  rune // next character (utf8)
 	err   error
 	idbuf []byte // accumulation buffer.
 
@@ -50,7 +51,9 @@ func (l *Lexer90) Reset(source string, r io.Reader) error {
 	if l.idbuf == nil {
 		l.idbuf = make([]byte, 0, 1024)
 	}
-	l.readChar()
+	// Fill up peek and current character.
+	l.readCharLL()
+	l.readCharLL()
 	return l.err
 }
 
@@ -78,15 +81,32 @@ func (l *Lexer90) Pos() int { return l.pos }
 // Parens returns the parentheses/braces depth at the current position.
 func (l *Lexer90) Parens() int { return l.parens }
 
+// SkipLines skips next n lines of the input.
+func (l *Lexer90) SkipLines(n int) error {
+	if n <= 0 {
+		return nil
+	}
+	targetLine := l.line + n
+	for l.line != targetLine && !l.Done() {
+		tok, _, lit := l.NextToken()
+		if tok == token.Illegal {
+			return errors.New("illegal token: " + string(lit))
+		}
+	}
+	return l.Err()
+}
+
 // Next token parses the upcoming token and returns the literal representation
 // of the token for identifiers, strings and numbers.
 // The returned byte slice is reused between calls to NextToken.
 func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 	l.skipWhitespace()
 	startPos = l.pos
-	if l.err == io.EOF {
+	// With lookahead buffer, l.err might be EOF while l.ch still has a valid character
+	// Only return EOF when current character is exhausted
+	if l.ch == 0 {
 		return token.EOF, startPos, nil
-	} else if l.err != nil {
+	} else if l.err != nil && l.err != io.EOF {
 		return token.Illegal, startPos, nil
 	}
 	ch := l.ch
@@ -319,10 +339,6 @@ func (l *Lexer90) readString(quote rune) []byte {
 	start := l.bufstart()
 	l.readChar() // consume opening quote
 	for l.ch != quote && l.ch != 0 {
-		// Check for continuation line
-		if l.skipContinuation() {
-			continue
-		}
 		if l.ch == '\n' {
 			// Newline without continuation - unterminated string
 			l.err = errors.New("unterminated string literal")
@@ -588,11 +604,11 @@ func (l *Lexer90) readNumber() ([]byte, bool) {
 				next := l.peekChar()
 				// The '.' is part of the number if next is:
 				// - a digit (e.g., 1.5)
-				// - E/D for exponent (e.g., 1.E5, 100.D0)
+				// - E/D/Q for exponent (e.g., 1.E5, 100.D0, 1.Q0)
 				// - whitespace/operator (e.g., 1. + 2)
 				// The '.' is NOT part of the number if next is:
-				// - a letter that's not E/D (e.g., 1.OR., 1.AND.)
-				if isIdentifierChar(next) && next != 'E' && next != 'e' && next != 'D' && next != 'd' {
+				// - a letter that's not E/D/Q (e.g., 1.OR., 1.AND.)
+				if isIdentifierChar(next) && next != 'E' && next != 'e' && next != 'D' && next != 'd' && next != 'Q' && next != 'q' {
 					// The '.' starts a dot operator, don't consume it
 					break
 				}
@@ -601,8 +617,8 @@ func (l *Lexer90) readNumber() ([]byte, bool) {
 				l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
 				l.readChar()
 				continue
-			} else if ch == 'E' || ch == 'e' || ch == 'D' || ch == 'd' {
-				// Handle scientific notation exponent (e.g., 1.5E3, 100.D0)
+			} else if ch == 'E' || ch == 'e' || ch == 'D' || ch == 'd' || ch == 'Q' || ch == 'q' {
+				// Handle scientific notation exponent (e.g., 1.5E3, 100.D0, 1.Q0)
 				seenDot = true // Numbers with exponents are always floats
 				l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
 				l.readChar()
@@ -638,39 +654,9 @@ func (l *Lexer90) bufstart() int {
 	return len(l.idbuf)
 }
 
-// skipContinuation checks if current character is '&' followed by newline,
-// and if so, skips the continuation characters and returns true.
-// In Fortran 90, '&' at end of line continues to next line, with optional '&' at start.
-func (l *Lexer90) skipContinuation() bool {
-	if l.ch == '&' {
-		next := l.peekChar()
-		if next == '\n' {
-			l.readChar() // consume '&'
-			l.readChar() // consume '\n'
-			// Skip leading whitespace on continuation line
-			for l.ch == ' ' || l.ch == '\t' {
-				l.readChar()
-			}
-			// Skip optional continuation marker '&'
-			if l.ch == '&' {
-				l.readChar()
-			}
-			return true
-		}
-	}
-	return false
-}
-
 func (l *Lexer90) skipWhitespace() {
-	for {
-		if isWhitespace(l.ch) {
-			l.readChar()
-		} else if l.skipContinuation() {
-			// Continue skipping after continuation
-			continue
-		} else {
-			break
-		}
+	for isWhitespace(l.ch) {
+		l.readChar()
 	}
 }
 
@@ -679,9 +665,35 @@ func (l *Lexer90) readChar() {
 		l.ch = 0 // Just in case annihilate char.
 		return
 	}
+	l.readCharLL()
+
+	// Handle Fortran 90 line continuation: '&' followed by '\n'
+	// The continuation, along with any surrounding whitespace and optional '&'
+	// on the next line, is consumed transparently.
+	for l.err == nil && l.ch == '&' && l.peek == '\n' {
+		// Consume continuation line commence string "&\n"
+		l.readCharLL()
+		l.readCharLL()
+		for l.err == nil && (l.ch == ' ' || l.ch == '\t') {
+			l.readCharLL() // Skip whitespace on continuation line.
+		}
+		if l.err == nil && l.ch == '&' && l.peek != '\n' {
+			l.readCharLL() // Consume continuation line ampersand if found.
+		}
+	}
+}
+
+func (l *Lexer90) peekChar() rune {
+	return l.peek
+}
+
+func (l *Lexer90) readCharLL() {
+	// Advance character buffer first, so even on EOF we don't lose the last char
+	l.ch = l.peek
+
 	ch, sz, err := l.input.ReadRune()
 	if err != nil {
-		l.ch = 0
+		l.peek = 0
 		l.err = err
 		return
 	}
@@ -692,25 +704,7 @@ func (l *Lexer90) readChar() {
 		l.col++
 	}
 	l.pos += sz
-	l.ch = ch
-}
-
-func (l *Lexer90) peekChar() rune {
-	posstart := l.pos
-	linestart := l.line
-	colstart := l.col
-	chstart := l.ch
-	l.readChar()
-	if l.err != nil {
-		return 0
-	}
-	peeked := l.ch
-	l.line = linestart
-	l.err = l.input.UnreadRune()
-	l.pos = posstart
-	l.col = colstart
-	l.ch = chstart
-	return peeked
+	l.peek = ch
 }
 
 // PositionString returns the "source:line:column" representation of the lexer's current position.

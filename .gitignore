@@ -25,9 +25,10 @@ vendor/
 
 # For local development and testing create `local` directories.
 local
-local_test.go
+local_ignore_test.go
 geodyn
 *.f90
+claude-test
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
