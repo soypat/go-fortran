@@ -98,6 +98,8 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 
 func (p *Parser90) nextToken() {
 	tok, start, lit := p.l.NextToken()
+	// Get the line/col where this token started
+	line, col := p.l.TokenLineCol()
 	// Cycle buffers between current and peek.
 	currBuf := p.current.lit // is clobbered by peek, reused by new peek.
 	p.current = p.peek
@@ -105,6 +107,8 @@ func (p *Parser90) nextToken() {
 	p.peek.lit = append(currBuf[:0], lit...)
 	p.peek.start = start
 	p.peek.tok = tok
+	p.peek.line = line
+	p.peek.col = col
 	if p.current.tok == token.Illegal {
 
 	}
@@ -126,6 +130,8 @@ type toktuple struct {
 	tok   token.Token
 	start int
 	lit   []byte
+	line  int // Line number where this token starts
+	col   int // Column number where this token starts
 }
 
 // ParseNextProgramUnit parses and returns the next program unit from the input.
@@ -133,21 +139,29 @@ type toktuple struct {
 // This method can be called repeatedly to incrementally parse a Fortran file.
 // Phase 1: Parses only top-level program units (PROGRAM, SUBROUTINE, FUNCTION, MODULE)
 func (p *Parser90) ParseNextProgramUnit() ast.ProgramUnit {
-	// Skip leading newlines and comments
-	p.skipNewlinesAndComments()
+	for {
+		// Skip leading newlines and comments
+		p.skipNewlinesAndComments()
 
-	// Check for EOF
-	if p.currentTokenIs(token.EOF) {
-		return nil
+		// Check for EOF
+		if p.currentTokenIs(token.EOF) {
+			return nil
+		}
+
+		// Parse one program unit
+		unit := p.parseTopLevelUnit()
+
+		// Skip trailing newlines after this unit
+		p.skipNewlinesAndComments()
+
+		// If parsing succeeded, return the unit
+		if unit != nil {
+			return unit
+		}
+
+		// If parsing failed but we're not at EOF, continue to next unit
+		// This allows error recovery for invalid program units
 	}
-
-	// Parse and return one program unit
-	unit := p.parseTopLevelUnit()
-
-	// Skip trailing newlines after this unit
-	p.skipNewlinesAndComments()
-
-	return unit
 }
 
 // registerTopLevelParsers registers all statement-level parsing functions
@@ -191,7 +205,10 @@ func (p *Parser90) parseTopLevelUnit() ast.ProgramUnit {
 		return unit
 	}
 
-	p.addError("statement is not a program unit")
+	// If stmt is nil, the parser already added an error
+	if stmt != nil {
+		p.addError("statement is not a program unit")
+	}
 	return nil
 }
 
@@ -221,7 +238,12 @@ func (p *Parser90) skipNewlinesAndComments() {
 
 func (p *Parser90) addError(msg string) {
 	p.errors = append(p.errors, ParserError{
-		sp:  p.l.sourcePos(),
+		sp: sourcePos{
+			Source: p.l.source,
+			Line:   p.current.line,
+			Col:    p.current.col,
+			Pos:    p.current.start,
+		},
 		msg: msg,
 	})
 }
@@ -236,6 +258,25 @@ func (p *Parser90) isTypeKeyword(t token.Token) bool {
 
 func (p *Parser90) isAttributeKeyword(t token.Token) bool {
 	return t == token.RECURSIVE || t == token.PURE || t == token.ELEMENTAL
+}
+
+// canUseAsIdentifier returns true if the current token can be used as an identifier.
+// In Fortran, keywords can be used as variable/function/subroutine names in many contexts.
+func (p *Parser90) canUseAsIdentifier() bool {
+	// Explicit identifiers are always OK
+	if p.currentTokenIs(token.Identifier) || p.currentTokenIs(token.FormatSpec) {
+		return true
+	}
+	// Allow keywords to be used as identifiers
+	// We exclude structural keywords that would cause ambiguity
+	switch p.current.tok {
+	case token.PROGRAM, token.SUBROUTINE, token.FUNCTION, token.MODULE,
+		token.END, token.CONTAINS:
+		return false
+	default:
+		// Most other keywords can be used as identifiers
+		return p.current.tok.IsKeyword()
+	}
 }
 
 // parseParameterList parses a parameter list like (a, b, c)
@@ -334,16 +375,11 @@ func (p *Parser90) collectBodyUntilEnd(endKeyword token.Token) []ast.TokenTuple 
 					return tokens // Found exact match
 				}
 				// Also accept bare END or END followed by identifier (the subprogram name)
-				// But NOT if followed by another top-level keyword (PROGRAM, MODULE, SUBROUTINE, FUNCTION)
 				if nextTok == token.NewLine || nextTok == token.EOF || nextTok == token.Identifier {
 					return tokens // Bare END or END <name>
 				}
-				// If followed by PROGRAM, MODULE, SUBROUTINE, or FUNCTION, this must be ending
-				// a different (parent) construct, so treat current unit as ended
-				if nextTok == token.PROGRAM || nextTok == token.MODULE ||
-					nextTok == token.SUBROUTINE || nextTok == token.FUNCTION {
-					return tokens
-				}
+				// Note: We do NOT return for END SUBROUTINE/FUNCTION/etc. found while collecting
+				// a module body, as these might be nested constructs (e.g., inside INTERFACE blocks)
 			} else {
 				// Looking for bare END or END followed by newline/EOF
 				if nextTok == token.NewLine || nextTok == token.EOF {
@@ -394,8 +430,8 @@ func (p *Parser90) parseProgramBlock() ast.Statement {
 	// Consume PROGRAM keyword
 	p.nextToken()
 
-	// Parse program name (can be Identifier or FormatSpec)
-	if !p.currentTokenIs(token.Identifier) && !p.currentTokenIs(token.FormatSpec) {
+	// Parse program name (keywords can be used as program names)
+	if !p.canUseAsIdentifier() {
 		p.addError("expected program name, got " + p.current.tok.String())
 		return nil
 	}
@@ -432,8 +468,8 @@ func (p *Parser90) parseSubroutine() ast.Statement {
 	// Consume SUBROUTINE keyword
 	p.nextToken()
 
-	// Parse subroutine name (can be Identifier or FormatSpec)
-	if !p.currentTokenIs(token.Identifier) && !p.currentTokenIs(token.FormatSpec) {
+	// Parse subroutine name (keywords can be used as subroutine names)
+	if !p.canUseAsIdentifier() {
 		p.addError("expected subroutine name, got " + p.current.tok.String())
 		return nil
 	}
@@ -475,8 +511,8 @@ func (p *Parser90) parseFunction() ast.Statement {
 	// Consume FUNCTION keyword
 	p.nextToken()
 
-	// Parse function name (can be Identifier or FormatSpec token like D71, I3, etc.)
-	if !p.currentTokenIs(token.Identifier) && !p.currentTokenIs(token.FormatSpec) {
+	// Parse function name (can be Identifier, FormatSpec, or keyword used as identifier)
+	if !p.canUseAsIdentifier() {
 		p.addError("expected function name, got " + p.current.tok.String())
 		return nil
 	}
@@ -533,8 +569,9 @@ func (p *Parser90) parseModule() ast.Statement {
 	// Consume MODULE keyword
 	p.nextToken()
 
-	// Parse module name
-	if !p.expectCurrent(token.Identifier) {
+	// Parse module name (keywords can be used as module names)
+	if !p.canUseAsIdentifier() {
+		p.addError("expected module name, got " + p.current.tok.String())
 		return nil
 	}
 	mod.Name = string(p.current.lit)
@@ -665,6 +702,12 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 	typeToken := p.current.tok
 	typeSpec := typeToken.String()
 	p.nextToken()
+
+	// Handle DOUBLE PRECISION (two-token type specifier)
+	if typeToken == token.DOUBLE && p.currentTokenIs(token.PRECISION) {
+		typeSpec = "DOUBLE PRECISION"
+		p.nextToken()
+	}
 
 	// Handle type length/kind specifiers: CHARACTER*4, REAL*8, INTEGER*4, etc.
 	if p.currentTokenIs(token.Asterisk) {

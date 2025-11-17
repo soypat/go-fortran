@@ -23,11 +23,13 @@ type Lexer90 struct {
 
 	// Higher level statistics fields:
 
-	source string // filename or source name.
-	line   int    // file line number
-	col    int    // column number in line
-	pos    int    // byte position.
-	parens int    // '{','}' braces counter to pick up on unbalanced braces early.
+	source    string // filename or source name.
+	line      int    // file line number
+	col       int    // column number in line
+	pos       int    // byte position.
+	parens    int    // '{','}' braces counter to pick up on unbalanced braces early.
+	tokenLine int    // line number where the last token started
+	tokenCol  int    // column number where the last token started
 }
 
 func (l *Lexer90) Done() bool {
@@ -74,6 +76,11 @@ func (l *Lexer90) LineCol() (line, col int) {
 	return l.line, l.col
 }
 
+// TokenLineCol returns the line/col where the last returned token started.
+func (l *Lexer90) TokenLineCol() (line, col int) {
+	return l.tokenLine, l.tokenCol
+}
+
 // Pos returns the absolute position of the lexer in bytes from the start of the file.
 func (l *Lexer90) Pos() int { return l.pos }
 
@@ -101,6 +108,8 @@ func (l *Lexer90) SkipLines(n int) error {
 func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 	l.skipWhitespace()
 	startPos = l.pos
+	// Capture starting line/col for this token
+	l.tokenLine, l.tokenCol = l.line, l.col
 	// With lookahead buffer, l.err might be EOF while l.ch still has a valid character
 	// Only return EOF when current character is exhausted
 	if l.ch == 0 {
