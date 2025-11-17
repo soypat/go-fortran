@@ -14,9 +14,8 @@ func TestPrint(t *testing.T) {
 		Name:     "test",
 		StartPos: 0,
 		EndPos:   100,
-		BodyTokens: []TokenTuple{
-			{Tok: token.INTEGER, Start: 10, Lit: []byte("INTEGER")},
-			{Tok: token.Identifier, Start: 18, Lit: []byte("x")},
+		Body: []Statement{
+			&ImplicitStatement{IsNone: true, StartPos: 10, EndPos: 22},
 		},
 	}
 
@@ -34,7 +33,7 @@ func TestPrint(t *testing.T) {
 		"Name: \"test\"",
 		"StartPos: 0",
 		"EndPos: 100",
-		"BodyTokens",
+		"Body",
 	}
 
 	for _, exp := range expected {
@@ -46,10 +45,10 @@ func TestPrint(t *testing.T) {
 
 func TestPrintWithFilter(t *testing.T) {
 	prog := &ProgramBlock{
-		Name:       "test",
-		StartPos:   0,
-		EndPos:     100,
-		BodyTokens: nil, // nil slice
+		Name:     "test",
+		StartPos: 0,
+		EndPos:   100,
+		Body:     nil, // nil slice
 	}
 
 	var buf bytes.Buffer
@@ -60,9 +59,9 @@ func TestPrintWithFilter(t *testing.T) {
 
 	output := buf.String()
 
-	// With NotNilFilter, BodyTokens should not appear
-	if strings.Contains(output, "BodyTokens") {
-		t.Errorf("Expected BodyTokens to be filtered out (nil), but got:\n%s", output)
+	// With NotNilFilter, Body should not appear
+	if strings.Contains(output, "Body") {
+		t.Errorf("Expected Body to be filtered out (nil), but got:\n%s", output)
 	}
 
 	// But Name should still appear

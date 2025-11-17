@@ -60,10 +60,10 @@ func (p *Program) End() int {
 
 // ProgramBlock represents a PROGRAM...END PROGRAM block
 type ProgramBlock struct {
-	Name       string
-	BodyTokens []TokenTuple // Unparsed body for phase 2
-	StartPos   int
-	EndPos     int
+	Name     string
+	Body     []Statement // Specification and executable statements
+	StartPos int
+	EndPos   int
 }
 
 func (pb *ProgramBlock) statementNode()   {}
@@ -85,7 +85,7 @@ type Subroutine struct {
 	Name       string
 	Parameters []string
 	Attributes []token.Token // RECURSIVE, PURE, etc.
-	BodyTokens []TokenTuple
+	Body       []Statement   // Specification and executable statements
 	StartPos   int
 	EndPos     int
 }
@@ -115,11 +115,11 @@ func (s *Subroutine) End() int { return s.EndPos }
 // Function represents a FUNCTION...END FUNCTION block
 type Function struct {
 	Name           string
-	ResultType     string // e.g., "INTEGER", "REAL"
+	ResultType     string        // e.g., "INTEGER", "REAL"
 	Parameters     []string
 	ResultVariable string        // For RESULT(var) clause
 	Attributes     []token.Token // RECURSIVE, PURE, ELEMENTAL
-	BodyTokens     []TokenTuple
+	Body           []Statement   // Specification and executable statements
 	StartPos       int
 	EndPos         int
 }
@@ -157,11 +157,11 @@ func (f *Function) End() int { return f.EndPos }
 
 // Module represents a MODULE...END MODULE block
 type Module struct {
-	Name       string
-	BodyTokens []TokenTuple  // Module-level declarations
-	Contains   []ProgramUnit // Procedures in CONTAINS section
-	StartPos   int
-	EndPos     int
+	Name     string
+	Body     []Statement   // Module-level declarations
+	Contains []ProgramUnit // Procedures in CONTAINS section
+	StartPos int
+	EndPos   int
 }
 
 func (m *Module) statementNode()   {}
@@ -183,10 +183,10 @@ func (m *Module) End() int { return m.EndPos }
 
 // BlockData represents a BLOCK DATA...END BLOCK DATA block (Fortran 77 feature)
 type BlockData struct {
-	Name       string
-	BodyTokens []TokenTuple
-	StartPos   int
-	EndPos     int
+	Name     string
+	Body     []Statement
+	StartPos int
+	EndPos   int
 }
 
 func (bd *BlockData) statementNode()   {}
@@ -211,6 +211,99 @@ type TokenTuple struct {
 	Tok   token.Token
 	Start int
 	Lit   []byte
+}
+
+// Specification Part Statements (Phase 2)
+
+// ImplicitStatement represents an IMPLICIT statement
+type ImplicitStatement struct {
+	IsNone   bool   // true for IMPLICIT NONE
+	StartPos int
+	EndPos   int
+}
+
+func (is *ImplicitStatement) statementNode() {}
+func (is *ImplicitStatement) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "IMPLICIT"...)
+}
+func (is *ImplicitStatement) AppendString(dst []byte) []byte {
+	if is.IsNone {
+		return append(dst, "IMPLICIT NONE"...)
+	}
+	return append(dst, "IMPLICIT"...)
+}
+func (is *ImplicitStatement) Pos() int { return is.StartPos }
+func (is *ImplicitStatement) End() int { return is.EndPos }
+
+// UseStatement represents a USE statement
+type UseStatement struct {
+	ModuleName string
+	Only       []string // Empty if not using ONLY clause
+	StartPos   int
+	EndPos     int
+}
+
+func (us *UseStatement) statementNode() {}
+func (us *UseStatement) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "USE"...)
+}
+func (us *UseStatement) AppendString(dst []byte) []byte {
+	dst = append(dst, "USE "...)
+	dst = append(dst, us.ModuleName...)
+	if len(us.Only) > 0 {
+		dst = append(dst, ", ONLY: "...)
+		for i, name := range us.Only {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = append(dst, name...)
+		}
+	}
+	return dst
+}
+func (us *UseStatement) Pos() int { return us.StartPos }
+func (us *UseStatement) End() int { return us.EndPos }
+
+// TypeDeclaration represents a type declaration with attributes
+type TypeDeclaration struct {
+	TypeSpec   string          // e.g., "INTEGER", "REAL", "CHARACTER"
+	Attributes []token.Token   // e.g., PARAMETER, SAVE, INTENT, etc.
+	Entities   []DeclEntity    // Variables being declared
+	StartPos   int
+	EndPos     int
+}
+
+func (td *TypeDeclaration) statementNode() {}
+func (td *TypeDeclaration) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, td.TypeSpec...)
+}
+func (td *TypeDeclaration) AppendString(dst []byte) []byte {
+	dst = append(dst, td.TypeSpec...)
+	if len(td.Attributes) > 0 {
+		dst = append(dst, ", "...)
+		for i, attr := range td.Attributes {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = append(dst, attr.String()...)
+		}
+	}
+	dst = append(dst, " :: "...)
+	for i, entity := range td.Entities {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		dst = append(dst, entity.Name...)
+	}
+	return dst
+}
+func (td *TypeDeclaration) Pos() int { return td.StartPos }
+func (td *TypeDeclaration) End() int { return td.EndPos }
+
+// DeclEntity represents a single entity in a type declaration
+type DeclEntity struct {
+	Name string
+	// Future: ArraySpec, Initialization, etc.
 }
 
 // Identifier represents an identifier
