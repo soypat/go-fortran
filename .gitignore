@@ -16,6 +16,7 @@ vendor/
 *.dylib
 *.hex
 
+
 # `__debug_bin` Debug binary generated in VSCode when using the built-in debugger.
 **__debug_bin*
 *bin
@@ -29,6 +30,8 @@ local_ignore_test.go
 geodyn
 *.f90
 claude-test
+.claude
+!/testdata/**.f90
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out

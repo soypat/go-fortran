@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"strconv"
 	"unicode/utf8"
 
 	"github.com/soypat/go-fortran/token"
@@ -714,15 +713,18 @@ func (l *Lexer90) PositionString() string {
 
 // AppendPositionString appends [Lexer90.PositionString] to the buffer and returns the result.
 func (l *Lexer90) AppendPositionString(b []byte) []byte {
-	b = append(b, l.source...)
-	b = append(b, ':')
+	sp := l.sourcePos()
+	return sp.AppendString(b)
+}
+
+func (l *Lexer90) sourcePos() sourcePos {
 	line, col := l.LineCol()
-	b = strconv.AppendInt(b, int64(line), 10)
-	if l.col > 0 {
-		b = append(b, ':')
-		b = strconv.AppendInt(b, int64(col), 10)
+	return sourcePos{
+		Source: l.source,
+		Line:   line,
+		Col:    col,
+		Pos:    l.pos,
 	}
-	return b
 }
 
 func isIdentifierChar(ch rune) bool {
