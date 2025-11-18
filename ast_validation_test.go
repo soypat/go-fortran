@@ -508,6 +508,37 @@ END SUBROUTINE test
 	}
 }
 
+// exprToString converts an Expression to a string for testing purposes
+// Returns empty string for nil expressions
+func exprToString(expr ast.Expression) string {
+	if expr == nil {
+		return ""
+	}
+	switch e := expr.(type) {
+	case *ast.Identifier:
+		return e.Value
+	case *ast.IntegerLiteral:
+		return e.Raw
+	case *ast.RealLiteral:
+		return e.Raw
+	case *ast.StringLiteral:
+		return e.Value
+	case *ast.LogicalLiteral:
+		if e.Value {
+			return ".TRUE."
+		}
+		return ".FALSE."
+	case *ast.BinaryExpr:
+		return exprToString(e.Left) + " " + e.Op.String() + " " + exprToString(e.Right)
+	// Add more cases for other expression types as needed
+	case *ast.UnaryExpr:
+		return e.Op.String() + exprToString(e.Operand)
+
+	default:
+		return ""
+	}
+}
+
 // TestArraySpecifications verifies that array dimension specifications are correctly
 // captured in the AST for both DIMENSION attributes and entity declarators.
 func TestArraySpecifications(t *testing.T) {
@@ -785,17 +816,18 @@ END PROGRAM test
 						break
 					}
 					bound := arraySpec.Bounds[j]
-					if bound.Lower != expBound.lower {
+					lowerStr := exprToString(bound.Lower)
+					upperStr := exprToString(bound.Upper)
+					if lowerStr != expBound.lower {
 						t.Errorf("Entity %q dim %d: expected lower=%q, got %q",
-							exp.name, j, expBound.lower, bound.Lower)
+							exp.name, j, expBound.lower, lowerStr)
 					}
-					if bound.Upper != expBound.upper {
+					if upperStr != expBound.upper {
 						t.Errorf("Entity %q dim %d: expected upper=%q, got %q",
-							exp.name, j, expBound.upper, bound.Upper)
+							exp.name, j, expBound.upper, upperStr)
 					}
 				}
 			}
 		})
 	}
 }
-

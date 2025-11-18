@@ -1218,48 +1218,46 @@ func (p *Parser90) parseArraySpec() *ast.ArraySpec {
 		// Check for assumed-size: *
 		if p.currentTokenIs(token.Asterisk) {
 			hasAssumedSize = true
-			bound.Lower = ""
-			bound.Upper = "*"
+			bound.Lower = nil
+			// Represent * as an Identifier for consistency
+			bound.Upper = &ast.Identifier{
+				Value:    "*",
+				StartPos: p.current.start,
+				EndPos:   p.current.start + 1,
+			}
 			p.nextToken()
 		} else if p.currentTokenIs(token.Colon) {
 			// Assumed-shape: :
 			hasAssumedShape = true
-			bound.Lower = ""
-			bound.Upper = ""
+			bound.Lower = nil
+			bound.Upper = nil
 			p.nextToken()
 		} else {
-			// Explicit bound or lower bound
-			// Collect tokens until we hit ':', ',' or ')'
-			var boundTokens []byte
-			for !p.currentTokenIs(token.Colon) && !p.currentTokenIs(token.Comma) &&
-				!p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
-				if len(boundTokens) > 0 {
-					boundTokens = append(boundTokens, ' ')
-				}
-				boundTokens = append(boundTokens, p.current.lit...)
-				p.nextToken()
+			// Parse explicit bound expression
+			// parseExpression will stop at :, ,, or ) since they have precedence 0
+			lowerExpr := p.parseExpression(0)
+			if lowerExpr == nil {
+				// Invalid expression
+				break
 			}
 
 			if p.currentTokenIs(token.Colon) {
 				// This was the lower bound, now get upper bound
-				bound.Lower = string(boundTokens)
+				bound.Lower = lowerExpr
 				p.nextToken() // consume ':'
 
-				// Get upper bound
-				var upperTokens []byte
-				for !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
-					if len(upperTokens) > 0 {
-						upperTokens = append(upperTokens, ' ')
-					}
-					upperTokens = append(upperTokens, p.current.lit...)
-					p.nextToken()
+				// Parse upper bound expression
+				upperExpr := p.parseExpression(0)
+				if upperExpr == nil {
+					// Invalid expression
+					break
 				}
-				bound.Upper = string(upperTokens)
+				bound.Upper = upperExpr
 				hasExplicit = true
 			} else {
 				// No colon, so this is just upper bound (lower defaults to 1)
-				bound.Lower = ""
-				bound.Upper = string(boundTokens)
+				bound.Lower = nil
+				bound.Upper = lowerExpr
 				hasExplicit = true
 			}
 		}
@@ -1460,7 +1458,8 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 	if p.currentTokenIs(token.IntLit) {
 		// TODO: Parse actual integer value
 		lit := &ast.IntegerLiteral{
-			Value:    0, // Will need proper parsing
+			Value:    0,                         // Will need proper parsing
+			Raw:      string(p.current.lit),    // Store original text
 			StartPos: startPos,
 			EndPos:   p.current.start + len(p.current.lit),
 		}

@@ -328,12 +328,12 @@ func (ask ArraySpecKind) String() string {
 }
 
 // ArrayBound represents a single dimension's bounds (lower:upper)
-// For explicit shape: Lower and Upper are both set
+// For explicit shape: Lower and/or Upper are Expression nodes
 // For assumed shape (:): Lower and Upper are nil
-// For assumed size (*): indicated by ArraySpecAssumedSize kind
+// For assumed size (*): Upper is Identifier("*"), Lower is nil
 type ArrayBound struct {
-	Lower string // Lower bound expression (as string for now, will be Expression later)
-	Upper string // Upper bound expression (as string for now, will be Expression later)
+	Lower Expression // Lower bound expression (nil for assumed shape or when omitted)
+	Upper Expression // Upper bound expression (nil for assumed shape, Identifier("*") for assumed size)
 }
 
 // ArraySpec represents array dimension specification
@@ -404,7 +404,8 @@ func (i *Identifier) End() int { return i.EndPos }
 
 // IntegerLiteral represents an integer literal
 type IntegerLiteral struct {
-	Value    int64
+	Value    int64  // Parsed integer value (0 if not yet parsed)
+	Raw      string // Original text representation
 	StartPos int
 	EndPos   int
 }
