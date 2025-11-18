@@ -382,36 +382,19 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 		}
 	}
 
-	// Skip remaining execution part until CONTAINS or END of program unit
-	// Use same logic as collectBodyUntilEndOLD but don't collect tokens
-	for !p.currentTokenIs(token.EOF) {
-		if p.currentTokenIs(token.CONTAINS) {
+	// Phase 3: Parse executable statements
+	for !p.currentTokenIs(token.CONTAINS) && !p.isEndOfProgramUnit() && !p.currentTokenIs(token.EOF) {
+		p.skipNewlinesAndComments()
+		if p.currentTokenIs(token.CONTAINS) || p.isEndOfProgramUnit() {
 			break
 		}
 
-		if p.currentTokenIs(token.END) {
-			// Check if this is END of our program unit
-			nextTok := p.peek.tok
-			// Bare END or END followed by newline/EOF/identifier means end of unit
-			if nextTok == token.NewLine || nextTok == token.EOF || nextTok == token.Identifier {
-				break
-			}
-			// END followed by a keyword - could be end of unit or nested construct
-			// Check common program unit keywords
-			if nextTok == token.PROGRAM || nextTok == token.SUBROUTINE ||
-				nextTok == token.FUNCTION || nextTok == token.MODULE {
-				break
-			}
-			// This is a nested END (END IF, END DO, END TYPE, etc.)
-			// Skip both END and the following token
-			p.nextToken() // Skip END
-			if !p.currentTokenIs(token.EOF) && !p.currentTokenIs(token.NewLine) {
-				p.nextToken() // Skip keyword after END
-			}
-			continue
+		if stmt := p.parseExecutableStatement(); stmt != nil {
+			stmts = append(stmts, stmt)
+		} else {
+			// Not a parseable executable statement - skip the construct
+			p.skipToNextStatement()
 		}
-
-		p.nextToken()
 	}
 
 	return stmts

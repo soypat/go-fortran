@@ -59,7 +59,7 @@ END PROGRAM hello
 	// =====================
 	// ProgramBlock {
 	//   Name: "hello"
-	//   Body: ast.Statement (len=3) [
+	//   Body: ast.Statement (len=5) [
 	//     0: ImplicitStatement {
 	//       IsNone: true
 	//       Label: ""
@@ -94,6 +94,50 @@ END PROGRAM hello
 	//       Position: Position {
 	//         Start: 53
 	//         End: 61
+	//       }
+	//     }
+	//     3: AssignmentStmt {
+	//       Target: Identifier {
+	//         Value: "x"
+	//         Position: Position {
+	//           Start: 71
+	//           End: 72
+	//         }
+	//       }
+	//       Value: IntegerLiteral {
+	//         Value: 0
+	//         Raw: "10"
+	//         Position: Position {
+	//           Start: 75
+	//           End: 77
+	//         }
+	//       }
+	//       Label: ""
+	//       Position: Position {
+	//         Start: 71
+	//         End: 77
+	//       }
+	//     }
+	//     4: AssignmentStmt {
+	//       Target: Identifier {
+	//         Value: "y"
+	//         Position: Position {
+	//           Start: 80
+	//           End: 81
+	//         }
+	//       }
+	//       Value: IntegerLiteral {
+	//         Value: 0
+	//         Raw: "20"
+	//         Position: Position {
+	//           Start: 84
+	//           End: 86
+	//         }
+	//       }
+	//       Label: ""
+	//       Position: Position {
+	//         Start: 80
+	//         End: 86
 	//       }
 	//     }
 	//   ]
@@ -268,5 +312,5 @@ END SUBROUTINE swap
 	// Output:
 	// Subroutine: swap
 	// Parameters: [a b]
-	// Specification statements: 3
+	// Specification statements: 6
 }
