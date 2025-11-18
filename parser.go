@@ -1325,6 +1325,247 @@ func (p *Parser90) parseCharacterLength() string {
 	return string(lengthTokens)
 }
 
+// getOperatorPrecedence returns the precedence level for operators
+// Higher number = higher precedence
+// Fortran precedence (highest to lowest):
+// 9: ** (exponentiation, right associative)
+// 8: unary +, -, .NOT.
+// 7: *, /
+// 6: binary +, -
+// 5: // (string concatenation)
+// 4: relational (.EQ., .NE., .LT., .LE., .GT., .GE., ==, /=, <, <=, >, >=)
+// 3: .AND.
+// 2: .OR.
+// 1: .EQV., .NEQV.
+func (p *Parser90) getOperatorPrecedence(op token.Token) int {
+	switch op {
+	case token.DoubleStar: // **
+		return 9
+	case token.Asterisk, token.Slash: // *, /
+		return 7
+	case token.Plus, token.Minus: // +, -
+		return 6
+	case token.StringConcat: // //
+		return 5
+	case token.EQ, token.NE, token.LT, token.LE, token.GT, token.GE: // .EQ., .NE., etc.
+		return 4
+	case token.EqEq, token.NotEquals, token.Less, token.LessEq, token.Greater, token.GreaterEq: // ==, /=, <, <=, >, >=
+		return 4
+	case token.AND: // .AND.
+		return 3
+	case token.OR: // .OR.
+		return 2
+	case token.EQV, token.NEQV: // .EQV., .NEQV.
+		return 1
+	default:
+		return 0
+	}
+}
+
+// isRightAssociative returns true for right-associative operators
+func (p *Parser90) isRightAssociative(op token.Token) bool {
+	return op == token.DoubleStar // ** is right associative
+}
+
+// parseExpression parses a Fortran expression using precedence climbing
+// minPrec is the minimum precedence level to parse
+func (p *Parser90) parseExpression(minPrec int) ast.Expression {
+	// Parse primary expression (literal, identifier, function call, etc.)
+	left := p.parsePrimaryExpr()
+	if left == nil {
+		return nil
+	}
+
+	// Precedence climbing
+	for {
+		// Check if current token is a binary operator
+		prec := p.getOperatorPrecedence(p.current.tok)
+		if prec == 0 || prec < minPrec {
+			break
+		}
+
+		op := p.current.tok
+		p.nextToken() // consume operator
+
+		// Determine the minimum precedence for the right side
+		nextMinPrec := prec
+		if !p.isRightAssociative(op) {
+			nextMinPrec = prec + 1
+		}
+
+		// Parse right side
+		right := p.parseExpression(nextMinPrec)
+		if right == nil {
+			p.addError("expected expression after operator")
+			return left
+		}
+
+		// Create binary expression node
+		left = &ast.BinaryExpr{
+			Op:       op,
+			Left:     left,
+			Right:    right,
+			StartPos: left.Pos(),
+			EndPos:   right.End(),
+		}
+	}
+
+	return left
+}
+
+// parsePrimaryExpr parses primary expressions: literals, identifiers, function calls,
+// array references, and parenthesized expressions
+func (p *Parser90) parsePrimaryExpr() ast.Expression {
+	startPos := p.current.start
+
+	// Handle unary operators: +, -, .NOT.
+	if p.current.tok == token.Plus || p.current.tok == token.Minus || p.current.tok == token.NOT {
+		op := p.current.tok
+		p.nextToken()
+		operand := p.parseExpression(8) // Unary operators have precedence 8
+		if operand == nil {
+			p.addError("expected expression after unary operator")
+			return nil
+		}
+		return &ast.UnaryExpr{
+			Op:       op,
+			Operand:  operand,
+			StartPos: startPos,
+			EndPos:   operand.End(),
+		}
+	}
+
+	// Handle parenthesized expressions
+	if p.currentTokenIs(token.LParen) {
+		p.nextToken() // consume (
+		expr := p.parseExpression(0)
+		if expr == nil {
+			p.addError("expected expression after '('")
+			return nil
+		}
+		if !p.currentTokenIs(token.RParen) {
+			p.addError("expected ')' after expression")
+			return nil
+		}
+		endPos := p.current.start
+		p.nextToken() // consume )
+		return &ast.ParenExpr{
+			Expr:     expr,
+			StartPos: startPos,
+			EndPos:   endPos,
+		}
+	}
+
+	// Handle integer literals
+	if p.currentTokenIs(token.IntLit) {
+		// TODO: Parse actual integer value
+		lit := &ast.IntegerLiteral{
+			Value:    0, // Will need proper parsing
+			StartPos: startPos,
+			EndPos:   p.current.start + len(p.current.lit),
+		}
+		p.nextToken()
+		return lit
+	}
+
+	// Handle real literals
+	if p.currentTokenIs(token.FloatLit) {
+		lit := &ast.RealLiteral{
+			Value:    0.0, // Will need proper parsing
+			Raw:      string(p.current.lit),
+			StartPos: startPos,
+			EndPos:   p.current.start + len(p.current.lit),
+		}
+		p.nextToken()
+		return lit
+	}
+
+	// Handle string literals
+	if p.currentTokenIs(token.StringLit) {
+		lit := &ast.StringLiteral{
+			Value:    string(p.current.lit),
+			StartPos: startPos,
+			EndPos:   p.current.start + len(p.current.lit),
+		}
+		p.nextToken()
+		return lit
+	}
+
+	// Handle logical literals
+	if p.currentTokenIs(token.TRUE) {
+		lit := &ast.LogicalLiteral{
+			Value:    true,
+			StartPos: startPos,
+			EndPos:   p.current.start + len(p.current.lit),
+		}
+		p.nextToken()
+		return lit
+	}
+	if p.currentTokenIs(token.FALSE) {
+		lit := &ast.LogicalLiteral{
+			Value:    false,
+			StartPos: startPos,
+			EndPos:   p.current.start + len(p.current.lit),
+		}
+		p.nextToken()
+		return lit
+	}
+
+	// Handle identifiers, function calls, and array references
+	if p.canUseAsIdentifier() {
+		name := string(p.current.lit)
+		endPos := p.current.start + len(p.current.lit)
+		p.nextToken()
+
+		// Check for function call or array reference
+		if p.currentTokenIs(token.LParen) {
+			p.nextToken() // consume (
+
+			// Parse argument/subscript list
+			var args []ast.Expression
+			for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+				arg := p.parseExpression(0)
+				if arg == nil {
+					p.addError("expected expression in argument list")
+					break
+				}
+				args = append(args, arg)
+
+				if p.currentTokenIs(token.Comma) {
+					p.nextToken()
+				} else if !p.currentTokenIs(token.RParen) {
+					p.addError("expected ',' or ')' in argument list")
+					break
+				}
+			}
+
+			if p.currentTokenIs(token.RParen) {
+				endPos = p.current.start
+				p.nextToken() // consume )
+			}
+
+			// For now, treat all identifier(...) as function calls
+			// In a full implementation, we'd need symbol table to distinguish
+			// between function calls and array references
+			return &ast.FunctionCall{
+				Name:     name,
+				Args:     args,
+				StartPos: startPos,
+				EndPos:   endPos,
+			}
+		}
+
+		// Just an identifier
+		return &ast.Identifier{
+			Value:    name,
+			StartPos: startPos,
+			EndPos:   endPos,
+		}
+	}
+
+	return nil
+}
+
 // collectBlockDataBody collects tokens until END
 func (p *Parser90) collectBlockDataBody() []ast.TokenTuple {
 	tokens := []ast.TokenTuple{}

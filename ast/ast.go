@@ -420,3 +420,180 @@ func (il *IntegerLiteral) AppendString(dst []byte) []byte {
 
 func (il *IntegerLiteral) Pos() int { return il.StartPos }
 func (il *IntegerLiteral) End() int { return il.EndPos }
+
+// RealLiteral represents a floating-point literal
+type RealLiteral struct {
+	Value    float64
+	Raw      string // Original text representation
+	StartPos int
+	EndPos   int
+}
+
+func (rl *RealLiteral) expressionNode() {}
+func (rl *RealLiteral) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "REAL"...)
+}
+func (rl *RealLiteral) AppendString(dst []byte) []byte {
+	return append(dst, rl.Raw...)
+}
+func (rl *RealLiteral) Pos() int { return rl.StartPos }
+func (rl *RealLiteral) End() int { return rl.EndPos }
+
+// StringLiteral represents a string literal
+type StringLiteral struct {
+	Value    string
+	StartPos int
+	EndPos   int
+}
+
+func (sl *StringLiteral) expressionNode() {}
+func (sl *StringLiteral) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "STRING"...)
+}
+func (sl *StringLiteral) AppendString(dst []byte) []byte {
+	dst = append(dst, '"')
+	dst = append(dst, sl.Value...)
+	dst = append(dst, '"')
+	return dst
+}
+func (sl *StringLiteral) Pos() int { return sl.StartPos }
+func (sl *StringLiteral) End() int { return sl.EndPos }
+
+// LogicalLiteral represents .TRUE. or .FALSE.
+type LogicalLiteral struct {
+	Value    bool
+	StartPos int
+	EndPos   int
+}
+
+func (ll *LogicalLiteral) expressionNode() {}
+func (ll *LogicalLiteral) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "LOGICAL"...)
+}
+func (ll *LogicalLiteral) AppendString(dst []byte) []byte {
+	if ll.Value {
+		return append(dst, ".TRUE."...)
+	}
+	return append(dst, ".FALSE."...)
+}
+func (ll *LogicalLiteral) Pos() int { return ll.StartPos }
+func (ll *LogicalLiteral) End() int { return ll.EndPos }
+
+// BinaryExpr represents a binary operation (e.g., a + b, x .GT. y)
+type BinaryExpr struct {
+	Op       token.Token // Operator token
+	Left     Expression
+	Right    Expression
+	StartPos int
+	EndPos   int
+}
+
+func (be *BinaryExpr) expressionNode() {}
+func (be *BinaryExpr) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, be.Op.String()...)
+}
+func (be *BinaryExpr) AppendString(dst []byte) []byte {
+	dst = be.Left.AppendString(dst)
+	dst = append(dst, ' ')
+	dst = append(dst, be.Op.String()...)
+	dst = append(dst, ' ')
+	dst = be.Right.AppendString(dst)
+	return dst
+}
+func (be *BinaryExpr) Pos() int { return be.StartPos }
+func (be *BinaryExpr) End() int { return be.EndPos }
+
+// UnaryExpr represents a unary operation (e.g., -x, +y, .NOT. flag)
+type UnaryExpr struct {
+	Op      token.Token // Operator token
+	Operand Expression
+	StartPos int
+	EndPos   int
+}
+
+func (ue *UnaryExpr) expressionNode() {}
+func (ue *UnaryExpr) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, ue.Op.String()...)
+}
+func (ue *UnaryExpr) AppendString(dst []byte) []byte {
+	dst = append(dst, ue.Op.String()...)
+	dst = append(dst, ' ')
+	dst = ue.Operand.AppendString(dst)
+	return dst
+}
+func (ue *UnaryExpr) Pos() int { return ue.StartPos }
+func (ue *UnaryExpr) End() int { return ue.EndPos }
+
+// FunctionCall represents a function call expression (e.g., sqrt(x), max(a, b, c))
+type FunctionCall struct {
+	Name     string
+	Args     []Expression
+	StartPos int
+	EndPos   int
+}
+
+func (fc *FunctionCall) expressionNode() {}
+func (fc *FunctionCall) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "CALL"...)
+}
+func (fc *FunctionCall) AppendString(dst []byte) []byte {
+	dst = append(dst, fc.Name...)
+	dst = append(dst, '(')
+	for i, arg := range fc.Args {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		dst = arg.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+func (fc *FunctionCall) Pos() int { return fc.StartPos }
+func (fc *FunctionCall) End() int { return fc.EndPos }
+
+// ArrayRef represents an array reference (e.g., arr(i), matrix(i,j))
+type ArrayRef struct {
+	Name       string
+	Subscripts []Expression
+	StartPos   int
+	EndPos     int
+}
+
+func (ar *ArrayRef) expressionNode() {}
+func (ar *ArrayRef) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "ARRAYREF"...)
+}
+func (ar *ArrayRef) AppendString(dst []byte) []byte {
+	dst = append(dst, ar.Name...)
+	dst = append(dst, '(')
+	for i, sub := range ar.Subscripts {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		dst = sub.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+func (ar *ArrayRef) Pos() int { return ar.StartPos }
+func (ar *ArrayRef) End() int { return ar.EndPos }
+
+// ParenExpr represents a parenthesized expression
+type ParenExpr struct {
+	Expr     Expression
+	StartPos int
+	EndPos   int
+}
+
+func (pe *ParenExpr) expressionNode() {}
+func (pe *ParenExpr) AppendTokenLiteral(dst []byte) []byte {
+	return pe.Expr.AppendTokenLiteral(dst)
+}
+func (pe *ParenExpr) AppendString(dst []byte) []byte {
+	dst = append(dst, '(')
+	dst = pe.Expr.AppendString(dst)
+	dst = append(dst, ')')
+	return dst
+}
+func (pe *ParenExpr) Pos() int { return pe.StartPos }
+func (pe *ParenExpr) End() int { return pe.EndPos }

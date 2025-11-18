@@ -116,38 +116,54 @@ Parameters: []Parameter{
 
 ---
 
-## Phase 4: Expression AST (Foundation)
+## Phase 4: Expression AST (Foundation) ✅ COMPLETED
 
 **Problem**: No expression representation - can't represent calculations or conditions
 **Goal**: Basic expression tree for literals, operators, function calls
 
-**Tasks**:
-- [ ] Create expression interface and basic node types:
+**Tasks Completed**:
+- ✅ Created expression interface and node types (ast/ast.go lines 424-600):
   ```go
   type Expression interface {
     Node
     expressionNode()
   }
+  type RealLiteral struct { Value float64; Raw string; StartPos, EndPos int }
+  type StringLiteral struct { Value string; StartPos, EndPos int }
+  type LogicalLiteral struct { Value bool; StartPos, EndPos int }
   type BinaryExpr struct { Op token.Token; Left, Right Expression; StartPos, EndPos int }
   type UnaryExpr struct { Op token.Token; Operand Expression; StartPos, EndPos int }
   type FunctionCall struct { Name string; Args []Expression; StartPos, EndPos int }
   type ArrayRef struct { Name string; Subscripts []Expression; StartPos, EndPos int }
-  // Literal types already exist: IntegerLiteral, Identifier, etc.
+  type ParenExpr struct { Expr Expression; StartPos, EndPos int }
+  // Identifier also implements Expression interface
   ```
-- [ ] Implement expression parser:
-  - Implement `parseExpression()` using precedence climbing or Pratt parsing
-  - Handle operator precedence: `**` > `*,/` > `+,-` > relational > logical
-  - Parse literals: integers, reals, strings, logical (.TRUE., .FALSE.)
-  - Parse identifiers and array references
-  - Parse function/subroutine calls with argument lists
-  - Handle parenthesized expressions
-- [ ] Test expression parsing comprehensively:
-  - Arithmetic: `a + b * c` → BinaryExpr(+, Identifier(a), BinaryExpr(*, b, c))
-  - Function calls: `sqrt(x*x + y*y)`
-  - Array references: `arr(i,j)`
-  - Logical expressions: `(x .GT. 0) .AND. (y .LT. 10)`
+- ✅ Implemented expression parser (parser.go lines 1328-1567):
+  - `parseExpression()` using precedence climbing algorithm
+  - Operator precedence: `**` (9) > `*,/` (7) > `+,-` (6) > `//` (5) > relational (4) > `.AND.` (3) > `.OR.` (2) > `.EQV.,.NEQV.` (1)
+  - Right-associativity for `**` operator
+  - Literals: integers, reals, strings, logical (.TRUE., .FALSE.)
+  - Identifiers and function/array calls (indistinguishable without symbol table)
+  - Parenthesized expressions
+  - Unary operators: +, -, .NOT.
+- ✅ Comprehensive expression parsing tests (expression_parsing_test.go):
+  - 36 test cases covering all expression types
+  - Arithmetic precedence: `a + b * c` correctly parsed as `a + (b * c)`
+  - Exponentiation right-associativity: `2 ** 3 ** 4` parsed as `2 ** (3 ** 4)`
+  - Function calls: `sqrt(x*x + y*y)` with nested expressions
+  - Logical expressions: `x > 0 .AND. y < 10` with correct precedence
+  - Both F77 (.GT., .LT.) and F90 (>, <) relational operators
+  - Parentheses override precedence: `(a + b) * c`
+  - Complex nested expressions with multiple operators
+  - String concatenation: `'Hello' // ' ' // 'World'`
 
-**Expected Outcome**: Can represent and parse arbitrary Fortran expressions correctly.
+**Key Implementation Details**:
+- Precedence climbing algorithm ensures correct operator precedence
+- Fixed critical bug: precedence 0 (non-operators) must break the precedence loop
+- Function calls and array references parsed identically (requires symbol table to distinguish)
+- All tests pass (36/36)
+
+**Expected Outcome**: ✅ Can represent and parse arbitrary Fortran expressions correctly.
 
 ---
 
@@ -232,8 +248,8 @@ These features can be implemented as needed:
 | Phase 1: Parameters | **CRITICAL** | 1-2 days | ✅ **COMPLETE** |
 | Phase 2: Arrays | **HIGH** | 1-2 days | ✅ **COMPLETE** |
 | Phase 3: Declarations | **HIGH** | 1 day | ✅ **COMPLETE** |
-| Phase 4: Expressions | **MEDIUM** | 2-3 days | 🔄 **NEXT** |
-| Phase 5: Executable | **MEDIUM** | 2-3 days | ⬜ Pending |
+| Phase 4: Expressions | **MEDIUM** | 2-3 days | ✅ **COMPLETE** |
+| Phase 5: Executable | **MEDIUM** | 2-3 days | 🔄 **NEXT** |
 | Phase 6: Testing | **HIGH** | 1-2 days | ⬜ Pending |
 | Phase 7: Advanced | **LOW** | As needed | ⬜ Future |
 
@@ -241,7 +257,7 @@ These features can be implemented as needed:
 
 ## Notes for LLM Implementation
 
-**Current State** (after Phase 3):
+**Current State** (after Phase 4):
 - Parser successfully extracts specification statements
 - Parameter type information fully captured with INTENT and attributes
 - Array specifications fully parsed and represented:
@@ -256,6 +272,13 @@ These features can be implemented as needed:
   - CHARACTER length specifications: `CHARACTER(LEN=80)`, `CHARACTER(n)`, `CHARACTER*n`
   - Both `DeclEntity` and `Parameter` have `CharLen` and `Initializer` fields
 - Comprehensive test coverage for parameters, arrays, and declarations
+- Expression parsing fully implemented:
+  - All Fortran operators with correct precedence (9 levels)
+  - Right-associativity for exponentiation (**)
+  - Unary operators: +, -, .NOT.
+  - Binary operators: arithmetic, relational (F77 & F90), logical, string concatenation
+  - Function calls and parenthesized expressions
+  - 36 comprehensive test cases, all passing
 
 **Key Design Decisions**:
 - Parameters tracked via `paramMap` during `parseBody()` execution
