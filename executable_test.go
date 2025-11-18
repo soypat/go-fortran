@@ -267,7 +267,7 @@ END PROGRAM test`,
 			if len(parser.Errors()) > 0 {
 				t.Errorf("Parse errors:")
 				for _, e := range parser.Errors() {
-					t.Errorf("  %v", e)
+					t.Errorf("  %v", &e)
 				}
 				return
 			}
