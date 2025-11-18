@@ -41,10 +41,10 @@ func Print(x any) error {
 }
 
 type printer struct {
-	output io.Writer
-	filter FieldFilter
-	ptrmap map[any]int
-	indent int
+	output     io.Writer
+	filter     FieldFilter
+	ptrmap     map[any]int
+	indent     int
 	lastWasNil bool
 }
 
@@ -88,6 +88,23 @@ func (p *printer) print(v reflect.Value) error {
 
 	// Get type information
 	t := v.Type()
+
+	// Special handling for Position type
+	if t.Name() == "Position" && t.PkgPath() == "github.com/soypat/go-fortran/ast" {
+		// Position has unexported fields, so we need to call the methods
+		if posVal, ok := v.Interface().(Position); ok {
+			p.printf("Position {\n")
+			p.indent++
+			p.printIndent()
+			p.printf("Start: %d\n", posVal.Start())
+			p.printIndent()
+			p.printf("End: %d\n", posVal.End())
+			p.indent--
+			p.printIndent()
+			p.printf("}")
+			return nil
+		}
+	}
 
 	// Print based on kind
 	switch v.Kind() {

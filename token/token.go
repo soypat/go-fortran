@@ -193,6 +193,7 @@ const (
 
 	// ==================== SPECIAL TOKENS ====================
 
+	Label       // <label>
 	LineComment // <linecomment>
 	NewLine     // <newline>
 	EOF         // <EOF>

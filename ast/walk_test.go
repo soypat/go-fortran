@@ -21,8 +21,7 @@ func (v *countVisitor) Visit(node Node) Visitor {
 func TestWalkProgramBlock(t *testing.T) {
 	prog := &ProgramBlock{
 		Name:     "test",
-		StartPos: 0,
-		EndPos:   100,
+		Position: Pos(0, 100),
 	}
 	v := &countVisitor{}
 	Walk(v, prog)

@@ -116,6 +116,19 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 		l.err = errors.New("lexer unitilialized")
 		return token.Illegal, 0, nil
 	}
+
+	// Handle labels at the beginning of a line
+	if l.col == 1 && isDigit(l.ch) {
+		startPos = l.pos
+		l.tokenLine, l.tokenCol = l.line, l.col
+		literal, ok := l.readNumber()
+		if !ok || l.col <= 6 { // Labels are in columns 1-5
+			return token.Label, startPos, literal
+		}
+		l.err = errors.New("bad label")
+		return token.Illegal, startPos, literal
+	}
+
 	l.skipWhitespace()
 	startPos = l.pos
 	// Capture starting line/col for this token

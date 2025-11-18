@@ -62,8 +62,11 @@ END PROGRAM hello
 	//   Body: ast.Statement (len=3) [
 	//     0: ImplicitStatement {
 	//       IsNone: true
-	//       StartPos: 19
-	//       EndPos: 32
+	//       Label: ""
+	//       Position: Position {
+	//         Start: 19
+	//         End: 32
+	//       }
 	//     }
 	//     1: TypeDeclaration {
 	//       TypeSpec: "INTEGER"
@@ -79,17 +82,26 @@ END PROGRAM hello
 	//           CharLen: ""
 	//         }
 	//       ]
-	//       StartPos: 35
-	//       EndPos: 50
+	//       Label: ""
+	//       Position: Position {
+	//         Start: 35
+	//         End: 50
+	//       }
 	//     }
 	//     2: TypeDeclaration {
 	//       TypeSpec: "REAL"
-	//       StartPos: 53
-	//       EndPos: 61
+	//       Label: ""
+	//       Position: Position {
+	//         Start: 53
+	//         End: 61
+	//       }
 	//     }
 	//   ]
-	//   StartPos: 3
-	//   EndPos: 133
+	//   Label: ""
+	//   Position: Position {
+	//     Start: 3
+	//     End: 133
+	//   }
 	// }
 }
 

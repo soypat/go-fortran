@@ -6,6 +6,13 @@ SUBROUTINE sub1(a, b, c)
 	REAL :: a, b, c
 	END SUBROUTINE sub1
 
+SUBROUTINE f77_test()
+	  INTEGER :: i
+	  DO 10 i = 1, 10
+	    CALL print_hello
+10    CONTINUE
+	END SUBROUTINE
+
 SUBROUTINE nosub()
 	END SUBROUTINE
 
@@ -56,3 +63,14 @@ SUBROUTINE stateful
 
 SUBROUTINE CHARLY(MAXCOR,RRCORE,NCORE,ICORE,*)
 	END SUBROUTINE
+
+subroutine add_numbers(x, y, result)
+  implicit none
+  ! Declare arguments
+  integer, intent(in) :: x, y
+  integer, intent(out) :: result
+
+  ! Perform the addition
+  result = x + y
+
+end subroutine add_numbers
