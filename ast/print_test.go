@@ -72,8 +72,12 @@ func TestPrintWithFilter(t *testing.T) {
 
 func TestPrintSubroutine(t *testing.T) {
 	sub := &Subroutine{
-		Name:       "factorial",
-		Parameters: []string{"n", "result"},
+		Name: "factorial",
+		Parameters: []Parameter{{
+			Name: "n",
+		}, {
+			Name: "result",
+		}},
 		Attributes: []token.Token{token.RECURSIVE},
 		StartPos:   0,
 		EndPos:     50,

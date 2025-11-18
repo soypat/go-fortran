@@ -67,13 +67,21 @@ END PROGRAM hello
 	//     }
 	//     1: TypeDeclaration {
 	//       TypeSpec: "INTEGER"
+	//       Entities: ast.DeclEntity (len=2) [
+	//         0: DeclEntity {
+	//           Name: "x"
+	//         }
+	//         1: DeclEntity {
+	//           Name: "y"
+	//         }
+	//       ]
 	//       StartPos: 35
-	//       EndPos: 43
+	//       EndPos: 50
 	//     }
 	//     2: TypeDeclaration {
 	//       TypeSpec: "REAL"
 	//       StartPos: 53
-	//       EndPos: 58
+	//       EndPos: 61
 	//     }
 	//   ]
 	//   StartPos: 3
@@ -231,7 +239,13 @@ END SUBROUTINE swap
 	unit := parser.ParseNextProgramUnit()
 	if sub, ok := unit.(*ast.Subroutine); ok {
 		fmt.Printf("Subroutine: %s\n", sub.Name)
-		fmt.Printf("Parameters: %v\n", sub.Parameters)
+
+		// Extract parameter names
+		var paramNames []string
+		for _, p := range sub.Parameters {
+			paramNames = append(paramNames, p.Name)
+		}
+		fmt.Printf("Parameters: %v\n", paramNames)
 		fmt.Printf("Specification statements: %d\n", len(sub.Body))
 	}
 

@@ -216,7 +216,13 @@ func (tok Token) IsTypeDeclaration() bool {
 
 // IsAttribute returns true if the token is a Fortran 90 attribute.
 func (tok Token) IsAttribute() bool {
-	return tok >= INTENT && tok <= LEN
+	// F90 attributes that can appear in type declarations
+	switch tok {
+	case PARAMETER, DIMENSION, SAVE, EXTERNAL, INTRINSIC, PUBLIC, PRIVATE:
+		return true
+	default:
+		return tok >= INTENT && tok <= LEN
+	}
 }
 
 // IsOperator returns true if the token is an operator.

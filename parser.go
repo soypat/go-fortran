@@ -287,8 +287,8 @@ func (p *Parser90) canUseAsIdentifier() bool {
 
 // parseParameterList parses a parameter list like (a, b, c)
 // In Fortran, keywords can be used as variable names
-func (p *Parser90) parseParameterList() []string {
-	params := []string{}
+func (p *Parser90) parseParameterList() []ast.Parameter {
+	params := []ast.Parameter{}
 
 	if !p.expectCurrent(token.LParen) {
 		return params
@@ -304,16 +304,21 @@ func (p *Parser90) parseParameterList() []string {
 	// Parse parameters
 	for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
 		// Accept identifiers, keywords, or * (alternate return specifier in F77)
+		var paramName string
 		if p.currentTokenIs(token.Asterisk) {
-			params = append(params, "*")
+			paramName = "*"
 			p.nextToken()
 		} else if p.currentTokenIs(token.Identifier) || len(p.current.lit) > 0 {
-			params = append(params, string(p.current.lit))
+			paramName = string(p.current.lit)
 			p.nextToken()
 		} else {
 			p.addError("expected parameter name")
 			break
 		}
+
+		// Create Parameter with just the name for now
+		// Type information will be filled in by parseBody when it sees type declarations
+		params = append(params, ast.Parameter{Name: paramName})
 
 		if p.currentTokenIs(token.Comma) {
 			p.nextToken()
@@ -362,9 +367,16 @@ func (p *Parser90) collectUntilEnd(endTokens ...token.Token) []ast.TokenTuple {
 }
 
 // parseBody parses specification statements, then uses old token collection for execution part
-func (p *Parser90) parseBody() []ast.Statement {
+// If parameters are provided, it will populate their type information when type declarations are found
+func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 	var stmts []ast.Statement
 	var sawImplicit, sawDecl bool
+
+	// Create a map for quick parameter lookup
+	paramMap := make(map[string]*ast.Parameter)
+	for i := range parameters {
+		paramMap[parameters[i].Name] = &parameters[i]
+	}
 
 	// Phase 2: Parse specification statements only
 	for !p.currentTokenIs(token.CONTAINS) && !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
@@ -378,7 +390,7 @@ func (p *Parser90) parseBody() []ast.Statement {
 			break
 		}
 
-		if stmt := p.parseSpecStatement(&sawImplicit, &sawDecl); stmt != nil {
+		if stmt := p.parseSpecStatement(&sawImplicit, &sawDecl, paramMap); stmt != nil {
 			stmts = append(stmts, stmt)
 		} else {
 			// Not a parseable spec statement - skip the construct
@@ -565,7 +577,8 @@ func (p *Parser90) skipSelectConstruct() {
 }
 
 // parseSpecStatement parses a specification statement
-func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool) ast.Statement {
+// paramMap is used to populate type information for parameters
+func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[string]*ast.Parameter) ast.Statement {
 	switch p.current.tok {
 	case token.IMPLICIT:
 		return p.parseImplicit(sawImplicit, sawDecl)
@@ -573,13 +586,13 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool) ast.Statement 
 		return p.parseUse()
 	case token.INTEGER, token.REAL, token.DOUBLE, token.COMPLEX, token.LOGICAL, token.CHARACTER:
 		*sawDecl = true
-		return p.parseTypeDecl()
+		return p.parseTypeDecl(paramMap)
 	case token.TYPE:
 		// Distinguish between TYPE definition and TYPE(typename) declaration
 		if p.peekTokenIs(token.LParen) {
 			// TYPE(typename) :: var - treat as type declaration
 			*sawDecl = true
-			return p.parseTypeDecl()
+			return p.parseTypeDecl(paramMap)
 		} else {
 			// TYPE :: name ... END TYPE - skip entire block
 			p.skipTypeDefinition()
@@ -647,7 +660,8 @@ func (p *Parser90) parseUse() ast.Statement {
 }
 
 // parseTypeDecl parses INTEGER :: x, y or REAL, PARAMETER :: pi = 3.14 or TYPE(typename) :: var
-func (p *Parser90) parseTypeDecl() ast.Statement {
+// If paramMap is provided, it will populate type information for any parameters found
+func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Statement {
 	stmt := &ast.TypeDeclaration{StartPos: p.current.start, TypeSpec: p.current.tok.String()}
 	p.nextToken()
 
@@ -673,13 +687,62 @@ func (p *Parser90) parseTypeDecl() ast.Statement {
 	}
 
 	// Parse attributes (PARAMETER, INTENT, etc.)
+	var intentType ast.IntentType
+	var arraySpec *ast.ArraySpec
 	if p.currentTokenIs(token.Comma) {
 		for p.currentTokenIs(token.Comma) {
 			p.nextToken()
 			if p.current.tok.IsAttribute() {
 				stmt.Attributes = append(stmt.Attributes, p.current.tok)
+
+				// Special handling for INTENT to extract the direction
+				if p.current.tok == token.INTENT {
+					p.nextToken()
+					if p.currentTokenIs(token.LParen) {
+						p.nextToken()
+						if p.currentTokenIs(token.Identifier) {
+							intentStr := string(p.current.lit)
+							switch intentStr {
+							case "IN":
+								intentType = ast.IntentIn
+							case "OUT":
+								intentType = ast.IntentOut
+							case "INOUT":
+								intentType = ast.IntentInOut
+							}
+						} else if p.currentTokenIs(token.IN) {
+							intentType = ast.IntentIn
+						} else if p.currentTokenIs(token.OUT) {
+							intentType = ast.IntentOut
+						} else if p.currentTokenIs(token.INOUT) {
+							intentType = ast.IntentInOut
+						}
+						// Skip to closing paren
+						depth := 1
+						p.nextToken()
+						for depth > 0 && !p.currentTokenIs(token.EOF) {
+							if p.currentTokenIs(token.LParen) {
+								depth++
+							} else if p.currentTokenIs(token.RParen) {
+								depth--
+							}
+							p.nextToken()
+						}
+						continue
+					}
+				}
+
+				// Special handling for DIMENSION to extract array bounds
+				if p.current.tok == token.DIMENSION {
+					p.nextToken()
+					if p.currentTokenIs(token.LParen) {
+						arraySpec = p.parseArraySpec()
+						continue
+					}
+				}
+
 				p.nextToken()
-				// Skip INTENT(IN/OUT/INOUT), DIMENSION(...), etc.
+				// Skip attribute arguments like DIMENSION(...), etc.
 				if p.currentTokenIs(token.LParen) {
 					depth := 1
 					p.nextToken()
@@ -697,7 +760,9 @@ func (p *Parser90) parseTypeDecl() ast.Statement {
 	}
 
 	// Expect ::
-	if p.currentTokenIs(token.Colon) {
+	if p.currentTokenIs(token.DoubleColon) {
+		p.nextToken()
+	} else if p.currentTokenIs(token.Colon) {
 		p.nextToken()
 		if p.currentTokenIs(token.Colon) {
 			p.nextToken()
@@ -706,26 +771,60 @@ func (p *Parser90) parseTypeDecl() ast.Statement {
 
 	// Parse entity list
 	for p.canUseAsIdentifier() {
-		stmt.Entities = append(stmt.Entities, ast.DeclEntity{Name: string(p.current.lit)})
+		entityName := string(p.current.lit)
+		entity := ast.DeclEntity{Name: entityName}
+
+		// Start with arraySpec from DIMENSION attribute if present
+		if arraySpec != nil {
+			entity.ArraySpec = arraySpec
+		}
+
 		p.nextToken()
-		// Skip array specs, initialization
-		if p.currentTokenIs(token.LParen) || p.currentTokenIs(token.Equals) {
+
+		// Check for array declarator: arr(10,20) or initialization
+		var entityArraySpec *ast.ArraySpec
+		if p.currentTokenIs(token.LParen) {
+			// This could be an array declarator - parse it
+			entityArraySpec = p.parseArraySpec()
+			// Entity-level array spec takes precedence over DIMENSION attribute
+			if entityArraySpec != nil {
+				entity.ArraySpec = entityArraySpec
+			}
+		}
+
+		// Add entity to statement
+		stmt.Entities = append(stmt.Entities, entity)
+
+		// If this entity is a parameter, populate its type information
+		if paramMap != nil {
+			if param, exists := paramMap[entityName]; exists {
+				param.Type = stmt.TypeSpec
+				param.Intent = intentType
+				param.Attributes = append(param.Attributes, stmt.Attributes...)
+				// Use entity array spec if present, otherwise DIMENSION attribute spec
+				if entityArraySpec != nil {
+					param.ArraySpec = entityArraySpec
+				} else if arraySpec != nil {
+					param.ArraySpec = arraySpec
+				}
+			}
+		}
+
+		// Skip initialization (= value)
+		if p.currentTokenIs(token.Equals) {
 			depth := 0
 			for !p.currentTokenIs(token.NewLine) && !p.currentTokenIs(token.EOF) {
 				if p.currentTokenIs(token.LParen) {
 					depth++
 				} else if p.currentTokenIs(token.RParen) {
 					depth--
-					if depth == 0 {
-						p.nextToken()
-						break
-					}
 				} else if p.currentTokenIs(token.Comma) && depth == 0 {
 					break
 				}
 				p.nextToken()
 			}
 		}
+
 		if !p.currentTokenIs(token.Comma) {
 			break
 		}
@@ -822,7 +921,7 @@ func (p *Parser90) parseProgramBlock() ast.Statement {
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
-	block.Body = p.parseBody()
+	block.Body = p.parseBody(nil)
 
 	block.EndPos = p.current.start
 	p.nextToken() // Move past END
@@ -865,7 +964,7 @@ func (p *Parser90) parseSubroutine() ast.Statement {
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
-	sub.Body = p.parseBody()
+	sub.Body = p.parseBody(sub.Parameters)
 
 	sub.EndPos = p.current.start
 	p.nextToken() // Move past END
@@ -923,7 +1022,7 @@ func (p *Parser90) parseFunction() ast.Statement {
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
-	fn.Body = p.parseBody()
+	fn.Body = p.parseBody(fn.Parameters)
 
 	fn.EndPos = p.current.start
 	p.nextToken() // Move past END
@@ -961,7 +1060,7 @@ func (p *Parser90) parseModule() ast.Statement {
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
-	mod.Body = p.parseBody()
+	mod.Body = p.parseBody(nil)
 
 	// Handle CONTAINS section with recursive parsing
 	if p.currentTokenIs(token.CONTAINS) {
@@ -1030,7 +1129,7 @@ func (p *Parser90) parseBlockData() ast.ProgramUnit {
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
-	bd.Body = p.parseBody()
+	bd.Body = p.parseBody(nil)
 
 	bd.EndPos = p.current.start
 	p.nextToken() // Move past END
@@ -1051,6 +1150,102 @@ func (p *Parser90) parseBlockData() ast.ProgramUnit {
 	}
 
 	return bd
+}
+
+// parseArraySpec parses array dimension specification from DIMENSION(...) or entity declarator
+// Expects current token to be '(' and consumes up to and including ')'
+// Supports: (10), (1:10), (:), (*), (10,20), (1:10,1:20), (:,:), etc.
+func (p *Parser90) parseArraySpec() *ast.ArraySpec {
+	if !p.currentTokenIs(token.LParen) {
+		return nil
+	}
+	p.nextToken() // consume '('
+
+	spec := &ast.ArraySpec{
+		Kind:   ast.ArraySpecExplicit, // Default, may be changed
+		Bounds: []ast.ArrayBound{},
+	}
+
+	// Track if we see any assumed-shape (:) or assumed-size (*) dimensions
+	hasAssumedShape := false
+	hasAssumedSize := false
+	hasExplicit := false
+
+	for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+		var bound ast.ArrayBound
+
+		// Check for assumed-size: *
+		if p.currentTokenIs(token.Asterisk) {
+			hasAssumedSize = true
+			bound.Lower = ""
+			bound.Upper = "*"
+			p.nextToken()
+		} else if p.currentTokenIs(token.Colon) {
+			// Assumed-shape: :
+			hasAssumedShape = true
+			bound.Lower = ""
+			bound.Upper = ""
+			p.nextToken()
+		} else {
+			// Explicit bound or lower bound
+			// Collect tokens until we hit ':', ',' or ')'
+			var boundTokens []byte
+			for !p.currentTokenIs(token.Colon) && !p.currentTokenIs(token.Comma) &&
+				!p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+				if len(boundTokens) > 0 {
+					boundTokens = append(boundTokens, ' ')
+				}
+				boundTokens = append(boundTokens, p.current.lit...)
+				p.nextToken()
+			}
+
+			if p.currentTokenIs(token.Colon) {
+				// This was the lower bound, now get upper bound
+				bound.Lower = string(boundTokens)
+				p.nextToken() // consume ':'
+
+				// Get upper bound
+				var upperTokens []byte
+				for !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+					if len(upperTokens) > 0 {
+						upperTokens = append(upperTokens, ' ')
+					}
+					upperTokens = append(upperTokens, p.current.lit...)
+					p.nextToken()
+				}
+				bound.Upper = string(upperTokens)
+				hasExplicit = true
+			} else {
+				// No colon, so this is just upper bound (lower defaults to 1)
+				bound.Lower = ""
+				bound.Upper = string(boundTokens)
+				hasExplicit = true
+			}
+		}
+
+		spec.Bounds = append(spec.Bounds, bound)
+
+		// Move past comma if present
+		if p.currentTokenIs(token.Comma) {
+			p.nextToken()
+		}
+	}
+
+	// Consume closing paren
+	if p.currentTokenIs(token.RParen) {
+		p.nextToken()
+	}
+
+	// Determine the kind based on what we saw
+	if hasAssumedSize {
+		spec.Kind = ast.ArraySpecAssumedSize
+	} else if hasAssumedShape {
+		spec.Kind = ast.ArraySpecAssumed
+	} else if hasExplicit {
+		spec.Kind = ast.ArraySpecExplicit
+	}
+
+	return spec
 }
 
 // collectBlockDataBody collects tokens until END

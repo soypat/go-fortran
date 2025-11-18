@@ -1,6 +1,8 @@
 package ast
 
-import "github.com/soypat/go-fortran/token"
+import (
+	"github.com/soypat/go-fortran/token"
+)
 
 type Node interface {
 	AppendTokenLiteral(dst []byte) []byte
@@ -83,7 +85,7 @@ func (pb *ProgramBlock) End() int { return pb.EndPos }
 // Subroutine represents a SUBROUTINE...END SUBROUTINE block
 type Subroutine struct {
 	Name       string
-	Parameters []string
+	Parameters []Parameter   // Function/subroutine parameters with type information
 	Attributes []token.Token // RECURSIVE, PURE, etc.
 	Body       []Statement   // Specification and executable statements
 	StartPos   int
@@ -103,7 +105,7 @@ func (s *Subroutine) AppendString(dst []byte) []byte {
 		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		dst = append(dst, p...)
+		dst = append(dst, p.Name...)
 	}
 	dst = append(dst, ')')
 	return dst
@@ -116,7 +118,7 @@ func (s *Subroutine) End() int { return s.EndPos }
 type Function struct {
 	Name           string
 	ResultType     string        // e.g., "INTEGER", "REAL"
-	Parameters     []string
+	Parameters     []Parameter   // Function parameters with type information
 	ResultVariable string        // For RESULT(var) clause
 	Attributes     []token.Token // RECURSIVE, PURE, ELEMENTAL
 	Body           []Statement   // Specification and executable statements
@@ -141,7 +143,7 @@ func (f *Function) AppendString(dst []byte) []byte {
 		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		dst = append(dst, p...)
+		dst = append(dst, p.Name...)
 	}
 	dst = append(dst, ')')
 	if f.ResultVariable != "" {
@@ -217,7 +219,7 @@ type TokenTuple struct {
 
 // ImplicitStatement represents an IMPLICIT statement
 type ImplicitStatement struct {
-	IsNone   bool   // true for IMPLICIT NONE
+	IsNone   bool // true for IMPLICIT NONE
 	StartPos int
 	EndPos   int
 }
@@ -266,9 +268,9 @@ func (us *UseStatement) End() int { return us.EndPos }
 
 // TypeDeclaration represents a type declaration with attributes
 type TypeDeclaration struct {
-	TypeSpec   string          // e.g., "INTEGER", "REAL", "CHARACTER"
-	Attributes []token.Token   // e.g., PARAMETER, SAVE, INTENT, etc.
-	Entities   []DeclEntity    // Variables being declared
+	TypeSpec   string        // e.g., "INTEGER", "REAL", "CHARACTER"
+	Attributes []token.Token // e.g., PARAMETER, SAVE, INTENT, etc.
+	Entities   []DeclEntity  // Variables being declared
 	StartPos   int
 	EndPos     int
 }
@@ -300,10 +302,85 @@ func (td *TypeDeclaration) AppendString(dst []byte) []byte {
 func (td *TypeDeclaration) Pos() int { return td.StartPos }
 func (td *TypeDeclaration) End() int { return td.EndPos }
 
+// ArraySpecKind represents the kind of array specification
+type ArraySpecKind int
+
+const (
+	ArraySpecExplicit    ArraySpecKind = iota // Explicit shape: (1:10, 1:20)
+	ArraySpecAssumed                          // Assumed shape: (:, :)
+	ArraySpecDeferred                         // Deferred shape: (:) with ALLOCATABLE/POINTER
+	ArraySpecAssumedSize                      // Assumed size: (*) - F77 style
+)
+
+func (ask ArraySpecKind) String() string {
+	switch ask {
+	case ArraySpecExplicit:
+		return "explicit"
+	case ArraySpecAssumed:
+		return "assumed"
+	case ArraySpecDeferred:
+		return "deferred"
+	case ArraySpecAssumedSize:
+		return "assumed-size"
+	default:
+		return "unknown"
+	}
+}
+
+// ArrayBound represents a single dimension's bounds (lower:upper)
+// For explicit shape: Lower and Upper are both set
+// For assumed shape (:): Lower and Upper are nil
+// For assumed size (*): indicated by ArraySpecAssumedSize kind
+type ArrayBound struct {
+	Lower string // Lower bound expression (as string for now, will be Expression later)
+	Upper string // Upper bound expression (as string for now, will be Expression later)
+}
+
+// ArraySpec represents array dimension specification
+type ArraySpec struct {
+	Kind   ArraySpecKind
+	Bounds []ArrayBound // One bound per dimension
+}
+
 // DeclEntity represents a single entity in a type declaration
 type DeclEntity struct {
-	Name string
-	// Future: ArraySpec, Initialization, etc.
+	Name      string
+	ArraySpec *ArraySpec // Array dimensions if this is an array
+	// Future: Initialization, CharLen for CHARACTER, etc.
+}
+
+// IntentType represents the INTENT attribute direction
+type IntentType int
+
+const (
+	// IntentInOut
+	intentDefault IntentType = iota
+	IntentInOut
+	IntentIn
+	IntentOut
+)
+
+func (it IntentType) String() string {
+	switch it {
+	case IntentIn:
+		return "IN"
+	case IntentOut:
+		return "OUT"
+	case IntentInOut:
+		return "INOUT"
+	default:
+		return ""
+	}
+}
+
+// Parameter represents a subroutine or function parameter with full type information
+type Parameter struct {
+	Name       string        // Parameter name
+	Type       string        // Type specification (INTEGER, REAL, etc.)
+	Intent     IntentType    // INTENT(IN/OUT/INOUT)
+	Attributes []token.Token // Other attributes (OPTIONAL, POINTER, TARGET, etc.)
+	ArraySpec  *ArraySpec    // Array dimensions if this is an array parameter
+	// Future: CharLen for CHARACTER, etc.
 }
 
 // Identifier represents an identifier
