@@ -30,8 +30,8 @@ func TestPrint(t *testing.T) {
 	expected := []string{
 		"ProgramBlock",
 		"Name: \"test\"",
-		"StartPos: 0",
-		"EndPos: 100",
+		"Start: 0",
+		"End: 100",
 		"Body",
 	}
 

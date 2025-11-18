@@ -382,19 +382,36 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 		}
 	}
 
-	// Phase 5: Parse executable statements
-	for !p.currentTokenIs(token.CONTAINS) && !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
-		p.skipNewlinesAndComments()
-		if p.currentTokenIs(token.CONTAINS) || p.isEndOfProgramUnit() {
+	// Skip remaining execution part until CONTAINS or END of program unit
+	// Use same logic as collectBodyUntilEndOLD but don't collect tokens
+	for !p.currentTokenIs(token.EOF) {
+		if p.currentTokenIs(token.CONTAINS) {
 			break
 		}
 
-		if stmt := p.parseExecutableStatement(); stmt != nil {
-			stmts = append(stmts, stmt)
-		} else {
-			// Not a parseable executable statement - skip the construct
-			p.skipToNextStatement()
+		if p.currentTokenIs(token.END) {
+			// Check if this is END of our program unit
+			nextTok := p.peek.tok
+			// Bare END or END followed by newline/EOF/identifier means end of unit
+			if nextTok == token.NewLine || nextTok == token.EOF || nextTok == token.Identifier {
+				break
+			}
+			// END followed by a keyword - could be end of unit or nested construct
+			// Check common program unit keywords
+			if nextTok == token.PROGRAM || nextTok == token.SUBROUTINE ||
+				nextTok == token.FUNCTION || nextTok == token.MODULE {
+				break
+			}
+			// This is a nested END (END IF, END DO, END TYPE, etc.)
+			// Skip both END and the following token
+			p.nextToken() // Skip END
+			if !p.currentTokenIs(token.EOF) && !p.currentTokenIs(token.NewLine) {
+				p.nextToken() // Skip keyword after END
+			}
+			continue
 		}
+
+		p.nextToken()
 	}
 
 	return stmts
@@ -985,15 +1002,14 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 			*sawDecl = true
 			return p.parseTypeDecl(paramMap)
 		} else {
-			// TYPE :: name ... END TYPE - this is a derived type definition
-			return p.parseDerivedTypeStmt()
+			// TYPE :: name ... END TYPE - skip entire block
+			p.skipTypeDefinition()
+			return &ast.ImplicitStatement{} // Return non-nil to indicate success
 		}
 	case token.INTERFACE:
-		return p.parseInterfaceStmt()
-	case token.PRIVATE:
-		return p.parsePrivateStmt()
-	case token.PUBLIC:
-		return p.parsePublicStmt()
+		// INTERFACE block - skip entire block
+		p.skipInterfaceBlock()
+		return &ast.ImplicitStatement{} // Return non-nil to indicate success
 	default:
 		return nil // Unknown statement, caller will skip
 	}
@@ -2152,31 +2168,6 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 
 		// Check for function call or array reference/section
 		if p.currentTokenIs(token.LParen) {
-			// Check for array section (contains a colon)
-			hasColon := false
-			p.nextToken() // consume (
-			depth := 1
-			for !p.currentTokenIs(token.EOF) {
-				if p.currentTokenIs(token.LParen) {
-					depth++
-				} else if p.currentTokenIs(token.RParen) {
-					depth--
-					if depth == 0 {
-						break
-					}
-				} else if p.currentTokenIs(token.Colon) {
-					hasColon = true
-				}
-				p.nextToken()
-			}
-			// p.l.Unread(p.current.start) // Go back to after the identifier
-			p.nextToken()
-			p.nextToken()
-
-			if hasColon {
-				return p.parseArraySection(name, startPos)
-			}
-
 			p.nextToken() // consume (
 
 			// Parse argument/subscript list
