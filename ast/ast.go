@@ -428,6 +428,36 @@ func (i *Identifier) AppendString(dst []byte) []byte {
 	return append(dst, i.Value...)
 }
 
+// RangeExpr represents array slice/range syntax in Fortran
+// Examples: :, start:end, :end, start:, start:end:stride
+type RangeExpr struct {
+	Start  Expression // nil means implicit start (1)
+	End    Expression // nil means implicit end (size)
+	Stride Expression // nil means stride of 1 (F90 feature)
+	Position
+}
+
+var _ Expression = (*RangeExpr)(nil)
+
+func (r *RangeExpr) expressionNode() {}
+func (r *RangeExpr) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, ":"...)
+}
+func (r *RangeExpr) AppendString(dst []byte) []byte {
+	if r.Start != nil {
+		dst = r.Start.AppendString(dst)
+	}
+	dst = append(dst, ':')
+	if r.End != nil {
+		dst = r.End.AppendString(dst)
+	}
+	if r.Stride != nil {
+		dst = append(dst, ':')
+		dst = r.Stride.AppendString(dst)
+	}
+	return dst
+}
+
 // IntegerLiteral represents an integer literal
 type IntegerLiteral struct {
 	Value int64  // Parsed integer value (0 if not yet parsed)
@@ -672,6 +702,37 @@ func (is *IfStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// ArithmeticIfStmt represents the F77 arithmetic IF statement
+// IF (expr) label_negative, label_zero, label_positive
+// Branches based on whether the expression is < 0, == 0, or > 0
+type ArithmeticIfStmt struct {
+	Condition     Expression // Arithmetic expression to evaluate
+	NegativeLabel string     // Label to jump to if condition < 0
+	ZeroLabel     string     // Label to jump to if condition == 0
+	PositiveLabel string     // Label to jump to if condition > 0
+	Label         string     // Optional statement label
+	Position
+}
+
+var _ Statement = (*ArithmeticIfStmt)(nil)
+
+func (ais *ArithmeticIfStmt) GetLabel() string { return ais.Label }
+func (ais *ArithmeticIfStmt) statementNode()   {}
+func (ais *ArithmeticIfStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "IF"...)
+}
+func (ais *ArithmeticIfStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "IF ("...)
+	dst = ais.Condition.AppendString(dst)
+	dst = append(dst, ") "...)
+	dst = append(dst, ais.NegativeLabel...)
+	dst = append(dst, ", "...)
+	dst = append(dst, ais.ZeroLabel...)
+	dst = append(dst, ", "...)
+	dst = append(dst, ais.PositiveLabel...)
+	return dst
+}
+
 // DoLoop represents a DO loop
 type DoLoop struct {
 	Var   string // Loop variable (empty for DO WHILE)
@@ -831,6 +892,33 @@ func (gs *GotoStmt) AppendTokenLiteral(dst []byte) []byte {
 func (gs *GotoStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "GO TO "...)
 	return append(dst, gs.Target...)
+}
+
+// WriteStmt represents a WRITE statement
+type WriteStmt struct {
+	Unit       Expression   // Unit specifier (e.g., 91, *, variable)
+	OutputList []Expression // List of expressions to write
+	Label      string       // Optional statement label
+	Position
+}
+
+var _ Statement = (*WriteStmt)(nil) // compile time check of interface implementation.
+
+func (ws *WriteStmt) GetLabel() string { return ws.Label }
+
+func (ws *WriteStmt) statementNode() {}
+func (ws *WriteStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "WRITE"...)
+}
+func (ws *WriteStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "WRITE(...) "...)
+	for i, expr := range ws.OutputList {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		dst = expr.AppendString(dst)
+	}
+	return dst
 }
 
 // Derived Type Statements (Phase 7)

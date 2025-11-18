@@ -486,6 +486,8 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		stmt = p.parseContinueStmt()
 	case token.GOTO:
 		stmt = p.parseGotoStmt()
+	case token.WRITE:
+		stmt = p.parseWriteStmt()
 	case token.Identifier:
 		// Check for "GO TO" (two separate tokens)
 		if string(p.current.lit) == "GO" && p.peekTokenIs(token.Identifier) {
@@ -568,6 +570,49 @@ func (p *Parser90) parseGotoStmt() ast.Statement {
 	return stmt
 }
 
+// parseWriteStmt parses a WRITE statement
+// Format: WRITE(unit) list or WRITE(unit, format) list
+func (p *Parser90) parseWriteStmt() ast.Statement {
+	start := p.current.start
+	stmt := &ast.WriteStmt{}
+
+	p.nextToken() // consume WRITE
+
+	if !p.expect(token.LParen, "opening WRITE unit specifier") {
+		return nil
+	}
+
+	// Parse unit (could be number, *, or expression)
+	stmt.Unit = p.parseExpression(0)
+	if stmt.Unit == nil {
+		p.addError("expected unit specifier in WRITE statement")
+		return nil
+	}
+
+	// Skip optional format specifier (could be comma followed by format)
+	// For now, we'll just skip to the closing paren
+	for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+		p.nextToken()
+	}
+
+	if !p.expect(token.RParen, "closing WRITE unit specifier") {
+		return nil
+	}
+
+	// Parse output list (comma-separated expressions)
+	for !p.currentTokenIs(token.NewLine) && !p.currentTokenIs(token.EOF) {
+		if expr := p.parseExpression(0); expr != nil {
+			stmt.OutputList = append(stmt.OutputList, expr)
+		}
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
 // parseIfStmt parses an IF construct
 // Precondition: current token is IF
 func (p *Parser90) parseIfStmt() ast.Statement {
@@ -587,6 +632,43 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 
 	if !p.expect(token.RParen, "closing IF condition") {
 		return nil
+	}
+
+	// Check for arithmetic IF (F77): IF (expr) label1, label2, label3
+	// This branches to label1 if expr < 0, label2 if expr == 0, label3 if expr > 0
+	if (p.currentTokenIs(token.IntLit) || p.currentTokenIs(token.Label)) && p.peekTokenIs(token.Comma) {
+		arithmeticStmt := &ast.ArithmeticIfStmt{
+			Condition: stmt.Condition,
+		}
+
+		// Parse negative label
+		arithmeticStmt.NegativeLabel = string(p.current.lit)
+		p.nextToken() // consume label
+		if !p.expect(token.Comma, "after first label in arithmetic IF") {
+			return nil
+		}
+
+		// Parse zero label
+		if !p.currentTokenIs(token.IntLit) && !p.currentTokenIs(token.Label) {
+			p.addError("expected label for zero case in arithmetic IF")
+			return nil
+		}
+		arithmeticStmt.ZeroLabel = string(p.current.lit)
+		p.nextToken() // consume label
+		if !p.expect(token.Comma, "after second label in arithmetic IF") {
+			return nil
+		}
+
+		// Parse positive label
+		if !p.currentTokenIs(token.IntLit) && !p.currentTokenIs(token.Label) {
+			p.addError("expected label for positive case in arithmetic IF")
+			return nil
+		}
+		arithmeticStmt.PositiveLabel = string(p.current.lit)
+		p.nextToken() // consume label
+
+		arithmeticStmt.Position = ast.Pos(start, p.current.start)
+		return arithmeticStmt
 	}
 
 	// Check for inline IF (no THEN) vs block IF (with THEN)
@@ -2144,10 +2226,50 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 
 			// Parse argument/subscript list
 			parseOneArg := func() (ast.Expression, error) {
+				start := p.current.start
+
+				// Handle array slice syntax: : or start:end or start:end:stride
+				if p.currentTokenIs(token.Colon) {
+					// Lone colon means "all elements" (:)
+					p.nextToken() // consume :
+					rangeExpr := &ast.RangeExpr{
+						Start:    nil, // implicit start
+						End:      nil, // implicit end
+						Position: ast.Pos(start, p.current.start),
+					}
+					// Check for stride (:stride)
+					if !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) {
+						rangeExpr.End = p.parseExpression(0) // This is actually end, not stride
+					}
+					return rangeExpr, nil
+				}
+
 				arg := p.parseExpression(0)
 				if arg == nil {
 					return nil, fmt.Errorf("expected expression in argument list")
 				}
+
+				// Check for range syntax: expr:expr or expr:expr:stride
+				if p.currentTokenIs(token.Colon) {
+					p.nextToken() // consume :
+					rangeExpr := &ast.RangeExpr{
+						Start:    arg,
+						Position: ast.Pos(start, p.current.start),
+					}
+					// Parse end expression (optional)
+					if !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.Colon) {
+						rangeExpr.End = p.parseExpression(0)
+					}
+					// Check for stride (F90 feature: start:end:stride)
+					if p.currentTokenIs(token.Colon) {
+						p.nextToken() // consume :
+						if !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) {
+							rangeExpr.Stride = p.parseExpression(0)
+						}
+					}
+					return rangeExpr, nil
+				}
+
 				return arg, nil
 			}
 
