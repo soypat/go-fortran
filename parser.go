@@ -97,6 +97,9 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 }
 
 func (p *Parser90) nextToken() {
+	if p.IsDone() {
+		return
+	}
 	tok, start, lit := p.l.NextToken()
 	// Get the line/col where this token started
 	line, col := p.l.TokenLineCol()
@@ -109,9 +112,10 @@ func (p *Parser90) nextToken() {
 	p.peek.tok = tok
 	p.peek.line = line
 	p.peek.col = col
-	if p.current.tok == token.Illegal {
+}
 
-	}
+func (p *Parser90) IsDone() bool {
+	return p.l.IsDone() && p.current.tok.IsIllegalOrEOF()
 }
 
 func (p *Parser90) registerPrefix(tokenType token.Token, fn prefixParseFn) {
@@ -157,10 +161,9 @@ func (p *Parser90) ParseNextProgramUnit() ast.ProgramUnit {
 		// If parsing succeeded, return the unit
 		if unit != nil {
 			return unit
+		} else if p.IsDone() {
+			return nil
 		}
-
-		// If parsing failed but we're not at EOF, continue to next unit
-		// This allows error recovery for invalid program units
 	}
 }
 
@@ -233,6 +236,9 @@ func (p *Parser90) expectCurrent(t token.Token) bool {
 func (p *Parser90) skipNewlinesAndComments() {
 	for p.currentTokenIs(token.NewLine) || p.currentTokenIs(token.LineComment) {
 		p.nextToken()
+		if p.IsDone() {
+			break
+		}
 	}
 }
 
@@ -352,10 +358,382 @@ func (p *Parser90) collectUntilEnd(endTokens ...token.Token) []ast.TokenTuple {
 	return tokens
 }
 
-// collectBodyUntilEnd collects body tokens for a program unit, handling nested END statements
-// endKeyword is the token that should follow END to terminate collection (e.g., PROGRAM, MODULE, SUBROUTINE, FUNCTION)
-// If endKeyword is token.Illegal, any END not followed by a keyword will terminate
-func (p *Parser90) collectBodyUntilEnd(endKeyword token.Token) []ast.TokenTuple {
+// parseBody parses specification statements, then uses old token collection for execution part
+func (p *Parser90) parseBody() []ast.Statement {
+	var stmts []ast.Statement
+	var sawImplicit, sawDecl bool
+
+	// Phase 2: Parse specification statements only
+	for !p.currentTokenIs(token.CONTAINS) && !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+		p.skipNewlinesAndComments()
+		if p.currentTokenIs(token.CONTAINS) || p.currentTokenIs(token.END) || p.currentTokenIs(token.EOF) {
+			break
+		}
+
+		// Check if this is an executable statement (execution part starts here)
+		if p.isExecutableStatement() {
+			break
+		}
+
+		if stmt := p.parseSpecStatement(&sawImplicit, &sawDecl); stmt != nil {
+			stmts = append(stmts, stmt)
+		} else {
+			// Not a parseable spec statement - skip the construct
+			p.skipToNextStatement()
+		}
+	}
+
+	// Skip remaining execution part until CONTAINS or END of program unit
+	// Use same logic as collectBodyUntilEndOLD but don't collect tokens
+	for !p.currentTokenIs(token.EOF) {
+		if p.currentTokenIs(token.CONTAINS) {
+			break
+		}
+
+		if p.currentTokenIs(token.END) {
+			// Check if this is END of our program unit
+			nextTok := p.peek.tok
+			// Bare END or END followed by newline/EOF/identifier means end of unit
+			if nextTok == token.NewLine || nextTok == token.EOF || nextTok == token.Identifier {
+				break
+			}
+			// END followed by a keyword - could be end of unit or nested construct
+			// Check common program unit keywords
+			if nextTok == token.PROGRAM || nextTok == token.SUBROUTINE ||
+				nextTok == token.FUNCTION || nextTok == token.MODULE {
+				break
+			}
+			// This is a nested END (END IF, END DO, END TYPE, etc.)
+			// Skip both END and the following token
+			p.nextToken() // Skip END
+			if !p.currentTokenIs(token.EOF) && !p.currentTokenIs(token.NewLine) {
+				p.nextToken() // Skip keyword after END
+			}
+			continue
+		}
+
+		p.nextToken()
+	}
+
+	return stmts
+}
+
+// isExecutableStatement returns true if current token starts an executable statement
+func (p *Parser90) isExecutableStatement() bool {
+	switch p.current.tok {
+	case token.IF, token.DO, token.CALL, token.RETURN, token.STOP, token.EXIT,
+		token.ALLOCATE, token.DEALLOCATE, token.READ, token.WRITE, token.PRINT,
+		token.GOTO, token.CONTINUE, token.CYCLE:
+		return true
+	case token.Identifier:
+		// Could be assignment or procedure call
+		return true
+	default:
+		return false
+	}
+}
+
+// skipToNextStatement skips tokens until the next newline
+func (p *Parser90) skipToNextStatement() {
+	for !p.currentTokenIs(token.NewLine) && !p.currentTokenIs(token.EOF) {
+		p.nextToken()
+	}
+	if p.currentTokenIs(token.NewLine) {
+		p.nextToken()
+	}
+}
+
+// skipTypeDefinition skips from TYPE to END TYPE
+func (p *Parser90) skipTypeDefinition() {
+	p.nextToken() // Skip TYPE
+	depth := 1
+	for depth > 0 && !p.currentTokenIs(token.EOF) {
+		if p.currentTokenIs(token.TYPE) {
+			depth++
+			p.nextToken()
+		} else if p.currentTokenIs(token.END) {
+			p.nextToken()
+			if p.currentTokenIs(token.TYPE) {
+				depth--
+				if depth > 0 {
+					p.nextToken()
+				}
+			}
+		} else {
+			p.nextToken()
+		}
+	}
+}
+
+// skipInterfaceBlock skips from INTERFACE to END INTERFACE
+func (p *Parser90) skipInterfaceBlock() {
+	p.nextToken() // Skip INTERFACE
+	depth := 1
+	for depth > 0 && !p.currentTokenIs(token.EOF) {
+		if p.currentTokenIs(token.INTERFACE) {
+			depth++
+			p.nextToken()
+		} else if p.currentTokenIs(token.END) {
+			p.nextToken()
+			if p.currentTokenIs(token.INTERFACE) {
+				depth--
+				if depth > 0 {
+					p.nextToken()
+				}
+			}
+		} else {
+			p.nextToken()
+		}
+	}
+}
+
+// isEndOfProgramUnit checks if current END token ends a program unit
+func (p *Parser90) isEndOfProgramUnit() bool {
+	if !p.currentTokenIs(token.END) {
+		return false
+	}
+	// Look ahead to see what follows END
+	next := p.peek.tok
+	switch next {
+	case token.PROGRAM, token.SUBROUTINE, token.FUNCTION, token.MODULE:
+		return true
+	case token.NewLine, token.EOF:
+		// Bare END (common in older Fortran)
+		return true
+	case token.Identifier:
+		// Could be "END program_name" or "END BLOCK" (for BLOCK DATA)
+		return true
+	default:
+		return false
+	}
+}
+
+// skipIfConstruct skips from IF to matching END IF
+func (p *Parser90) skipIfConstruct() {
+	// For Phase 2, we simply skip to END IF without tracking nesting
+	// This handles most common cases correctly
+	p.nextToken() // Skip IF
+	for !p.currentTokenIs(token.EOF) {
+		if p.currentTokenIs(token.END) {
+			p.nextToken()
+			if p.currentTokenIs(token.IF) {
+				p.nextToken() // Skip IF in "END IF"
+				return
+			}
+			// Not END IF, continue (might be END DO inside the IF block, etc.)
+		} else {
+			p.nextToken()
+		}
+	}
+}
+
+// skipDoConstruct skips from DO to matching END DO
+func (p *Parser90) skipDoConstruct() {
+	p.nextToken() // Skip DO
+	depth := 1
+	for depth > 0 && !p.currentTokenIs(token.EOF) {
+		if p.currentTokenIs(token.DO) {
+			depth++
+		} else if p.currentTokenIs(token.END) {
+			p.nextToken()
+			if p.currentTokenIs(token.DO) {
+				depth--
+			}
+		}
+		p.nextToken()
+	}
+}
+
+// skipSelectConstruct skips from SELECT to matching END SELECT
+func (p *Parser90) skipSelectConstruct() {
+	p.nextToken() // Skip SELECT
+	depth := 1
+	for depth > 0 && !p.currentTokenIs(token.EOF) {
+		if p.currentTokenIs(token.SELECT) {
+			depth++
+		} else if p.currentTokenIs(token.END) {
+			p.nextToken()
+			if p.currentTokenIs(token.SELECT) {
+				depth--
+			}
+		}
+		p.nextToken()
+	}
+}
+
+// parseSpecStatement parses a specification statement
+func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool) ast.Statement {
+	switch p.current.tok {
+	case token.IMPLICIT:
+		return p.parseImplicit(sawImplicit, sawDecl)
+	case token.USE:
+		return p.parseUse()
+	case token.INTEGER, token.REAL, token.DOUBLE, token.COMPLEX, token.LOGICAL, token.CHARACTER:
+		*sawDecl = true
+		return p.parseTypeDecl()
+	case token.TYPE:
+		// Distinguish between TYPE definition and TYPE(typename) declaration
+		if p.peekTokenIs(token.LParen) {
+			// TYPE(typename) :: var - treat as type declaration
+			*sawDecl = true
+			return p.parseTypeDecl()
+		} else {
+			// TYPE :: name ... END TYPE - skip entire block
+			p.skipTypeDefinition()
+			return &ast.ImplicitStatement{} // Return non-nil to indicate success
+		}
+	case token.INTERFACE:
+		// INTERFACE block - skip entire block
+		p.skipInterfaceBlock()
+		return &ast.ImplicitStatement{} // Return non-nil to indicate success
+	default:
+		return nil // Unknown statement, caller will skip
+	}
+}
+
+// parseImplicit parses IMPLICIT [NONE] with validation
+func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
+	stmt := &ast.ImplicitStatement{StartPos: p.current.start}
+	p.nextToken()
+
+	if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "NONE" {
+		if *sawImplicit {
+			p.addError("duplicate IMPLICIT statement")
+		} else if *sawDecl {
+			p.addError("IMPLICIT NONE must appear before type declarations")
+		}
+		*sawImplicit = true
+		stmt.IsNone = true
+		p.nextToken()
+	}
+	stmt.EndPos = p.current.start
+	return stmt
+}
+
+// parseUse parses USE module [, ONLY: list]
+func (p *Parser90) parseUse() ast.Statement {
+	stmt := &ast.UseStatement{StartPos: p.current.start}
+	p.nextToken()
+
+	if !p.canUseAsIdentifier() {
+		p.addError("expected module name after USE")
+		return nil
+	}
+	stmt.ModuleName = string(p.current.lit)
+	p.nextToken()
+
+	if p.currentTokenIs(token.Comma) {
+		p.nextToken()
+		if p.currentTokenIs(token.ONLY) {
+			p.nextToken()
+			if p.expectCurrent(token.Colon) {
+				p.nextToken()
+				for p.canUseAsIdentifier() {
+					stmt.Only = append(stmt.Only, string(p.current.lit))
+					p.nextToken()
+					if !p.currentTokenIs(token.Comma) {
+						break
+					}
+					p.nextToken()
+				}
+			}
+		}
+	}
+	stmt.EndPos = p.current.start
+	return stmt
+}
+
+// parseTypeDecl parses INTEGER :: x, y or REAL, PARAMETER :: pi = 3.14 or TYPE(typename) :: var
+func (p *Parser90) parseTypeDecl() ast.Statement {
+	stmt := &ast.TypeDeclaration{StartPos: p.current.start, TypeSpec: p.current.tok.String()}
+	p.nextToken()
+
+	// Handle DOUBLE PRECISION
+	if stmt.TypeSpec == "DOUBLE" && p.currentTokenIs(token.PRECISION) {
+		stmt.TypeSpec = "DOUBLE PRECISION"
+		p.nextToken()
+	}
+
+	// Handle TYPE(typename) for derived types
+	if stmt.TypeSpec == "TYPE" && p.currentTokenIs(token.LParen) {
+		// Skip (typename)
+		depth := 1
+		p.nextToken()
+		for depth > 0 && !p.currentTokenIs(token.EOF) {
+			if p.currentTokenIs(token.LParen) {
+				depth++
+			} else if p.currentTokenIs(token.RParen) {
+				depth--
+			}
+			p.nextToken()
+		}
+	}
+
+	// Parse attributes (PARAMETER, INTENT, etc.)
+	if p.currentTokenIs(token.Comma) {
+		for p.currentTokenIs(token.Comma) {
+			p.nextToken()
+			if p.current.tok.IsAttribute() {
+				stmt.Attributes = append(stmt.Attributes, p.current.tok)
+				p.nextToken()
+				// Skip INTENT(IN/OUT/INOUT), DIMENSION(...), etc.
+				if p.currentTokenIs(token.LParen) {
+					depth := 1
+					p.nextToken()
+					for depth > 0 && !p.currentTokenIs(token.EOF) {
+						if p.currentTokenIs(token.LParen) {
+							depth++
+						} else if p.currentTokenIs(token.RParen) {
+							depth--
+						}
+						p.nextToken()
+					}
+				}
+			}
+		}
+	}
+
+	// Expect ::
+	if p.currentTokenIs(token.Colon) {
+		p.nextToken()
+		if p.currentTokenIs(token.Colon) {
+			p.nextToken()
+		}
+	}
+
+	// Parse entity list
+	for p.canUseAsIdentifier() {
+		stmt.Entities = append(stmt.Entities, ast.DeclEntity{Name: string(p.current.lit)})
+		p.nextToken()
+		// Skip array specs, initialization
+		if p.currentTokenIs(token.LParen) || p.currentTokenIs(token.Equals) {
+			depth := 0
+			for !p.currentTokenIs(token.NewLine) && !p.currentTokenIs(token.EOF) {
+				if p.currentTokenIs(token.LParen) {
+					depth++
+				} else if p.currentTokenIs(token.RParen) {
+					depth--
+					if depth == 0 {
+						p.nextToken()
+						break
+					}
+				} else if p.currentTokenIs(token.Comma) && depth == 0 {
+					break
+				}
+				p.nextToken()
+			}
+		}
+		if !p.currentTokenIs(token.Comma) {
+			break
+		}
+		p.nextToken()
+	}
+	stmt.EndPos = p.current.start
+	return stmt
+}
+
+// collectBodyUntilEnd - DEPRECATED, kept for reference
+func (p *Parser90) collectBodyUntilEndOLD(endKeyword token.Token) []ast.TokenTuple {
 	tokens := []ast.TokenTuple{}
 
 	for !p.currentTokenIs(token.EOF) {
@@ -440,8 +818,8 @@ func (p *Parser90) parseProgramBlock() ast.Statement {
 
 	p.skipNewlinesAndComments()
 
-	// Collect body tokens until END PROGRAM
-	block.BodyTokens = p.collectBodyUntilEnd(token.PROGRAM)
+	// Parse body statements
+	block.Body = p.parseBody()
 
 	block.EndPos = p.current.start
 	p.nextToken() // Move past END
@@ -483,8 +861,8 @@ func (p *Parser90) parseSubroutine() ast.Statement {
 
 	p.skipNewlinesAndComments()
 
-	// Collect body tokens until END SUBROUTINE
-	sub.BodyTokens = p.collectBodyUntilEnd(token.SUBROUTINE)
+	// Parse body statements
+	sub.Body = p.parseBody()
 
 	sub.EndPos = p.current.start
 	p.nextToken() // Move past END
@@ -541,8 +919,8 @@ func (p *Parser90) parseFunction() ast.Statement {
 
 	p.skipNewlinesAndComments()
 
-	// Collect body tokens until END FUNCTION
-	fn.BodyTokens = p.collectBodyUntilEnd(token.FUNCTION)
+	// Parse body statements
+	fn.Body = p.parseBody()
 
 	fn.EndPos = p.current.start
 	p.nextToken() // Move past END
@@ -579,9 +957,8 @@ func (p *Parser90) parseModule() ast.Statement {
 
 	p.skipNewlinesAndComments()
 
-	// Collect body tokens until CONTAINS or END MODULE
-	// Must handle nested END statements (END TYPE, END INTERFACE, etc.)
-	mod.BodyTokens = p.collectBodyUntilEnd(token.MODULE)
+	// Parse body statements
+	mod.Body = p.parseBody()
 
 	// Handle CONTAINS section with recursive parsing
 	if p.currentTokenIs(token.CONTAINS) {
@@ -649,9 +1026,8 @@ func (p *Parser90) parseBlockData() ast.ProgramUnit {
 
 	p.skipNewlinesAndComments()
 
-	// Collect body tokens until END
-	// BLOCK DATA can end with: END, END BLOCK DATA, or END BLOCKDATA
-	bd.BodyTokens = p.collectBlockDataBody()
+	// Parse body statements
+	bd.Body = p.parseBody()
 
 	bd.EndPos = p.current.start
 	p.nextToken() // Move past END

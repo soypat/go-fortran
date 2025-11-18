@@ -205,6 +205,10 @@ func (tok Token) IsKeyword() bool {
 	return tok >= INTEGER && tok <= ENDWHERE
 }
 
+func (tok Token) IsIllegalOrEOF() bool {
+	return tok == EOF || tok == Illegal
+}
+
 // IsTypeDeclaration returns true if the token is a type declaration keyword.
 func (tok Token) IsTypeDeclaration() bool {
 	return tok >= INTEGER && tok <= PRECISION

@@ -231,7 +231,7 @@ func TestLexer90_tokens(t *testing.T) {
 				t.Errorf("%s tok %d LiteralMismatch want %q got %q", l.Source(), i, expect.literal, literal)
 			}
 		}
-		if !l.Done() {
+		if !l.IsDone() {
 			tok, _, lit := l.NextToken()
 			t.Errorf("%s expected lexer to be done, got %s (%s)", l.Source(), lit, tok.String())
 		}

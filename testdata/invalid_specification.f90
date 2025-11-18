@@ -16,10 +16,10 @@ MODULE ! ERROR "expected module name"
 PROGRAM implicit_none_placement
   ! Invalid: IMPLICIT NONE must come before other declarations
   INTEGER :: x
-  IMPLICIT NONE  ! FUTURE ERROR: IMPLICIT NONE after type declarations
+  IMPLICIT NONE  ! ERROR "IMPLICIT NONE must appear before type declarations"
 
   ! Invalid: Duplicate IMPLICIT NONE
-  IMPLICIT NONE  ! FUTURE ERROR: duplicate IMPLICIT NONE
+  IMPLICIT NONE  ! ERROR "duplicate IMPLICIT statement"
 
   ! Invalid: PARAMETER without value
   INTEGER, PARAMETER :: NO_VALUE  ! FUTURE ERROR: PARAMETER requires initialization

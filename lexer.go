@@ -32,7 +32,7 @@ type Lexer90 struct {
 	tokenCol  int    // column number where the last token started
 }
 
-func (l *Lexer90) Done() bool {
+func (l *Lexer90) IsDone() bool {
 	return l.err != nil
 }
 
@@ -93,7 +93,7 @@ func (l *Lexer90) SkipLines(n int) error {
 		return nil
 	}
 	targetLine := l.line + n
-	for l.line != targetLine && !l.Done() {
+	for l.line != targetLine && !l.IsDone() {
 		tok, _, lit := l.NextToken()
 		if tok == token.Illegal {
 			return errors.New("illegal token: " + string(lit))
@@ -310,7 +310,7 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 func (l *Lexer90) readUntil(stopchar rune) ([]byte, token.Token) {
 	start := l.bufstart()
 	var isInteger, isFloat bool = true, true
-	for l.ch != stopchar {
+	for l.err == nil && l.ch != stopchar {
 		isLetter := isPrintableASCII(l.ch)
 		isDigitOrDec := isDigitOrDecimal(l.ch)
 		isSpace := l.ch == ' '
@@ -321,6 +321,9 @@ func (l *Lexer90) readUntil(stopchar rune) ([]byte, token.Token) {
 		isFloat = isFloat && !isLetter && !isSpace
 		l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
 		l.readChar()
+	}
+	if l.err != nil {
+		return l.idbuf[start:], token.Illegal
 	}
 	tokst := token.Identifier
 	literal := l.idbuf[start:]
@@ -682,6 +685,11 @@ func (l *Lexer90) readChar() {
 		// Consume continuation line commence string "&\n"
 		l.readCharLL()
 		l.readCharLL()
+		if l.ch == '!' {
+			l.ch = 0
+			l.peek = 0
+			l.err = errors.New("comment start on continuation line unsupported")
+		}
 		for l.err == nil && (l.ch == ' ' || l.ch == '\t') {
 			l.readCharLL() // Skip whitespace on continuation line.
 		}
