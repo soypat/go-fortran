@@ -206,6 +206,19 @@ func (tok Token) IsKeyword() bool {
 	return tok >= INTEGER && tok <= ENDWHERE
 }
 
+// IsExecutableStatement returns true if the token is a executable
+// statement- control structure or built in function.
+// The [Identifier] token returns false as it may or may not represent an executable statement.
+func (tok Token) IsExecutableStatement() bool {
+	switch tok {
+	case IF, DO, CALL, RETURN, STOP, EXIT,
+		ALLOCATE, DEALLOCATE, READ, WRITE, PRINT,
+		GOTO, CONTINUE, CYCLE:
+		return true
+	}
+	return false
+}
+
 func (tok Token) IsIllegalOrEOF() bool {
 	return tok == EOF || tok == Illegal
 }

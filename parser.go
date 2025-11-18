@@ -201,6 +201,19 @@ func (p *Parser90) parseTopLevelUnit() ast.ProgramUnit {
 
 // Helper methods
 
+// loopUntil returns true as long as current token not in set and EOF not hit.
+func (p *Parser90) loopUntil(t ...token.Token) bool {
+	if p.current.tok == token.EOF || p.current.tok == 0 {
+		return false
+	}
+	for i := range t {
+		if t[i] == p.current.tok {
+			return false
+		}
+	}
+	return true
+}
+
 func (p *Parser90) currentTokenIs(t token.Token) bool {
 	return p.current.tok == t
 }
@@ -286,7 +299,7 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 	}
 
 	// Parse parameters
-	for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.RParen) {
 		// Accept identifiers, keywords, or * (alternate return specifier in F77)
 		var paramName string
 		if p.currentTokenIs(token.Asterisk) {
@@ -329,7 +342,7 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 func (p *Parser90) collectUntilEnd(endTokens ...token.Token) []ast.TokenTuple {
 	tokens := []ast.TokenTuple{}
 
-	for !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.EOF) {
 		// Check if we've hit an end token
 		for _, endTok := range endTokens {
 			if p.currentTokenIs(endTok) {
@@ -363,7 +376,7 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 	}
 
 	// Phase 2: Parse specification statements
-	for !p.currentTokenIs(token.CONTAINS) && !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.CONTAINS, token.END) {
 		p.skipNewlinesAndComments()
 		if p.currentTokenIs(token.CONTAINS) || p.currentTokenIs(token.END) || p.currentTokenIs(token.EOF) {
 			break
@@ -383,7 +396,7 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 	}
 
 	// Phase 3: Parse executable statements
-	for !p.currentTokenIs(token.CONTAINS) && !p.isEndOfProgramUnit() && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.CONTAINS) && !p.isEndOfProgramUnit() {
 		p.skipNewlinesAndComments()
 		if p.currentTokenIs(token.CONTAINS) || p.isEndOfProgramUnit() {
 			break
@@ -497,7 +510,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 	p.skipNewlinesAndComments()
 
 	// Parse THEN block
-	for !p.currentTokenIs(token.ELSE) && !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.ELSE, token.END) {
 		if p.peekTokenIs(token.IF) && p.currentTokenIs(token.ELSE) {
 			break
 		}
@@ -542,7 +555,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 		p.skipNewlinesAndComments()
 
 		// Parse ELSE IF block
-		for !p.currentTokenIs(token.ELSE) && !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+		for p.loopUntil(token.ELSE, token.END) {
 			if p.peekTokenIs(token.IF) && p.currentTokenIs(token.ELSE) {
 				break
 			}
@@ -562,7 +575,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 		p.nextToken() // consume ELSE
 		p.skipNewlinesAndComments()
 
-		for !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+		for p.loopUntil(token.END) {
 			if s := p.parseExecutableStatement(); s != nil {
 				stmt.ElsePart = append(stmt.ElsePart, s)
 			} else {
@@ -726,7 +739,7 @@ func (p *Parser90) parseCallStmt() ast.Statement {
 	if p.currentTokenIs(token.LParen) {
 		p.nextToken() // consume (
 		var args []ast.Expression
-		for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+		for p.loopUntil(token.RParen) {
 			arg := p.parseExpression(0)
 			if arg == nil {
 				p.addError("expected expression in argument list")
@@ -823,25 +836,21 @@ func (p *Parser90) parseAssignmentStmt() ast.Statement {
 
 // isExecutableStatement returns true if current token starts an executable statement
 func (p *Parser90) isExecutableStatement() bool {
-	switch p.current.tok {
-	case token.IF, token.DO, token.CALL, token.RETURN, token.STOP, token.EXIT,
-		token.ALLOCATE, token.DEALLOCATE, token.READ, token.WRITE, token.PRINT,
-		token.GOTO, token.CONTINUE, token.CYCLE:
+	if p.current.tok.IsExecutableStatement() {
 		return true
-	case token.Identifier:
+	} else if p.current.tok == token.Identifier {
 		// Could be assignment or procedure call. We need to lookahead to distinguish.
 		// If we see `IDENTIFIER =`, it's an assignment.
 		// If we see `IDENTIFIER(...)` it could be an assignment to an array element or a function call.
 		// For now, we will treat all identifiers at the start of a statement in the execution part as the start of an executable statement.
 		return true
-	default:
-		return false
 	}
+	return false
 }
 
 // skipToNextStatement skips tokens until the next newline
 func (p *Parser90) skipToNextStatement() {
-	for !p.currentTokenIs(token.NewLine) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.NewLine) {
 		p.nextToken()
 	}
 	if p.currentTokenIs(token.NewLine) {
@@ -1053,7 +1062,7 @@ func (p *Parser90) parseInterfaceStmt() ast.Statement {
 	p.skipNewlinesAndComments()
 
 	// Parse interface body
-	for !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.END) {
 		if p.peekTokenIs(token.INTERFACE) && p.currentTokenIs(token.END) {
 			break
 		}
@@ -1101,7 +1110,7 @@ func (p *Parser90) parseDerivedTypeStmt() ast.Statement {
 	p.skipNewlinesAndComments()
 
 	// Parse component declarations
-	for !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.END) {
 		if p.peekTokenIs(token.TYPE) && p.currentTokenIs(token.END) {
 			break
 		}
@@ -1204,7 +1213,7 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 		if p.currentTokenIs(token.Equals) || p.currentTokenIs(token.PointerAssign) {
 			p.nextToken() // consume = or =>
 			// For now, just consume the expression
-			for !p.currentTokenIs(token.NewLine) && !p.currentTokenIs(token.EOF) && !p.currentTokenIs(token.Comma) {
+			for p.loopUntil(token.NewLine, token.Comma) {
 				p.nextToken()
 			}
 		}
@@ -1440,7 +1449,7 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 			}
 
 			depth := 0
-			for !p.currentTokenIs(token.NewLine) && !p.currentTokenIs(token.EOF) {
+			for p.loopUntil(token.NewLine) {
 				if p.currentTokenIs(token.LParen) {
 					depth++
 				} else if p.currentTokenIs(token.RParen) {
@@ -1729,8 +1738,7 @@ func (p *Parser90) parseModule() ast.Statement {
 		p.skipNewlinesAndComments()
 
 		// Recursively parse contained procedures
-		for !p.currentTokenIs(token.END) &&
-			!p.currentTokenIs(token.EOF) {
+		for p.loopUntil(token.END) {
 
 			// Check if this is a procedure keyword
 			if p.currentTokenIs(token.SUBROUTINE) ||
@@ -1833,7 +1841,7 @@ func (p *Parser90) parseArraySpec() *ast.ArraySpec {
 	hasAssumedSize := false
 	hasExplicit := false
 
-	for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.RParen) {
 		var bound ast.ArrayBound
 
 		// Check for assumed-size: *
@@ -1927,7 +1935,7 @@ func (p *Parser90) parseCharacterLength() string {
 	}
 
 	// Collect tokens until closing paren
-	for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.RParen) {
 		if len(lengthTokens) > 0 {
 			lengthTokens = append(lengthTokens, ' ')
 		}
@@ -2155,7 +2163,7 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 
 			// Parse argument/subscript list
 			var args []ast.Expression
-			for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+			for p.loopUntil(token.RParen) {
 				arg := p.parseExpression(0)
 				if arg == nil {
 					p.addError("expected expression in argument list")
@@ -2203,7 +2211,7 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 	p.nextToken() // consume (
 	p.nextToken() // consume /
 
-	for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.Slash) {
 		val := p.parseExpression(0)
 		if val == nil {
 			p.addError("expected expression in array constructor")
@@ -2240,7 +2248,7 @@ func (p *Parser90) parseArraySection(name string, startPos int) ast.Expression {
 	}
 	p.nextToken() // consume (
 
-	for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.RParen) {
 		sub := ast.Subscript{}
 		if !p.currentTokenIs(token.Colon) {
 			sub.Lower = p.parseExpression(0)
@@ -2348,7 +2356,7 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 	// Otherwise, this is a type declaration (Phase 2)
 	// For now, skip this line
 	p.addError("type declarations not yet supported in Phase 1")
-	for !p.currentTokenIs(token.NewLine) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.NewLine) {
 		p.nextToken()
 	}
 	return nil
