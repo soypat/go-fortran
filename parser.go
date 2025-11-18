@@ -1,6 +1,7 @@
 package fortran
 
 import (
+	"fmt"
 	"io"
 	"strconv"
 
@@ -230,6 +231,17 @@ func (p *Parser90) expectCurrent(t token.Token) bool {
 	return true
 }
 
+// expect checks if current token matches t, consumes it if so, and reports error if not.
+// Returns true if token matched and was consumed, false otherwise.
+func (p *Parser90) expect(t token.Token) bool {
+	if !p.currentTokenIs(t) {
+		p.addError("expected " + t.String() + ", got " + p.current.tok.String())
+		return false
+	}
+	p.nextToken()
+	return true
+}
+
 func (p *Parser90) skipNewlinesAndComments() {
 	for p.currentTokenIs(token.NewLine) || p.currentTokenIs(token.LineComment) {
 		p.nextToken()
@@ -298,8 +310,8 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 		return params
 	}
 
-	// Parse parameters
-	for p.loopUntil(token.RParen) {
+	// Parse parameters using generic helper
+	parseOneParam := func() (ast.Parameter, error) {
 		// Accept identifiers, keywords, or * (alternate return specifier in F77)
 		var paramName string
 		if p.currentTokenIs(token.Asterisk) {
@@ -309,25 +321,18 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 			paramName = string(p.current.lit)
 			p.nextToken()
 		} else {
-			p.addError("expected parameter name")
-			break
+			return ast.Parameter{}, fmt.Errorf("expected parameter name")
 		}
 
 		// Create Parameter with just the name for now
 		// Type information will be filled in by parseBody when it sees type declarations
-		params = append(params, ast.Parameter{Name: paramName})
+		return ast.Parameter{Name: paramName}, nil
+	}
 
-		if p.currentTokenIs(token.Comma) {
-			p.nextToken()
-			continue
-		}
-
-		if p.currentTokenIs(token.RParen) {
-			break
-		}
-
-		p.addError("expected comma or closing paren in parameter list")
-		break
+	var err error
+	params, err = parseCommaSeparatedList(p, token.RParen, parseOneParam)
+	if err != nil {
+		p.addError(err.Error())
 	}
 
 	if p.expectCurrent(token.RParen) {
@@ -738,23 +743,21 @@ func (p *Parser90) parseCallStmt() ast.Statement {
 
 	if p.currentTokenIs(token.LParen) {
 		p.nextToken() // consume (
-		var args []ast.Expression
-		for p.loopUntil(token.RParen) {
+
+		parseOneArg := func() (ast.Expression, error) {
 			arg := p.parseExpression(0)
 			if arg == nil {
-				p.addError("expected expression in argument list")
-				break
+				return nil, fmt.Errorf("expected expression in argument list")
 			}
-			args = append(args, arg)
+			return arg, nil
+		}
 
-			if p.currentTokenIs(token.Comma) {
-				p.nextToken()
-			} else if !p.currentTokenIs(token.RParen) {
-				p.addError("expected ',' or ')' in argument list")
-				break
-			}
+		args, err := parseCommaSeparatedList(p, token.RParen, parseOneArg)
+		if err != nil {
+			p.addError(err.Error())
 		}
 		stmt.Args = args
+
 		if p.currentTokenIs(token.RParen) {
 			p.nextToken() // consume )
 		}
@@ -2162,21 +2165,17 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 			p.nextToken() // consume (
 
 			// Parse argument/subscript list
-			var args []ast.Expression
-			for p.loopUntil(token.RParen) {
+			parseOneArg := func() (ast.Expression, error) {
 				arg := p.parseExpression(0)
 				if arg == nil {
-					p.addError("expected expression in argument list")
-					break
+					return nil, fmt.Errorf("expected expression in argument list")
 				}
-				args = append(args, arg)
+				return arg, nil
+			}
 
-				if p.currentTokenIs(token.Comma) {
-					p.nextToken()
-				} else if !p.currentTokenIs(token.RParen) {
-					p.addError("expected ',' or ')' in argument list")
-					break
-				}
+			args, err := parseCommaSeparatedList(p, token.RParen, parseOneArg)
+			if err != nil {
+				p.addError(err.Error())
 			}
 
 			if p.currentTokenIs(token.RParen) {
@@ -2248,7 +2247,7 @@ func (p *Parser90) parseArraySection(name string, startPos int) ast.Expression {
 	}
 	p.nextToken() // consume (
 
-	for p.loopUntil(token.RParen) {
+	parseOneSubscript := func() (ast.Subscript, error) {
 		sub := ast.Subscript{}
 		if !p.currentTokenIs(token.Colon) {
 			sub.Lower = p.parseExpression(0)
@@ -2263,13 +2262,14 @@ func (p *Parser90) parseArraySection(name string, startPos int) ast.Expression {
 			p.nextToken() // consume :
 			sub.Stride = p.parseExpression(0)
 		}
-		stmt.Subscripts = append(stmt.Subscripts, sub)
-
-		if !p.currentTokenIs(token.Comma) {
-			break
-		}
-		p.nextToken()
+		return sub, nil
 	}
+
+	subscripts, err := parseCommaSeparatedList(p, token.RParen, parseOneSubscript)
+	if err != nil {
+		p.addError(err.Error())
+	}
+	stmt.Subscripts = subscripts
 
 	if p.currentTokenIs(token.RParen) {
 		stmt.Position = ast.Pos(start, p.current.start)
@@ -2404,4 +2404,23 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 	}
 
 	return stmt
+}
+
+// parseCommaSeparatedList parses items separated by commas until terminator
+// parser is a function that parses one item
+func parseCommaSeparatedList[T any](p *Parser90, terminator token.Token, parser func() (T, error)) ([]T, error) {
+	var items []T
+	for p.loopUntil(terminator) {
+		item, err := parser()
+		if err != nil {
+			return items, err
+		}
+		items = append(items, item)
+		if p.currentTokenIs(token.Comma) {
+			p.nextToken()
+		} else if !p.currentTokenIs(terminator) {
+			return items, fmt.Errorf("expected ',' or '%s'", terminator)
+		}
+	}
+	return items, nil
 }
