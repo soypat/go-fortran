@@ -8,6 +8,7 @@ type Token int
 //go:generate stringer -type=Token -linecomment -output stringers.go .
 
 // List of all tokens of the Fortran programming language.
+// When adding a new token add it in between blocks since we use comparison functions to check properties of tokens.
 const (
 	// Not to be used in code. Is to catch uninitialized tokens.
 	Undefined Token = iota // <undefined>
@@ -15,13 +16,14 @@ const (
 	// ==================== KEYWORDS ====================
 
 	// Type declaration keywords
-	INTEGER   // INTEGER
-	REAL      // REAL
-	COMPLEX   // COMPLEX
-	LOGICAL   // LOGICAL
-	CHARACTER // CHARACTER
-	DOUBLE    // DOUBLE
-	PRECISION // PRECISION
+	INTEGER         // INTEGER
+	REAL            // REAL
+	COMPLEX         // COMPLEX
+	LOGICAL         // LOGICAL
+	CHARACTER       // CHARACTER
+	DOUBLE          // DOUBLE
+	PRECISION       // PRECISION
+	DOUBLEPRECISION // DOUBLEPRECISION
 
 	// Program structure keywords
 	PROGRAM       // PROGRAM
@@ -225,7 +227,7 @@ func (tok Token) IsIllegalOrEOF() bool {
 
 // IsTypeDeclaration returns true if the token is a type declaration keyword.
 func (tok Token) IsTypeDeclaration() bool {
-	return tok >= INTEGER && tok <= PRECISION
+	return tok >= INTEGER && tok <= DOUBLEPRECISION
 }
 
 // IsAttribute returns true if the token is a Fortran 90 attribute.

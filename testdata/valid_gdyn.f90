@@ -1,9 +1,9 @@
-!$GDYN2E
 PROGRAM GDYN2E
-!      COMMON/APHASE/NANTPT,NANTPS(999),KANTPS(999),NANTMT(10),NNUMMT,   &
-!     &              NXAPHA
-      COMMON/APHASE/NANT_sat,NANTPS_sat(999),KANTPS_sat(999),           &
-     &              nant_sta,NANTPS_sta(999),KANTPS_sta(999),           &
-     &              NANTPT,  NANTPS(999),    KANTPS(999), NANTMT(99),   &
-     &              NNUMMT, NXAPHA
+! &
+! 
+      COMMON/APHASE/NANT_sat
+      DOUBLEPRECISION          :: DEFALT
+      IF(LNORMP) CALL TITLE(IOUT15)
+      IF(NPARC.LE.0.AND..NOT.LSTARC) GO TO 2000
+      IF(LSTINR) WRITE(91) BIASP,BIAS,DYNEQ
 END PROGRAM GDYN2E

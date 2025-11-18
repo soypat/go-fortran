@@ -143,8 +143,8 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 	ch := l.ch
 	// Handle comments - '!' can appear at any column in Fortran 90
 	if ch == '!' {
-		l.readChar() // skip the '!'
-		data, _ := l.readUntil('\n')
+		l.readCharLL() // skip the '!' without continuation handling
+		data := l.readCommentContent()
 		return token.LineComment, startPos, data
 	}
 	switch ch {
@@ -369,6 +369,21 @@ func (l *Lexer90) readUntil(stopchar rune) ([]byte, token.Token) {
 	return literal, tokst
 }
 
+// readCommentContent reads comment text until newline without processing line continuations.
+// In Fortran, '&' inside comments is just regular text, not a continuation character.
+func (l *Lexer90) readCommentContent() []byte {
+	start := l.bufstart()
+	for l.err == nil && l.ch != '\n' && l.ch != 0 {
+		l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
+		l.readCharLL() // Use low-level read to avoid continuation handling
+	}
+	// If we hit EOF but l.ch has the last valid character, append it
+	if l.err != nil && l.ch != 0 && l.ch != '\n' {
+		l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
+	}
+	return l.idbuf[start:]
+}
+
 func (l *Lexer90) readIdentifier() []byte {
 	start := l.bufstart()
 	for isIdentifierChar(l.ch) || isDigit(l.ch) {
@@ -445,6 +460,8 @@ func (l *Lexer90) lookupKeyword(ident []byte) token.Token {
 		return token.DIMENSION
 	case "DOUBLE":
 		return token.DOUBLE
+	case "DOUBLEPRECISION":
+		return token.DOUBLEPRECISION
 	case "CALL":
 		return token.CALL
 	case "THEN":
@@ -703,6 +720,12 @@ func (l *Lexer90) skipWhitespace() {
 	}
 }
 
+// readChar reads the next character with line continuation processing.
+// Fortran 90 line continuation: '&' at end of line continues to next line.
+//
+// IMPORTANT: This should be used for normal code and strings, but NOT for comments.
+// - Normal code/strings: '&\n' is a continuation character
+// - Comments: '&' is just literal text (use readCharLL instead)
 func (l *Lexer90) readChar() {
 	if l.err != nil {
 		l.ch = 0 // Just in case annihilate char.
@@ -735,6 +758,10 @@ func (l *Lexer90) peekChar() rune {
 	return l.peek
 }
 
+// readCharLL reads the next character at the lowest level without any processing.
+// This is the raw character reader that does NOT handle line continuations.
+// Use this directly only when you need to read characters where '&' should be literal
+// (e.g., inside comments). For normal code, use readChar() instead.
 func (l *Lexer90) readCharLL() {
 	// Advance character buffer first, so even on EOF we don't lose the last char
 	l.ch = l.peek

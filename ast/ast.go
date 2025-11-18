@@ -812,6 +812,27 @@ func (cs *ContinueStmt) AppendString(dst []byte) []byte {
 	return append(dst, "CONTINUE"...)
 }
 
+// GotoStmt represents a GOTO or GO TO statement
+type GotoStmt struct {
+	Target string // The label to jump to
+	Label  string // Optional statement label
+	Position
+}
+
+var _ Statement = (*GotoStmt)(nil) // compile time check of interface implementation.
+
+func (gs *GotoStmt) GetLabel() string { return gs.Label }
+
+func (gs *GotoStmt) statementNode() {}
+func (gs *GotoStmt) AppendTokenLiteral(dst []byte) []byte {
+	dst = append(dst, "GO TO "...)
+	return append(dst, gs.Target...)
+}
+func (gs *GotoStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "GO TO "...)
+	return append(dst, gs.Target...)
+}
+
 // Derived Type Statements (Phase 7)
 
 // DerivedTypeStmt represents a TYPE...END TYPE block

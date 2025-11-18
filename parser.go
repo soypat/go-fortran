@@ -166,6 +166,7 @@ func (p *Parser90) registerTopLevelParsers() {
 	p.registerStatement(token.LOGICAL, p.parseTypePrefixedConstruct)
 	p.registerStatement(token.CHARACTER, p.parseTypePrefixedConstruct)
 	p.registerStatement(token.DOUBLE, p.parseTypePrefixedConstruct)
+	p.registerStatement(token.DOUBLEPRECISION, p.parseTypePrefixedConstruct)
 	p.registerStatement(token.COMPLEX, p.parseTypePrefixedConstruct)
 
 	// Register attributes that can prefix procedures
@@ -483,10 +484,17 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		stmt = p.parseExitStmt()
 	case token.CONTINUE:
 		stmt = p.parseContinueStmt()
+	case token.GOTO:
+		stmt = p.parseGotoStmt()
 	case token.Identifier:
-		// This could be an assignment statement or a call to a subroutine without the CALL keyword.
-		// For now, we'll assume it's an assignment.
-		stmt = p.parseAssignmentStmt()
+		// Check for "GO TO" (two separate tokens)
+		if string(p.current.lit) == "GO" && p.peekTokenIs(token.Identifier) {
+			stmt = p.parseGotoStmt()
+		} else {
+			// This could be an assignment statement or a call to a subroutine without the CALL keyword.
+			// For now, we'll assume it's an assignment.
+			stmt = p.parseAssignmentStmt()
+		}
 	default:
 		return nil // Unknown statement, caller will skip
 	}
@@ -525,6 +533,41 @@ func (p *Parser90) parseContinueStmt() ast.Statement {
 	}
 }
 
+// parseGotoStmt parses a GOTO or GO TO statement
+// Handles both GOTO (single token) and GO (identifier) followed by TO
+func (p *Parser90) parseGotoStmt() ast.Statement {
+	start := p.current.start
+	stmt := &ast.GotoStmt{}
+
+	// Handle GOTO token or GO identifier
+	if p.currentTokenIs(token.GOTO) {
+		p.nextToken() // consume GOTO
+	} else if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "GO" {
+		// Handle "GO TO" as two separate tokens
+		p.nextToken() // consume GO
+		if !p.currentTokenIs(token.Identifier) || string(p.current.lit) != "TO" {
+			p.addError("expected TO after GO")
+			return nil
+		}
+		p.nextToken() // consume TO
+	} else {
+		p.addError("expected GOTO or GO TO")
+		return nil
+	}
+
+	// Parse target label
+	if p.currentTokenIs(token.IntLit) || p.currentTokenIs(token.Label) {
+		stmt.Target = string(p.current.lit)
+		p.nextToken()
+	} else {
+		p.addError("expected label after GO TO")
+		return nil
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
 // parseIfStmt parses an IF construct
 // Precondition: current token is IF
 func (p *Parser90) parseIfStmt() ast.Statement {
@@ -546,9 +589,22 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 		return nil
 	}
 
-	if !p.expect(token.THEN, "after IF condition") {
-		return nil
+	// Check for inline IF (no THEN) vs block IF (with THEN)
+	if !p.currentTokenIs(token.THEN) {
+		// Inline IF: IF (condition) statement
+		// Parse single executable statement
+		if s := p.parseExecutableStatement(); s != nil {
+			stmt.ThenPart = append(stmt.ThenPart, s)
+		} else {
+			p.addError("expected executable statement after IF condition")
+			return nil
+		}
+		stmt.Position = ast.Pos(start, p.current.start)
+		return stmt
 	}
+
+	// Block IF: IF (condition) THEN ... END IF
+	p.nextToken() // consume THEN
 	p.skipNewlinesAndComments()
 
 	// Parse THEN block
@@ -1115,10 +1171,12 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	stmt.Type = p.current.tok.String()
 	p.nextToken()
 
-	// Handle DOUBLE PRECISION
+	// Handle DOUBLE PRECISION (two tokens) or DOUBLEPRECISION (one token)
 	if stmt.Type == "DOUBLE" && p.currentTokenIs(token.PRECISION) {
 		stmt.Type = "DOUBLE PRECISION"
 		p.nextToken()
+	} else if stmt.Type == "DOUBLEPRECISION" {
+		stmt.Type = "DOUBLE PRECISION" // Normalize to canonical form
 	}
 
 	// Handle CHARACTER length specification
@@ -1255,10 +1313,12 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 	stmt := &ast.TypeDeclaration{TypeSpec: p.current.tok.String()}
 	p.nextToken()
 
-	// Handle DOUBLE PRECISION
+	// Handle DOUBLE PRECISION (two tokens) or DOUBLEPRECISION (one token)
 	if stmt.TypeSpec == "DOUBLE" && p.currentTokenIs(token.PRECISION) {
 		stmt.TypeSpec = "DOUBLE PRECISION"
 		p.nextToken()
+	} else if stmt.TypeSpec == "DOUBLEPRECISION" {
+		stmt.TypeSpec = "DOUBLE PRECISION" // Normalize to canonical form
 	}
 
 	// Handle CHARACTER length specification: CHARACTER(LEN=80) or CHARACTER*80 or CHARACTER(*)
@@ -2223,10 +2283,12 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 	typeSpec := typeToken.String()
 	p.nextToken()
 
-	// Handle DOUBLE PRECISION (two-token type specifier)
+	// Handle DOUBLE PRECISION (two tokens) or DOUBLEPRECISION (one token)
 	if typeToken == token.DOUBLE && p.currentTokenIs(token.PRECISION) {
 		typeSpec = "DOUBLE PRECISION"
 		p.nextToken()
+	} else if typeToken == token.DOUBLEPRECISION {
+		typeSpec = "DOUBLE PRECISION" // Normalize to canonical form
 	}
 
 	// Handle type length/kind specifiers: CHARACTER*4, REAL*8, INTEGER*4, etc.
