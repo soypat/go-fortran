@@ -146,3 +146,13 @@ FUNCTION typed_function(a, b) RESULT(sum_val)
 
   sum_val = a + b
 END FUNCTION typed_function
+
+SUBROUTINE array_decl()
+	  INTEGER, DIMENSION(3) :: a
+	  a = (/ 1, 2, 3 /)
+END SUBROUTINE
+
+SUBROUTINE array_section()
+	  REAL, DIMENSION(10, 10) :: a
+	  a(:, 1:5) = 0.0
+	END SUBROUTINE

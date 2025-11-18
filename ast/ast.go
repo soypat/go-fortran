@@ -7,8 +7,9 @@ import (
 type Node interface {
 	AppendTokenLiteral(dst []byte) []byte
 	AppendString(dst []byte) []byte
-	Pos() int // position of first character belonging to the node in file.
-	End() int // position of first character immediately after the node in file.
+	// SourcePos returns the position of first character belonging to the node as start
+	// and the position of the first character immediately after the node as end in the file.
+	SourcePos() Position
 }
 
 type Expression interface {
@@ -19,6 +20,7 @@ type Expression interface {
 type Statement interface {
 	Node
 	statementNode()
+	GetLabel() string
 }
 
 // ProgramUnit represents a top-level construct (PROGRAM, SUBROUTINE, FUNCTION, MODULE)
@@ -27,10 +29,32 @@ type ProgramUnit interface {
 	programUnitNode()
 }
 
+func Pos(start, end int) Position {
+	if end < start {
+		panic("end < start")
+	}
+	return Position{start: start, end: end}
+}
+
+type Position struct {
+	start int
+	end   int
+}
+
+func (p Position) Start() int { return p.start }
+func (p Position) End() int   { return p.end }
+
+func (sp Position) SourcePos() Position {
+	return sp
+}
+
 // Program represents the root node of a Fortran program file
 type Program struct {
 	Units []ProgramUnit
+	Label string
 }
+
+func (p *Program) GetLabel() string { return p.Label }
 
 func (p *Program) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "PROGRAM"...)
@@ -46,27 +70,26 @@ func (p *Program) AppendString(dst []byte) []byte {
 	return dst
 }
 
-func (p *Program) Pos() int {
-	if len(p.Units) == 0 {
-		return 0
+func (p *Program) SourcePos() Position {
+	if len(p.Units) <= 0 {
+		return Position{}
 	}
-	return p.Units[0].Pos()
-}
-
-func (p *Program) End() int {
-	if len(p.Units) == 0 {
-		return 0
-	}
-	return p.Units[len(p.Units)-1].End()
+	p0 := p.Units[0].SourcePos()
+	pend := p.Units[len(p.Units)-1].SourcePos()
+	return Position{start: p0.start, end: pend.end}
 }
 
 // ProgramBlock represents a PROGRAM...END PROGRAM block
 type ProgramBlock struct {
-	Name     string
-	Body     []Statement // Specification and executable statements
-	StartPos int
-	EndPos   int
+	Name  string
+	Body  []Statement // Specification and executable statements
+	Label string
+	Position
 }
+
+var _ ProgramUnit = (*ProgramBlock)(nil) // compile time check of interface implementation.
+
+func (pb *ProgramBlock) GetLabel() string { return pb.Label }
 
 func (pb *ProgramBlock) statementNode()   {}
 func (pb *ProgramBlock) programUnitNode() {}
@@ -79,18 +102,19 @@ func (pb *ProgramBlock) AppendString(dst []byte) []byte {
 	return dst
 }
 
-func (pb *ProgramBlock) Pos() int { return pb.StartPos }
-func (pb *ProgramBlock) End() int { return pb.EndPos }
-
 // Subroutine represents a SUBROUTINE...END SUBROUTINE block
 type Subroutine struct {
 	Name       string
 	Parameters []Parameter   // Function/subroutine parameters with type information
 	Attributes []token.Token // RECURSIVE, PURE, etc.
 	Body       []Statement   // Specification and executable statements
-	StartPos   int
-	EndPos     int
+	Label      string
+	Position
 }
+
+var _ ProgramUnit = (*Subroutine)(nil) // compile time check of interface implementation.
+
+func (s *Subroutine) GetLabel() string { return s.Label }
 
 func (s *Subroutine) statementNode()   {}
 func (s *Subroutine) programUnitNode() {}
@@ -111,9 +135,6 @@ func (s *Subroutine) AppendString(dst []byte) []byte {
 	return dst
 }
 
-func (s *Subroutine) Pos() int { return s.StartPos }
-func (s *Subroutine) End() int { return s.EndPos }
-
 // Function represents a FUNCTION...END FUNCTION block
 type Function struct {
 	Name           string
@@ -122,9 +143,13 @@ type Function struct {
 	ResultVariable string        // For RESULT(var) clause
 	Attributes     []token.Token // RECURSIVE, PURE, ELEMENTAL
 	Body           []Statement   // Specification and executable statements
-	StartPos       int
-	EndPos         int
+	Label          string
+	Position
 }
+
+var _ ProgramUnit = (*Function)(nil) // compile time check of interface implementation.
+
+func (f *Function) GetLabel() string { return f.Label }
 
 func (f *Function) statementNode()   {}
 func (f *Function) programUnitNode() {}
@@ -154,17 +179,18 @@ func (f *Function) AppendString(dst []byte) []byte {
 	return dst
 }
 
-func (f *Function) Pos() int { return f.StartPos }
-func (f *Function) End() int { return f.EndPos }
-
 // Module represents a MODULE...END MODULE block
 type Module struct {
 	Name     string
 	Body     []Statement   // Module-level declarations
 	Contains []ProgramUnit // Procedures in CONTAINS section
-	StartPos int
-	EndPos   int
+	Label    string
+	Position
 }
+
+var _ ProgramUnit = (*Module)(nil) // compile time check of interface implementation.
+
+func (m *Module) GetLabel() string { return m.Label }
 
 func (m *Module) statementNode()   {}
 func (m *Module) programUnitNode() {}
@@ -180,16 +206,17 @@ func (m *Module) AppendString(dst []byte) []byte {
 	return dst
 }
 
-func (m *Module) Pos() int { return m.StartPos }
-func (m *Module) End() int { return m.EndPos }
-
 // BlockData represents a BLOCK DATA...END BLOCK DATA block (Fortran 77 feature)
 type BlockData struct {
-	Name     string
-	Body     []Statement
-	StartPos int
-	EndPos   int
+	Name  string
+	Body  []Statement
+	Label string
+	Position
 }
+
+var _ ProgramUnit = (*BlockData)(nil) // compile time check of interface implementation.
+
+func (bd *BlockData) GetLabel() string { return bd.Label }
 
 func (bd *BlockData) statementNode()   {}
 func (bd *BlockData) programUnitNode() {}
@@ -205,9 +232,6 @@ func (bd *BlockData) AppendString(dst []byte) []byte {
 	return dst
 }
 
-func (bd *BlockData) Pos() int { return bd.StartPos }
-func (bd *BlockData) End() int { return bd.EndPos }
-
 // TokenTuple represents a stored token for deferred parsing
 type TokenTuple struct {
 	Tok   token.Token
@@ -219,10 +243,14 @@ type TokenTuple struct {
 
 // ImplicitStatement represents an IMPLICIT statement
 type ImplicitStatement struct {
-	IsNone   bool // true for IMPLICIT NONE
-	StartPos int
-	EndPos   int
+	IsNone bool // true for IMPLICIT NONE
+	Label  string
+	Position
 }
+
+var _ Statement = (*ImplicitStatement)(nil) // compile time check of interface implementation.
+
+func (is *ImplicitStatement) GetLabel() string { return is.Label }
 
 func (is *ImplicitStatement) statementNode() {}
 func (is *ImplicitStatement) AppendTokenLiteral(dst []byte) []byte {
@@ -234,16 +262,18 @@ func (is *ImplicitStatement) AppendString(dst []byte) []byte {
 	}
 	return append(dst, "IMPLICIT"...)
 }
-func (is *ImplicitStatement) Pos() int { return is.StartPos }
-func (is *ImplicitStatement) End() int { return is.EndPos }
 
 // UseStatement represents a USE statement
 type UseStatement struct {
 	ModuleName string
 	Only       []string // Empty if not using ONLY clause
-	StartPos   int
-	EndPos     int
+	Label      string
+	Position
 }
+
+var _ Statement = (*UseStatement)(nil) // compile time check of interface implementation.
+
+func (us *UseStatement) GetLabel() string { return us.Label }
 
 func (us *UseStatement) statementNode() {}
 func (us *UseStatement) AppendTokenLiteral(dst []byte) []byte {
@@ -263,17 +293,19 @@ func (us *UseStatement) AppendString(dst []byte) []byte {
 	}
 	return dst
 }
-func (us *UseStatement) Pos() int { return us.StartPos }
-func (us *UseStatement) End() int { return us.EndPos }
 
 // TypeDeclaration represents a type declaration with attributes
 type TypeDeclaration struct {
 	TypeSpec   string        // e.g., "INTEGER", "REAL", "CHARACTER"
 	Attributes []token.Token // e.g., PARAMETER, SAVE, INTENT, etc.
 	Entities   []DeclEntity  // Variables being declared
-	StartPos   int
-	EndPos     int
+	Label      string
+	Position
 }
+
+var _ Statement = (*TypeDeclaration)(nil) // compile time check of interface implementation.
+
+func (td *TypeDeclaration) GetLabel() string { return td.Label }
 
 func (td *TypeDeclaration) statementNode() {}
 func (td *TypeDeclaration) AppendTokenLiteral(dst []byte) []byte {
@@ -299,8 +331,6 @@ func (td *TypeDeclaration) AppendString(dst []byte) []byte {
 	}
 	return dst
 }
-func (td *TypeDeclaration) Pos() int { return td.StartPos }
-func (td *TypeDeclaration) End() int { return td.EndPos }
 
 // ArraySpecKind represents the kind of array specification
 type ArraySpecKind int
@@ -386,9 +416,8 @@ type Parameter struct {
 
 // Identifier represents an identifier
 type Identifier struct {
-	Value    string
-	StartPos int
-	EndPos   int
+	Value string
+	Position
 }
 
 func (i *Identifier) expressionNode() {}
@@ -399,16 +428,14 @@ func (i *Identifier) AppendString(dst []byte) []byte {
 	return append(dst, i.Value...)
 }
 
-func (i *Identifier) Pos() int { return i.StartPos }
-func (i *Identifier) End() int { return i.EndPos }
-
 // IntegerLiteral represents an integer literal
 type IntegerLiteral struct {
-	Value    int64  // Parsed integer value (0 if not yet parsed)
-	Raw      string // Original text representation
-	StartPos int
-	EndPos   int
+	Value int64  // Parsed integer value (0 if not yet parsed)
+	Raw   string // Original text representation
+	Position
 }
+
+var _ Expression = (*IntegerLiteral)(nil) // compile time check of interface implementation.
 
 func (il *IntegerLiteral) expressionNode() {}
 func (il *IntegerLiteral) AppendTokenLiteral(dst []byte) []byte {
@@ -419,16 +446,14 @@ func (il *IntegerLiteral) AppendString(dst []byte) []byte {
 	return append(dst, []byte(string(rune(il.Value)))...)
 }
 
-func (il *IntegerLiteral) Pos() int { return il.StartPos }
-func (il *IntegerLiteral) End() int { return il.EndPos }
-
 // RealLiteral represents a floating-point literal
 type RealLiteral struct {
-	Value    float64
-	Raw      string // Original text representation
-	StartPos int
-	EndPos   int
+	Value float64
+	Raw   string // Original text representation
+	Position
 }
+
+var _ Expression = (*RealLiteral)(nil) // compile time check of interface implementation.
 
 func (rl *RealLiteral) expressionNode() {}
 func (rl *RealLiteral) AppendTokenLiteral(dst []byte) []byte {
@@ -437,15 +462,14 @@ func (rl *RealLiteral) AppendTokenLiteral(dst []byte) []byte {
 func (rl *RealLiteral) AppendString(dst []byte) []byte {
 	return append(dst, rl.Raw...)
 }
-func (rl *RealLiteral) Pos() int { return rl.StartPos }
-func (rl *RealLiteral) End() int { return rl.EndPos }
 
 // StringLiteral represents a string literal
 type StringLiteral struct {
-	Value    string
-	StartPos int
-	EndPos   int
+	Value string
+	Position
 }
+
+var _ Expression = (*StringLiteral)(nil) // compile time check of interface implementation.
 
 func (sl *StringLiteral) expressionNode() {}
 func (sl *StringLiteral) AppendTokenLiteral(dst []byte) []byte {
@@ -457,15 +481,14 @@ func (sl *StringLiteral) AppendString(dst []byte) []byte {
 	dst = append(dst, '"')
 	return dst
 }
-func (sl *StringLiteral) Pos() int { return sl.StartPos }
-func (sl *StringLiteral) End() int { return sl.EndPos }
 
 // LogicalLiteral represents .TRUE. or .FALSE.
 type LogicalLiteral struct {
-	Value    bool
-	StartPos int
-	EndPos   int
+	Value bool
+	Position
 }
+
+var _ Expression = (*LogicalLiteral)(nil) // compile time check of interface implementation.
 
 func (ll *LogicalLiteral) expressionNode() {}
 func (ll *LogicalLiteral) AppendTokenLiteral(dst []byte) []byte {
@@ -477,17 +500,16 @@ func (ll *LogicalLiteral) AppendString(dst []byte) []byte {
 	}
 	return append(dst, ".FALSE."...)
 }
-func (ll *LogicalLiteral) Pos() int { return ll.StartPos }
-func (ll *LogicalLiteral) End() int { return ll.EndPos }
 
 // BinaryExpr represents a binary operation (e.g., a + b, x .GT. y)
 type BinaryExpr struct {
-	Op       token.Token // Operator token
-	Left     Expression
-	Right    Expression
-	StartPos int
-	EndPos   int
+	Op    token.Token // Operator token
+	Left  Expression
+	Right Expression
+	Position
 }
+
+var _ Expression = (*BinaryExpr)(nil) // compile time check of interface implementation.
 
 func (be *BinaryExpr) expressionNode() {}
 func (be *BinaryExpr) AppendTokenLiteral(dst []byte) []byte {
@@ -501,16 +523,15 @@ func (be *BinaryExpr) AppendString(dst []byte) []byte {
 	dst = be.Right.AppendString(dst)
 	return dst
 }
-func (be *BinaryExpr) Pos() int { return be.StartPos }
-func (be *BinaryExpr) End() int { return be.EndPos }
 
-// UnaryExpr represents a unary operation (e.g., -x, +y, .NOT. flag)
+// UnaryExpr represents a unary prefix operation (e.g., -x, +y, .NOT. flag)
 type UnaryExpr struct {
 	Op      token.Token // Operator token
 	Operand Expression
-	StartPos int
-	EndPos   int
+	Position
 }
+
+var _ Expression = (*UnaryExpr)(nil) // compile time check of interface implementation.
 
 func (ue *UnaryExpr) expressionNode() {}
 func (ue *UnaryExpr) AppendTokenLiteral(dst []byte) []byte {
@@ -522,16 +543,15 @@ func (ue *UnaryExpr) AppendString(dst []byte) []byte {
 	dst = ue.Operand.AppendString(dst)
 	return dst
 }
-func (ue *UnaryExpr) Pos() int { return ue.StartPos }
-func (ue *UnaryExpr) End() int { return ue.EndPos }
 
 // FunctionCall represents a function call expression (e.g., sqrt(x), max(a, b, c))
 type FunctionCall struct {
-	Name     string
-	Args     []Expression
-	StartPos int
-	EndPos   int
+	Name string
+	Args []Expression
+	Position
 }
+
+var _ Expression = (*FunctionCall)(nil) // compile time check of interface implementation.
 
 func (fc *FunctionCall) expressionNode() {}
 func (fc *FunctionCall) AppendTokenLiteral(dst []byte) []byte {
@@ -549,16 +569,15 @@ func (fc *FunctionCall) AppendString(dst []byte) []byte {
 	dst = append(dst, ')')
 	return dst
 }
-func (fc *FunctionCall) Pos() int { return fc.StartPos }
-func (fc *FunctionCall) End() int { return fc.EndPos }
 
 // ArrayRef represents an array reference (e.g., arr(i), matrix(i,j))
 type ArrayRef struct {
 	Name       string
 	Subscripts []Expression
-	StartPos   int
-	EndPos     int
+	Position
 }
+
+var _ Expression = (*ArrayRef)(nil) // compile time check of interface implementation.
 
 func (ar *ArrayRef) expressionNode() {}
 func (ar *ArrayRef) AppendTokenLiteral(dst []byte) []byte {
@@ -576,15 +595,14 @@ func (ar *ArrayRef) AppendString(dst []byte) []byte {
 	dst = append(dst, ')')
 	return dst
 }
-func (ar *ArrayRef) Pos() int { return ar.StartPos }
-func (ar *ArrayRef) End() int { return ar.EndPos }
 
 // ParenExpr represents a parenthesized expression
 type ParenExpr struct {
-	Expr     Expression
-	StartPos int
-	EndPos   int
+	Expr Expression
+	Position
 }
+
+var _ Expression = (*ParenExpr)(nil) // compile time check of interface implementation.
 
 func (pe *ParenExpr) expressionNode() {}
 func (pe *ParenExpr) AppendTokenLiteral(dst []byte) []byte {
@@ -596,5 +614,461 @@ func (pe *ParenExpr) AppendString(dst []byte) []byte {
 	dst = append(dst, ')')
 	return dst
 }
-func (pe *ParenExpr) Pos() int { return pe.StartPos }
-func (pe *ParenExpr) End() int { return pe.EndPos }
+
+// Executable Statements (Phase 5)
+
+// AssignmentStmt represents an assignment statement (e.g., x = y + 1)
+type AssignmentStmt struct {
+	Target Expression
+	Value  Expression
+	Label  string
+	Position
+}
+
+var _ Statement = (*AssignmentStmt)(nil) // compile time check of interface implementation.
+
+func (as *AssignmentStmt) GetLabel() string { return as.Label }
+
+func (as *AssignmentStmt) statementNode() {}
+func (as *AssignmentStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "="...)
+}
+func (as *AssignmentStmt) AppendString(dst []byte) []byte {
+	dst = as.Target.AppendString(dst)
+	dst = append(dst, " = "...)
+	dst = as.Value.AppendString(dst)
+	return dst
+}
+
+// IfStmt represents an IF...THEN...ELSE IF...ELSE...END IF construct
+type IfStmt struct {
+	Condition   Expression
+	ThenPart    []Statement
+	ElseIfParts []ElseIfClause
+	ElsePart    []Statement
+	Label       string
+	Position
+}
+
+var _ Statement = (*IfStmt)(nil) // compile time check of interface implementation.
+
+func (is *IfStmt) GetLabel() string { return is.Label }
+
+// ElseIfClause represents a single ELSE IF block
+type ElseIfClause struct {
+	Condition Expression
+	ThenPart  []Statement
+	Position
+}
+
+func (is *IfStmt) statementNode() {}
+func (is *IfStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "IF"...)
+}
+func (is *IfStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "IF ("...)
+	dst = is.Condition.AppendString(dst)
+	dst = append(dst, ") THEN"...)
+	return dst
+}
+
+// DoLoop represents a DO loop
+type DoLoop struct {
+	Var   string // Loop variable (empty for DO WHILE)
+	Start Expression
+	End   Expression
+	Step  Expression
+	Body  []Statement
+	Label string
+	Position
+}
+
+var _ Statement = (*DoLoop)(nil) // compile time check of interface implementation.
+
+func (dl *DoLoop) GetLabel() string { return dl.Label }
+
+func (dl *DoLoop) statementNode() {}
+func (dl *DoLoop) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "DO"...)
+}
+func (dl *DoLoop) AppendString(dst []byte) []byte {
+	dst = append(dst, "DO"...)
+	if dl.Var != "" {
+		dst = append(dst, " "...)
+		dst = append(dst, dl.Var...)
+		dst = append(dst, " = "...)
+		dst = dl.Start.AppendString(dst)
+		dst = append(dst, ", "...)
+		dst = dl.End.AppendString(dst)
+		if dl.Step != nil {
+			dst = append(dst, ", "...)
+			dst = dl.Step.AppendString(dst)
+		}
+	}
+	return dst
+}
+
+// CallStmt represents a CALL statement
+type CallStmt struct {
+	Name  string
+	Args  []Expression
+	Label string
+	Position
+}
+
+var _ Statement = (*CallStmt)(nil) // compile time check of interface implementation.
+
+func (cs *CallStmt) GetLabel() string { return cs.Label }
+
+func (cs *CallStmt) statementNode() {}
+func (cs *CallStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "CALL"...)
+}
+func (cs *CallStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "CALL "...)
+	dst = append(dst, cs.Name...)
+	if len(cs.Args) > 0 {
+		dst = append(dst, '(')
+		for i, arg := range cs.Args {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = arg.AppendString(dst)
+		}
+		dst = append(dst, ')')
+	}
+	return dst
+}
+
+// ReturnStmt represents a RETURN statement
+type ReturnStmt struct {
+	Label string
+	Position
+}
+
+var _ Statement = (*ReturnStmt)(nil) // compile time check of interface implementation.
+
+func (rs *ReturnStmt) GetLabel() string { return rs.Label }
+
+func (rs *ReturnStmt) statementNode() {}
+func (rs *ReturnStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "RETURN"...)
+}
+func (rs *ReturnStmt) AppendString(dst []byte) []byte {
+	return append(dst, "RETURN"...)
+}
+
+// CycleStmt represents a CYCLE statement
+type CycleStmt struct {
+	Label string
+	Position
+}
+
+var _ Statement = (*CycleStmt)(nil) // compile time check of interface implementation.
+
+func (cs *CycleStmt) GetLabel() string { return cs.Label }
+
+func (cs *CycleStmt) statementNode() {}
+func (cs *CycleStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "CYCLE"...)
+}
+func (cs *CycleStmt) AppendString(dst []byte) []byte {
+	return append(dst, "CYCLE"...)
+}
+
+// ExitStmt represents an EXIT statement
+type ExitStmt struct {
+	Label string
+	Position
+}
+
+var _ Statement = (*ExitStmt)(nil) // compile time check of interface implementation.
+
+func (es *ExitStmt) GetLabel() string { return es.Label }
+
+func (es *ExitStmt) statementNode() {}
+func (es *ExitStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "EXIT"...)
+}
+func (es *ExitStmt) AppendString(dst []byte) []byte {
+	return append(dst, "EXIT"...)
+}
+
+// ContinueStmt represents a CONTINUE statement
+type ContinueStmt struct {
+	Label string
+	Position
+}
+
+var _ Statement = (*ContinueStmt)(nil) // compile time check of interface implementation.
+
+func (cs *ContinueStmt) GetLabel() string { return cs.Label }
+
+func (cs *ContinueStmt) statementNode() {}
+func (cs *ContinueStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "CONTINUE"...)
+}
+func (cs *ContinueStmt) AppendString(dst []byte) []byte {
+	return append(dst, "CONTINUE"...)
+}
+
+// Derived Type Statements (Phase 7)
+
+// DerivedTypeStmt represents a TYPE...END TYPE block
+type DerivedTypeStmt struct {
+	Name       string
+	Components []ComponentDecl
+	Label      string
+	Position
+}
+
+var _ Statement = (*DerivedTypeStmt)(nil) // compile time check of interface implementation.
+
+func (dts *DerivedTypeStmt) GetLabel() string { return dts.Label }
+
+func (dts *DerivedTypeStmt) statementNode() {}
+func (dts *DerivedTypeStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "TYPE"...)
+}
+func (dts *DerivedTypeStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "TYPE :: "...)
+	dst = append(dst, dts.Name...)
+	return dst
+}
+
+// ComponentDecl represents a component in a derived type
+type ComponentDecl struct {
+	Type       string
+	Attributes []token.Token
+	Components []DeclEntity
+	Label      string
+	Position
+}
+
+var _ Statement = (*ComponentDecl)(nil) // compile time check of interface implementation.
+
+func (cd *ComponentDecl) GetLabel() string { return cd.Label }
+
+func (cd *ComponentDecl) statementNode() {}
+func (cd *ComponentDecl) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, cd.Type...)
+}
+func (cd *ComponentDecl) AppendString(dst []byte) []byte {
+	dst = append(dst, cd.Type...)
+	if len(cd.Attributes) > 0 {
+		dst = append(dst, ", "...)
+		for i, attr := range cd.Attributes {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = append(dst, attr.String()...)
+		}
+	}
+	dst = append(dst, " :: "...)
+	for i, entity := range cd.Components {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		dst = append(dst, entity.Name...)
+	}
+	return dst
+}
+
+// Interface Blocks (Phase 7)
+
+// InterfaceStmt represents an INTERFACE...END INTERFACE block
+type InterfaceStmt struct {
+	Name  string
+	Body  []Statement
+	Label string
+	Position
+}
+
+var _ Statement = (*InterfaceStmt)(nil) // compile time check of interface implementation.
+
+func (is *InterfaceStmt) GetLabel() string { return is.Label }
+
+func (is *InterfaceStmt) statementNode() {}
+func (is *InterfaceStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "INTERFACE"...)
+}
+func (is *InterfaceStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "INTERFACE"...)
+	if is.Name != "" {
+		dst = append(dst, " "...)
+		dst = append(dst, is.Name...)
+	}
+	return dst
+}
+
+// Accessibility Statements (Phase 7)
+
+// PrivateStmt represents a PRIVATE statement
+type PrivateStmt struct {
+	Entities []string
+	Label    string
+	Position
+}
+
+var _ Statement = (*PrivateStmt)(nil) // compile time check of interface implementation.
+
+func (ps *PrivateStmt) GetLabel() string { return ps.Label }
+
+func (ps *PrivateStmt) statementNode() {}
+func (ps *PrivateStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "PRIVATE"...)
+}
+func (ps *PrivateStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "PRIVATE"...)
+	if len(ps.Entities) > 0 {
+		dst = append(dst, " :: "...)
+		for i, entity := range ps.Entities {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = append(dst, entity...)
+		}
+	}
+	return dst
+}
+
+// PublicStmt represents a PUBLIC statement
+type PublicStmt struct {
+	Entities []string
+	Label    string
+	Position
+}
+
+var _ Statement = (*PublicStmt)(nil) // compile time check of interface implementation.
+
+func (ps *PublicStmt) GetLabel() string { return ps.Label }
+
+func (ps *PublicStmt) statementNode() {}
+func (ps *PublicStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "PUBLIC"...)
+}
+func (ps *PublicStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "PUBLIC"...)
+	if len(ps.Entities) > 0 {
+		dst = append(dst, " :: "...)
+		for i, entity := range ps.Entities {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = append(dst, entity...)
+		}
+	}
+	return dst
+}
+
+// Advanced Expressions (Phase 7)
+
+// ArraySection represents an array section (e.g., arr(1:5), arr(:, 1:10:2))
+type ArraySection struct {
+	Name       string
+	Subscripts []Subscript
+	Position
+}
+
+var _ Expression = (*ArraySection)(nil) // compile time check of interface implementation.
+
+func (as *ArraySection) expressionNode() {}
+func (as *ArraySection) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "ARRAY_SECTION"...)
+}
+func (as *ArraySection) AppendString(dst []byte) []byte {
+	dst = append(dst, as.Name...)
+	dst = append(dst, '(')
+	for i, sub := range as.Subscripts {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		if sub.Lower != nil {
+			dst = sub.Lower.AppendString(dst)
+		}
+		dst = append(dst, ':')
+		if sub.Upper != nil {
+			dst = sub.Upper.AppendString(dst)
+		}
+		if sub.Stride != nil {
+			dst = append(dst, ':')
+			dst = sub.Stride.AppendString(dst)
+		}
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
+// Subscript represents a subscript in an array section or array reference
+type Subscript struct {
+	Lower  Expression
+	Upper  Expression
+	Stride Expression
+}
+
+// ArrayConstructor represents an array constructor (e.g., (/ 1, 2, 3 /))
+type ArrayConstructor struct {
+	Values []Expression
+	Position
+}
+
+var _ Expression = (*ArrayConstructor)(nil) // compile time check of interface implementation.
+
+func (ac *ArrayConstructor) expressionNode() {}
+func (ac *ArrayConstructor) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "(/"...)
+}
+func (ac *ArrayConstructor) AppendString(dst []byte) []byte {
+	dst = append(dst, "(/"...)
+	for i, val := range ac.Values {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		dst = val.AppendString(dst)
+	}
+	dst = append(dst, "/)"...)
+	return dst
+}
+
+// ComponentAccess represents a derived type component access (e.g., person%name)
+type ComponentAccess struct {
+	Base      Expression
+	Component string
+	Position
+}
+
+var _ Expression = (*ArrayConstructor)(nil) // compile time check of interface implementation.
+
+func (ca *ComponentAccess) expressionNode() {}
+func (ca *ComponentAccess) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "%"...)
+}
+func (ca *ComponentAccess) AppendString(dst []byte) []byte {
+	dst = ca.Base.AppendString(dst)
+	dst = append(dst, '%')
+	dst = append(dst, ca.Component...)
+	return dst
+}
+
+// PointerAssignmentStmt represents a pointer assignment statement (e.g., ptr => target)
+type PointerAssignmentStmt struct {
+	Target Expression
+	Value  Expression
+	Label  string
+	Position
+}
+
+var _ Statement = (*PointerAssignmentStmt)(nil) // compile time check of interface implementation.
+
+func (pa *PointerAssignmentStmt) GetLabel() string { return pa.Label }
+
+func (pa *PointerAssignmentStmt) statementNode() {}
+func (pa *PointerAssignmentStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "=>"...)
+}
+func (pa *PointerAssignmentStmt) AppendString(dst []byte) []byte {
+	dst = pa.Target.AppendString(dst)
+	dst = append(dst, " => "...)
+	dst = pa.Value.AppendString(dst)
+	return dst
+}

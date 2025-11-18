@@ -1,6 +1,7 @@
 package fortran
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -829,5 +830,114 @@ END PROGRAM test
 				}
 			}
 		})
+	}
+}
+
+func astEqual(t *testing.T, got, want ast.Node) bool {
+	t.Helper()
+	if got == nil && want == nil {
+		return true
+	}
+	if got == nil || want == nil {
+		t.Errorf("nil mismatch: got %v, want %v", got, want)
+		return false
+	}
+
+	if reflect.TypeOf(got) != reflect.TypeOf(want) {
+		t.Errorf("type mismatch: got %T, want %T", got, want)
+		return false
+	}
+
+	// Handle expressions specifically
+	switch g := got.(type) {
+	case ast.Expression:
+		w := want.(ast.Expression)
+		return exprEqual(t, g, w)
+	}
+
+	g := reflect.ValueOf(got).Elem()
+	w := reflect.ValueOf(want).Elem()
+
+	for i := 0; i < g.NumField(); i++ {
+		fieldName := g.Type().Field(i).Name
+		if fieldName == "StartPos" || fieldName == "EndPos" {
+			continue
+		}
+
+		gf := g.Field(i)
+		wf := w.Field(i)
+
+		if gf.Type().Kind() == reflect.Slice {
+			if gf.Len() != wf.Len() {
+				t.Errorf("slice length mismatch in %s: got %d, want %d", fieldName, gf.Len(), wf.Len())
+				return false
+			}
+			for j := 0; j < gf.Len(); j++ {
+				if gf.Index(j).Type().Implements(reflect.TypeOf((*ast.Node)(nil)).Elem()) {
+					if !astEqual(t, gf.Index(j).Interface().(ast.Node), wf.Index(j).Interface().(ast.Node)) {
+						return false
+					}
+				} else if !reflect.DeepEqual(gf.Index(j).Interface(), wf.Index(j).Interface()) {
+					t.Errorf("slice element %d mismatch in %s: got %v, want %v", j, fieldName, gf.Index(j).Interface(), wf.Index(j).Interface())
+					return false
+				}
+			}
+		} else if gf.Type().Implements(reflect.TypeOf((*ast.Node)(nil)).Elem()) {
+			if !astEqual(t, gf.Interface().(ast.Node), wf.Interface().(ast.Node)) {
+				return false
+			}
+		} else if !reflect.DeepEqual(gf.Interface(), wf.Interface()) {
+			t.Errorf("field %s mismatch: got %v, want %v", fieldName, gf.Interface(), wf.Interface())
+			return false
+		}
+	}
+
+	return true
+}
+
+func exprEqual(t *testing.T, got, want ast.Expression) bool {
+	t.Helper()
+	if got == nil && want == nil {
+		return true
+	}
+	if got == nil || want == nil {
+		t.Errorf("nil mismatch in expression: got %v, want %v", got, want)
+		return false
+	}
+
+	if reflect.TypeOf(got) != reflect.TypeOf(want) {
+		t.Errorf("expression type mismatch: got %T, want %T", got, want)
+		return false
+	}
+
+	switch g := got.(type) {
+	case *ast.Identifier:
+		w := want.(*ast.Identifier)
+		return g.Value == w.Value
+	case *ast.IntegerLiteral:
+		w := want.(*ast.IntegerLiteral)
+		return g.Raw == w.Raw
+	case *ast.BinaryExpr:
+		w := want.(*ast.BinaryExpr)
+		return g.Op == w.Op && exprEqual(t, g.Left, w.Left) && exprEqual(t, g.Right, w.Right)
+	case *ast.FunctionCall:
+		w := want.(*ast.FunctionCall)
+		if g.Name != w.Name {
+			t.Errorf("function call name mismatch: got %s, want %s", g.Name, w.Name)
+			return false
+		}
+		if len(g.Args) != len(w.Args) {
+			t.Errorf("function call arg count mismatch: got %d, want %d", len(g.Args), len(w.Args))
+			return false
+		}
+		for i := range g.Args {
+			if !exprEqual(t, g.Args[i], w.Args[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		t.Errorf("unhandled expression type in exprEqual: %T", got)
+		return false
 	}
 }

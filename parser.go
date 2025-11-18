@@ -10,8 +10,6 @@ import (
 
 // Pratt parsing functions. a.k.a: Semantic Code.
 type (
-	prefixParseFn    func() ast.Expression
-	infixParseFn     func(ast.Expression) ast.Expression
 	statementParseFn func() ast.Statement // For statement-level constructs
 )
 
@@ -58,8 +56,7 @@ type Parser90 struct {
 	l       Lexer90
 	current toktuple
 	peek    toktuple
-	pfxFns  map[token.Token]prefixParseFn
-	infxFns map[token.Token]infixParseFn
+
 	stmtFns map[token.Token]statementParseFn // Statement parsers
 	errors  []ParserError                    // Collected parsing errors
 }
@@ -69,21 +66,16 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	if p.pfxFns == nil {
-		p.pfxFns = make(map[token.Token]prefixParseFn)
-		p.infxFns = make(map[token.Token]infixParseFn)
+	if p.stmtFns == nil {
 		p.stmtFns = make(map[token.Token]statementParseFn)
 	}
 	*p = Parser90{
 		l: p.l,
 		// Reuse memory but clear later.
-		pfxFns:  p.pfxFns,
-		infxFns: p.infxFns,
+
 		stmtFns: p.stmtFns,
 		errors:  p.errors[:0], // Reuse slice, clear contents
 	}
-	clear(p.pfxFns)
-	clear(p.infxFns)
 	clear(p.stmtFns)
 
 	// Initialize token stream
@@ -116,14 +108,6 @@ func (p *Parser90) nextToken() {
 
 func (p *Parser90) IsDone() bool {
 	return p.l.IsDone() && p.current.tok.IsIllegalOrEOF()
-}
-
-func (p *Parser90) registerPrefix(tokenType token.Token, fn prefixParseFn) {
-	p.pfxFns[tokenType] = fn
-}
-
-func (p *Parser90) registerInfix(tokenType token.Token, fn infixParseFn) {
-	p.infxFns[tokenType] = fn
 }
 
 func (p *Parser90) registerStatement(tokenType token.Token, fn statementParseFn) {
@@ -366,7 +350,7 @@ func (p *Parser90) collectUntilEnd(endTokens ...token.Token) []ast.TokenTuple {
 	return tokens
 }
 
-// parseBody parses specification statements, then uses old token collection for execution part
+// parseBody parses specification statements, then executable statements
 // If parameters are provided, it will populate their type information when type declarations are found
 func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 	var stmts []ast.Statement
@@ -378,7 +362,7 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 		paramMap[parameters[i].Name] = &parameters[i]
 	}
 
-	// Phase 2: Parse specification statements only
+	// Phase 2: Parse specification statements
 	for !p.currentTokenIs(token.CONTAINS) && !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
 		p.skipNewlinesAndComments()
 		if p.currentTokenIs(token.CONTAINS) || p.currentTokenIs(token.END) || p.currentTokenIs(token.EOF) {
@@ -398,39 +382,443 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 		}
 	}
 
-	// Skip remaining execution part until CONTAINS or END of program unit
-	// Use same logic as collectBodyUntilEndOLD but don't collect tokens
-	for !p.currentTokenIs(token.EOF) {
-		if p.currentTokenIs(token.CONTAINS) {
+	// Phase 5: Parse executable statements
+	for !p.currentTokenIs(token.CONTAINS) && !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+		p.skipNewlinesAndComments()
+		if p.currentTokenIs(token.CONTAINS) || p.isEndOfProgramUnit() {
 			break
 		}
 
-		if p.currentTokenIs(token.END) {
-			// Check if this is END of our program unit
-			nextTok := p.peek.tok
-			// Bare END or END followed by newline/EOF/identifier means end of unit
-			if nextTok == token.NewLine || nextTok == token.EOF || nextTok == token.Identifier {
-				break
-			}
-			// END followed by a keyword - could be end of unit or nested construct
-			// Check common program unit keywords
-			if nextTok == token.PROGRAM || nextTok == token.SUBROUTINE ||
-				nextTok == token.FUNCTION || nextTok == token.MODULE {
-				break
-			}
-			// This is a nested END (END IF, END DO, END TYPE, etc.)
-			// Skip both END and the following token
-			p.nextToken() // Skip END
-			if !p.currentTokenIs(token.EOF) && !p.currentTokenIs(token.NewLine) {
-				p.nextToken() // Skip keyword after END
-			}
-			continue
+		if stmt := p.parseExecutableStatement(); stmt != nil {
+			stmts = append(stmts, stmt)
+		} else {
+			// Not a parseable executable statement - skip the construct
+			p.skipToNextStatement()
 		}
-
-		p.nextToken()
 	}
 
 	return stmts
+}
+
+// parseExecutableStatement parses a single executable statement
+func (p *Parser90) parseExecutableStatement() ast.Statement {
+	var label string
+	if p.currentTokenIs(token.Label) {
+		label = string(p.current.lit)
+		p.nextToken()
+	}
+
+	var stmt ast.Statement
+	switch p.current.tok {
+	case token.IF:
+		stmt = p.parseIfStmt()
+	case token.DO:
+		stmt = p.parseDoLoop()
+	case token.CALL:
+		stmt = p.parseCallStmt()
+	case token.RETURN:
+		stmt = p.parseReturnStmt()
+	case token.CYCLE:
+		stmt = p.parseCycleStmt()
+	case token.EXIT:
+		stmt = p.parseExitStmt()
+	case token.CONTINUE:
+		stmt = p.parseContinueStmt()
+	case token.Identifier:
+		// This could be an assignment statement or a call to a subroutine without the CALL keyword.
+		// For now, we'll assume it's an assignment.
+		stmt = p.parseAssignmentStmt()
+	default:
+		return nil // Unknown statement, caller will skip
+	}
+
+	if stmt != nil {
+		switch s := stmt.(type) {
+		case *ast.IfStmt:
+			s.Label = label
+		case *ast.DoLoop:
+			s.Label = label
+		case *ast.CallStmt:
+			s.Label = label
+		case *ast.ReturnStmt:
+			s.Label = label
+		case *ast.CycleStmt:
+			s.Label = label
+		case *ast.ExitStmt:
+			s.Label = label
+		case *ast.ContinueStmt:
+			s.Label = label
+		case *ast.AssignmentStmt:
+			s.Label = label
+		}
+	}
+
+	return stmt
+}
+
+// parseContinueStmt parses a CONTINUE statement
+func (p *Parser90) parseContinueStmt() ast.Statement {
+	start := p.current.start
+	p.nextToken() // consume CONTINUE
+	return &ast.ContinueStmt{
+		Position: ast.Pos(start, p.current.start),
+	}
+}
+
+// parseIfStmt parses an IF construct
+func (p *Parser90) parseIfStmt() ast.Statement {
+	start := p.current.start
+	stmt := &ast.IfStmt{}
+	p.nextToken() // consume IF
+
+	if !p.currentTokenIs(token.LParen) {
+		p.addError("expected '(' after IF")
+		return nil
+	}
+	p.nextToken() // consume (
+
+	stmt.Condition = p.parseExpression(0)
+	if stmt.Condition == nil {
+		p.addError("expected condition in IF statement")
+		return nil
+	}
+
+	if !p.currentTokenIs(token.RParen) {
+		p.addError("expected ')' after IF condition")
+		return nil
+	}
+	p.nextToken() // consume )
+
+	if !p.currentTokenIs(token.THEN) {
+		p.addError("expected THEN after IF condition")
+		return nil
+	}
+	p.nextToken() // consume THEN
+	p.skipNewlinesAndComments()
+
+	// Parse THEN block
+	for !p.currentTokenIs(token.ELSE) && !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+		if p.peekTokenIs(token.IF) && p.currentTokenIs(token.ELSE) {
+			break
+		}
+		if s := p.parseExecutableStatement(); s != nil {
+			stmt.ThenPart = append(stmt.ThenPart, s)
+		} else {
+			p.skipToNextStatement()
+		}
+		p.skipNewlinesAndComments()
+	}
+
+	// Parse ELSE IF parts
+	for p.currentTokenIs(token.ELSE) && p.peekTokenIs(token.IF) {
+		p.nextToken() // consume ELSE
+		p.nextToken() // consume IF
+
+		clause := ast.ElseIfClause{}
+		clauseStart := p.current.start
+		if !p.currentTokenIs(token.LParen) {
+			p.addError("expected '(' after ELSE IF")
+			return nil
+		}
+		p.nextToken() // consume (
+
+		clause.Condition = p.parseExpression(0)
+		if clause.Condition == nil {
+			p.addError("expected condition in ELSE IF statement")
+			return nil
+		}
+
+		if !p.currentTokenIs(token.RParen) {
+			p.addError("expected ')' after ELSE IF condition")
+			return nil
+		}
+		p.nextToken() // consume )
+
+		if !p.currentTokenIs(token.THEN) {
+			p.addError("expected THEN after ELSE IF condition")
+			return nil
+		}
+		p.nextToken() // consume THEN
+		p.skipNewlinesAndComments()
+
+		// Parse ELSE IF block
+		for !p.currentTokenIs(token.ELSE) && !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+			if p.peekTokenIs(token.IF) && p.currentTokenIs(token.ELSE) {
+				break
+			}
+			if s := p.parseExecutableStatement(); s != nil {
+				clause.ThenPart = append(clause.ThenPart, s)
+			} else {
+				p.skipToNextStatement()
+			}
+			p.skipNewlinesAndComments()
+		}
+		clause.Position = ast.Pos(clauseStart, p.current.start)
+		stmt.ElseIfParts = append(stmt.ElseIfParts, clause)
+	}
+
+	// Parse ELSE part
+	if p.currentTokenIs(token.ELSE) {
+		p.nextToken() // consume ELSE
+		p.skipNewlinesAndComments()
+
+		for !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+			if s := p.parseExecutableStatement(); s != nil {
+				stmt.ElsePart = append(stmt.ElsePart, s)
+			} else {
+				p.skipToNextStatement()
+			}
+			p.skipNewlinesAndComments()
+		}
+	}
+
+	// Expect END IF
+	if p.currentTokenIs(token.END) {
+		p.nextToken() // consume END
+		if p.currentTokenIs(token.IF) {
+			p.nextToken() // consume IF
+		} else {
+			p.addError("expected IF after END")
+		}
+	} else {
+		p.addError("expected END IF")
+	}
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseDoLoop parses a DO loop
+func (p *Parser90) parseDoLoop() ast.Statement {
+	start := p.current.start
+	stmt := &ast.DoLoop{}
+	p.nextToken() // consume DO
+
+	var doLabel string
+	if p.currentTokenIs(token.IntLit) {
+		doLabel = string(p.current.lit)
+		p.nextToken()
+	}
+
+	// Check for DO WHILE
+	if p.currentTokenIs(token.WHILE) {
+		p.nextToken() // consume WHILE
+		if !p.currentTokenIs(token.LParen) {
+			p.addError("expected '(' after DO WHILE")
+			return nil
+		}
+		p.nextToken() // consume (
+
+		stmt.Start = p.parseExpression(0) // Condition stored in Start for DO WHILE
+		if stmt.Start == nil {
+			p.addError("expected condition in DO WHILE statement")
+			return nil
+		}
+
+		if !p.currentTokenIs(token.RParen) {
+			p.addError("expected ')' after DO WHILE condition")
+			return nil
+		}
+		p.nextToken() // consume )
+	} else {
+		// Counter-controlled DO loop
+		if p.currentTokenIs(token.Identifier) {
+			stmt.Var = string(p.current.lit)
+			p.nextToken()
+
+			if !p.currentTokenIs(token.Equals) {
+				p.addError("expected '=' after loop variable")
+				return nil
+			}
+			p.nextToken() // consume =
+
+			stmt.Start = p.parseExpression(0)
+			if stmt.Start == nil {
+				p.addError("expected start expression in DO loop")
+				return nil
+			}
+
+			if !p.currentTokenIs(token.Comma) {
+				p.addError("expected ',' after start expression")
+				return nil
+			}
+			p.nextToken() // consume ,
+
+			stmt.End = p.parseExpression(0)
+			if stmt.End == nil {
+				p.addError("expected end expression in DO loop")
+				return nil
+			}
+
+			if p.currentTokenIs(token.Comma) {
+				p.nextToken() // consume ,
+				stmt.Step = p.parseExpression(0)
+				if stmt.Step == nil {
+					p.addError("expected step expression in DO loop")
+					return nil
+				}
+			}
+		}
+	}
+
+	p.skipNewlinesAndComments()
+
+	// Parse loop body
+	for {
+		p.skipNewlinesAndComments()
+		if p.currentTokenIs(token.END) && p.peekTokenIs(token.DO) {
+			break
+		}
+		if p.currentTokenIs(token.Label) && string(p.current.lit) == doLabel {
+			break
+		}
+		if p.currentTokenIs(token.EOF) {
+			break
+		}
+
+		if s := p.parseExecutableStatement(); s != nil {
+			stmt.Body = append(stmt.Body, s)
+		} else {
+			p.skipToNextStatement()
+		}
+	}
+
+	// Expect END DO or a labeled statement
+	if doLabel != "" {
+		if p.currentTokenIs(token.Label) && string(p.current.lit) == doLabel {
+			p.nextToken() // consume label
+			if s := p.parseExecutableStatement(); s != nil {
+				stmt.Body = append(stmt.Body, s)
+			} else {
+				p.addError("expected an executable statement after label " + doLabel)
+			}
+		} else {
+			p.addError("expected statement with label " + doLabel)
+		}
+	} else {
+		if p.currentTokenIs(token.END) {
+			p.nextToken() // consume END
+			if p.currentTokenIs(token.DO) {
+				p.nextToken() // consume DO
+			} else {
+				p.addError("expected DO after END")
+			}
+		} else {
+			p.addError("expected END DO")
+		}
+	}
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseCallStmt parses a CALL statement
+func (p *Parser90) parseCallStmt() ast.Statement {
+	start := p.current.start
+	stmt := &ast.CallStmt{}
+	p.nextToken() // consume CALL
+
+	if !p.canUseAsIdentifier() {
+		p.addError("expected subroutine name after CALL")
+		return nil
+	}
+	stmt.Name = string(p.current.lit)
+	p.nextToken()
+
+	if p.currentTokenIs(token.LParen) {
+		p.nextToken() // consume (
+		var args []ast.Expression
+		for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+			arg := p.parseExpression(0)
+			if arg == nil {
+				p.addError("expected expression in argument list")
+				break
+			}
+			args = append(args, arg)
+
+			if p.currentTokenIs(token.Comma) {
+				p.nextToken()
+			} else if !p.currentTokenIs(token.RParen) {
+				p.addError("expected ',' or ')' in argument list")
+				break
+			}
+		}
+		stmt.Args = args
+		if p.currentTokenIs(token.RParen) {
+			p.nextToken() // consume )
+		}
+	}
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseReturnStmt parses a RETURN statement
+func (p *Parser90) parseReturnStmt() ast.Statement {
+	start := p.current.start
+	stmt := &ast.ReturnStmt{}
+	p.nextToken() // consume RETURN
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseCycleStmt parses a CYCLE statement
+func (p *Parser90) parseCycleStmt() ast.Statement {
+	start := p.current.start
+	stmt := &ast.CycleStmt{}
+	p.nextToken() // consume CYCLE
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseExitStmt parses an EXIT statement
+func (p *Parser90) parseExitStmt() ast.Statement {
+	start := p.current.start
+	stmt := &ast.ExitStmt{}
+	p.nextToken() // consume EXIT
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseAssignmentStmt parses an assignment statement
+func (p *Parser90) parseAssignmentStmt() ast.Statement {
+	startPos := p.current.start
+
+	// The "target" of an assignment can be a complex expression itself (e.g., array slice, derived type component)
+	// We parse it as a general expression.
+	target := p.parseExpression(0)
+	if target == nil {
+		p.addError("invalid target for assignment")
+		return nil
+	}
+
+	if p.currentTokenIs(token.Equals) {
+		p.nextToken() // consume =
+		value := p.parseExpression(0)
+		if value == nil {
+			p.addError("expected expression after '='")
+			return nil
+		}
+		return &ast.AssignmentStmt{
+			Target:   target,
+			Value:    value,
+			Position: ast.Pos(startPos, p.current.start),
+		}
+	} else if p.currentTokenIs(token.PointerAssign) {
+		p.nextToken() // consume =>
+		value := p.parseExpression(0)
+		if value == nil {
+			p.addError("expected expression after '=>'")
+			return nil
+		}
+		return &ast.PointerAssignmentStmt{
+			Target:   target,
+			Value:    value,
+			Position: ast.Pos(startPos, p.current.start),
+		}
+	}
+
+	// This might be a subroutine call without the CALL keyword.
+	// For now, we'll treat it as an error.
+	p.addError("expected '=' or '=>' for assignment statement")
+	return nil
 }
 
 // isExecutableStatement returns true if current token starts an executable statement
@@ -441,7 +829,10 @@ func (p *Parser90) isExecutableStatement() bool {
 		token.GOTO, token.CONTINUE, token.CYCLE:
 		return true
 	case token.Identifier:
-		// Could be assignment or procedure call
+		// Could be assignment or procedure call. We need to lookahead to distinguish.
+		// If we see `IDENTIFIER =`, it's an assignment.
+		// If we see `IDENTIFIER(...)` it could be an assignment to an array element or a function call.
+		// For now, we will treat all identifiers at the start of a statement in the execution part as the start of an executable statement.
 		return true
 	default:
 		return false
@@ -594,22 +985,246 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 			*sawDecl = true
 			return p.parseTypeDecl(paramMap)
 		} else {
-			// TYPE :: name ... END TYPE - skip entire block
-			p.skipTypeDefinition()
-			return &ast.ImplicitStatement{} // Return non-nil to indicate success
+			// TYPE :: name ... END TYPE - this is a derived type definition
+			return p.parseDerivedTypeStmt()
 		}
 	case token.INTERFACE:
-		// INTERFACE block - skip entire block
-		p.skipInterfaceBlock()
-		return &ast.ImplicitStatement{} // Return non-nil to indicate success
+		return p.parseInterfaceStmt()
+	case token.PRIVATE:
+		return p.parsePrivateStmt()
+	case token.PUBLIC:
+		return p.parsePublicStmt()
 	default:
 		return nil // Unknown statement, caller will skip
 	}
 }
 
+// parsePrivateStmt parses a PRIVATE statement
+func (p *Parser90) parsePrivateStmt() ast.Statement {
+	start := p.current.start
+	stmt := &ast.PrivateStmt{}
+	p.nextToken() // consume PRIVATE
+
+	if p.currentTokenIs(token.DoubleColon) {
+		p.nextToken() // consume ::
+		for p.canUseAsIdentifier() {
+			stmt.Entities = append(stmt.Entities, string(p.current.lit))
+			p.nextToken()
+			if !p.currentTokenIs(token.Comma) {
+				break
+			}
+			p.nextToken()
+		}
+	}
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parsePublicStmt parses a PUBLIC statement
+func (p *Parser90) parsePublicStmt() ast.Statement {
+	start := p.current.start
+	stmt := &ast.PublicStmt{}
+	p.nextToken() // consume PUBLIC
+
+	if p.currentTokenIs(token.DoubleColon) {
+		p.nextToken() // consume ::
+		for p.canUseAsIdentifier() {
+			stmt.Entities = append(stmt.Entities, string(p.current.lit))
+			p.nextToken()
+			if !p.currentTokenIs(token.Comma) {
+				break
+			}
+			p.nextToken()
+		}
+	}
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseInterfaceStmt parses an INTERFACE...END INTERFACE block
+func (p *Parser90) parseInterfaceStmt() ast.Statement {
+	start := p.current.start
+	stmt := &ast.InterfaceStmt{}
+	p.nextToken() // consume INTERFACE
+
+	if p.canUseAsIdentifier() {
+		stmt.Name = string(p.current.lit)
+		p.nextToken()
+	}
+	p.skipNewlinesAndComments()
+
+	// Parse interface body
+	for !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+		if p.peekTokenIs(token.INTERFACE) && p.currentTokenIs(token.END) {
+			break
+		}
+		// The body of an interface block can contain procedure headings
+		// (subroutines and functions). We can reuse the top-level parsers for this.
+		if unit := p.parseTopLevelUnit(); unit != nil {
+			stmt.Body = append(stmt.Body, unit)
+		} else {
+			p.skipToNextStatement()
+		}
+		p.skipNewlinesAndComments()
+	}
+
+	// Expect END INTERFACE
+	if p.currentTokenIs(token.END) {
+		p.nextToken() // consume END
+		if p.currentTokenIs(token.INTERFACE) {
+			p.nextToken() // consume INTERFACE
+		} else {
+			p.addError("expected INTERFACE after END")
+		}
+	} else {
+		p.addError("expected END INTERFACE")
+	}
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseDerivedTypeStmt parses a TYPE...END TYPE block
+func (p *Parser90) parseDerivedTypeStmt() ast.Statement {
+	start := p.current.start
+	stmt := &ast.DerivedTypeStmt{}
+	p.nextToken() // consume TYPE
+
+	if p.currentTokenIs(token.DoubleColon) {
+		p.nextToken() // consume ::
+	}
+
+	if !p.canUseAsIdentifier() {
+		p.addError("expected derived type name")
+		return nil
+	}
+	stmt.Name = string(p.current.lit)
+	p.nextToken()
+	p.skipNewlinesAndComments()
+
+	// Parse component declarations
+	for !p.currentTokenIs(token.END) && !p.currentTokenIs(token.EOF) {
+		if p.peekTokenIs(token.TYPE) && p.currentTokenIs(token.END) {
+			break
+		}
+		if s := p.parseComponentDecl(); s != nil {
+			stmt.Components = append(stmt.Components, *s)
+		} else {
+			p.skipToNextStatement()
+		}
+		p.skipNewlinesAndComments()
+	}
+
+	// Expect END TYPE
+	if p.currentTokenIs(token.END) {
+		p.nextToken() // consume END
+		if p.currentTokenIs(token.TYPE) {
+			p.nextToken() // consume TYPE
+		} else {
+			p.addError("expected TYPE after END")
+		}
+	} else {
+		p.addError("expected END TYPE")
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseComponentDecl parses a component declaration within a derived type
+func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
+	start := p.current.start
+	stmt := &ast.ComponentDecl{}
+	if !p.isTypeKeyword(p.current.tok) && p.current.tok != token.TYPE {
+		p.addError("expected type specifier for component declaration")
+		return nil
+	}
+	stmt.Type = p.current.tok.String()
+	p.nextToken()
+
+	// Handle DOUBLE PRECISION
+	if stmt.Type == "DOUBLE" && p.currentTokenIs(token.PRECISION) {
+		stmt.Type = "DOUBLE PRECISION"
+		p.nextToken()
+	}
+
+	// Handle CHARACTER length specification
+	if stmt.Type == "CHARACTER" {
+		if p.currentTokenIs(token.LParen) {
+			stmt.Type += p.parseCharacterLength()
+		} else if p.currentTokenIs(token.Asterisk) {
+			p.nextToken() // consume *
+			if p.currentTokenIs(token.IntLit) || p.canUseAsIdentifier() {
+				stmt.Type += "*" + string(p.current.lit)
+				p.nextToken()
+			}
+		}
+	}
+
+	// Handle TYPE(typename) for derived types
+	if stmt.Type == "TYPE" && p.currentTokenIs(token.LParen) {
+		// Skip (typename)
+		depth := 1
+		p.nextToken()
+		for depth > 0 && !p.currentTokenIs(token.EOF) {
+			if p.currentTokenIs(token.LParen) {
+				depth++
+			} else if p.currentTokenIs(token.RParen) {
+				depth--
+			}
+			p.nextToken()
+		}
+	}
+
+	// Parse attributes
+	if p.currentTokenIs(token.Comma) {
+		for p.currentTokenIs(token.Comma) {
+			p.nextToken()
+			if p.current.tok.IsAttribute() {
+				stmt.Attributes = append(stmt.Attributes, p.current.tok)
+				p.nextToken()
+			}
+		}
+	}
+
+	if p.currentTokenIs(token.DoubleColon) {
+		p.nextToken()
+	}
+
+	// Parse component list
+	for p.canUseAsIdentifier() {
+		entityName := string(p.current.lit)
+		entity := ast.DeclEntity{Name: entityName}
+		p.nextToken()
+
+		// Check for array declarator
+		if p.currentTokenIs(token.LParen) {
+			entity.ArraySpec = p.parseArraySpec()
+		}
+
+		// Parse initialization expression
+		if p.currentTokenIs(token.Equals) || p.currentTokenIs(token.PointerAssign) {
+			p.nextToken() // consume = or =>
+			// For now, just consume the expression
+			for !p.currentTokenIs(token.NewLine) && !p.currentTokenIs(token.EOF) && !p.currentTokenIs(token.Comma) {
+				p.nextToken()
+			}
+		}
+
+		stmt.Components = append(stmt.Components, entity)
+
+		if !p.currentTokenIs(token.Comma) {
+			break
+		}
+		p.nextToken()
+	}
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
 // parseImplicit parses IMPLICIT [NONE] with validation
 func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
-	stmt := &ast.ImplicitStatement{StartPos: p.current.start}
+	start := p.current.start
+	stmt := &ast.ImplicitStatement{}
 	p.nextToken()
 
 	if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "NONE" {
@@ -622,13 +1237,14 @@ func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
 		stmt.IsNone = true
 		p.nextToken()
 	}
-	stmt.EndPos = p.current.start
+	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
 }
 
 // parseUse parses USE module [, ONLY: list]
 func (p *Parser90) parseUse() ast.Statement {
-	stmt := &ast.UseStatement{StartPos: p.current.start}
+	start := p.current.start
+	stmt := &ast.UseStatement{}
 	p.nextToken()
 
 	if !p.canUseAsIdentifier() {
@@ -655,14 +1271,15 @@ func (p *Parser90) parseUse() ast.Statement {
 			}
 		}
 	}
-	stmt.EndPos = p.current.start
+	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
 }
 
 // parseTypeDecl parses INTEGER :: x, y or REAL, PARAMETER :: pi = 3.14 or TYPE(typename) :: var
 // If paramMap is provided, it will populate type information for any parameters found
 func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Statement {
-	stmt := &ast.TypeDeclaration{StartPos: p.current.start, TypeSpec: p.current.tok.String()}
+	start := p.current.start
+	stmt := &ast.TypeDeclaration{TypeSpec: p.current.tok.String()}
 	p.nextToken()
 
 	// Handle DOUBLE PRECISION
@@ -871,7 +1488,7 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		}
 		p.nextToken()
 	}
-	stmt.EndPos = p.current.start
+	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
 }
 
@@ -946,7 +1563,8 @@ func (p *Parser90) collectBodyUntilEndOLD(endKeyword token.Token) []ast.TokenTup
 
 // parseProgramBlock parses a PROGRAM...END PROGRAM block
 func (p *Parser90) parseProgramBlock() ast.Statement {
-	block := &ast.ProgramBlock{StartPos: p.current.start}
+	start := p.current.start
+	block := &ast.ProgramBlock{}
 
 	// Consume PROGRAM keyword
 	p.nextToken()
@@ -964,7 +1582,7 @@ func (p *Parser90) parseProgramBlock() ast.Statement {
 	// Parse body statements
 	block.Body = p.parseBody(nil)
 
-	block.EndPos = p.current.start
+	block.Position = ast.Pos(start, p.current.start)
 	p.nextToken() // Move past END
 
 	// Consume optional PROGRAM keyword after END
@@ -984,7 +1602,8 @@ func (p *Parser90) parseProgramBlock() ast.Statement {
 
 // parseSubroutine parses a SUBROUTINE...END SUBROUTINE block
 func (p *Parser90) parseSubroutine() ast.Statement {
-	sub := &ast.Subroutine{StartPos: p.current.start}
+	start := p.current.start
+	sub := &ast.Subroutine{}
 
 	// Consume SUBROUTINE keyword
 	p.nextToken()
@@ -1007,7 +1626,7 @@ func (p *Parser90) parseSubroutine() ast.Statement {
 	// Parse body statements
 	sub.Body = p.parseBody(sub.Parameters)
 
-	sub.EndPos = p.current.start
+	sub.Position = ast.Pos(start, p.current.start)
 	p.nextToken() // Move past END
 
 	// Consume optional SUBROUTINE keyword after END
@@ -1027,7 +1646,8 @@ func (p *Parser90) parseSubroutine() ast.Statement {
 
 // parseFunction parses a FUNCTION...END FUNCTION block
 func (p *Parser90) parseFunction() ast.Statement {
-	fn := &ast.Function{StartPos: p.current.start}
+	start := p.current.start
+	fn := &ast.Function{}
 
 	// Consume FUNCTION keyword
 	p.nextToken()
@@ -1065,7 +1685,7 @@ func (p *Parser90) parseFunction() ast.Statement {
 	// Parse body statements
 	fn.Body = p.parseBody(fn.Parameters)
 
-	fn.EndPos = p.current.start
+	fn.Position = ast.Pos(start, p.current.start)
 	p.nextToken() // Move past END
 
 	// Consume optional FUNCTION keyword after END
@@ -1085,7 +1705,8 @@ func (p *Parser90) parseFunction() ast.Statement {
 
 // parseModule parses a MODULE...END MODULE block
 func (p *Parser90) parseModule() ast.Statement {
-	mod := &ast.Module{StartPos: p.current.start}
+	start := p.current.start
+	mod := &ast.Module{}
 
 	// Consume MODULE keyword
 	p.nextToken()
@@ -1130,7 +1751,7 @@ func (p *Parser90) parseModule() ast.Statement {
 		}
 	}
 
-	mod.EndPos = p.current.start
+	mod.Position = ast.Pos(start, p.current.start)
 	p.nextToken() // Move past END
 
 	// Consume optional MODULE keyword after END
@@ -1150,7 +1771,8 @@ func (p *Parser90) parseModule() ast.Statement {
 
 // parseBlockData parses a BLOCK DATA...END [BLOCK DATA] block
 func (p *Parser90) parseBlockData() ast.ProgramUnit {
-	bd := &ast.BlockData{StartPos: p.current.start}
+	start := p.current.start
+	bd := &ast.BlockData{}
 
 	// Consume BLOCK identifier
 	p.nextToken()
@@ -1172,7 +1794,7 @@ func (p *Parser90) parseBlockData() ast.ProgramUnit {
 	// Parse body statements
 	bd.Body = p.parseBody(nil)
 
-	bd.EndPos = p.current.start
+	bd.Position = ast.Pos(start, p.current.start)
 	p.nextToken() // Move past END
 
 	// Consume optional BLOCK DATA after END
@@ -1222,8 +1844,7 @@ func (p *Parser90) parseArraySpec() *ast.ArraySpec {
 			// Represent * as an Identifier for consistency
 			bound.Upper = &ast.Identifier{
 				Value:    "*",
-				StartPos: p.current.start,
-				EndPos:   p.current.start + 1,
+				Position: ast.Pos(p.current.start, p.current.start+1),
 			}
 			p.nextToken()
 		} else if p.currentTokenIs(token.Colon) {
@@ -1326,6 +1947,7 @@ func (p *Parser90) parseCharacterLength() string {
 // getOperatorPrecedence returns the precedence level for operators
 // Higher number = higher precedence
 // Fortran precedence (highest to lowest):
+// 10: % (component access)
 // 9: ** (exponentiation, right associative)
 // 8: unary +, -, .NOT.
 // 7: *, /
@@ -1337,6 +1959,8 @@ func (p *Parser90) parseCharacterLength() string {
 // 1: .EQV., .NEQV.
 func (p *Parser90) getOperatorPrecedence(op token.Token) int {
 	switch op {
+	case token.Percent:
+		return 10
 	case token.DoubleStar: // **
 		return 9
 	case token.Asterisk, token.Slash: // *, /
@@ -1373,7 +1997,7 @@ func (p *Parser90) parseExpression(minPrec int) ast.Expression {
 	if left == nil {
 		return nil
 	}
-
+	start := left.SourcePos().Start()
 	// Precedence climbing
 	for {
 		// Check if current token is a binary operator
@@ -1384,6 +2008,21 @@ func (p *Parser90) parseExpression(minPrec int) ast.Expression {
 
 		op := p.current.tok
 		p.nextToken() // consume operator
+
+		if op == token.Percent {
+			if !p.canUseAsIdentifier() {
+				p.addError("expected component name after '%'")
+				return left
+			}
+			componentName := string(p.current.lit)
+			p.nextToken()
+			left = &ast.ComponentAccess{
+				Base:      left,
+				Component: componentName,
+				Position:  ast.Pos(start, p.current.start),
+			}
+			continue
+		}
 
 		// Determine the minimum precedence for the right side
 		nextMinPrec := prec
@@ -1403,8 +2042,7 @@ func (p *Parser90) parseExpression(minPrec int) ast.Expression {
 			Op:       op,
 			Left:     left,
 			Right:    right,
-			StartPos: left.Pos(),
-			EndPos:   right.End(),
+			Position: ast.Pos(start, right.SourcePos().End()),
 		}
 	}
 
@@ -1428,13 +2066,15 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 		return &ast.UnaryExpr{
 			Op:       op,
 			Operand:  operand,
-			StartPos: startPos,
-			EndPos:   operand.End(),
+			Position: ast.Pos(startPos, operand.SourcePos().End()),
 		}
 	}
 
-	// Handle parenthesized expressions
+	// Handle parenthesized expressions and array constructors
 	if p.currentTokenIs(token.LParen) {
+		if p.peekTokenIs(token.Slash) {
+			return p.parseArrayConstructor()
+		}
 		p.nextToken() // consume (
 		expr := p.parseExpression(0)
 		if expr == nil {
@@ -1449,19 +2089,17 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 		p.nextToken() // consume )
 		return &ast.ParenExpr{
 			Expr:     expr,
-			StartPos: startPos,
-			EndPos:   endPos,
+			Position: ast.Pos(startPos, endPos),
 		}
 	}
-
+	pos := ast.Pos(startPos, p.current.start+len(p.current.lit))
 	// Handle integer literals
 	if p.currentTokenIs(token.IntLit) {
 		// TODO: Parse actual integer value
 		lit := &ast.IntegerLiteral{
-			Value:    0,                         // Will need proper parsing
-			Raw:      string(p.current.lit),    // Store original text
-			StartPos: startPos,
-			EndPos:   p.current.start + len(p.current.lit),
+			Value:    0,                     // Will need proper parsing
+			Raw:      string(p.current.lit), // Store original text
+			Position: pos,
 		}
 		p.nextToken()
 		return lit
@@ -1472,8 +2110,7 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 		lit := &ast.RealLiteral{
 			Value:    0.0, // Will need proper parsing
 			Raw:      string(p.current.lit),
-			StartPos: startPos,
-			EndPos:   p.current.start + len(p.current.lit),
+			Position: pos,
 		}
 		p.nextToken()
 		return lit
@@ -1483,8 +2120,7 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 	if p.currentTokenIs(token.StringLit) {
 		lit := &ast.StringLiteral{
 			Value:    string(p.current.lit),
-			StartPos: startPos,
-			EndPos:   p.current.start + len(p.current.lit),
+			Position: pos,
 		}
 		p.nextToken()
 		return lit
@@ -1494,8 +2130,7 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 	if p.currentTokenIs(token.TRUE) {
 		lit := &ast.LogicalLiteral{
 			Value:    true,
-			StartPos: startPos,
-			EndPos:   p.current.start + len(p.current.lit),
+			Position: pos,
 		}
 		p.nextToken()
 		return lit
@@ -1503,8 +2138,7 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 	if p.currentTokenIs(token.FALSE) {
 		lit := &ast.LogicalLiteral{
 			Value:    false,
-			StartPos: startPos,
-			EndPos:   p.current.start + len(p.current.lit),
+			Position: pos,
 		}
 		p.nextToken()
 		return lit
@@ -1516,8 +2150,33 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 		endPos := p.current.start + len(p.current.lit)
 		p.nextToken()
 
-		// Check for function call or array reference
+		// Check for function call or array reference/section
 		if p.currentTokenIs(token.LParen) {
+			// Check for array section (contains a colon)
+			hasColon := false
+			p.nextToken() // consume (
+			depth := 1
+			for !p.currentTokenIs(token.EOF) {
+				if p.currentTokenIs(token.LParen) {
+					depth++
+				} else if p.currentTokenIs(token.RParen) {
+					depth--
+					if depth == 0 {
+						break
+					}
+				} else if p.currentTokenIs(token.Colon) {
+					hasColon = true
+				}
+				p.nextToken()
+			}
+			// p.l.Unread(p.current.start) // Go back to after the identifier
+			p.nextToken()
+			p.nextToken()
+
+			if hasColon {
+				return p.parseArraySection(name, startPos)
+			}
+
 			p.nextToken() // consume (
 
 			// Parse argument/subscript list
@@ -1549,20 +2208,95 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 			return &ast.FunctionCall{
 				Name:     name,
 				Args:     args,
-				StartPos: startPos,
-				EndPos:   endPos,
+				Position: ast.Pos(startPos, endPos),
 			}
 		}
 
 		// Just an identifier
 		return &ast.Identifier{
 			Value:    name,
-			StartPos: startPos,
-			EndPos:   endPos,
+			Position: ast.Pos(startPos, endPos),
 		}
 	}
 
 	return nil
+}
+
+// parseArrayConstructor parses an array constructor
+func (p *Parser90) parseArrayConstructor() ast.Expression {
+	start := p.current.start
+	stmt := &ast.ArrayConstructor{}
+	p.nextToken() // consume (
+	p.nextToken() // consume /
+
+	for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.EOF) {
+		val := p.parseExpression(0)
+		if val == nil {
+			p.addError("expected expression in array constructor")
+			break
+		}
+		stmt.Values = append(stmt.Values, val)
+
+		if !p.currentTokenIs(token.Comma) {
+			break
+		}
+		p.nextToken()
+	}
+
+	if p.currentTokenIs(token.Slash) {
+		p.nextToken() // consume /
+		if p.currentTokenIs(token.RParen) {
+			stmt.Position = ast.Pos(start, p.current.start)
+			p.nextToken() // consume )
+		} else {
+			p.addError("expected ')' after array constructor")
+		}
+	} else {
+		p.addError("expected '/)' at end of array constructor")
+	}
+
+	return stmt
+}
+
+// parseArraySection parses an array section
+func (p *Parser90) parseArraySection(name string, startPos int) ast.Expression {
+	start := p.current.start
+	stmt := &ast.ArraySection{
+		Name: name,
+	}
+	p.nextToken() // consume (
+
+	for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+		sub := ast.Subscript{}
+		if !p.currentTokenIs(token.Colon) {
+			sub.Lower = p.parseExpression(0)
+		}
+		if p.currentTokenIs(token.Colon) {
+			p.nextToken() // consume :
+			if !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) {
+				sub.Upper = p.parseExpression(0)
+			}
+		}
+		if p.currentTokenIs(token.Colon) {
+			p.nextToken() // consume :
+			sub.Stride = p.parseExpression(0)
+		}
+		stmt.Subscripts = append(stmt.Subscripts, sub)
+
+		if !p.currentTokenIs(token.Comma) {
+			break
+		}
+		p.nextToken()
+	}
+
+	if p.currentTokenIs(token.RParen) {
+		stmt.Position = ast.Pos(start, p.current.start)
+		p.nextToken() // consume )
+	} else {
+		p.addError("expected ')' after array section")
+	}
+
+	return stmt
 }
 
 // collectBlockDataBody collects tokens until END

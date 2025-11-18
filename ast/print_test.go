@@ -12,10 +12,9 @@ func TestPrint(t *testing.T) {
 	// Create a simple AST node
 	prog := &ProgramBlock{
 		Name:     "test",
-		StartPos: 0,
-		EndPos:   100,
+		Position: Pos(0, 100),
 		Body: []Statement{
-			&ImplicitStatement{IsNone: true, StartPos: 10, EndPos: 22},
+			&ImplicitStatement{IsNone: true, Position: Pos(10, 22)},
 		},
 	}
 
@@ -46,8 +45,7 @@ func TestPrint(t *testing.T) {
 func TestPrintWithFilter(t *testing.T) {
 	prog := &ProgramBlock{
 		Name:     "test",
-		StartPos: 0,
-		EndPos:   100,
+		Position: Pos(0, 100),
 		Body:     nil, // nil slice
 	}
 
@@ -79,8 +77,7 @@ func TestPrintSubroutine(t *testing.T) {
 			Name: "result",
 		}},
 		Attributes: []token.Token{token.RECURSIVE},
-		StartPos:   0,
-		EndPos:     50,
+		Position:   Pos(0, 50),
 	}
 
 	var buf bytes.Buffer

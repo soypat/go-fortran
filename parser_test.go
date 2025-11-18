@@ -147,3 +147,12 @@ func compareErrors(t *testing.T, srcpath string, expected map[int]string, actual
 
 	return nil
 }
+
+func newParser(t *testing.T, code string) *Parser90 {
+	p := &Parser90{}
+	err := p.Reset("test.f90", strings.NewReader(code))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
