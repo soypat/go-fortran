@@ -70,9 +70,13 @@ END PROGRAM hello
 	//       Entities: ast.DeclEntity (len=2) [
 	//         0: DeclEntity {
 	//           Name: "x"
+	//           Initializer: ""
+	//           CharLen: ""
 	//         }
 	//         1: DeclEntity {
 	//           Name: "y"
+	//           Initializer: ""
+	//           CharLen: ""
 	//         }
 	//       ]
 	//       StartPos: 35

@@ -671,6 +671,22 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		p.nextToken()
 	}
 
+	// Handle CHARACTER length specification: CHARACTER(LEN=80) or CHARACTER*80 or CHARACTER(*)
+	var charLen string
+	if stmt.TypeSpec == "CHARACTER" {
+		if p.currentTokenIs(token.LParen) {
+			// CHARACTER(LEN=n) or CHARACTER(n) or CHARACTER(*)
+			charLen = p.parseCharacterLength()
+		} else if p.currentTokenIs(token.Asterisk) {
+			// CHARACTER*n form
+			p.nextToken() // consume *
+			if p.currentTokenIs(token.IntLit) || p.canUseAsIdentifier() {
+				charLen = string(p.current.lit)
+				p.nextToken()
+			}
+		}
+	}
+
 	// Handle TYPE(typename) for derived types
 	if stmt.TypeSpec == "TYPE" && p.currentTokenIs(token.LParen) {
 		// Skip (typename)
@@ -774,6 +790,11 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		entityName := string(p.current.lit)
 		entity := ast.DeclEntity{Name: entityName}
 
+		// Set CHARACTER length if this is a CHARACTER type
+		if charLen != "" {
+			entity.CharLen = charLen
+		}
+
 		// Start with arraySpec from DIMENSION attribute if present
 		if arraySpec != nil {
 			entity.ArraySpec = arraySpec
@@ -781,7 +802,7 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 
 		p.nextToken()
 
-		// Check for array declarator: arr(10,20) or initialization
+		// Check for array declarator: arr(10,20)
 		var entityArraySpec *ast.ArraySpec
 		if p.currentTokenIs(token.LParen) {
 			// This could be an array declarator - parse it
@@ -792,26 +813,16 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 			}
 		}
 
-		// Add entity to statement
-		stmt.Entities = append(stmt.Entities, entity)
+		// Parse initialization expression: = value or => null()
+		if p.currentTokenIs(token.Equals) || p.currentTokenIs(token.PointerAssign) {
+			isPointerAssign := p.currentTokenIs(token.PointerAssign)
+			p.nextToken() // consume = or =>
 
-		// If this entity is a parameter, populate its type information
-		if paramMap != nil {
-			if param, exists := paramMap[entityName]; exists {
-				param.Type = stmt.TypeSpec
-				param.Intent = intentType
-				param.Attributes = append(param.Attributes, stmt.Attributes...)
-				// Use entity array spec if present, otherwise DIMENSION attribute spec
-				if entityArraySpec != nil {
-					param.ArraySpec = entityArraySpec
-				} else if arraySpec != nil {
-					param.ArraySpec = arraySpec
-				}
+			var initTokens []byte
+			if isPointerAssign {
+				initTokens = append(initTokens, []byte("=> ")...)
 			}
-		}
 
-		// Skip initialization (= value)
-		if p.currentTokenIs(token.Equals) {
 			depth := 0
 			for !p.currentTokenIs(token.NewLine) && !p.currentTokenIs(token.EOF) {
 				if p.currentTokenIs(token.LParen) {
@@ -821,7 +832,37 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 				} else if p.currentTokenIs(token.Comma) && depth == 0 {
 					break
 				}
+				// Add space before token if needed (but not before first token, and not around parens/slashes)
+				if len(initTokens) > 0 {
+					lastChar := initTokens[len(initTokens)-1]
+					currIsSpecial := p.currentTokenIs(token.LParen) || p.currentTokenIs(token.RParen) || p.currentTokenIs(token.Slash)
+					lastIsSpecial := lastChar == '(' || lastChar == ')' || lastChar == '/'
+					if !currIsSpecial && !lastIsSpecial {
+						initTokens = append(initTokens, ' ')
+					}
+				}
+				initTokens = append(initTokens, p.current.lit...)
 				p.nextToken()
+			}
+			entity.Initializer = string(initTokens)
+		}
+
+		// Add entity to statement (now that all fields are populated)
+		stmt.Entities = append(stmt.Entities, entity)
+
+		// If this entity is a parameter, populate its type information
+		if paramMap != nil {
+			if param, exists := paramMap[entityName]; exists {
+				param.Type = stmt.TypeSpec
+				param.Intent = intentType
+				param.Attributes = append(param.Attributes, stmt.Attributes...)
+				param.CharLen = entity.CharLen
+				// Use entity array spec if present, otherwise DIMENSION attribute spec
+				if entityArraySpec != nil {
+					param.ArraySpec = entityArraySpec
+				} else if arraySpec != nil {
+					param.ArraySpec = arraySpec
+				}
 			}
 		}
 
@@ -1246,6 +1287,42 @@ func (p *Parser90) parseArraySpec() *ast.ArraySpec {
 	}
 
 	return spec
+}
+
+// parseCharacterLength parses CHARACTER length specification from (LEN=n), (n), (*), or (LEN=:)
+// Expects current token to be '(' and consumes up to and including ')'
+// Returns the length specification as a string
+func (p *Parser90) parseCharacterLength() string {
+	if !p.currentTokenIs(token.LParen) {
+		return ""
+	}
+	p.nextToken() // consume '('
+
+	var lengthTokens []byte
+
+	// Check for LEN= prefix
+	if p.currentTokenIs(token.LEN) {
+		p.nextToken() // consume LEN
+		if p.currentTokenIs(token.Equals) {
+			p.nextToken() // consume =
+		}
+	}
+
+	// Collect tokens until closing paren
+	for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+		if len(lengthTokens) > 0 {
+			lengthTokens = append(lengthTokens, ' ')
+		}
+		lengthTokens = append(lengthTokens, p.current.lit...)
+		p.nextToken()
+	}
+
+	// Consume closing paren
+	if p.currentTokenIs(token.RParen) {
+		p.nextToken()
+	}
+
+	return string(lengthTokens)
 }
 
 // collectBlockDataBody collects tokens until END

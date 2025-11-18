@@ -381,7 +381,7 @@ type Parameter struct {
 	Intent     IntentType    // INTENT(IN/OUT/INOUT)
 	Attributes []token.Token // Other attributes (OPTIONAL, POINTER, TARGET, etc.)
 	ArraySpec  *ArraySpec    // Array dimensions if this is an array parameter
-	// Future: CharLen for CHARACTER, etc.
+	CharLen    string        // CHARACTER length specification (will become Expression in Phase 4)
 }
 
 // Identifier represents an identifier
