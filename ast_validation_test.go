@@ -231,3 +231,294 @@ END SUBROUTINE test
 		t.Errorf("Parameter 'opt' should have OPTIONAL attribute, got: %v", optParam.Attributes)
 	}
 }
+
+// TestArraySpecifications verifies that array dimension specifications are correctly
+// captured in the AST for both DIMENSION attributes and entity declarators.
+func TestArraySpecifications(t *testing.T) {
+	tests := []struct {
+		name     string
+		src      string
+		unitType string
+		expected []struct {
+			name      string
+			arrayKind ast.ArraySpecKind
+			numDims   int
+			bounds    []struct{ lower, upper string }
+		}
+	}{
+		{
+			name: "explicit shape 1D array",
+			src: `
+SUBROUTINE test(arr)
+  REAL, DIMENSION(10) :: arr
+END SUBROUTINE test
+`,
+			unitType: "subroutine",
+			expected: []struct {
+				name      string
+				arrayKind ast.ArraySpecKind
+				numDims   int
+				bounds    []struct{ lower, upper string }
+			}{
+				{
+					name:      "arr",
+					arrayKind: ast.ArraySpecExplicit,
+					numDims:   1,
+					bounds:    []struct{ lower, upper string }{{lower: "", upper: "10"}},
+				},
+			},
+		},
+		{
+			name: "explicit shape 2D array with bounds",
+			src: `
+SUBROUTINE test(matrix)
+  REAL, DIMENSION(1:10, 1:20) :: matrix
+END SUBROUTINE test
+`,
+			unitType: "subroutine",
+			expected: []struct {
+				name      string
+				arrayKind ast.ArraySpecKind
+				numDims   int
+				bounds    []struct{ lower, upper string }
+			}{
+				{
+					name:      "matrix",
+					arrayKind: ast.ArraySpecExplicit,
+					numDims:   2,
+					bounds: []struct{ lower, upper string }{
+						{lower: "1", upper: "10"},
+						{lower: "1", upper: "20"},
+					},
+				},
+			},
+		},
+		{
+			name: "assumed shape array",
+			src: `
+SUBROUTINE test(arr)
+  REAL, DIMENSION(:,:) :: arr
+END SUBROUTINE test
+`,
+			unitType: "subroutine",
+			expected: []struct {
+				name      string
+				arrayKind ast.ArraySpecKind
+				numDims   int
+				bounds    []struct{ lower, upper string }
+			}{
+				{
+					name:      "arr",
+					arrayKind: ast.ArraySpecAssumed,
+					numDims:   2,
+					bounds: []struct{ lower, upper string }{
+						{lower: "", upper: ""},
+						{lower: "", upper: ""},
+					},
+				},
+			},
+		},
+		{
+			name: "assumed size array (F77 style)",
+			src: `
+SUBROUTINE test(arr)
+  REAL, DIMENSION(*) :: arr
+END SUBROUTINE test
+`,
+			unitType: "subroutine",
+			expected: []struct {
+				name      string
+				arrayKind ast.ArraySpecKind
+				numDims   int
+				bounds    []struct{ lower, upper string }
+			}{
+				{
+					name:      "arr",
+					arrayKind: ast.ArraySpecAssumedSize,
+					numDims:   1,
+					bounds:    []struct{ lower, upper string }{{lower: "", upper: "*"}},
+				},
+			},
+		},
+		{
+			name: "array with entity declarator (no DIMENSION attribute)",
+			src: `
+SUBROUTINE test()
+  REAL :: arr(5, 10)
+END SUBROUTINE test
+`,
+			unitType: "subroutine",
+			expected: []struct {
+				name      string
+				arrayKind ast.ArraySpecKind
+				numDims   int
+				bounds    []struct{ lower, upper string }
+			}{
+				{
+					name:      "arr",
+					arrayKind: ast.ArraySpecExplicit,
+					numDims:   2,
+					bounds: []struct{ lower, upper string }{
+						{lower: "", upper: "5"},
+						{lower: "", upper: "10"},
+					},
+				},
+			},
+		},
+		{
+			name: "multiple arrays with different specs",
+			src: `
+PROGRAM test
+  REAL, DIMENSION(10) :: vec
+  REAL, DIMENSION(:,:) :: matrix
+  REAL :: arr(3,3)
+END PROGRAM test
+`,
+			unitType: "program",
+			expected: []struct {
+				name      string
+				arrayKind ast.ArraySpecKind
+				numDims   int
+				bounds    []struct{ lower, upper string }
+			}{
+				{
+					name:      "vec",
+					arrayKind: ast.ArraySpecExplicit,
+					numDims:   1,
+					bounds:    []struct{ lower, upper string }{{lower: "", upper: "10"}},
+				},
+				{
+					name:      "matrix",
+					arrayKind: ast.ArraySpecAssumed,
+					numDims:   2,
+					bounds: []struct{ lower, upper string }{
+						{lower: "", upper: ""},
+						{lower: "", upper: ""},
+					},
+				},
+				{
+					name:      "arr",
+					arrayKind: ast.ArraySpecExplicit,
+					numDims:   2,
+					bounds: []struct{ lower, upper string }{
+						{lower: "", upper: "3"},
+						{lower: "", upper: "3"},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var parser Parser90
+			err := parser.Reset(tt.name+".f90", strings.NewReader(tt.src))
+			if err != nil {
+				t.Fatalf("Reset failed: %v", err)
+			}
+
+			unit := parser.ParseNextProgramUnit()
+			if unit == nil {
+				t.Fatal("ParseNextProgramUnit returned nil")
+			}
+
+			if len(parser.Errors()) > 0 {
+				t.Fatalf("Parse errors: %v", parser.Errors())
+			}
+
+			// Extract entities to check from body statements
+			var entities []ast.DeclEntity
+			var params []ast.Parameter
+
+			switch tt.unitType {
+			case "subroutine":
+				sub, ok := unit.(*ast.Subroutine)
+				if !ok {
+					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
+				}
+				params = sub.Parameters
+				// Extract entities from type declarations in body
+				for _, stmt := range sub.Body {
+					if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
+						entities = append(entities, typeDecl.Entities...)
+					}
+				}
+			case "program":
+				prog, ok := unit.(*ast.ProgramBlock)
+				if !ok {
+					t.Fatalf("Expected *ast.ProgramBlock, got %T", unit)
+				}
+				// Extract entities from type declarations in body
+				for _, stmt := range prog.Body {
+					if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
+						entities = append(entities, typeDecl.Entities...)
+					}
+				}
+			default:
+				t.Fatalf("Unknown unit type: %s", tt.unitType)
+			}
+
+			// Check parameters first
+			for i, exp := range tt.expected {
+				var arraySpec *ast.ArraySpec
+
+				// Look for the entity in parameters
+				found := false
+				for _, param := range params {
+					if param.Name == exp.name {
+						arraySpec = param.ArraySpec
+						found = true
+						break
+					}
+				}
+
+				// If not found in parameters, look in entities
+				if !found {
+					for _, entity := range entities {
+						if entity.Name == exp.name {
+							arraySpec = entity.ArraySpec
+							found = true
+							break
+						}
+					}
+				}
+
+				if !found {
+					t.Errorf("Expected entity %d: %q not found", i, exp.name)
+					continue
+				}
+
+				if arraySpec == nil {
+					t.Errorf("Entity %q: expected ArraySpec, got nil", exp.name)
+					continue
+				}
+
+				if arraySpec.Kind != exp.arrayKind {
+					t.Errorf("Entity %q: expected kind %v, got %v",
+						exp.name, exp.arrayKind, arraySpec.Kind)
+				}
+
+				if len(arraySpec.Bounds) != exp.numDims {
+					t.Errorf("Entity %q: expected %d dimensions, got %d",
+						exp.name, exp.numDims, len(arraySpec.Bounds))
+					continue
+				}
+
+				for j, expBound := range exp.bounds {
+					if j >= len(arraySpec.Bounds) {
+						break
+					}
+					bound := arraySpec.Bounds[j]
+					if bound.Lower != expBound.lower {
+						t.Errorf("Entity %q dim %d: expected lower=%q, got %q",
+							exp.name, j, expBound.lower, bound.Lower)
+					}
+					if bound.Upper != expBound.upper {
+						t.Errorf("Entity %q dim %d: expected upper=%q, got %q",
+							exp.name, j, expBound.upper, bound.Upper)
+					}
+				}
+			}
+		})
+	}
+}

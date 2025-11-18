@@ -344,9 +344,10 @@ type ArraySpec struct {
 
 // DeclEntity represents a single entity in a type declaration
 type DeclEntity struct {
-	Name      string
-	ArraySpec *ArraySpec // Array dimensions if this is an array
-	// Future: Initialization, CharLen for CHARACTER, etc.
+	Name        string
+	ArraySpec   *ArraySpec // Array dimensions if this is an array
+	Initializer string     // Initialization expression (will become Expression in Phase 4)
+	CharLen     string     // CHARACTER length specification (will become Expression in Phase 4)
 }
 
 // IntentType represents the INTENT attribute direction
