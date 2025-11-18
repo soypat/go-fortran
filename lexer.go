@@ -36,11 +36,17 @@ func (l *Lexer90) IsDone() bool {
 	return l.err != nil
 }
 
+func (l *Lexer90) isUnitialized() bool {
+	return l.source == ""
+}
+
 // Reset discards all state and buffered data and begins a new lexing
 // procedure on the input r. It performs a single utf8 read to initialize.
 func (l *Lexer90) Reset(source string, r io.Reader) error {
 	if r == nil {
 		return errors.New("nil reader")
+	} else if source == "" {
+		return errors.New("no source name")
 	}
 	*l = Lexer90{
 		input:  l.input,
@@ -106,6 +112,10 @@ func (l *Lexer90) SkipLines(n int) error {
 // of the token for identifiers, strings and numbers.
 // The returned byte slice is reused between calls to NextToken.
 func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
+	if l.isUnitialized() {
+		l.err = errors.New("lexer unitilialized")
+		return token.Illegal, 0, nil
+	}
 	l.skipWhitespace()
 	startPos = l.pos
 	// Capture starting line/col for this token
@@ -322,7 +332,16 @@ func (l *Lexer90) readUntil(stopchar rune) ([]byte, token.Token) {
 		l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
 		l.readChar()
 	}
+	// If we hit EOF but l.ch has the last valid character, append it
 	if l.err != nil {
+		if l.ch != 0 && l.ch != stopchar {
+			isLetter := isPrintableASCII(l.ch)
+			isDigitOrDec := isDigitOrDecimal(l.ch)
+			isSpace := l.ch == ' '
+			if isDigitOrDec || isLetter || isSpace {
+				l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
+			}
+		}
 		return l.idbuf[start:], token.Illegal
 	}
 	tokst := token.Identifier

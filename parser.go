@@ -303,26 +303,29 @@ func (p *Parser90) parseParameterList() []string {
 
 	// Parse parameters
 	for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
-		// Accept identifiers or keywords as parameter names
-		if p.currentTokenIs(token.Identifier) || len(p.current.lit) > 0 {
+		// Accept identifiers, keywords, or * (alternate return specifier in F77)
+		if p.currentTokenIs(token.Asterisk) {
+			params = append(params, "*")
+			p.nextToken()
+		} else if p.currentTokenIs(token.Identifier) || len(p.current.lit) > 0 {
 			params = append(params, string(p.current.lit))
 			p.nextToken()
-
-			if p.currentTokenIs(token.Comma) {
-				p.nextToken()
-				continue
-			}
-
-			if p.currentTokenIs(token.RParen) {
-				break
-			}
-
-			p.addError("expected comma or closing paren in parameter list")
-			break
 		} else {
 			p.addError("expected parameter name")
 			break
 		}
+
+		if p.currentTokenIs(token.Comma) {
+			p.nextToken()
+			continue
+		}
+
+		if p.currentTokenIs(token.RParen) {
+			break
+		}
+
+		p.addError("expected comma or closing paren in parameter list")
+		break
 	}
 
 	if p.expectCurrent(token.RParen) {
