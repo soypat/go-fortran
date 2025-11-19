@@ -1,6 +1,7 @@
 package fortran
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -151,6 +152,65 @@ func TestStatementParsing(t *testing.T) {
 			},
 		},
 		{
+			name: "computed GOTO with few labels",
+			src:  "GOTO (10,20,30) I",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				computedGoto, ok := stmt.(*ast.ComputedGotoStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ComputedGotoStmt, got %T", stmt)
+				}
+
+				expectedLabels := []string{"10", "20", "30"}
+				if len(computedGoto.Labels) != len(expectedLabels) {
+					t.Fatalf("Expected %d labels, got %d", len(expectedLabels), len(computedGoto.Labels))
+				}
+
+				for i, expected := range expectedLabels {
+					if computedGoto.Labels[i] != expected {
+						t.Errorf("Expected label[%d] = %q, got %q", i, expected, computedGoto.Labels[i])
+					}
+				}
+
+				// Check expression is an identifier
+				ident, ok := computedGoto.Expression.(*ast.Identifier)
+				if !ok {
+					t.Errorf("Expected expression to be *ast.Identifier, got %T", computedGoto.Expression)
+				} else if ident.Value != "I" {
+					t.Errorf("Expected expression 'I', got %q", ident.Value)
+				}
+			},
+		},
+		{
+			name: "computed GOTO with many labels",
+			src:  "GOTO(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15) ibeta",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				computedGoto, ok := stmt.(*ast.ComputedGotoStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ComputedGotoStmt, got %T", stmt)
+				}
+
+				if len(computedGoto.Labels) != 15 {
+					t.Fatalf("Expected 15 labels, got %d", len(computedGoto.Labels))
+				}
+
+				// Verify first few labels
+				for i := 1; i <= 5; i++ {
+					expected := strconv.Itoa(i)
+					if computedGoto.Labels[i-1] != expected {
+						t.Errorf("Expected label[%d] = %q, got %q", i-1, expected, computedGoto.Labels[i-1])
+					}
+				}
+
+				// Check expression
+				ident, ok := computedGoto.Expression.(*ast.Identifier)
+				if !ok {
+					t.Errorf("Expected expression to be *ast.Identifier, got %T", computedGoto.Expression)
+				} else if ident.Value != "ibeta" {
+					t.Errorf("Expected expression 'ibeta', got %q", ident.Value)
+				}
+			},
+		},
+		{
 			name: "GOTO in inline IF",
 			src:  "IF(NPARC.LE.0.AND..NOT.LSTARC) GO TO 2000",
 			validate: func(t *testing.T, stmt ast.Statement) {
@@ -225,6 +285,29 @@ func TestStatementParsing(t *testing.T) {
 
 				if len(writeStmt.OutputList) != 3 {
 					t.Errorf("Expected 3 output items, got %d", len(writeStmt.OutputList))
+				}
+			},
+		},
+
+		// ===== Block IF with ENDIF (F77 single token) =====
+		{
+			name: "block IF with ENDIF single token",
+			src: `IF(X > 0) THEN
+         Y = 1
+      ENDIF`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ifStmt, ok := stmt.(*ast.IfStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
+				}
+
+				if len(ifStmt.ThenPart) != 1 {
+					t.Fatalf("Expected 1 statement in ThenPart, got %d", len(ifStmt.ThenPart))
+				}
+
+				_, ok = ifStmt.ThenPart[0].(*ast.AssignmentStmt)
+				if !ok {
+					t.Errorf("Expected ThenPart[0] to be *ast.AssignmentStmt, got %T", ifStmt.ThenPart[0])
 				}
 			},
 		},

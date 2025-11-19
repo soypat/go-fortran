@@ -20,4 +20,7 @@ PROGRAM GDYN2E
    12  continue
    13  continue
    14  continue
+      IF(CARD(I:I).EQ.DIG(J:J)) THEN
+      ENDIF
+
 END PROGRAM GDYN2E

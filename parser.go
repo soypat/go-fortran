@@ -107,6 +107,15 @@ func (p *Parser90) nextToken() {
 	p.peek.col = col
 }
 
+func (p *Parser90) sourcePos() sourcePos {
+	return sourcePos{
+		Source: p.l.Source(),
+		Line:   p.current.line,
+		Col:    p.current.col,
+		Pos:    p.current.start,
+	}
+}
+
 func (p *Parser90) IsDone() bool {
 	return p.l.IsDone() && p.current.tok.IsIllegalOrEOF()
 }
@@ -257,19 +266,27 @@ func (p *Parser90) consumeIf(t token.Token) bool {
 // expectEndConstruct handles END <keyword> for control flow constructs (IF, DO).
 // The keyword is REQUIRED. If END is found without the keyword, reports error
 // and does NOT consume END (it likely belongs to parent construct).
+// Accepts both F77 style (ENDIF, ENDDO) and F90 style (END IF, END DO) forms.
 // Returns true if END <keyword> was successfully consumed.
-func (p *Parser90) expectEndConstruct(keyword token.Token) bool {
+func (p *Parser90) expectEndConstruct(keyword, singleEndForm token.Token, start sourcePos) bool {
+	// Check for F77 single-token form (e.g., ENDIF, ENDDO)
+	if p.currentTokenIs(singleEndForm) {
+		p.nextToken()
+		return true // Consume single-token END for. i.e: ENDIF, ENDDO
+	}
+
+	// Check for F90 two-token form (e.g., END IF, END DO)
 	if p.currentTokenIs(token.END) && p.peekTokenIs(keyword) {
 		p.nextToken() // consume END
 		p.nextToken() // consume keyword
 		return true
 	} else if p.currentTokenIs(token.END) {
 		// END without expected keyword - belongs to parent
-		p.addError(fmt.Sprintf("expected END %s, got END without %s (may belong to enclosing construct)",
-			keyword.String(), keyword.String()))
+		p.addErrorWithPos(start, keyword.String()+" missing missing END with keyword")
+		p.addError("expected 'END " + keyword.String() + "'; got END without keyword (may belong to enclosing program unit or construct)")
 		return false
 	} else {
-		p.addError(fmt.Sprintf("expected END %s", keyword.String()))
+		p.addError("expected END " + keyword.String())
 		return false
 	}
 }
@@ -295,16 +312,15 @@ func (p *Parser90) skipNewlinesAndComments() {
 	}
 }
 
-func (p *Parser90) addError(msg string) {
+func (p *Parser90) addErrorWithPos(pos sourcePos, msg string) {
 	p.errors = append(p.errors, ParserError{
-		sp: sourcePos{
-			Source: p.l.source,
-			Line:   p.current.line,
-			Col:    p.current.col,
-			Pos:    p.current.start,
-		},
+		sp:  pos,
 		msg: msg,
 	})
+}
+
+func (p *Parser90) addError(msg string) {
+	p.addErrorWithPos(p.sourcePos(), msg)
 }
 
 func (p *Parser90) Errors() []ParserError {
@@ -539,7 +555,6 @@ func (p *Parser90) parseContinueStmt() ast.Statement {
 // Handles both GOTO (single token) and GO (identifier) followed by TO
 func (p *Parser90) parseGotoStmt() ast.Statement {
 	start := p.current.start
-	stmt := &ast.GotoStmt{}
 
 	// Handle GOTO token or GO identifier
 	if p.currentTokenIs(token.GOTO) {
@@ -557,7 +572,45 @@ func (p *Parser90) parseGotoStmt() ast.Statement {
 		return nil
 	}
 
-	// Parse target label
+	// Check for computed GOTO: GOTO (label-list) expression
+	if p.currentTokenIs(token.LParen) {
+		computedStmt := &ast.ComputedGotoStmt{}
+		p.nextToken() // consume (
+
+		// Parse label list using parseCommaSeparatedList
+		parseOneLabel := func() (string, error) {
+			if !p.currentTokenIs(token.IntLit) && !p.currentTokenIs(token.Label) {
+				return "", fmt.Errorf("expected label in computed GOTO label list")
+			}
+			label := string(p.current.lit)
+			p.nextToken() // consume label
+			return label, nil
+		}
+
+		labels, err := parseCommaSeparatedList(p, token.RParen, parseOneLabel)
+		if err != nil {
+			p.addError(err.Error())
+			return nil
+		}
+		computedStmt.Labels = labels
+
+		if !p.expect(token.RParen, "closing computed GOTO label list") {
+			return nil
+		}
+
+		// Parse the index expression
+		computedStmt.Expression = p.parseExpression(0)
+		if computedStmt.Expression == nil {
+			p.addError("expected expression after computed GOTO label list")
+			return nil
+		}
+
+		computedStmt.Position = ast.Pos(start, p.current.start)
+		return computedStmt
+	}
+
+	// Simple GOTO: GOTO label
+	stmt := &ast.GotoStmt{}
 	if p.currentTokenIs(token.IntLit) || p.currentTokenIs(token.Label) {
 		stmt.Target = string(p.current.lit)
 		p.nextToken()
@@ -616,7 +669,7 @@ func (p *Parser90) parseWriteStmt() ast.Statement {
 // parseIfStmt parses an IF construct
 // Precondition: current token is IF
 func (p *Parser90) parseIfStmt() ast.Statement {
-	start := p.current.start
+	start := p.sourcePos()
 	stmt := &ast.IfStmt{}
 	p.expect(token.IF, "")
 
@@ -667,7 +720,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 		arithmeticStmt.PositiveLabel = string(p.current.lit)
 		p.nextToken() // consume label
 
-		arithmeticStmt.Position = ast.Pos(start, p.current.start)
+		arithmeticStmt.Position = ast.Pos(start.Pos, p.current.start)
 		return arithmeticStmt
 	}
 
@@ -681,7 +734,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 			p.addError("expected executable statement after IF condition")
 			return nil
 		}
-		stmt.Position = ast.Pos(start, p.current.start)
+		stmt.Position = ast.Pos(start.Pos, p.current.start)
 		return stmt
 	}
 
@@ -690,7 +743,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 	p.skipNewlinesAndComments()
 
 	// Parse THEN block
-	for p.loopUntil(token.ELSE, token.END) {
+	for p.loopUntil(token.ELSE, token.END, token.ENDIF) {
 		if p.peekTokenIs(token.IF) && p.currentTokenIs(token.ELSE) {
 			break
 		}
@@ -723,7 +776,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 		p.skipNewlinesAndComments()
 
 		// Parse ELSE IF block
-		for p.loopUntil(token.ELSE, token.END) {
+		for p.loopUntil(token.ELSE, token.END, token.ENDIF) {
 			if p.peekTokenIs(token.IF) && p.currentTokenIs(token.ELSE) {
 				break
 			}
@@ -743,7 +796,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 		p.nextToken() // consume ELSE
 		p.skipNewlinesAndComments()
 
-		for p.loopUntil(token.END) {
+		for p.loopUntil(token.END, token.ENDIF) {
 			if s := p.parseExecutableStatement(); s != nil {
 				stmt.ElsePart = append(stmt.ElsePart, s)
 			} else {
@@ -754,14 +807,14 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 	}
 
 	// Expect END IF
-	p.expectEndConstruct(token.IF)
-	stmt.Position = ast.Pos(start, p.current.start)
+	p.expectEndConstruct(token.IF, token.ENDIF, start)
+	stmt.Position = ast.Pos(start.Pos, p.current.start)
 	return stmt
 }
 
 // parseDoLoop parses a DO loop
 func (p *Parser90) parseDoLoop() ast.Statement {
-	start := p.current.start
+	start := p.sourcePos()
 	stmt := &ast.DoLoop{}
 	p.nextToken() // consume DO
 
@@ -848,9 +901,9 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 			p.addError("expected statement with label " + doLabel)
 		}
 	} else {
-		p.expectEndConstruct(token.DO)
+		p.expectEndConstruct(token.DO, token.ENDDO, start)
 	}
-	stmt.Position = ast.Pos(start, p.current.start)
+	stmt.Position = ast.Pos(start.Pos, p.current.start)
 	return stmt
 }
 
@@ -1151,7 +1204,7 @@ func (p *Parser90) parsePrivateStmt() ast.Statement {
 
 // parsePublicStmt parses a PUBLIC statement
 func (p *Parser90) parsePublicStmt() ast.Statement {
-	start := p.current.start
+	start := p.sourcePos()
 	stmt := &ast.PublicStmt{}
 	p.nextToken() // consume PUBLIC
 
@@ -1165,13 +1218,13 @@ func (p *Parser90) parsePublicStmt() ast.Statement {
 			p.nextToken()
 		}
 	}
-	stmt.Position = ast.Pos(start, p.current.start)
+	stmt.Position = ast.Pos(start.Pos, p.current.start)
 	return stmt
 }
 
 // parseInterfaceStmt parses an INTERFACE...END INTERFACE block
 func (p *Parser90) parseInterfaceStmt() ast.Statement {
-	start := p.current.start
+	start := p.sourcePos()
 	stmt := &ast.InterfaceStmt{}
 	p.nextToken() // consume INTERFACE
 
@@ -1197,15 +1250,15 @@ func (p *Parser90) parseInterfaceStmt() ast.Statement {
 	}
 
 	// Expect END INTERFACE [name]
-	p.expectEndConstruct(token.INTERFACE)
+	p.expectEndConstruct(token.INTERFACE, token.ENDINTERFACE, start)
 	p.consumeIf(token.Identifier) // optional interface name
-	stmt.Position = ast.Pos(start, p.current.start)
+	stmt.Position = ast.Pos(start.Pos, p.current.start)
 	return stmt
 }
 
 // parseDerivedTypeStmt parses a TYPE...END TYPE block
 func (p *Parser90) parseDerivedTypeStmt() ast.Statement {
-	start := p.current.start
+	start := p.sourcePos()
 	stmt := &ast.DerivedTypeStmt{}
 	p.nextToken() // consume TYPE
 
@@ -1235,10 +1288,10 @@ func (p *Parser90) parseDerivedTypeStmt() ast.Statement {
 	}
 
 	// Expect END TYPE [name]
-	p.expectEndConstruct(token.TYPE)
+	p.expectEndConstruct(token.TYPE, token.ENDTYPE, start)
 	p.consumeIf(token.Identifier) // optional type name
 
-	stmt.Position = ast.Pos(start, p.current.start)
+	stmt.Position = ast.Pos(start.Pos, p.current.start)
 	return stmt
 }
 

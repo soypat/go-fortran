@@ -894,6 +894,38 @@ func (gs *GotoStmt) AppendString(dst []byte) []byte {
 	return append(dst, gs.Target...)
 }
 
+// ComputedGotoStmt represents a computed/indexed GOTO statement (F77)
+// GOTO (label1, label2, ..., labeln) expression
+// Jumps to one of the labels based on the value of the expression (1-indexed)
+type ComputedGotoStmt struct {
+	Labels     []string   // List of labels to jump to (stored as strings for consistency)
+	Expression Expression // Expression to evaluate (1-based index into Labels)
+	Label      string     // Optional statement label
+	Position
+}
+
+var _ Statement = (*ComputedGotoStmt)(nil)
+
+func (cgs *ComputedGotoStmt) GetLabel() string { return cgs.Label }
+func (cgs *ComputedGotoStmt) statementNode()   {}
+func (cgs *ComputedGotoStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "GO TO"...)
+}
+func (cgs *ComputedGotoStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "GO TO ("...)
+	for i, label := range cgs.Labels {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		dst = append(dst, label...)
+	}
+	dst = append(dst, ") "...)
+	if cgs.Expression != nil {
+		dst = cgs.Expression.AppendString(dst)
+	}
+	return dst
+}
+
 // WriteStmt represents a WRITE statement
 type WriteStmt struct {
 	Unit       Expression   // Unit specifier (e.g., 91, *, variable)
