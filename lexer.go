@@ -740,16 +740,27 @@ func (l *Lexer90) readChar() {
 		// Consume continuation line commence string "&\n"
 		l.readCharLL()
 		l.readCharLL()
-		if l.ch == '!' {
-			l.ch = 0
-			l.peek = 0
-			l.err = errors.New("comment start on continuation line unsupported")
+
+		// Skip any comment lines between continuations
+		// In Fortran, comment lines can appear between continuation lines
+		for l.err == nil && l.ch == '!' {
+			// Skip entire comment line
+			for l.err == nil && l.ch != '\n' && l.ch != 0 {
+				l.readCharLL()
+			}
+			// Consume the newline
+			if l.ch == '\n' {
+				l.readCharLL()
+			}
 		}
+
+		// Skip whitespace on continuation line
 		for l.err == nil && (l.ch == ' ' || l.ch == '\t') {
-			l.readCharLL() // Skip whitespace on continuation line.
+			l.readCharLL()
 		}
+		// Consume continuation line ampersand if found
 		if l.err == nil && l.ch == '&' && l.peek != '\n' {
-			l.readCharLL() // Consume continuation line ampersand if found.
+			l.readCharLL()
 		}
 	}
 }

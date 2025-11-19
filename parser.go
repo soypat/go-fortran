@@ -137,16 +137,27 @@ type toktuple struct {
 // This method can be called repeatedly to incrementally parse a Fortran file.
 // Phase 1: Parses only top-level program units (PROGRAM, SUBROUTINE, FUNCTION, MODULE)
 func (p *Parser90) ParseNextProgramUnit() ast.ProgramUnit {
+	puStart := p.sourcePos()
+	panicked := true
+	defer func() {
+		if panicked {
+			p.addErrorWithPos(puStart, "panicked in program unit")
+			p.addError("panic position")
+			fmt.Printf("%v\n%v\n", &p.errors[len(p.errors)-1], &p.errors[len(p.errors)-2])
+		}
+	}()
 	for {
 		// Skip leading newlines and comments
 		p.skipNewlinesAndComments()
 
 		// Check for EOF
 		if p.currentTokenIs(token.EOF) {
+			panicked = false
 			return nil
 		}
 
 		// Parse one program unit
+		puStart = p.sourcePos()
 		unit := p.parseTopLevelUnit()
 
 		// Skip trailing newlines after this unit
@@ -154,8 +165,10 @@ func (p *Parser90) ParseNextProgramUnit() ast.ProgramUnit {
 
 		// If parsing succeeded, return the unit
 		if unit != nil {
+			panicked = false
 			return unit
 		} else if p.IsDone() {
+			panicked = false
 			return nil
 		}
 	}
@@ -2455,25 +2468,47 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 	p.expect(token.LParen, "array start '\\('") // consume (
 	p.expect(token.Slash, "array start '\\('")  // consume /
 
-	for p.loopUntil(token.Slash) {
+	// Parse array elements until we find /)
+	// Array constructors can span multiple lines
+	for !p.currentTokenIs(token.EOF) {
+		// Check for /) which closes the array constructor
+		if p.currentTokenIs(token.Slash) && p.peekTokenIs(token.RParen) {
+			break
+		}
+
 		val := p.parseExpression(0)
 		if val == nil {
+			// If expression parsing fails, try to recover by looking for /)
+			for !p.currentTokenIs(token.EOF) {
+				if p.currentTokenIs(token.Slash) && p.peekTokenIs(token.RParen) {
+					break
+				}
+				p.nextToken()
+			}
 			p.addError("expected expression in array constructor")
 			break
 		}
 		stmt.Values = append(stmt.Values, val)
 
+		// Check again for /) after expression
+		if p.currentTokenIs(token.Slash) && p.peekTokenIs(token.RParen) {
+			break
+		}
+
+		// Expect comma before next element (unless we're at /)
 		if !p.currentTokenIs(token.Comma) {
 			break
 		}
-		p.nextToken()
+		p.nextToken() // consume comma
 	}
 
+	// Always set position to avoid zero position issues
+	endPos := p.current.start
 	if p.currentTokenIs(token.Slash) {
 		p.nextToken() // consume /
 		if p.currentTokenIs(token.RParen) {
-			stmt.Position = ast.Pos(start, p.current.start)
-			p.nextToken() // consume )
+			endPos = p.current.start + len(p.current.lit) // end position after )
+			p.nextToken()                                  // consume )
 		} else {
 			p.addError("expected ')' after array constructor")
 		}
@@ -2481,6 +2516,7 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 		p.addError("expected '/)' at end of array constructor")
 	}
 
+	stmt.Position = ast.Pos(start, endPos)
 	return stmt
 }
 

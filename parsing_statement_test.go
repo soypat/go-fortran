@@ -573,6 +573,40 @@ func TestStatementParsing(t *testing.T) {
 				}
 			},
 		},
+
+		// ===== Line Continuation with Comments =====
+		{
+			name: "CALL statement with continuation and comment",
+			src: `CALL DIRALT(AA, II, &
+! comment line
+     &           C3)`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				callStmt, ok := stmt.(*ast.CallStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.CallStmt, got %T", stmt)
+				}
+
+				if callStmt.Name != "DIRALT" {
+					t.Errorf("Expected subroutine name 'DIRALT', got %q", callStmt.Name)
+				}
+
+				// Should have 3 arguments: AA, II, C3
+				if len(callStmt.Args) != 3 {
+					t.Fatalf("Expected 3 arguments, got %d", len(callStmt.Args))
+				}
+
+				// Check argument names
+				expectedArgs := []string{"AA", "II", "C3"}
+				for i, expected := range expectedArgs {
+					ident, ok := callStmt.Args[i].(*ast.Identifier)
+					if !ok {
+						t.Errorf("Expected arg[%d] to be *ast.Identifier, got %T", i, callStmt.Args[i])
+					} else if ident.Value != expected {
+						t.Errorf("Expected arg[%d] = %q, got %q", i, expected, ident.Value)
+					}
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

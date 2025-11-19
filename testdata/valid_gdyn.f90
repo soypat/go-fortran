@@ -23,4 +23,14 @@ PROGRAM GDYN2E
       IF(CARD(I:I).EQ.DIG(J:J)) THEN
       ENDIF
    WRITE(IOUT6,10109) TOTAL,DEL,(COVSCR(M,1),M=1,6)
+      IF(LSIMND) THEN
+      CALL DIRALT(AA,II,&
+! comment
+     &           C3)
+      ENDIF
+
+      if (ALL( k==(/ 0 /) )) then
+      end if
+      ((k == (/ 0, 
+     3  /)))
 END PROGRAM GDYN2E
