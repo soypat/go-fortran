@@ -382,7 +382,7 @@ func (p *Parser90) canUseAsIdentifier() bool {
 		return false
 	default:
 		// Most other keywords can be used as identifiers
-		return p.current.tok.IsKeyword()
+		return p.current.tok.IsKeyword() || p.current.tok.IsAttribute()
 	}
 }
 

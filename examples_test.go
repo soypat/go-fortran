@@ -90,10 +90,17 @@ END PROGRAM hello
 	//     }
 	//     2: TypeDeclaration {
 	//       TypeSpec: "REAL"
+	//       Entities: ast.DeclEntity (len=1) [
+	//         0: DeclEntity {
+	//           Name: "result"
+	//           Initializer: ""
+	//           CharLen: ""
+	//         }
+	//       ]
 	//       Label: ""
 	//       Position: Position {
 	//         Start: 53
-	//         End: 61
+	//         End: 67
 	//       }
 	//     }
 	//     3: AssignmentStmt {
