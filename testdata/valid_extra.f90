@@ -1,4 +1,4 @@
-subroutine add_numbers(x)
-  implicit none
-  integer :: x
-end subroutine
+SUBROUTINE f77_test()
+	  DO 10 i = 1, 10
+10    CONTINUE
+	END SUBROUTINE
