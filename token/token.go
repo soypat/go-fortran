@@ -208,6 +208,10 @@ func (tok Token) IsKeyword() bool {
 	return tok >= INTEGER && tok <= ENDWHERE
 }
 
+func (tok Token) IsAttributeKeyword() bool {
+	return tok == PURE || tok == RECURSIVE || tok == ELEMENTAL
+}
+
 // IsExecutableStatement returns true if the token is a executable
 // statement- control structure or built in function.
 // The [Identifier] token returns false as it may or may not represent an executable statement.

@@ -60,6 +60,7 @@ type Parser90 struct {
 
 	stmtFns map[token.Token]statementParseFn // Statement parsers
 	errors  []ParserError                    // Collected parsing errors
+	maxErrs int
 }
 
 func (p *Parser90) Reset(source string, r io.Reader) error {
@@ -69,11 +70,13 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 	}
 	if p.stmtFns == nil {
 		p.stmtFns = make(map[token.Token]statementParseFn)
+	} else if p.maxErrs == 0 {
+		p.maxErrs = 20
 	}
 	*p = Parser90{
 		l: p.l,
 		// Reuse memory but clear later.
-
+		maxErrs: p.maxErrs,
 		stmtFns: p.stmtFns,
 		errors:  p.errors[:0], // Reuse slice, clear contents
 	}
@@ -340,14 +343,6 @@ func (p *Parser90) Errors() []ParserError {
 	return p.errors
 }
 
-func (p *Parser90) isTypeKeyword(t token.Token) bool {
-	return t.IsTypeDeclaration()
-}
-
-func (p *Parser90) isAttributeKeyword(t token.Token) bool {
-	return t == token.RECURSIVE || t == token.PURE || t == token.ELEMENTAL
-}
-
 // canUseAsIdentifier returns true if the current token can be used as an identifier.
 // In Fortran, keywords can be used as variable/function/subroutine names in many contexts.
 func (p *Parser90) canUseAsIdentifier() bool {
@@ -413,32 +408,6 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 	return params
 }
 
-// collectUntilEnd collects tokens until one of the specified end tokens is found
-// Returns the collected tokens (excluding the end token)
-func (p *Parser90) collectUntilEnd(endTokens ...token.Token) []ast.TokenTuple {
-	tokens := []ast.TokenTuple{}
-
-	for p.loopUntil(token.EOF) {
-		// Check if we've hit an end token
-		for _, endTok := range endTokens {
-			if p.currentTokenIs(endTok) {
-				return tokens
-			}
-		}
-
-		// Collect the token
-		tokens = append(tokens, ast.TokenTuple{
-			Tok:   p.current.tok,
-			Start: p.current.start,
-			Lit:   append([]byte{}, p.current.lit...), // Copy the byte slice
-		})
-
-		p.nextToken()
-	}
-
-	return tokens
-}
-
 // parseBody parses specification statements, then executable statements
 // If parameters are provided, it will populate their type information when type declarations are found
 func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
@@ -491,6 +460,7 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 
 // parseExecutableStatement parses a single executable statement
 func (p *Parser90) parseExecutableStatement() ast.Statement {
+
 	var label string
 	if p.currentTokenIs(token.Label) {
 		label = string(p.current.lit)
@@ -1111,59 +1081,6 @@ func (p *Parser90) isEndOfProgramUnit() bool {
 	}
 }
 
-// skipIfConstruct skips from IF to matching END IF
-func (p *Parser90) skipIfConstruct() {
-	// For Phase 2, we simply skip to END IF without tracking nesting
-	// This handles most common cases correctly
-	p.nextToken() // Skip IF
-	for !p.currentTokenIs(token.EOF) {
-		if p.currentTokenIs(token.END) {
-			p.nextToken()
-			if p.currentTokenIs(token.IF) {
-				p.nextToken() // Skip IF in "END IF"
-				return
-			}
-			// Not END IF, continue (might be END DO inside the IF block, etc.)
-		} else {
-			p.nextToken()
-		}
-	}
-}
-
-// skipDoConstruct skips from DO to matching END DO
-func (p *Parser90) skipDoConstruct() {
-	p.nextToken() // Skip DO
-	depth := 1
-	for depth > 0 && !p.currentTokenIs(token.EOF) {
-		if p.currentTokenIs(token.DO) {
-			depth++
-		} else if p.currentTokenIs(token.END) {
-			p.nextToken()
-			if p.currentTokenIs(token.DO) {
-				depth--
-			}
-		}
-		p.nextToken()
-	}
-}
-
-// skipSelectConstruct skips from SELECT to matching END SELECT
-func (p *Parser90) skipSelectConstruct() {
-	p.nextToken() // Skip SELECT
-	depth := 1
-	for depth > 0 && !p.currentTokenIs(token.EOF) {
-		if p.currentTokenIs(token.SELECT) {
-			depth++
-		} else if p.currentTokenIs(token.END) {
-			p.nextToken()
-			if p.currentTokenIs(token.SELECT) {
-				depth--
-			}
-		}
-		p.nextToken()
-	}
-}
-
 // parseSpecStatement parses a specification statement
 // paramMap is used to populate type information for parameters
 func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[string]*ast.Parameter) ast.Statement {
@@ -1312,7 +1229,7 @@ func (p *Parser90) parseDerivedTypeStmt() ast.Statement {
 func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	start := p.current.start
 	stmt := &ast.ComponentDecl{}
-	if !p.isTypeKeyword(p.current.tok) && p.current.tok != token.TYPE {
+	if !p.current.tok.IsTypeDeclaration() && p.current.tok != token.TYPE {
 		p.addError("expected type specifier for component declaration")
 		return nil
 	}
@@ -1673,73 +1590,6 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 	return stmt
 }
 
-// collectBodyUntilEnd - DEPRECATED, kept for reference
-func (p *Parser90) collectBodyUntilEndOLD(endKeyword token.Token) []ast.TokenTuple {
-	tokens := []ast.TokenTuple{}
-
-	for !p.currentTokenIs(token.EOF) {
-		// Check for CONTAINS - for modules/subprograms with contained procedures
-		if p.currentTokenIs(token.CONTAINS) {
-			return tokens
-		}
-
-		// Check for END - could be the unit's END or a nested END
-		if p.currentTokenIs(token.END) {
-			nextTok := p.peek.tok
-
-			// Check if this is the END we're looking for
-			if endKeyword != token.Illegal {
-				// Looking for specific END KEYWORD (e.g., END SUBROUTINE)
-				if nextTok == endKeyword {
-					return tokens // Found exact match
-				}
-				// Also accept bare END or END followed by identifier (the subprogram name)
-				if nextTok == token.NewLine || nextTok == token.EOF || nextTok == token.Identifier {
-					return tokens // Bare END or END <name>
-				}
-				// Note: We do NOT return for END SUBROUTINE/FUNCTION/etc. found while collecting
-				// a module body, as these might be nested constructs (e.g., inside INTERFACE blocks)
-			} else {
-				// Looking for bare END or END followed by newline/EOF
-				if nextTok == token.NewLine || nextTok == token.EOF {
-					return tokens
-				}
-			}
-
-			// This is a nested END (END DO, END IF, END TYPE, etc.)
-			// Collect both the END and the following keyword/identifier
-			tokens = append(tokens, ast.TokenTuple{
-				Tok:   p.current.tok,
-				Start: p.current.start,
-				Lit:   append([]byte{}, p.current.lit...),
-			})
-			p.nextToken()
-
-			// Collect the token after END
-			if !p.currentTokenIs(token.EOF) && !p.currentTokenIs(token.NewLine) {
-				tokens = append(tokens, ast.TokenTuple{
-					Tok:   p.current.tok,
-					Start: p.current.start,
-					Lit:   append([]byte{}, p.current.lit...),
-				})
-				p.nextToken()
-			}
-			continue
-		}
-
-		// Collect the token
-		tokens = append(tokens, ast.TokenTuple{
-			Tok:   p.current.tok,
-			Start: p.current.start,
-			Lit:   append([]byte{}, p.current.lit...),
-		})
-
-		p.nextToken()
-	}
-
-	return tokens
-}
-
 // Semantic parsing functions for top-level constructs
 
 // parseProgramBlock parses a PROGRAM...END PROGRAM block
@@ -1889,8 +1739,8 @@ func (p *Parser90) parseModule() ast.Statement {
 			// Check if this is a procedure keyword
 			if p.currentTokenIs(token.SUBROUTINE) ||
 				p.currentTokenIs(token.FUNCTION) ||
-				p.isAttributeKeyword(p.current.tok) ||
-				p.isTypeKeyword(p.current.tok) {
+				p.current.tok.IsAttributeKeyword() ||
+				p.current.tok.IsTypeDeclaration() {
 
 				unit := p.parseTopLevelUnit()
 				if unit != nil {
@@ -2139,6 +1989,12 @@ func (p *Parser90) parseExpression(minPrec int) ast.Expression {
 		// Check if current token is a binary operator
 		prec := p.getOperatorPrecedence(p.current.tok)
 		if prec == 0 || prec < minPrec {
+			break
+		}
+
+		// Special case: Check for /) which ends array constructor
+		// The / should not be treated as division operator in this context
+		if p.currentTokenIs(token.Slash) && p.peekTokenIs(token.RParen) {
 			break
 		}
 
@@ -2508,7 +2364,7 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 		p.nextToken() // consume /
 		if p.currentTokenIs(token.RParen) {
 			endPos = p.current.start + len(p.current.lit) // end position after )
-			p.nextToken()                                  // consume )
+			p.nextToken()                                 // consume )
 		} else {
 			p.addError("expected ')' after array constructor")
 		}
@@ -2645,7 +2501,7 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 	// Collect all attributes
 	attributes := []token.Token{}
 
-	for p.isAttributeKeyword(p.current.tok) {
+	for p.current.tok.IsAttributeKeyword() {
 		attributes = append(attributes, p.current.tok)
 		p.nextToken()
 	}
@@ -2662,7 +2518,7 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 		if fn, ok := stmt.(*ast.Function); ok {
 			fn.Attributes = attributes
 		}
-	} else if p.isTypeKeyword(p.current.tok) {
+	} else if p.current.tok.IsTypeDeclaration() {
 		// Type-prefixed function with attributes
 		typeToken := p.current.tok
 		p.nextToken()
