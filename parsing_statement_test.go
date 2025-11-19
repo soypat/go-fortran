@@ -289,6 +289,142 @@ func TestStatementParsing(t *testing.T) {
 			},
 		},
 
+		// ===== Implied DO Loops in I/O Statements =====
+		{
+			name: "WRITE with implied DO loop - single expression",
+			src:  "WRITE(6,10109) (COVSCR(M,1), M=1, 6)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				writeStmt, ok := stmt.(*ast.WriteStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
+				}
+
+				if len(writeStmt.OutputList) != 1 {
+					t.Fatalf("Expected 1 output item, got %d", len(writeStmt.OutputList))
+				}
+
+				impliedDo, ok := writeStmt.OutputList[0].(*ast.ImpliedDoLoop)
+				if !ok {
+					t.Fatalf("Expected *ast.ImpliedDoLoop, got %T", writeStmt.OutputList[0])
+				}
+
+				if len(impliedDo.Expressions) != 1 {
+					t.Errorf("Expected 1 expression in implied DO, got %d", len(impliedDo.Expressions))
+				}
+
+				if impliedDo.LoopVar != "M" {
+					t.Errorf("Expected loop variable 'M', got %q", impliedDo.LoopVar)
+				}
+
+				// Check start value
+				startIdent, ok := impliedDo.Start.(*ast.IntegerLiteral)
+				if !ok {
+					t.Errorf("Expected start to be *ast.IntegerLiteral, got %T", impliedDo.Start)
+				} else if startIdent.Raw != "1" {
+					t.Errorf("Expected start value '1', got %q", startIdent.Raw)
+				}
+
+				// Check end value
+				endIdent, ok := impliedDo.End.(*ast.IntegerLiteral)
+				if !ok {
+					t.Errorf("Expected end to be *ast.IntegerLiteral, got %T", impliedDo.End)
+				} else if endIdent.Raw != "6" {
+					t.Errorf("Expected end value '6', got %q", endIdent.Raw)
+				}
+
+				// Stride should be nil
+				if impliedDo.Stride != nil {
+					t.Errorf("Expected nil stride, got %T", impliedDo.Stride)
+				}
+			},
+		},
+		{
+			name: "WRITE with implied DO loop - multiple expressions",
+			src:  "WRITE(IOUT6,10109) TOTAL, DEL, (COVSCR(M,1), M=1, 6)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				writeStmt, ok := stmt.(*ast.WriteStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
+				}
+
+				if len(writeStmt.OutputList) != 3 {
+					t.Fatalf("Expected 3 output items, got %d", len(writeStmt.OutputList))
+				}
+
+				// First two should be identifiers
+				for i := 0; i < 2; i++ {
+					if _, ok := writeStmt.OutputList[i].(*ast.Identifier); !ok {
+						t.Errorf("Expected OutputList[%d] to be *ast.Identifier, got %T", i, writeStmt.OutputList[i])
+					}
+				}
+
+				// Third should be implied DO loop
+				impliedDo, ok := writeStmt.OutputList[2].(*ast.ImpliedDoLoop)
+				if !ok {
+					t.Fatalf("Expected *ast.ImpliedDoLoop, got %T", writeStmt.OutputList[2])
+				}
+
+				if impliedDo.LoopVar != "M" {
+					t.Errorf("Expected loop variable 'M', got %q", impliedDo.LoopVar)
+				}
+			},
+		},
+		{
+			name: "implied DO loop with stride",
+			src:  "WRITE(6) (A(I), I=1, 10, 2)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				writeStmt, ok := stmt.(*ast.WriteStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
+				}
+
+				impliedDo, ok := writeStmt.OutputList[0].(*ast.ImpliedDoLoop)
+				if !ok {
+					t.Fatalf("Expected *ast.ImpliedDoLoop, got %T", writeStmt.OutputList[0])
+				}
+
+				if impliedDo.LoopVar != "I" {
+					t.Errorf("Expected loop variable 'I', got %q", impliedDo.LoopVar)
+				}
+
+				// Check stride is present
+				if impliedDo.Stride == nil {
+					t.Error("Expected non-nil stride")
+				} else {
+					strideVal, ok := impliedDo.Stride.(*ast.IntegerLiteral)
+					if !ok {
+						t.Errorf("Expected stride to be *ast.IntegerLiteral, got %T", impliedDo.Stride)
+					} else if strideVal.Raw != "2" {
+						t.Errorf("Expected stride value '2', got %q", strideVal.Raw)
+					}
+				}
+			},
+		},
+		{
+			name: "implied DO loop with multiple output expressions",
+			src:  "WRITE(6) (A(I), B(I), I=1, N)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				writeStmt, ok := stmt.(*ast.WriteStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
+				}
+
+				impliedDo, ok := writeStmt.OutputList[0].(*ast.ImpliedDoLoop)
+				if !ok {
+					t.Fatalf("Expected *ast.ImpliedDoLoop, got %T", writeStmt.OutputList[0])
+				}
+
+				// Should have 2 expressions before the loop control
+				if len(impliedDo.Expressions) != 2 {
+					t.Errorf("Expected 2 expressions in implied DO, got %d", len(impliedDo.Expressions))
+				}
+
+				if impliedDo.LoopVar != "I" {
+					t.Errorf("Expected loop variable 'I', got %q", impliedDo.LoopVar)
+				}
+			},
+		},
+
 		// ===== Block IF with ENDIF (F77 single token) =====
 		{
 			name: "block IF with ENDIF single token",

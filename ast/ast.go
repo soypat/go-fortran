@@ -645,6 +645,46 @@ func (pe *ParenExpr) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// ImpliedDoLoop represents an implied DO loop in I/O statements
+// Syntax: ( expression-list, loop-var = start, end [, stride] )
+// Example: (COVSCR(M,1), M=1, 6)
+type ImpliedDoLoop struct {
+	Expressions []Expression // The output list before the loop control
+	LoopVar     string       // Loop variable name
+	Start       Expression   // Start value
+	End         Expression   // End value
+	Stride      Expression   // Optional stride (nil if not specified)
+	Position
+}
+
+var _ Expression = (*ImpliedDoLoop)(nil) // compile time check of interface implementation.
+
+func (idl *ImpliedDoLoop) expressionNode() {}
+func (idl *ImpliedDoLoop) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "IMPLIED-DO"...)
+}
+func (idl *ImpliedDoLoop) AppendString(dst []byte) []byte {
+	dst = append(dst, '(')
+	for i, expr := range idl.Expressions {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		dst = expr.AppendString(dst)
+	}
+	dst = append(dst, ", "...)
+	dst = append(dst, idl.LoopVar...)
+	dst = append(dst, " = "...)
+	dst = idl.Start.AppendString(dst)
+	dst = append(dst, ", "...)
+	dst = idl.End.AppendString(dst)
+	if idl.Stride != nil {
+		dst = append(dst, ", "...)
+		dst = idl.Stride.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
 // Executable Statements (Phase 5)
 
 // AssignmentStmt represents an assignment statement (e.g., x = y + 1)

@@ -2172,6 +2172,87 @@ func (p *Parser90) parseExpression(minPrec int) ast.Expression {
 	return left
 }
 
+// tryParseImpliedDoLoop attempts to parse an implied DO loop after seeing ( expr ,
+// Syntax: ( expression-list, loop-var = start, end [, stride] )
+// Returns nil and adds an error if parsing fails
+func (p *Parser90) tryParseImpliedDoLoop(startPos int, firstExpr ast.Expression) *ast.ImpliedDoLoop {
+	expressions := []ast.Expression{firstExpr}
+
+	// Parse comma-separated expressions until we find identifier =
+	for p.currentTokenIs(token.Comma) {
+		p.nextToken() // consume comma
+
+		// Check if this is the loop control part: identifier =
+		if p.currentTokenIs(token.Identifier) && p.peekTokenIs(token.Equals) {
+			// Found the loop variable
+			loopVar := string(p.current.lit)
+			p.nextToken() // consume identifier
+			p.nextToken() // consume =
+
+			// Parse start expression
+			start := p.parseExpression(0)
+			if start == nil {
+				p.addError("expected start expression in implied DO loop")
+				return nil
+			}
+
+			// Expect comma
+			if !p.currentTokenIs(token.Comma) {
+				p.addError("expected ',' after start expression in implied DO loop")
+				return nil
+			}
+			p.nextToken() // consume comma
+
+			// Parse end expression
+			end := p.parseExpression(0)
+			if end == nil {
+				p.addError("expected end expression in implied DO loop")
+				return nil
+			}
+
+			// Check for optional stride
+			var stride ast.Expression
+			if p.currentTokenIs(token.Comma) {
+				p.nextToken() // consume comma
+				stride = p.parseExpression(0)
+				if stride == nil {
+					p.addError("expected stride expression in implied DO loop")
+					return nil
+				}
+			}
+
+			// Expect closing paren
+			if !p.currentTokenIs(token.RParen) {
+				p.addError("expected ')' to close implied DO loop")
+				return nil
+			}
+			endPos := p.current.start
+			p.nextToken() // consume )
+
+			return &ast.ImpliedDoLoop{
+				Expressions: expressions,
+				LoopVar:     loopVar,
+				Start:       start,
+				End:         end,
+				Stride:      stride,
+				Position:    ast.Pos(startPos, endPos),
+			}
+		}
+
+		// Not the loop control yet, parse another expression
+		expr := p.parseExpression(0)
+		if expr == nil {
+			p.addError("expected expression in implied DO loop")
+			return nil
+		}
+		expressions = append(expressions, expr)
+	}
+
+	// If we got here, we didn't find the identifier = pattern
+	p.addError("failed to parse implied DO loop: expected 'identifier =' pattern")
+	return nil
+}
+
 // parsePrimaryExpr parses primary expressions: literals, identifiers, function calls,
 // array references, and parenthesized expressions
 func (p *Parser90) parsePrimaryExpr() ast.Expression {
@@ -2204,6 +2285,17 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 			p.addError("expected expression after '('")
 			return nil
 		}
+
+		// Check for implied DO loop: (expr1, expr2, ..., var = start, end [, stride])
+		if p.currentTokenIs(token.Comma) {
+			// Try to parse as implied DO loop
+			if impliedDo := p.tryParseImpliedDoLoop(startPos, expr); impliedDo != nil {
+				return impliedDo
+			}
+			// If tryParseImpliedDoLoop returns nil, it has already added an error
+			return nil
+		}
+
 		if !p.currentTokenIs(token.RParen) {
 			p.addError("expected ')' after expression")
 			return nil
