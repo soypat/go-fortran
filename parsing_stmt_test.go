@@ -607,6 +607,47 @@ func TestStatementParsing(t *testing.T) {
 				}
 			},
 		},
+
+		// ===== IMPLICIT Statements =====
+		{
+			name: "IMPLICIT NONE uppercase",
+			src:  "IMPLICIT NONE",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				implStmt, ok := stmt.(*ast.ImplicitStatement)
+				if !ok {
+					t.Fatalf("Expected *ast.ImplicitStatement, got %T", stmt)
+				}
+				if !implStmt.IsNone {
+					t.Error("Expected IsNone to be true")
+				}
+			},
+		},
+		{
+			name: "IMPLICIT NONE lowercase",
+			src:  "implicit none",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				implStmt, ok := stmt.(*ast.ImplicitStatement)
+				if !ok {
+					t.Fatalf("Expected *ast.ImplicitStatement, got %T", stmt)
+				}
+				if !implStmt.IsNone {
+					t.Error("Expected IsNone to be true")
+				}
+			},
+		},
+		{
+			name: "IMPLICIT NONE mixed case",
+			src:  "ImPlIcIt NoNe",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				implStmt, ok := stmt.(*ast.ImplicitStatement)
+				if !ok {
+					t.Fatalf("Expected *ast.ImplicitStatement, got %T", stmt)
+				}
+				if !implStmt.IsNone {
+					t.Error("Expected IsNone to be true")
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

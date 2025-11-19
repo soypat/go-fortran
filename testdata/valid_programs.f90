@@ -19,8 +19,8 @@ PROGRAM test_comment
 	END PROGRAM
 
 PROGRAM test_cont
-	INTEGER :: very_long_variable_name_that_needs &
-	           continuation
+	INTEGER :: very_long_variable_name_that_needs&
+	           &continuation
 	END PROGRAM
 
 PROGRAM test_bare_end

@@ -497,6 +497,40 @@ func TestExpressionParsing(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "function call with expression argument: fact(n-1, result)",
+			src:  "fact(n-1, result)",
+			validate: func(t *testing.T, expr ast.Expression) {
+				funcCall, ok := expr.(*ast.FunctionCall)
+				if !ok {
+					t.Fatalf("Expected *ast.FunctionCall, got %T", expr)
+				}
+				if funcCall.Name != "fact" {
+					t.Errorf("Expected function name 'fact', got %s", funcCall.Name)
+				}
+				if len(funcCall.Args) != 2 {
+					t.Fatalf("Expected 2 arguments, got %d", len(funcCall.Args))
+				}
+
+				// First argument should be binary expression (n-1)
+				binExpr, ok := funcCall.Args[0].(*ast.BinaryExpr)
+				if !ok {
+					t.Fatalf("Expected first arg to be *ast.BinaryExpr, got %T", funcCall.Args[0])
+				}
+				if binExpr.Op.String() != "-" {
+					t.Errorf("Expected first arg op '-', got %s", binExpr.Op)
+				}
+
+				// Second argument should be identifier 'result'
+				ident, ok := funcCall.Args[1].(*ast.Identifier)
+				if !ok {
+					t.Fatalf("Expected second arg to be *ast.Identifier, got %T", funcCall.Args[1])
+				}
+				if ident.Value != "result" {
+					t.Errorf("Expected identifier 'result', got %s", ident.Value)
+				}
+			},
+		},
 
 		// ===== Array References =====
 		// NOTE: Without a symbol table, array references are indistinguishable from function calls
@@ -686,6 +720,54 @@ func TestExpressionParsing(t *testing.T) {
 				_, ok = leftExp.Left.(*ast.FunctionCall)
 				if !ok {
 					t.Fatalf("Expected left.left to be *ast.FunctionCall, got %T", leftExp.Left)
+				}
+			},
+		},
+
+		// ===== Array Constructors (F90) =====
+		{
+			name: "array constructor with single element: (/ 0 /)",
+			src:  "(/ 0 /)",
+			validate: func(t *testing.T, expr ast.Expression) {
+				// Array constructor is parsed as a special kind of expression
+				// For now, we just verify it parses without error
+				// The structure depends on how the parser handles array constructors
+				constr, ok := expr.(*ast.ArrayConstructor)
+				if !ok {
+					t.Fatalf("failed to convert %T", expr)
+				}
+				v, ok := constr.Values[0].(*ast.IntegerLiteral)
+				if !ok {
+					t.Fatalf("failed to convert %T", v)
+				} else if v.Raw != "0" {
+					t.Errorf("expected raw 0, got %s", v.Raw)
+				}
+			},
+		},
+		{
+			name: "array constructor in comparison: k == (/ 0 /)",
+			src:  "k == (/ 0 /)",
+			validate: func(t *testing.T, expr ast.Expression) {
+				binExpr, ok := expr.(*ast.BinaryExpr)
+				if !ok {
+					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
+				}
+				if binExpr.Op.String() != "==" {
+					t.Errorf("Expected op '==', got %s", binExpr.Op)
+				}
+
+				// Left should be identifier 'k'
+				ident, ok := binExpr.Left.(*ast.Identifier)
+				if !ok {
+					t.Fatalf("Expected left to be *ast.Identifier, got %T", binExpr.Left)
+				}
+				if ident.Value != "k" {
+					t.Errorf("Expected identifier 'k', got %s", ident.Value)
+				}
+
+				// Right should be the array constructor
+				if binExpr.Right == nil {
+					t.Fatal("Right side of comparison is nil")
 				}
 			},
 		},

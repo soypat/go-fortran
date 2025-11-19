@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/soypat/go-fortran/ast"
 	"github.com/soypat/go-fortran/token"
@@ -1348,7 +1349,7 @@ func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
 	stmt := &ast.ImplicitStatement{}
 	p.nextToken()
 
-	if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "NONE" {
+	if p.currentTokenIs(token.Identifier) && strings.EqualFold(string(p.current.lit), "NONE") {
 		if *sawImplicit {
 			p.addError("duplicate IMPLICIT statement")
 		} else if *sawDecl {
