@@ -70,7 +70,8 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 	}
 	if p.stmtFns == nil {
 		p.stmtFns = make(map[token.Token]statementParseFn)
-	} else if p.maxErrs == 0 {
+	}
+	if p.maxErrs == 0 {
 		p.maxErrs = 20
 	}
 	*p = Parser90{
@@ -93,7 +94,7 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 }
 
 func (p *Parser90) nextToken() {
-	if p.IsDone() {
+	if p.current.tok == token.EOF {
 		return
 	}
 	tok, start, lit := p.l.NextToken()
@@ -108,6 +109,13 @@ func (p *Parser90) nextToken() {
 	p.peek.tok = tok
 	p.peek.line = line
 	p.peek.col = col
+	if p.peek.tok == token.Illegal {
+		err := "illegal token"
+		if p.l.Err() != nil {
+			err = p.l.Err().Error()
+		}
+		p.addErrorWithPos(p.l.sourcePos(), err)
+	}
 }
 
 func (p *Parser90) sourcePos() sourcePos {
@@ -120,7 +128,7 @@ func (p *Parser90) sourcePos() sourcePos {
 }
 
 func (p *Parser90) IsDone() bool {
-	return p.l.IsDone() && p.current.tok.IsIllegalOrEOF()
+	return p.current.tok == token.EOF || len(p.errors) >= p.maxErrs
 }
 
 func (p *Parser90) registerStatement(tokenType token.Token, fn statementParseFn) {
@@ -139,7 +147,7 @@ type toktuple struct {
 // Returns nil when EOF is reached or no more units are available.
 // This method can be called repeatedly to incrementally parse a Fortran file.
 // Phase 1: Parses only top-level program units (PROGRAM, SUBROUTINE, FUNCTION, MODULE)
-func (p *Parser90) ParseNextProgramUnit() ast.ProgramUnit {
+func (p *Parser90) ParseNextProgramUnit() (unit ast.ProgramUnit) {
 	puStart := p.sourcePos()
 	panicked := true
 	defer func() {
@@ -149,32 +157,21 @@ func (p *Parser90) ParseNextProgramUnit() ast.ProgramUnit {
 			fmt.Printf("%v\n%v\n", &p.errors[len(p.errors)-1], &p.errors[len(p.errors)-2])
 		}
 	}()
-	for {
+
+	for !p.IsDone() && unit == nil {
 		// Skip leading newlines and comments
 		p.skipNewlinesAndComments()
 
-		// Check for EOF
-		if p.currentTokenIs(token.EOF) {
-			panicked = false
-			return nil
-		}
-
 		// Parse one program unit
 		puStart = p.sourcePos()
-		unit := p.parseTopLevelUnit()
+		unit = p.parseTopLevelUnit()
 
 		// Skip trailing newlines after this unit
 		p.skipNewlinesAndComments()
-
-		// If parsing succeeded, return the unit
-		if unit != nil {
-			panicked = false
-			return unit
-		} else if p.IsDone() {
-			panicked = false
-			return nil
-		}
 	}
+	// If parsing succeeded, return the unit, nil or otherwise.
+	panicked = false
+	return unit
 }
 
 // registerTopLevelParsers registers all statement-level parsing functions
@@ -202,6 +199,9 @@ func (p *Parser90) registerTopLevelParsers() {
 
 // parseTopLevelUnit dispatches to the appropriate registered statement parser
 func (p *Parser90) parseTopLevelUnit() ast.ProgramUnit {
+	if p.IsDone() {
+		return nil
+	}
 	// Special case: BLOCK DATA (BLOCK is an identifier, DATA is a keyword)
 	if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "BLOCK" && p.peekTokenIs(token.DATA) {
 		return p.parseBlockData()
@@ -230,7 +230,31 @@ func (p *Parser90) parseTopLevelUnit() ast.ProgramUnit {
 
 // loopUntil returns true as long as current token not in set and EOF not hit.
 func (p *Parser90) loopUntil(t ...token.Token) bool {
-	if p.current.tok == token.EOF || p.current.tok == 0 {
+	if p.IsDone() {
+		return false
+	}
+	for i := range t {
+		if t[i] == p.current.tok {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *Parser90) loopWhile(t ...token.Token) bool {
+	if p.IsDone() {
+		return false
+	}
+	for i := range t {
+		if t[i] == p.current.tok {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Parser90) loopWhileNot(t ...token.Token) bool {
+	if p.IsDone() {
 		return false
 	}
 	for i := range t {
@@ -320,7 +344,7 @@ func (p *Parser90) expectEndProgramUnit(keyword token.Token, context string, exp
 }
 
 func (p *Parser90) skipNewlinesAndComments() {
-	for p.currentTokenIs(token.NewLine) || p.currentTokenIs(token.LineComment) {
+	for p.loopWhile(token.NewLine, token.LineComment) {
 		p.nextToken()
 		if p.IsDone() {
 			break
@@ -627,7 +651,7 @@ func (p *Parser90) parseWriteStmt() ast.Statement {
 
 	// Skip optional format specifier (could be comma followed by format)
 	// For now, we'll just skip to the closing paren
-	for !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.RParen) {
 		p.nextToken()
 	}
 
@@ -636,7 +660,7 @@ func (p *Parser90) parseWriteStmt() ast.Statement {
 	}
 
 	// Parse output list (comma-separated expressions)
-	for !p.currentTokenIs(token.NewLine) && !p.currentTokenIs(token.EOF) {
+	for p.loopUntil(token.NewLine) {
 		if expr := p.parseExpression(0); expr != nil {
 			stmt.OutputList = append(stmt.OutputList, expr)
 		}
@@ -739,7 +763,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 	}
 
 	// Parse ELSE IF parts
-	for p.currentTokenIs(token.ELSE) && p.peekTokenIs(token.IF) {
+	for p.currentTokenIs(token.ELSE) && p.peekTokenIs(token.IF) && !p.IsDone() {
 		p.nextToken() // consume ELSE
 		p.nextToken() // consume IF
 
@@ -852,7 +876,7 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 	p.skipNewlinesAndComments()
 
 	// Parse loop body
-	for {
+	for !p.IsDone() {
 		p.skipNewlinesAndComments()
 		if p.currentTokenIs(token.END) && p.peekTokenIs(token.DO) {
 			break
@@ -1020,7 +1044,7 @@ func (p *Parser90) skipToNextStatement() {
 func (p *Parser90) skipTypeDefinition() {
 	p.nextToken() // Skip TYPE
 	depth := 1
-	for depth > 0 && !p.currentTokenIs(token.EOF) {
+	for depth > 0 && !p.IsDone() {
 		if p.currentTokenIs(token.TYPE) && !p.peekTokenIs(token.LParen) {
 			depth++
 			p.nextToken()
@@ -1042,7 +1066,7 @@ func (p *Parser90) skipTypeDefinition() {
 func (p *Parser90) skipInterfaceBlock() {
 	p.nextToken() // Skip INTERFACE
 	depth := 1
-	for depth > 0 && !p.currentTokenIs(token.EOF) {
+	for depth > 0 && !p.IsDone() {
 		if p.currentTokenIs(token.INTERFACE) {
 			depth++
 			p.nextToken()
@@ -1262,7 +1286,7 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 		// Skip (typename)
 		depth := 1
 		p.nextToken()
-		for depth > 0 && !p.currentTokenIs(token.EOF) {
+		for depth > 0 && !p.IsDone() {
 			if p.currentTokenIs(token.LParen) {
 				depth++
 			} else if p.currentTokenIs(token.RParen) {
@@ -1273,8 +1297,8 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	}
 
 	// Parse attributes
-	if p.currentTokenIs(token.Comma) {
-		for p.currentTokenIs(token.Comma) {
+	if p.currentTokenIs(token.Comma) { // TODO remove this if statement?
+		for p.loopWhile(token.Comma) {
 			p.nextToken()
 			if p.current.tok.IsAttribute() {
 				stmt.Attributes = append(stmt.Attributes, p.current.tok)
@@ -1407,7 +1431,7 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		// Skip (typename)
 		depth := 1
 		p.nextToken()
-		for depth > 0 && !p.currentTokenIs(token.EOF) {
+		for depth > 0 && !p.IsDone() {
 			if p.currentTokenIs(token.LParen) {
 				depth++
 			} else if p.currentTokenIs(token.RParen) {
@@ -1421,7 +1445,7 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 	var intentType ast.IntentType
 	var arraySpec *ast.ArraySpec
 	if p.currentTokenIs(token.Comma) {
-		for p.currentTokenIs(token.Comma) {
+		for p.loopWhile(token.Comma) {
 			p.nextToken()
 			if p.current.tok.IsAttribute() {
 				stmt.Attributes = append(stmt.Attributes, p.current.tok)
@@ -1451,7 +1475,7 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 						// Skip to closing paren
 						depth := 1
 						p.nextToken()
-						for depth > 0 && !p.currentTokenIs(token.EOF) {
+						for depth > 0 && !p.IsDone() {
 							if p.currentTokenIs(token.LParen) {
 								depth++
 							} else if p.currentTokenIs(token.RParen) {
@@ -1477,7 +1501,7 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 				if p.currentTokenIs(token.LParen) {
 					depth := 1
 					p.nextToken()
-					for depth > 0 && !p.currentTokenIs(token.EOF) {
+					for depth > 0 && !p.IsDone() {
 						if p.currentTokenIs(token.LParen) {
 							depth++
 						} else if p.currentTokenIs(token.RParen) {
@@ -1985,7 +2009,7 @@ func (p *Parser90) parseExpression(minPrec int) ast.Expression {
 	}
 	start := left.SourcePos().Start()
 	// Precedence climbing
-	for {
+	for !p.IsDone() {
 		// Check if current token is a binary operator
 		prec := p.getOperatorPrecedence(p.current.tok)
 		if prec == 0 || prec < minPrec {
@@ -2048,7 +2072,7 @@ func (p *Parser90) tryParseImpliedDoLoop(startPos int, firstExpr ast.Expression)
 	expressions := []ast.Expression{firstExpr}
 
 	// Parse comma-separated expressions until we find identifier =
-	for p.currentTokenIs(token.Comma) {
+	for p.loopWhile(token.Comma) {
 		p.nextToken() // consume comma
 
 		// Check if this is the loop control part: identifier =
@@ -2326,7 +2350,7 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 
 	// Parse array elements until we find /)
 	// Array constructors can span multiple lines
-	for !p.currentTokenIs(token.EOF) {
+	for !p.IsDone() {
 		// Check for /) which closes the array constructor
 		if p.currentTokenIs(token.Slash) && p.peekTokenIs(token.RParen) {
 			break
@@ -2335,7 +2359,7 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 		val := p.parseExpression(0)
 		if val == nil {
 			// If expression parsing fails, try to recover by looking for /)
-			for !p.currentTokenIs(token.EOF) {
+			for !p.IsDone() {
 				if p.currentTokenIs(token.Slash) && p.peekTokenIs(token.RParen) {
 					break
 				}
@@ -2417,7 +2441,7 @@ func (p *Parser90) parseArraySection(name string, startPos int) ast.Expression {
 func (p *Parser90) collectBlockDataBody() []ast.TokenTuple {
 	tokens := []ast.TokenTuple{}
 
-	for !p.currentTokenIs(token.EOF) {
+	for !p.IsDone() {
 		if p.currentTokenIs(token.END) {
 			// BLOCK DATA ends with END (with optional BLOCK DATA or name after)
 			return tokens
@@ -2463,7 +2487,7 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 				depth := 1
 				typeSpec += "("
 				p.nextToken()
-				for depth > 0 && !p.currentTokenIs(token.EOF) {
+				for depth > 0 && !p.IsDone() {
 					if p.currentTokenIs(token.LParen) {
 						depth++
 					} else if p.currentTokenIs(token.RParen) {
@@ -2501,7 +2525,7 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 	// Collect all attributes
 	attributes := []token.Token{}
 
-	for p.current.tok.IsAttributeKeyword() {
+	for p.current.tok.IsAttributeKeyword() && !p.IsDone() {
 		attributes = append(attributes, p.current.tok)
 		p.nextToken()
 	}
