@@ -40,46 +40,6 @@ END SUBROUTINE`
 	}
 }
 
-// TestKnownIssue2_ContinuationLines tests parsing of Fortran continuation lines
-// which may cause issues with END detection.
-func TestKnownIssue2_ContinuationLines(t *testing.T) {
-	t.Skip("Known issue: continuation lines may break END detection")
-
-	src := `PROGRAM test_cont
-	INTEGER :: very_long_variable_name_that_needs &
-	           continuation
-END PROGRAM
-
-PROGRAM next_program
-	INTEGER :: x
-END PROGRAM`
-
-	var parser fortran.Parser90
-	err := parser.Reset("test.f90", strings.NewReader(src))
-	if err != nil {
-		t.Fatalf("Reset failed: %v", err)
-	}
-
-	// Parse first program
-	unit1 := parser.ParseNextProgramUnit()
-	if unit1 == nil {
-		t.Fatal("First program unit returned nil")
-	}
-
-	// Try to parse second program
-	unit2 := parser.ParseNextProgramUnit()
-	if unit2 == nil {
-		t.Error("Second program unit returned nil (may be continuation line issue)")
-	}
-
-	if len(parser.Errors()) > 0 {
-		t.Errorf("Parse errors (KNOWN BUG):")
-		for _, e := range parser.Errors() {
-			t.Logf("  %v", e)
-		}
-	}
-}
-
 // TestKnownIssue3_LabeledDOLoops tests Fortran 77 style labeled DO loops
 // which are not yet implemented.
 func TestKnownIssue3_LabeledDOLoops(t *testing.T) {

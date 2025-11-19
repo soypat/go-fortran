@@ -648,6 +648,83 @@ func TestStatementParsing(t *testing.T) {
 				}
 			},
 		},
+
+		// ===== Edge cases for construct-ending keywords =====
+		// These tests verify that parsing loops stop at construct-ending keywords
+		// and don't consume tokens from parent scopes (bug fix for nested control structures)
+		{
+			name: "nested IF with WRITE near ENDIF",
+			src: `IF(X.GT.0) THEN
+	IF(Y.GT.0) THEN
+		WRITE(6,*) 'test'
+	ENDIF
+ENDIF`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ifStmt, ok := stmt.(*ast.IfStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
+				}
+				// Verify outer IF has inner IF in THEN part
+				if len(ifStmt.ThenPart) != 1 {
+					t.Fatalf("Expected 1 statement in outer IF THEN part, got %d", len(ifStmt.ThenPart))
+				}
+				innerIf, ok := ifStmt.ThenPart[0].(*ast.IfStmt)
+				if !ok {
+					t.Errorf("Expected inner statement to be *ast.IfStmt, got %T", ifStmt.ThenPart[0])
+				}
+				// Verify inner IF has WRITE statement
+				if len(innerIf.ThenPart) != 1 {
+					t.Errorf("Expected 1 statement in inner IF THEN part, got %d", len(innerIf.ThenPart))
+				}
+			},
+		},
+		{
+			name: "WRITE in ELSE block near ENDIF",
+			src: `IF(FLAG) THEN
+	X = 1
+ELSE
+	WRITE(6,*) 'message'
+ENDIF`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ifStmt, ok := stmt.(*ast.IfStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
+				}
+				// Verify ELSE part has WRITE statement
+				if len(ifStmt.ElsePart) != 1 {
+					t.Fatalf("Expected 1 statement in ELSE part, got %d", len(ifStmt.ElsePart))
+				}
+			},
+		},
+		{
+			name: "multiple nested IFs with WRITE statements",
+			src: `IF(A) THEN
+	IF(B) THEN
+		WRITE(6,*) 'b'
+	ENDIF
+	IF(C) THEN
+		WRITE(6,*) 'c'
+	ELSE
+		WRITE(6,*) 'd'
+	ENDIF
+ENDIF`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ifStmt, ok := stmt.(*ast.IfStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
+				}
+				// Verify outer IF has 2 inner IFs
+				if len(ifStmt.ThenPart) != 2 {
+					t.Fatalf("Expected 2 statements in outer IF THEN part, got %d", len(ifStmt.ThenPart))
+				}
+				// Both should be IF statements
+				for i, s := range ifStmt.ThenPart {
+					if _, ok := s.(*ast.IfStmt); !ok {
+						t.Errorf("Expected statement %d to be *ast.IfStmt, got %T", i, s)
+					}
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

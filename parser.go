@@ -661,7 +661,8 @@ func (p *Parser90) parseWriteStmt() ast.Statement {
 	}
 
 	// Parse output list (comma-separated expressions)
-	for p.loopUntil(token.NewLine) {
+	// Stop at newline or any construct-ending keyword to avoid consuming tokens from parent scope
+	for p.loopUntil(token.NewLine, token.END, token.ENDIF, token.ENDIF2, token.ENDDO, token.ENDDO2, token.ELSE, token.ELSEIF) {
 		if expr := p.parseExpression(0); expr != nil {
 			stmt.OutputList = append(stmt.OutputList, expr)
 		}
@@ -1031,9 +1032,9 @@ func (p *Parser90) isExecutableStatement() bool {
 	return false
 }
 
-// skipToNextStatement skips tokens until the next newline
+// skipToNextStatement skips tokens until the next newline or construct-ending keyword
 func (p *Parser90) skipToNextStatement() {
-	for p.loopUntil(token.NewLine) {
+	for p.loopUntil(token.NewLine, token.END, token.ENDIF, token.ENDIF2, token.ENDDO, token.ENDDO2, token.ELSE, token.ELSEIF) {
 		p.nextToken()
 	}
 	if p.currentTokenIs(token.NewLine) {
@@ -1326,8 +1327,8 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 		// Parse initialization expression
 		if p.currentTokenIs(token.Equals) || p.currentTokenIs(token.PointerAssign) {
 			p.nextToken() // consume = or =>
-			// For now, just consume the expression
-			for p.loopUntil(token.NewLine, token.Comma) {
+			// For now, just consume the expression, stop at construct endings
+			for p.loopUntil(token.NewLine, token.Comma, token.END, token.ENDIF, token.ENDIF2, token.ENDDO, token.ENDDO2, token.ELSE, token.ELSEIF) {
 				p.nextToken()
 			}
 		}
@@ -1564,7 +1565,8 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 			}
 
 			depth := 0
-			for p.loopUntil(token.NewLine) {
+			// Stop at newline or any construct-ending keyword to avoid consuming tokens from parent scope
+			for p.loopUntil(token.NewLine, token.END, token.ENDIF, token.ENDIF2, token.ENDDO, token.ENDDO2, token.ELSE, token.ELSEIF) {
 				if p.currentTokenIs(token.LParen) {
 					depth++
 				} else if p.currentTokenIs(token.RParen) {
@@ -2513,9 +2515,9 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 	}
 
 	// Otherwise, this is a type declaration (Phase 2)
-	// For now, skip this line
+	// For now, skip this line, stop at construct endings
 	p.addError("type declarations not yet supported in Phase 1")
-	for p.loopUntil(token.NewLine) {
+	for p.loopUntil(token.NewLine, token.END, token.ENDIF, token.ENDIF2, token.ENDDO, token.ENDDO2, token.ELSE, token.ELSEIF) {
 		p.nextToken()
 	}
 	return nil
