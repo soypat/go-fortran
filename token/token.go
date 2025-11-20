@@ -43,10 +43,8 @@ const (
 	ELSE      // ELSE
 	ELSEIF    // ELSEIF
 	ENDIF     // ENDIF
-	ENDIF2    // END IF (with space)
 	DO        // DO
 	ENDDO     // ENDDO
-	ENDDO2    // END DO (with space)
 	WHILE     // WHILE
 	SELECT    // SELECT
 	CASE      // CASE
@@ -227,6 +225,18 @@ func (tok Token) IsExecutableStatement() bool {
 
 func (tok Token) IsIllegalOrEOF() bool {
 	return tok == EOF || tok == Illegal
+}
+
+// IsEndOrElse returns true if the token is a construct-ending keyword.
+// These tokens typically mark the end of a control structure or block.
+func (tok Token) IsEndOrElse() bool {
+	switch tok {
+	case END, ENDIF, ENDDO, ELSE, ELSEIF,
+		ENDPROGRAM, ENDSUBROUTINE, ENDFUNCTION, ENDMODULE,
+		ENDINTERFACE, ENDTYPE, ENDSELECT, ENDWHERE:
+		return true
+	}
+	return false
 }
 
 // IsTypeDeclaration returns true if the token is a type declaration keyword.
