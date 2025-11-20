@@ -788,35 +788,32 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 	parenDepth := 1
 
 	for parenDepth > 0 && !p.IsDone() {
-		if p.currentTokenIs(token.RParen) {
+		if p.consumeIf(token.RParen) {
 			parenDepth--
 			if parenDepth == 0 {
-				p.nextToken()
 				break
 			}
-			p.nextToken() // consume nested )
 			continue
 		}
 
-		if p.currentTokenIs(token.LParen) {
+		if p.consumeIf(token.LParen) {
 			parenDepth++
-			p.nextToken() // consume nested (
 			continue
 		}
 
 		// Parse one spec (expression, keyword=value, etc.)
-		// Special case: END is a keyword but can be used as identifier in I/O specs
+		// I/O specs can be: unit, format, KEYWORD=value
 		var spec ast.Expression
+
+		// Special case: END is a keyword but can be used as identifier in I/O specs
 		if p.currentTokenIs(token.END) {
-			// Treat END as an identifier in I/O context
 			spec = &ast.Identifier{
 				Value:    "END",
 				Position: ast.Pos(p.current.start, p.current.start+len(p.current.lit)),
 			}
 			p.nextToken()
 			// Check for assignment (END=500)
-			if p.currentTokenIs(token.Equals) {
-				p.nextToken() // consume =
+			if p.consumeIf(token.Equals) {
 				value := p.parseExpression(0)
 				if value != nil {
 					spec = &ast.BinaryExpr{
@@ -828,7 +825,21 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 				}
 			}
 		} else {
+			// Parse a spec: could be expr or KEYWORD=value
 			spec = p.parseExpression(0)
+			// Check if this is a keyword=value pattern
+			if spec != nil && p.consumeIf(token.Equals) {
+				// This is keyword=value
+				value := p.parseExpression(0)
+				if value != nil {
+					spec = &ast.BinaryExpr{
+						Left:     spec,
+						Op:       token.Equals,
+						Right:    value,
+						Position: ast.Pos(spec.SourcePos().Start(), value.SourcePos().End()),
+					}
+				}
+			}
 		}
 
 		if spec != nil {
@@ -838,6 +849,11 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 			break
 		}
 
+		// Loop continuation logic for comma-separated I/O control specs:
+		// - If comma found: consume it and continue to next spec
+		// - If no comma but at RParen: continue (RParen will be handled at top of loop)
+		// - If no comma and not at RParen: malformed spec list, break
+		// This handles both trailing comma cases: "READ(14,)" and "READ(14)"
 		if !p.consumeIf(token.Comma) && !p.currentTokenIs(token.RParen) {
 			break
 		}
@@ -845,7 +861,7 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 
 	// Parse I/O list (comma-separated expressions)
 	var ioList []ast.Expression
-	for !p.currentTokenIs(token.NewLine) && !p.current.tok.IsEnd() && !p.IsDone() {
+	for p.loopUntilEndElseOr(token.NewLine) {
 		if expr := p.parseExpression(0); expr != nil {
 			ioList = append(ioList, expr)
 		}

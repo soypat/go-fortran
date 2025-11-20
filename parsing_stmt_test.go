@@ -454,6 +454,122 @@ func TestStatementParsing(t *testing.T) {
 			},
 		},
 
+		// ===== I/O statements with keyword=value control specs =====
+		{
+			name: "READ with END= keyword",
+			src:  "READ(14,5000,END=500) X",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				readStmt, ok := stmt.(*ast.ReadStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ReadStmt, got %T", stmt)
+				}
+
+				// Should have 3 specs: unit, format, END=500
+				// (Unit is parsed from first spec)
+				if readStmt.Unit == nil {
+					t.Error("Expected non-nil Unit")
+				}
+
+				// Check we have at least one input
+				if len(readStmt.InputList) == 0 {
+					t.Error("Expected at least one input")
+				}
+			},
+		},
+		{
+			name: "READ with IOSTAT= keyword",
+			src:  "READ(14,5000,IOSTAT=IOS) X, Y",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				readStmt, ok := stmt.(*ast.ReadStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ReadStmt, got %T", stmt)
+				}
+
+				if readStmt.Unit == nil {
+					t.Error("Expected non-nil Unit")
+				}
+
+				// Check we have two inputs
+				if len(readStmt.InputList) != 2 {
+					t.Errorf("Expected 2 inputs, got %d", len(readStmt.InputList))
+				}
+			},
+		},
+		{
+			name: "READ with multiple keyword=value specs",
+			src:  "READ(14,81200,IOSTAT=IOS,END=60000) X",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				readStmt, ok := stmt.(*ast.ReadStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ReadStmt, got %T", stmt)
+				}
+
+				// This was the failing case - should parse successfully
+				if readStmt.Unit == nil {
+					t.Error("Expected non-nil Unit")
+				}
+
+				if len(readStmt.InputList) != 1 {
+					t.Errorf("Expected 1 input, got %d", len(readStmt.InputList))
+				}
+			},
+		},
+		{
+			name: "WRITE with FMT= keyword",
+			src:  "WRITE(6,FMT=100) X, Y",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				writeStmt, ok := stmt.(*ast.WriteStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
+				}
+
+				if writeStmt.Unit == nil {
+					t.Error("Expected non-nil Unit")
+				}
+
+				if len(writeStmt.OutputList) != 2 {
+					t.Errorf("Expected 2 outputs, got %d", len(writeStmt.OutputList))
+				}
+			},
+		},
+		{
+			name: "READ with ERR= keyword",
+			src:  "READ(14,5000,ERR=999) A, B, C",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				readStmt, ok := stmt.(*ast.ReadStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ReadStmt, got %T", stmt)
+				}
+
+				if readStmt.Unit == nil {
+					t.Error("Expected non-nil Unit")
+				}
+
+				if len(readStmt.InputList) != 3 {
+					t.Errorf("Expected 3 inputs, got %d", len(readStmt.InputList))
+				}
+			},
+		},
+		{
+			name: "WRITE with UNIT= and FMT= keywords",
+			src:  "WRITE(UNIT=6,FMT=100) MESSAGE",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				writeStmt, ok := stmt.(*ast.WriteStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
+				}
+
+				// With keyword form, both should be parsed
+				if writeStmt.Unit == nil {
+					t.Error("Expected non-nil Unit")
+				}
+
+				if len(writeStmt.OutputList) != 1 {
+					t.Errorf("Expected 1 output, got %d", len(writeStmt.OutputList))
+				}
+			},
+		},
+
 		// ===== Block IF with ENDIF (F77 single token) =====
 		{
 			name: "block IF with ENDIF single token",
