@@ -211,6 +211,35 @@ func TestStatementParsing(t *testing.T) {
 			},
 		},
 		{
+			name: "computed GOTO with comma before variable",
+			src:  "GO TO (1000,1300,1700,1900,2100,2300),MCALL",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				computedGoto, ok := stmt.(*ast.ComputedGotoStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ComputedGotoStmt, got %T", stmt)
+				}
+
+				expectedLabels := []string{"1000", "1300", "1700", "1900", "2100", "2300"}
+				if len(computedGoto.Labels) != len(expectedLabels) {
+					t.Fatalf("Expected %d labels, got %d", len(expectedLabels), len(computedGoto.Labels))
+				}
+
+				for i, expected := range expectedLabels {
+					if computedGoto.Labels[i] != expected {
+						t.Errorf("Expected label[%d] = %q, got %q", i, expected, computedGoto.Labels[i])
+					}
+				}
+
+				// Check expression is MCALL
+				ident, ok := computedGoto.Expression.(*ast.Identifier)
+				if !ok {
+					t.Errorf("Expected expression to be *ast.Identifier, got %T", computedGoto.Expression)
+				} else if ident.Value != "MCALL" {
+					t.Errorf("Expected expression 'MCALL', got %q", ident.Value)
+				}
+			},
+		},
+		{
 			name: "GOTO in inline IF",
 			src:  "IF(NPARC.LE.0.AND..NOT.LSTARC) GO TO 2000",
 			validate: func(t *testing.T, stmt ast.Statement) {

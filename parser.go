@@ -723,6 +723,9 @@ func (p *Parser90) parseGotoStmt() ast.Statement {
 			return nil
 		}
 
+		// Optional comma before the index expression (both forms are valid in Fortran)
+		p.consumeIf(token.Comma)
+
 		// Parse the index expression
 		computedStmt.Expression = p.parseExpression(0)
 		if computedStmt.Expression == nil {
