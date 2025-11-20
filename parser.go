@@ -589,6 +589,20 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 	return stmts
 }
 
+// currentIsGOTO check for "GO TO" (two separate tokens) returning 2
+// or for simpler conjoined GOTO returning 1. Returns 0 if not GOTO found.
+func (p *Parser90) currentIsGOTO() int {
+	switch {
+	case p.current.tok == token.GOTO:
+		return 1
+	case string(p.current.lit) == "GO" && string(p.peek.lit) == "TO":
+		return 2
+	case string(p.current.lit) == "go" && string(p.peek.lit) == "to":
+		return 2
+	}
+	return 0
+}
+
 // parseExecutableStatement parses a single executable statement
 func (p *Parser90) parseExecutableStatement() ast.Statement {
 	if p.nStatements >= p.maxStatements {
@@ -613,6 +627,8 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		// Most keywords can be used as identifiers in fortran.
 		// i.e: IF=0
 		stmt = p.parseAssignmentStmt()
+	} else if ngotoToks := p.currentIsGOTO(); ngotoToks > 0 {
+		stmt = p.parseGotoStmt()
 	} else {
 		switch p.current.tok {
 		case token.IF:
@@ -631,18 +647,17 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseExitStmt()
 		case token.CONTINUE:
 			stmt = p.parseContinueStmt()
-		case token.GOTO:
-			stmt = p.parseGotoStmt()
 		case token.READ, token.WRITE:
 			stmt = p.parseIOStmt()
 		case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
-			// Check for "GO TO" (two separate tokens)
+			stmt = p.parseAssignmentStmt()
+
 			if string(p.current.lit) == "GO" && p.peekTokenIs(token.Identifier) {
 				stmt = p.parseGotoStmt()
 			} else {
 				// This could be an assignment statement or a call to a subroutine without the CALL keyword.
 				// For now, we'll assume it's an assignment.
-				stmt = p.parseAssignmentStmt()
+
 			}
 		}
 	}
@@ -687,21 +702,15 @@ func (p *Parser90) parseContinueStmt() ast.Statement {
 // Handles both GOTO (single token) and GO (identifier) followed by TO
 func (p *Parser90) parseGotoStmt() ast.Statement {
 	start := p.current.start
-
-	// Handle GOTO token or GO identifier
-	if p.currentTokenIs(token.GOTO) {
-		p.nextToken() // consume GOTO
-	} else if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "GO" {
-		// Handle "GO TO" as two separate tokens
-		p.nextToken() // consume GO
-		if !p.currentTokenIs(token.Identifier) || string(p.current.lit) != "TO" {
-			p.addError("expected TO after GO")
-			return nil
-		}
-		p.nextToken() // consume TO
-	} else {
-		p.addError("expected GOTO or GO TO")
-		return nil
+	ngoto := p.currentIsGOTO()
+	switch ngoto {
+	case 0:
+		p.addError("invalid goto parsing")
+	case 1:
+		p.expect(token.GOTO, "")
+	case 2:
+		p.expect(token.Identifier, "expected GO")
+		p.expect(token.Identifier, "expected TO")
 	}
 
 	// Check for computed GOTO: GOTO (label-list) expression
