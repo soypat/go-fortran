@@ -5,6 +5,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/soypat/go-fortran/ast"
 	"github.com/soypat/go-fortran/token"
@@ -61,7 +62,10 @@ type Parser90 struct {
 
 	stmtFns map[token.Token]statementParseFn // Statement parsers
 	errors  []ParserError                    // Collected parsing errors
-	maxErrs int
+
+	maxStatements int
+	maxErrs       int
+	nStatements   int
 }
 
 func (p *Parser90) Reset(source string, r io.Reader) error {
@@ -74,13 +78,15 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 	}
 	if p.maxErrs == 0 {
 		p.maxErrs = 20
+		p.maxStatements = 1_000_000
 	}
 	*p = Parser90{
 		l: p.l,
 		// Reuse memory but clear later.
-		maxErrs: p.maxErrs,
-		stmtFns: p.stmtFns,
-		errors:  p.errors[:0], // Reuse slice, clear contents
+		maxErrs:       p.maxErrs,
+		maxStatements: p.maxStatements,
+		stmtFns:       p.stmtFns,
+		errors:        p.errors[:0], // Reuse slice, clear contents
 	}
 	clear(p.stmtFns)
 
@@ -153,7 +159,7 @@ func (p *Parser90) ParseNextProgramUnit() (unit ast.ProgramUnit) {
 	panicked := true
 	defer func() {
 		if panicked {
-			p.addErrorWithPos(puStart, "panicked in program unit")
+			p.addErrorWithPos(puStart, "panicked in program unit after parsing "+strconv.Itoa(p.nStatements)+" statements")
 			p.addError("panic position")
 			fmt.Printf("%v\n%v\n", &p.errors[len(p.errors)-1], &p.errors[len(p.errors)-2])
 		}
@@ -235,6 +241,7 @@ func (p *Parser90) loopUntilEndElseOr(t ...token.Token) bool {
 
 // loopUntil returns true as long as current token not in set and EOF not hit.
 func (p *Parser90) loopUntil(t ...token.Token) bool {
+	time.Sleep(time.Millisecond / 1000)
 	if p.IsDone() {
 		return false
 	}
@@ -256,18 +263,6 @@ func (p *Parser90) loopWhile(t ...token.Token) bool {
 		}
 	}
 	return false
-}
-
-func (p *Parser90) loopWhileNot(t ...token.Token) bool {
-	if p.IsDone() {
-		return false
-	}
-	for i := range t {
-		if t[i] == p.current.tok {
-			return false
-		}
-	}
-	return true
 }
 
 func (p *Parser90) currentTokenIs(t token.Token) bool {
@@ -351,9 +346,6 @@ func (p *Parser90) expectEndProgramUnit(keyword token.Token, context string, exp
 func (p *Parser90) skipNewlinesAndComments() {
 	for p.loopWhile(token.NewLine, token.LineComment) {
 		p.nextToken()
-		if p.IsDone() {
-			break
-		}
 	}
 }
 
@@ -468,15 +460,17 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 			p.skipToNextStatement()
 		}
 	}
+	p.nStatements += len(stmts) // Add specification statements.
 
 	// Phase 3: Parse executable statements
-	for p.loopUntil(token.CONTAINS) && !p.isEndOfProgramUnit() {
+	for !p.isEndOfProgramUnit() && p.loopUntil(token.CONTAINS) {
 		p.skipNewlinesAndComments()
 		if p.currentTokenIs(token.CONTAINS) || p.isEndOfProgramUnit() {
 			break
 		}
 
 		if stmt := p.parseExecutableStatement(); stmt != nil {
+			p.nStatements++
 			stmts = append(stmts, stmt)
 		} else {
 			// Not a parseable executable statement - skip the construct
@@ -489,9 +483,20 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 
 // parseExecutableStatement parses a single executable statement
 func (p *Parser90) parseExecutableStatement() ast.Statement {
-
+	if p.nStatements >= p.maxStatements {
+		if p.nStatements == p.maxStatements {
+			return nil
+		}
+		panic("too many statements parsed")
+	}
+	if p.current.tok.IsEnd() {
+		return nil // Empty statement or misplaced END.
+	}
 	var label string
 	if p.currentTokenIs(token.Label) || p.currentTokenIs(token.IntLit) {
+		if p.peek.tok.IsEnd() {
+			return nil // Is a Label to an END, should be parsed in parent
+		}
 		label = string(p.current.lit)
 		p.nextToken()
 	}
@@ -528,7 +533,7 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 	default:
 		return nil // Unknown statement, caller will skip
 	}
-
+	p.nStatements++ // add normal statement.
 	if stmt != nil {
 		switch s := stmt.(type) {
 		case *ast.IfStmt:
@@ -1094,6 +1099,10 @@ func (p *Parser90) skipInterfaceBlock() {
 
 // isEndOfProgramUnit checks if current END token ends a program unit
 func (p *Parser90) isEndOfProgramUnit() bool {
+	switch p.current.tok {
+	case token.ENDPROGRAM, token.ENDSUBROUTINE, token.ENDFUNCTION, token.ENDMODULE:
+		return true
+	}
 	if !p.currentTokenIs(token.END) {
 		return false
 	}

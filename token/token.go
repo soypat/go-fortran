@@ -230,10 +230,14 @@ func (tok Token) IsIllegalOrEOF() bool {
 // IsEndOrElse returns true if the token is a construct-ending keyword.
 // These tokens typically mark the end of a control structure or block.
 func (tok Token) IsEndOrElse() bool {
+	return tok.IsEnd() || tok == ELSE || tok == ELSEIF
+}
+
+// IsEnd returns true if the token starts with END. Includes composite ENDs like ENDDO, ENDIF, ENDPROGRAM, etc.
+func (tok Token) IsEnd() bool {
 	switch tok {
-	case END, ENDIF, ENDDO, ELSE, ELSEIF,
-		ENDPROGRAM, ENDSUBROUTINE, ENDFUNCTION, ENDMODULE,
-		ENDINTERFACE, ENDTYPE, ENDSELECT, ENDWHERE:
+	case END, ENDIF, ENDDO, ENDPROGRAM, ENDSUBROUTINE, ENDFUNCTION,
+		ENDMODULE, ENDINTERFACE, ENDTYPE, ENDSELECT, ENDWHERE:
 		return true
 	}
 	return false

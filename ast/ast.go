@@ -717,6 +717,7 @@ type IfStmt struct {
 	ElseIfParts []ElseIfClause
 	ElsePart    []Statement
 	Label       string
+	EndLabel    string // Label on END IF statement (F77)
 	Position
 }
 
@@ -775,12 +776,13 @@ func (ais *ArithmeticIfStmt) AppendString(dst []byte) []byte {
 
 // DoLoop represents a DO loop
 type DoLoop struct {
-	Var   string // Loop variable (empty for DO WHILE)
-	Start Expression
-	End   Expression
-	Step  Expression
-	Body  []Statement
-	Label string
+	Var      string // Loop variable (empty for DO WHILE)
+	Start    Expression
+	End      Expression
+	Step     Expression
+	Body     []Statement
+	Label    string
+	EndLabel string // Label on END DO statement (F77)
 	Position
 }
 
