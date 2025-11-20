@@ -56,15 +56,17 @@ func (l *sourcePos) AppendString(b []byte) []byte {
 }
 
 type Parser90 struct {
-	l       Lexer90
-	current toktuple
-	peek    toktuple
-	stmtFns map[token.Token]statementParseFn // Statement parsers
-	errors  []ParserError                    // Collected parsing errors
+	l        Lexer90
+	current  toktuple
+	peek     toktuple
+	uberpeek toktuple
+	stmtFns  map[token.Token]statementParseFn // Statement parsers
+	errors   []ParserError                    // Collected parsing errors
 
 	maxStatements int
 	maxErrs       int
 	nStatements   int
+	died          bool
 }
 
 func (p *Parser90) Reset(source string, r io.Reader) error {
@@ -92,6 +94,7 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 	// Initialize token stream
 	p.nextToken()
 	p.nextToken()
+	p.nextToken()
 
 	// Register all parsing functions
 	p.registerTopLevelParsers()
@@ -102,20 +105,23 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 func (p *Parser90) nextToken() {
 	if p.current.tok == token.EOF {
 		return
+	} else if p.current.tok == token.EndParse {
+		p.addErrorFatal("end parse token found")
 	}
 	tok, start, lit := p.l.NextToken()
 	// Get the line/col where this token started
 	line, col := p.l.TokenLineCol()
-	// Cycle buffers between current and peek.
+	// Cycle buffers towards current. The latest peek will use current buffer.
 	currBuf := p.current.lit // is clobbered by peek, reused by new peek.
 	p.current = p.peek
+	p.peek = p.uberpeek
 
-	p.peek.lit = append(currBuf[:0], lit...)
-	p.peek.start = start
-	p.peek.tok = tok
-	p.peek.line = line
-	p.peek.col = col
-	if p.peek.tok == token.Illegal {
+	p.uberpeek.lit = append(currBuf[:0], lit...)
+	p.uberpeek.start = start
+	p.uberpeek.tok = tok
+	p.uberpeek.line = line
+	p.uberpeek.col = col
+	if p.uberpeek.tok == token.Illegal {
 		err := "illegal token"
 		if p.l.Err() != nil {
 			err = p.l.Err().Error()
@@ -134,7 +140,7 @@ func (p *Parser90) sourcePos() sourcePos {
 }
 
 func (p *Parser90) IsDone() bool {
-	return p.current.tok == token.EOF || len(p.errors) >= p.maxErrs
+	return p.died || p.current.tok == token.EOF || len(p.errors) >= p.maxErrs
 }
 
 func (p *Parser90) registerStatement(tokenType token.Token, fn statementParseFn) {
@@ -295,11 +301,22 @@ func (p *Parser90) expect(t token.Token, reason string) bool {
 // Returns true if token was consumed, false otherwise.
 // Use this for optional tokens where absence is not an error.
 func (p *Parser90) consumeIf(t token.Token) bool {
-	if !p.currentTokenIs(t) {
-		return false
+	if p.currentTokenIs(t) {
+		p.nextToken()
+		return true
 	}
-	p.nextToken()
-	return true
+
+	return false
+}
+
+// consumeIf2 is same as consumeIf but must match current and peek token to consume at least 2 tokens.
+func (p *Parser90) consumeIf2(current, next token.Token) bool {
+	if p.currentTokenIs(current) && p.peekTokenIs(next) {
+		p.nextToken()
+		p.nextToken()
+		return true
+	}
+	return false
 }
 
 // expectEndConstruct handles END <keyword> for control flow constructs (IF, DO).
@@ -330,6 +347,31 @@ func (p *Parser90) expectEndConstruct(keyword, singleEndForm token.Token, start 
 	}
 }
 
+func (p *Parser90) skipUnexpectedEndConstructs(msg string) (skipped bool) {
+	for {
+		n := token.IsEndConstruct(p.current.tok, p.peek.tok, p.uberpeek.tok)
+		switch n {
+		case 0:
+			return skipped
+		case 1:
+			msg += ": unexpected end construct " + p.current.tok.String()
+			p.nextToken()
+		case 2:
+			msg += ": unexpected end construct " + p.current.tok.String() + " " + p.peek.tok.String()
+			p.nextToken()
+			p.nextToken()
+		case 3:
+			msg += ": unexpected end construct " + string(p.current.lit) + " " + p.peek.tok.String() + " " + p.uberpeek.tok.String()
+			p.nextToken()
+			p.nextToken()
+			p.nextToken()
+		}
+		skipped = true
+		p.addErrorFatal(msg)
+		p.skipNewlinesAndComments()
+	}
+}
+
 // expectEndProgramUnit handles END [keyword] [name] for program units.
 // END is required, but keyword and name after END are optional.
 // Returns true if END was successfully consumed.
@@ -353,6 +395,15 @@ func (p *Parser90) addErrorWithPos(pos sourcePos, msg string) {
 		sp:  pos,
 		msg: msg,
 	})
+}
+
+func (p *Parser90) addErrorFatal(msg string) {
+	if p.died {
+		p.addError(msg)
+	} else {
+		p.addError("fatal error encountered: " + msg) // Only one unrecoverable message
+	}
+	p.died = true
 }
 
 func (p *Parser90) addError(msg string) {
@@ -443,8 +494,11 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 	// Phase 2: Parse specification statements
 	for p.loopUntil(token.CONTAINS, token.END) {
 		p.skipNewlinesAndComments()
-		if p.currentTokenIs(token.CONTAINS) || p.currentTokenIs(token.END) || p.currentTokenIs(token.EOF) {
+		if p.currentTokenIs(token.CONTAINS) || p.currentTokenIs(token.EOF) {
 			break
+		}
+		if p.skipUnexpectedEndConstructs("at body parsing spec statements") {
+			return stmts
 		}
 
 		// Check if this is an executable statement (execution part starts here)
@@ -467,7 +521,9 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 		if p.currentTokenIs(token.CONTAINS) || p.isEndOfProgramUnit() {
 			break
 		}
-
+		if p.skipUnexpectedEndConstructs("at body parsing executable statements") {
+			return stmts
+		}
 		if stmt := p.parseExecutableStatement(); stmt != nil {
 			p.nStatements++
 			stmts = append(stmts, stmt)
@@ -475,8 +531,8 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 			// Not a parseable executable statement - skip the construct
 			p.skipToNextStatement()
 			var endlabel string
-			if false && len(stmts) > 0 && p.consumeEndLabelIfPresent(&endlabel, token.IF) ||
-				p.consumeEndLabelIfPresent(&endlabel, token.DO) {
+			if false && len(stmts) > 0 && p.consumeEndLabelIfPresent(&endlabel, token.IF, "") ||
+				p.consumeEndLabelIfPresent(&endlabel, token.DO, "") {
 				switch stmt := stmts[len(stmts)-1].(type) {
 				case *ast.DoLoop:
 					stmt.EndLabel = endlabel
@@ -700,61 +756,26 @@ func (p *Parser90) parseWriteStmt() ast.Statement {
 // Precondition: current token is IF
 func (p *Parser90) parseIfStmt() ast.Statement {
 	start := p.sourcePos()
-	stmt := &ast.IfStmt{}
 	p.expect(token.IF, "")
-
 	if !p.expect(token.LParen, "opening IF") {
 		return nil
 	}
-
-	stmt.Condition = p.parseExpression(0)
-	if stmt.Condition == nil {
+	condition := p.parseExpression(0)
+	if condition == nil {
 		p.addError("expected condition in IF statement")
 		return nil
-	}
-
-	if !p.expect(token.RParen, "closing IF condition") {
+	} else if !p.expect(token.RParen, "closing IF condition") {
 		return nil
 	}
 
 	// Check for arithmetic IF (F77): IF (expr) label1, label2, label3
 	// This branches to label1 if expr < 0, label2 if expr == 0, label3 if expr > 0
 	if p.currentTokenIs(token.IntLit) && p.peekTokenIs(token.Comma) {
-		arithmeticStmt := &ast.ArithmeticIfStmt{
-			Condition: stmt.Condition,
-		}
-
-		// Parse negative label
-		arithmeticStmt.NegativeLabel = string(p.current.lit)
-		p.nextToken() // consume label
-		if !p.expect(token.Comma, "after first label in arithmetic IF") {
-			return nil
-		}
-
-		// Parse zero label
-		if !p.currentTokenIs(token.IntLit) {
-			p.addError("expected label for zero case in arithmetic IF")
-			return nil
-		}
-		arithmeticStmt.ZeroLabel = string(p.current.lit)
-		p.nextToken() // consume label
-		if !p.expect(token.Comma, "after second label in arithmetic IF") {
-			return nil
-		}
-
-		// Parse positive label
-		if !p.currentTokenIs(token.IntLit) {
-			p.addError("expected label for positive case in arithmetic IF")
-			return nil
-		}
-		arithmeticStmt.PositiveLabel = string(p.current.lit)
-		p.nextToken() // consume label
-
-		arithmeticStmt.Position = ast.Pos(start.Pos, p.current.start)
-		return arithmeticStmt
+		return p.parseArithmeticIfStmt(start, condition)
 	}
 
-	// Check for inline IF (no THEN) vs block IF (with THEN)
+	stmt := &ast.IfStmt{Condition: condition}
+	// INLINE IF check (no THEN) vs block IF (with THEN)
 	if !p.currentTokenIs(token.THEN) {
 		// Inline IF: IF (condition) statement
 		// Parse single executable statement
@@ -767,87 +788,103 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 		stmt.Position = ast.Pos(start.Pos, p.current.start)
 		return stmt
 	}
-
 	// Block IF: IF (condition) THEN ... END IF
 	p.nextToken() // consume THEN
 	p.skipNewlinesAndComments()
 
-	// Parse THEN block
+	// THEN block parsing.
 	for p.loopUntil(token.ELSE, token.ELSEIF, token.END, token.ENDIF) {
-		if p.currentTokenIs(token.ELSEIF) || p.currentTokenIs(token.ELSE) && p.peekTokenIs(token.IF) {
-			break
-		}
 		if s := p.parseExecutableStatement(); s != nil {
 			stmt.ThenPart = append(stmt.ThenPart, s)
 		} else {
+			p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF, "")
 			p.skipToNextStatement()
 		}
 		p.skipNewlinesAndComments()
 	}
 
 	// Parse ELSE IF parts
-	for p.currentTokenIs(token.ELSE) && p.peekTokenIs(token.IF) && !p.IsDone() {
-		p.nextToken() // consume ELSE
-		p.nextToken() // consume IF
-
+	for p.consumeIf(token.ELSEIF) || p.consumeIf2(token.ELSE, token.IF) {
 		clause := ast.ElseIfClause{}
 		clauseStart := p.current.start
+		// Parse ELSE IF condition before THEN.
 		p.expect(token.LParen, "after ELSE IF")
-
 		clause.Condition = p.parseExpression(0)
 		if clause.Condition == nil {
 			p.addError("expected condition in ELSE IF statement")
 			return nil
 		}
-
 		p.expect(token.RParen, "after ELSE IF")
-		p.expect(token.THEN, "after ELSE IF")
-
-		p.skipNewlinesAndComments()
-		p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
 
 		// Parse ELSE IF block
-		for p.loopUntil(token.ELSE, token.END, token.ENDIF) {
-			if p.peekTokenIs(token.IF) && p.currentTokenIs(token.ELSE) {
-				break
-			}
+		p.expect(token.THEN, "after ELSE IF") // This is required in fortran, no inline ELSE IF.
+		p.skipNewlinesAndComments()
+		for p.loopUntil(token.ELSE, token.END, token.ENDIF, token.ELSEIF) {
 			if s := p.parseExecutableStatement(); s != nil {
 				clause.ThenPart = append(clause.ThenPart, s)
 			} else {
-				p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
+				p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF, "")
 				p.skipToNextStatement()
 			}
 			p.skipNewlinesAndComments()
-			p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
 		}
 		clause.Position = ast.Pos(clauseStart, p.current.start)
 		stmt.ElseIfParts = append(stmt.ElseIfParts, clause)
 	}
 
 	// Parse ELSE part
-	if p.currentTokenIs(token.ELSE) {
-		p.nextToken() // consume ELSE
+	if p.consumeIf(token.ELSE) {
 		p.skipNewlinesAndComments()
-		p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
 		for p.loopUntil(token.END, token.ENDIF) {
-			// LOOP FOREVER HERE.
 			if s := p.parseExecutableStatement(); s != nil {
 				stmt.ElsePart = append(stmt.ElsePart, s)
 			} else {
-				p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
+				p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF, "")
 				p.skipToNextStatement()
 			}
 			p.skipNewlinesAndComments()
-			p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
 		}
 	}
 
-	p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
-
 	// Expect END IF
+	p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF, "")
 	p.expectEndConstruct(token.IF, token.ENDIF, start)
 	stmt.Position = ast.Pos(start.Pos, p.current.start)
 	return stmt
+}
+
+func (p *Parser90) parseArithmeticIfStmt(start sourcePos, condition ast.Expression) ast.Statement {
+	arithmeticStmt := &ast.ArithmeticIfStmt{Condition: condition}
+	// Parse negative label
+	arithmeticStmt.NegativeLabel = string(p.current.lit)
+	if !p.expect(token.IntLit, "first label in arithmetic IF") {
+		return nil
+	}
+	if !p.expect(token.Comma, "after first label in arithmetic IF") {
+		return nil
+	}
+
+	// Parse zero label
+	if !p.currentTokenIs(token.IntLit) {
+		p.addError("expected label for zero case in arithmetic IF")
+		return nil
+	}
+	arithmeticStmt.ZeroLabel = string(p.current.lit)
+	p.nextToken() // consume label
+	if !p.expect(token.Comma, "after second label in arithmetic IF") {
+		return nil
+	}
+
+	// Parse positive label
+	if !p.currentTokenIs(token.IntLit) {
+		p.addError("expected label for positive case in arithmetic IF")
+		return nil
+	}
+	arithmeticStmt.PositiveLabel = string(p.current.lit)
+	p.nextToken() // consume label
+
+	arithmeticStmt.Position = ast.Pos(start.Pos, p.current.start)
+	return arithmeticStmt
 }
 
 // parseDoLoop parses a DO loop
@@ -911,7 +948,13 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 	for !p.IsDone() {
 		p.skipNewlinesAndComments()
 
-		p.consumeEndLabelIfPresent(&stmt.EndLabel, token.DO)
+		if p.consumeEndLabelIfPresent(&stmt.EndLabel, token.DO, stmt.TargetLabel) {
+			if p.peekTokenIs(token.CONTINUE) {
+				// Found closing target continue statement.
+				stmt.Position = ast.Pos(start.Pos, p.current.start)
+				return stmt
+			}
+		}
 
 		// Check for END DO or ENDDO
 		if p.currentTokenIs(token.END) && p.peekTokenIs(token.DO) {
@@ -2622,13 +2665,18 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 	return stmt
 }
 
-func (p *Parser90) consumeEndLabelIfPresent(tgt *string, endConstruct token.Token) bool {
-	// Check for labeled END IF: label END IF (F77)
-	if p.currentTokenIs(token.IntLit) &&
-		p.peek.tok == token.END || endConstruct.EndConstructComposite() == p.peek.tok {
+func (p *Parser90) consumeEndLabelIfPresent(tgt *string, endConstruct token.Token, continueMatch string) bool {
+	// Check for labeled END IF/ENDIF  or END DO/ENDDO/CONTINUE
+	isLabelled := p.currentTokenIs(token.IntLit) &&
+		(p.peek.tok == token.END || // 10 END DO or 10 END IF
+			p.peek.tok == endConstruct.EndConstructComposite() || // 10 ENDDO or 10 ENDIF
+			endConstruct == token.DO && p.peek.tok == token.CONTINUE && continueMatch == string(p.current.lit)) // 10 CONTINUE
+	if isLabelled {
 		// Capture the end label and advance past it
 		*tgt = string(p.current.lit)
-		p.nextToken()
+		if p.peek.tok != token.CONTINUE {
+			p.nextToken() // we only consume END labels. CONTINUE statements are parsed as part of AST with their label.
+		}
 		if p.current.tok == token.END && p.peek.tok != endConstruct {
 			p.addError("consumed label " + *tgt + " which did not correspond to " + endConstruct.String() + " construct")
 			*tgt = ""

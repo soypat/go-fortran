@@ -447,6 +447,45 @@ func TestStatementParsing(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "IF with ELSEIF",
+			src: `IF (1) THEN
+   ELSEIF (1) THEN
+      k=1
+   ENDIF`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ifStmt, ok := stmt.(*ast.IfStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
+				}
+
+				// Initial THEN part should be empty
+				if len(ifStmt.ThenPart) != 0 {
+					t.Errorf("Expected empty ThenPart, got %d statements", len(ifStmt.ThenPart))
+				}
+
+				// Should have one ELSEIF part
+				if len(ifStmt.ElseIfParts) != 1 {
+					t.Fatalf("Expected 1 ELSEIF part, got %d", len(ifStmt.ElseIfParts))
+				}
+
+				// ELSEIF part should have one statement
+				if len(ifStmt.ElseIfParts[0].ThenPart) != 1 {
+					t.Fatalf("Expected 1 statement in ELSEIF ThenPart, got %d", len(ifStmt.ElseIfParts[0].ThenPart))
+				}
+
+				// Statement should be an assignment
+				_, ok = ifStmt.ElseIfParts[0].ThenPart[0].(*ast.AssignmentStmt)
+				if !ok {
+					t.Errorf("Expected ELSEIF statement to be *ast.AssignmentStmt, got %T", ifStmt.ElseIfParts[0].ThenPart[0])
+				}
+
+				// Should have no ELSE part
+				if len(ifStmt.ElsePart) != 0 {
+					t.Errorf("Expected empty ElsePart, got %d statements", len(ifStmt.ElsePart))
+				}
+			},
+		},
 
 		// ===== Array Slice Syntax (F90) =====
 		{

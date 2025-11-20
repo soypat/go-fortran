@@ -28,16 +28,17 @@ PROGRAM GDYN2E
 ! comment
      &           C3)
       ENDIF
-
+      
       if (ALL( k==(/ 0 /) )) then
       end if
       ((k == (/ 0, 
      3  /)))
-   if (k=1) then
+   if (k==1) then
    DO 3800 IT=1,5
       k = 0
  3800      CONTINUE
       endif
+      ENDPARSE ! do not remove yet.
    DO 500 I=1,NPOINT
       DO 300 J=1,3
       VECTOR(J)=ECFSAT(J)-SVECT(I+JJ)
