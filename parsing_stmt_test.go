@@ -846,6 +846,146 @@ ENDIF`,
 				}
 			},
 		},
+
+		// ===== SELECT CASE =====
+		{
+			name: "empty SELECT CASE",
+			src: `SELECT CASE (N)
+END SELECT`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				selectStmt, ok := stmt.(*ast.SelectCaseStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.SelectCaseStmt, got %T", stmt)
+				}
+
+				// Verify expression
+				ident, ok := selectStmt.Expression.(*ast.Identifier)
+				if !ok {
+					t.Fatalf("Expected expression to be *ast.Identifier, got %T", selectStmt.Expression)
+				}
+				if ident.Value != "N" {
+					t.Errorf("Expected expression 'N', got %q", ident.Value)
+				}
+
+				// Verify no cases
+				if len(selectStmt.Cases) != 0 {
+					t.Errorf("Expected 0 cases, got %d", len(selectStmt.Cases))
+				}
+			},
+		},
+		{
+			name: "SELECT CASE with single case",
+			src: `SELECT CASE (STATUS)
+CASE (1)
+  X = 10
+END SELECT`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				selectStmt, ok := stmt.(*ast.SelectCaseStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.SelectCaseStmt, got %T", stmt)
+				}
+
+				// Verify one case
+				if len(selectStmt.Cases) != 1 {
+					t.Fatalf("Expected 1 case, got %d", len(selectStmt.Cases))
+				}
+
+				// Check case value
+				caseClause := selectStmt.Cases[0]
+				if len(caseClause.Values) != 1 {
+					t.Fatalf("Expected 1 value in case, got %d", len(caseClause.Values))
+				}
+
+				// Check case body
+				if len(caseClause.Body) != 1 {
+					t.Errorf("Expected 1 statement in case body, got %d", len(caseClause.Body))
+				}
+			},
+		},
+		{
+			name: "SELECT CASE with multiple values in one case",
+			src: `SELECT CASE (I)
+CASE (1, 2, 3)
+  X = 100
+END SELECT`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				selectStmt, ok := stmt.(*ast.SelectCaseStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.SelectCaseStmt, got %T", stmt)
+				}
+
+				if len(selectStmt.Cases) != 1 {
+					t.Fatalf("Expected 1 case, got %d", len(selectStmt.Cases))
+				}
+
+				caseClause := selectStmt.Cases[0]
+				if len(caseClause.Values) != 3 {
+					t.Fatalf("Expected 3 values in case, got %d", len(caseClause.Values))
+				}
+			},
+		},
+		{
+			name: "SELECT CASE with CASE DEFAULT",
+			src: `SELECT CASE (N)
+CASE DEFAULT
+  X = 0
+END SELECT`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				selectStmt, ok := stmt.(*ast.SelectCaseStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.SelectCaseStmt, got %T", stmt)
+				}
+
+				if len(selectStmt.Cases) != 1 {
+					t.Fatalf("Expected 1 case, got %d", len(selectStmt.Cases))
+				}
+
+				caseClause := selectStmt.Cases[0]
+				if !caseClause.IsDefault {
+					t.Errorf("Expected CASE DEFAULT, got IsDefault=false")
+				}
+
+				if len(caseClause.Body) != 1 {
+					t.Errorf("Expected 1 statement in default case body, got %d", len(caseClause.Body))
+				}
+			},
+		},
+		{
+			name: "SELECT CASE with multiple cases",
+			src: `SELECT CASE (STATUS)
+CASE (1)
+  X = 10
+CASE (2, 3)
+  Y = 20
+CASE DEFAULT
+  Z = 0
+END SELECT`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				selectStmt, ok := stmt.(*ast.SelectCaseStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.SelectCaseStmt, got %T", stmt)
+				}
+
+				if len(selectStmt.Cases) != 3 {
+					t.Fatalf("Expected 3 cases, got %d", len(selectStmt.Cases))
+				}
+
+				// First case: single value
+				if len(selectStmt.Cases[0].Values) != 1 {
+					t.Errorf("Expected 1 value in first case, got %d", len(selectStmt.Cases[0].Values))
+				}
+
+				// Second case: two values
+				if len(selectStmt.Cases[1].Values) != 2 {
+					t.Errorf("Expected 2 values in second case, got %d", len(selectStmt.Cases[1].Values))
+				}
+
+				// Third case: default
+				if !selectStmt.Cases[2].IsDefault {
+					t.Errorf("Expected third case to be DEFAULT")
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

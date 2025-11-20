@@ -59,7 +59,7 @@ END PROGRAM hello
 	// =====================
 	// ProgramBlock {
 	//   Name: "hello"
-	//   Body: ast.Statement (len=5) [
+	//   Body: ast.Statement (len=6) [
 	//     0: ImplicitStatement {
 	//       IsNone: true
 	//       Label: ""
@@ -145,6 +145,41 @@ END PROGRAM hello
 	//       Position: Position {
 	//         Start: 80
 	//         End: 86
+	//       }
+	//     }
+	//     5: AssignmentStmt {
+	//       Target: Identifier {
+	//         Value: "result"
+	//         Position: Position {
+	//           Start: 89
+	//           End: 95
+	//         }
+	//       }
+	//       Value: BinaryExpr {
+	//         Op: 90
+	//         Left: Identifier {
+	//           Value: "x"
+	//           Position: Position {
+	//             Start: 98
+	//             End: 99
+	//           }
+	//         }
+	//         Right: Identifier {
+	//           Value: "y"
+	//           Position: Position {
+	//             Start: 102
+	//             End: 103
+	//           }
+	//         }
+	//         Position: Position {
+	//           Start: 98
+	//           End: 103
+	//         }
+	//       }
+	//       Label: ""
+	//       Position: Position {
+	//         Start: 89
+	//         End: 103
 	//       }
 	//     }
 	//   ]

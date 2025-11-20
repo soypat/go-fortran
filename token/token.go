@@ -288,7 +288,7 @@ func (tok Token) EndConstructComposite() Token {
 // The [Identifier] token returns false as it may or may not represent an executable statement.
 func (tok Token) IsExecutableStatement() bool {
 	switch tok {
-	case IF, DO, CALL, RETURN, STOP, EXIT,
+	case IF, DO, SELECT, CALL, RETURN, STOP, EXIT,
 		ALLOCATE, DEALLOCATE, READ, WRITE, PRINT,
 		GOTO, CONTINUE, CYCLE:
 		return true

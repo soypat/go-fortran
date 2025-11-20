@@ -619,6 +619,8 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseIfStmt()
 		case token.DO:
 			stmt = p.parseDoLoop()
+		case token.SELECT:
+			stmt = p.parseSelectCaseStmt()
 		case token.CALL:
 			stmt = p.parseCallStmt()
 		case token.RETURN:
@@ -650,6 +652,8 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		case *ast.IfStmt:
 			s.Label = label
 		case *ast.DoLoop:
+			s.Label = label
+		case *ast.SelectCaseStmt:
 			s.Label = label
 		case *ast.CallStmt:
 			s.Label = label
@@ -999,6 +1003,97 @@ func (p *Parser90) parseArithmeticIfStmt(start sourcePos, condition ast.Expressi
 
 	arithmeticStmt.Position = ast.Pos(start.Pos, p.current.start)
 	return arithmeticStmt
+}
+
+// parseSelectCaseStmt parses a SELECT CASE construct
+// Precondition: current token is SELECT
+func (p *Parser90) parseSelectCaseStmt() ast.Statement {
+	start := p.sourcePos()
+	// Start parsing SELECT CASE opening statement and case expression.
+	if !p.expect(token.SELECT, "") || !p.expect(token.CASE, "after SELECT") ||
+		!p.expect(token.LParen, "after SELECT CASE") {
+		return nil
+	}
+	expression := p.parseExpression(0)
+	if expression == nil {
+		p.addError("expected expression in SELECT CASE")
+		return nil
+	}
+	if !p.expect(token.RParen, "closing parenthesis in SELECT CASE") {
+		return nil
+	}
+
+	stmt := &ast.SelectCaseStmt{
+		Expression: expression,
+	}
+	p.skipNewlinesAndComments()
+	// Parse CASE clauses until END SELECT
+	for p.loopUntil(token.END, token.ENDSELECT) {
+		if p.currentTokenIs(token.CASE) {
+			caseClause := p.parseCaseClause()
+			if caseClause != nil {
+				stmt.Cases = append(stmt.Cases, *caseClause)
+			}
+		} else {
+			// Not a CASE clause, skip to next statement
+			p.consumeEndLabelIfPresent(&stmt.EndLabel, token.SELECT, "")
+			p.skipToNextStatement()
+		}
+		p.skipNewlinesAndComments()
+	}
+
+	// Expect END SELECT
+	p.consumeEndLabelIfPresent(&stmt.EndLabel, token.SELECT, "")
+	p.expectEndConstruct(token.SELECT, token.ENDSELECT, start)
+	stmt.Position = ast.Pos(start.Pos, p.current.start)
+	return stmt
+}
+
+// parseCaseClause parses a single CASE clause
+// Precondition: current token is CASE
+func (p *Parser90) parseCaseClause() *ast.CaseClause {
+	start := p.sourcePos()
+	p.expect(token.CASE, "")
+	clause := &ast.CaseClause{}
+	// Check for CASE DEFAULT
+	if p.consumeIf(token.DEFAULT) {
+		clause.IsDefault = true
+		p.nextToken()
+	} else if p.consumeIf(token.LParen) {
+		// CASE (value-list)
+		// Parse comma-separated list of values
+		parseOneValue := func() (ast.Expression, error) {
+			val := p.parseExpression(0)
+			if val == nil {
+				return nil, fmt.Errorf("expected expression in CASE value list")
+			}
+			return val, nil
+		}
+
+		values, err := parseCommaSeparatedList(p, token.RParen, parseOneValue)
+		if err != nil {
+			p.addError(err.Error())
+		}
+		clause.Values = values
+
+		if p.currentTokenIs(token.RParen) {
+			p.nextToken()
+		}
+	}
+
+	p.skipNewlinesAndComments()
+
+	// Parse body statements until next CASE or END SELECT
+	for p.loopUntil(token.CASE, token.END, token.ENDSELECT) {
+		if s := p.parseExecutableStatement(); s != nil {
+			clause.Body = append(clause.Body, s)
+		} else {
+			p.skipToNextStatement()
+		}
+		p.skipNewlinesAndComments()
+	}
+	clause.Position = ast.Pos(start.Pos, p.current.start)
+	return clause
 }
 
 // parseDoLoop parses a DO loop

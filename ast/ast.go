@@ -812,6 +812,39 @@ func (dl *DoLoop) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// SelectCaseStmt represents a SELECT CASE construct
+type SelectCaseStmt struct {
+	Expression Expression    // The expression being selected on
+	Cases      []CaseClause  // List of CASE clauses
+	Label      string        // Statement label
+	EndLabel   string        // Label on END SELECT
+	Position
+}
+
+var _ Statement = (*SelectCaseStmt)(nil)
+
+func (s *SelectCaseStmt) GetLabel() string { return s.Label }
+func (s *SelectCaseStmt) statementNode()   {}
+func (s *SelectCaseStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "SELECT CASE"...)
+}
+func (s *SelectCaseStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "SELECT CASE ("...)
+	if s.Expression != nil {
+		dst = s.Expression.AppendString(dst)
+	}
+	dst = append(dst, ")"...)
+	return dst
+}
+
+// CaseClause represents a single CASE clause within a SELECT CASE
+type CaseClause struct {
+	Values   []Expression // Values for this case (nil for CASE DEFAULT)
+	Body     []Statement  // Statements in this case
+	IsDefault bool        // True if this is CASE DEFAULT
+	Position
+}
+
 // CallStmt represents a CALL statement
 type CallStmt struct {
 	Name  string
