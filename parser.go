@@ -427,8 +427,7 @@ func (p *Parser90) addErrorFatal(msg string, callstackSkip int) {
 		p.addError(msg)
 	} else {
 		callstack := getCallStack(callstackSkip)
-		p.addError("tokens: " + p.strToks() + "\n" + callstack + "\nfatal error encountered, terminating run early: " + msg) // Only one unrecoverable message
-
+		p.addError("token state: " + p.strToks() + "\n" + callstack + "\nfatal error encountered, terminating run early: " + msg) // Only one unrecoverable message
 	}
 	p.died = true
 }
@@ -2390,55 +2389,7 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 			p.nextToken() // consume (
 
 			// Parse argument/subscript list
-			parseOneArg := func() (ast.Expression, error) {
-				start := p.current.start
-
-				// Handle array slice syntax: : or start:end or start:end:stride
-				if p.currentTokenIs(token.Colon) {
-					// Lone colon means "all elements" (:)
-					p.nextToken() // consume :
-					rangeExpr := &ast.RangeExpr{
-						Start:    nil, // implicit start
-						End:      nil, // implicit end
-						Position: ast.Pos(start, p.current.start),
-					}
-					// Check for stride (:stride)
-					if !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) {
-						rangeExpr.End = p.parseExpression(0) // This is actually end, not stride
-					}
-					return rangeExpr, nil
-				}
-
-				arg := p.parseExpression(0)
-				if arg == nil {
-					return nil, fmt.Errorf("expected expression in argument list")
-				}
-
-				// Check for range syntax: expr:expr or expr:expr:stride
-				if p.currentTokenIs(token.Colon) {
-					p.nextToken() // consume :
-					rangeExpr := &ast.RangeExpr{
-						Start:    arg,
-						Position: ast.Pos(start, p.current.start),
-					}
-					// Parse end expression (optional)
-					if !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.Colon) {
-						rangeExpr.End = p.parseExpression(0)
-					}
-					// Check for stride (F90 feature: start:end:stride)
-					if p.currentTokenIs(token.Colon) {
-						p.nextToken() // consume :
-						if !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) {
-							rangeExpr.Stride = p.parseExpression(0)
-						}
-					}
-					return rangeExpr, nil
-				}
-
-				return arg, nil
-			}
-
-			args, err := parseCommaSeparatedList(p, token.RParen, parseOneArg)
+			args, err := parseCommaSeparatedList(p, token.RParen, p.parseOneArg)
 			if err != nil {
 				p.addError(err.Error())
 			}
@@ -2468,6 +2419,53 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 	return nil
 }
 
+// parseOneArg parses an argument in a parentheses preceding an identifier.
+// since identifier could be a function or an array we must handle both cases here.
+func (p *Parser90) parseOneArg() (ast.Expression, error) {
+	start := p.sourcePos()
+	// Handle array slice syntax: : or start:end or start:end:stride
+	if p.consumeIf(token.Colon) {
+		// Lone colon means "all elements" (:)
+		rangeExpr := &ast.RangeExpr{
+			Start:    nil, // implicit start
+			End:      nil, // implicit end
+			Position: ast.Pos(start.Pos, p.current.start),
+		}
+		// Check for stride (:stride)
+		if !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) {
+			rangeExpr.End = p.parseExpression(0) // This is actually end, not stride
+		}
+		return rangeExpr, nil
+	}
+
+	arg := p.parseExpression(0)
+	if arg == nil {
+		return nil, fmt.Errorf("expected expression in argument list")
+	}
+
+	// Check for range syntax: expr:expr or expr:expr:stride
+	if p.consumeIf(token.Colon) {
+		rangeExpr := &ast.RangeExpr{
+			Start:    arg,
+			Position: ast.Pos(start.Pos, p.current.start),
+		}
+		// Parse end expression (optional)
+		if !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) && !p.currentTokenIs(token.Colon) {
+			rangeExpr.End = p.parseExpression(0)
+		}
+		// Check for stride (F90 feature: start:end:stride)
+		if p.currentTokenIs(token.Colon) {
+			p.nextToken() // consume :
+			if !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) {
+				rangeExpr.Stride = p.parseExpression(0)
+			}
+		}
+		return rangeExpr, nil
+	}
+
+	return arg, nil
+}
+
 // parseArrayConstructor parses an array constructor
 func (p *Parser90) parseArrayConstructor() ast.Expression {
 	start := p.current.start
@@ -2475,49 +2473,32 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 	p.expect(token.LParen, "array start '\\('") // consume (
 	p.expect(token.Slash, "array start '\\('")  // consume /
 
-	// Parse array elements until we find /)
-	// Array constructors can span multiple lines
-	for !p.IsDone() {
-		// Check for /) which closes the array constructor
-		if p.currentTokenIs(token.Slash) && p.peekTokenIs(token.RParen) {
-			break
-		}
-
+	// Parse array elements until we find /
+	// Use parseCommaSeparatedList with / as terminator
+	parseOneElement := func() (ast.Expression, error) {
+		p.skipNewlinesAndComments()
 		val := p.parseExpression(0)
 		if val == nil {
-			// If expression parsing fails, try to recover by looking for /)
-			for !p.IsDone() {
-				if p.currentTokenIs(token.Slash) && p.peekTokenIs(token.RParen) {
-					break
-				}
-				p.nextToken()
-			}
-			p.addError("expected expression in array constructor")
-			break
+			return nil, fmt.Errorf("expected expression in array constructor")
 		}
-		stmt.Values = append(stmt.Values, val)
-
-		// Check again for /) after expression
-		if p.currentTokenIs(token.Slash) && p.peekTokenIs(token.RParen) {
-			break
-		}
-
-		// Expect comma before next element (unless we're at /)
-		if !p.currentTokenIs(token.Comma) {
-			break
-		}
-		p.nextToken() // consume comma
+		return val, nil
 	}
 
-	// Always set position to avoid zero position issues
+	values, err := parseCommaSeparatedList(p, token.Slash, parseOneElement)
+	if err != nil {
+		p.addError(err.Error())
+	}
+	stmt.Values = values
+
+	// Expect ) after /
 	endPos := p.current.start
 	if p.currentTokenIs(token.Slash) {
 		p.nextToken() // consume /
 		if p.currentTokenIs(token.RParen) {
-			endPos = p.current.start + len(p.current.lit) // end position after )
-			p.nextToken()                                 // consume )
+			endPos = p.current.start + len(p.current.lit)
+			p.nextToken() // consume )
 		} else {
-			p.addError("expected ')' after array constructor")
+			p.addError("expected ')' after '/' in array constructor")
 		}
 	} else {
 		p.addError("expected '/)' at end of array constructor")
@@ -2525,65 +2506,6 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 
 	stmt.Position = ast.Pos(start, endPos)
 	return stmt
-}
-
-// parseArraySection parses an array section
-func (p *Parser90) parseArraySection(name string, startPos int) ast.Expression {
-	start := p.current.start
-	stmt := &ast.ArraySection{
-		Name: name,
-	}
-	p.expect(token.RParen, "array section open")
-
-	parseOneSubscript := func() (ast.Subscript, error) {
-		sub := ast.Subscript{}
-		if !p.currentTokenIs(token.Colon) {
-			sub.Lower = p.parseExpression(0)
-		}
-		if p.currentTokenIs(token.Colon) {
-			p.nextToken() // consume :
-			if !p.currentTokenIs(token.Comma) && !p.currentTokenIs(token.RParen) {
-				sub.Upper = p.parseExpression(0)
-			}
-		}
-		if p.currentTokenIs(token.Colon) {
-			p.nextToken() // consume :
-			sub.Stride = p.parseExpression(0)
-		}
-		return sub, nil
-	}
-
-	subscripts, err := parseCommaSeparatedList(p, token.RParen, parseOneSubscript)
-	if err != nil {
-		p.addError(err.Error())
-	}
-	stmt.Subscripts = subscripts
-	stmt.Position = ast.Pos(start, p.current.start)
-	p.expect(token.RParen, "array section close")
-
-	return stmt
-}
-
-// collectBlockDataBody collects tokens until END
-func (p *Parser90) collectBlockDataBody() []ast.TokenTuple {
-	tokens := []ast.TokenTuple{}
-
-	for !p.IsDone() {
-		if p.currentTokenIs(token.END) {
-			// BLOCK DATA ends with END (with optional BLOCK DATA or name after)
-			return tokens
-		}
-
-		tokens = append(tokens, ast.TokenTuple{
-			Tok:   p.current.tok,
-			Start: p.current.start,
-			Lit:   append([]byte{}, p.current.lit...),
-		})
-
-		p.nextToken()
-	}
-
-	return tokens
 }
 
 // parseTypePrefixedConstruct handles type-prefixed functions like "INTEGER FUNCTION foo()"
