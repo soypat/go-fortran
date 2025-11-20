@@ -13,6 +13,9 @@ import (
 	"github.com/soypat/go-fortran/token"
 )
 
+// Set via -ldflags: go test -ldflags="-X 'github.com/soypat/go-fortran.debugNoStuckCheck=1'"
+var debugNoStuckCheck string
+
 // Pratt parsing functions. a.k.a: Semantic Code.
 type (
 	statementParseFn func() ast.Statement // For statement-level constructs
@@ -137,14 +140,20 @@ func (p *Parser90) nextToken() {
 	}
 }
 
+// posCheck is called in control structure methods like loop*, currentTokenIs, consumeIf* methods.
+// Should not be called from higher level parser functions.
 func (p *Parser90) posCheck() {
+	if debugNoStuckCheck == "1" {
+		return
+	}
 	if p.current.start == p.lastPosCheck {
 		p.nSamePosCheckCount++
-		if p.nSamePosCheckCount == 1000 {
+		if p.nSamePosCheckCount == 100000 { // F 1000 is too low for this!
 			p.addErrorFatal("parser stuck in forever loop", 3)
 		}
 	} else {
 		p.lastPosCheck = p.current.start
+		p.nSamePosCheckCount = 0
 	}
 }
 
@@ -157,6 +166,7 @@ func (p *Parser90) sourcePos() sourcePos {
 	}
 }
 
+// IsDone returns true if the parser is done parsing, whether it be by EOF or error(s) encountered.
 func (p *Parser90) IsDone() bool {
 	p.posCheck()
 	return p.died || p.current.tok == token.EOF || len(p.errors) >= p.maxErrs
@@ -765,14 +775,48 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 				p.nextToken()
 				break
 			}
-		} else if p.currentTokenIs(token.LParen) {
+			p.nextToken() // consume nested )
+			continue
+		}
+
+		if p.currentTokenIs(token.LParen) {
 			parenDepth++
+			p.nextToken() // consume nested (
+			continue
 		}
 
 		// Parse one spec (expression, keyword=value, etc.)
-		spec := p.parseExpression(0)
+		// Special case: END is a keyword but can be used as identifier in I/O specs
+		var spec ast.Expression
+		if p.currentTokenIs(token.END) {
+			// Treat END as an identifier in I/O context
+			spec = &ast.Identifier{
+				Value:    "END",
+				Position: ast.Pos(p.current.start, p.current.start+len(p.current.lit)),
+			}
+			p.nextToken()
+			// Check for assignment (END=500)
+			if p.currentTokenIs(token.Equals) {
+				p.nextToken() // consume =
+				value := p.parseExpression(0)
+				if value != nil {
+					spec = &ast.BinaryExpr{
+						Left:     spec,
+						Op:       token.Equals,
+						Right:    value,
+						Position: ast.Pos(spec.SourcePos().Start(), value.SourcePos().End()),
+					}
+				}
+			}
+		} else {
+			spec = p.parseExpression(0)
+		}
+
 		if spec != nil {
 			specs = append(specs, spec)
+		} else {
+			// If expression parsing fails, break to avoid infinite loop
+			break
 		}
 
 		if !p.consumeIf(token.Comma) && !p.currentTokenIs(token.RParen) {
@@ -802,16 +846,15 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 	pos := ast.Pos(start, p.current.start)
 	if isRead {
 		return &ast.ReadStmt{
-			Unit: unit,
-			// Specifiers: specifiers,
+			Unit:      unit,
 			InputList: ioList,
 			Position:  pos,
 		}
 	} else {
 		return &ast.WriteStmt{
-			// Specifiers: specifiers,
-			OutputList: ioList,
+			Unit:       unit,
 			Format:     format,
+			OutputList: ioList,
 			Position:   pos,
 		}
 	}
