@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/soypat/go-fortran/ast"
 	"github.com/soypat/go-fortran/token"
@@ -241,7 +240,7 @@ func (p *Parser90) loopUntilEndElseOr(t ...token.Token) bool {
 
 // loopUntil returns true as long as current token not in set and EOF not hit.
 func (p *Parser90) loopUntil(t ...token.Token) bool {
-	time.Sleep(time.Millisecond / 1000)
+	// time.Sleep(time.Millisecond / 1000)
 	if p.IsDone() {
 		return false
 	}
@@ -476,8 +475,8 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 			// Not a parseable executable statement - skip the construct
 			p.skipToNextStatement()
 			var endlabel string
-			if len(stmts) > 0 && p.consumeEndLabelIfPresent(&endlabel, token.IF) ||
-				p.consumeEndLabelIfPresent(&endlabel, token.ENDDO) {
+			if false && len(stmts) > 0 && p.consumeEndLabelIfPresent(&endlabel, token.IF) ||
+				p.consumeEndLabelIfPresent(&endlabel, token.DO) {
 				switch stmt := stmts[len(stmts)-1].(type) {
 				case *ast.DoLoop:
 					stmt.EndLabel = endlabel
@@ -774,8 +773,8 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 	p.skipNewlinesAndComments()
 
 	// Parse THEN block
-	for p.loopUntil(token.ELSE, token.END, token.ENDIF) {
-		if p.peekTokenIs(token.IF) && p.currentTokenIs(token.ELSE) {
+	for p.loopUntil(token.ELSE, token.ELSEIF, token.END, token.ENDIF) {
+		if p.currentTokenIs(token.ELSEIF) || p.currentTokenIs(token.ELSE) && p.peekTokenIs(token.IF) {
 			break
 		}
 		if s := p.parseExecutableStatement(); s != nil {
@@ -830,7 +829,8 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 		p.nextToken() // consume ELSE
 		p.skipNewlinesAndComments()
 		p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
-		for p.loopUntil(token.END, token.IF) {
+		for p.loopUntil(token.END, token.ENDIF) {
+			// LOOP FOREVER HERE.
 			if s := p.parseExecutableStatement(); s != nil {
 				stmt.ElsePart = append(stmt.ElsePart, s)
 			} else {
@@ -933,6 +933,21 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 
 		if s := p.parseExecutableStatement(); s != nil {
 			stmt.Body = append(stmt.Body, s)
+			// Check if this statement has the target label (F77 DO loop termination)
+			// This handles both direct labeled statements and shared DO termination
+			if stmt.TargetLabel != "" {
+				// Check if the statement itself has the target labe
+				label := s.GetLabel()
+				if label == stmt.TargetLabel {
+					break
+				}
+				// Check for shared DO termination: nested DO that ends at our target
+				if nestedDO, ok := s.(*ast.DoLoop); ok {
+					if nestedDO.TargetLabel == stmt.TargetLabel || nestedDO.EndLabel == stmt.TargetLabel {
+						break
+					}
+				}
+			}
 		} else {
 			p.skipToNextStatement()
 		}
@@ -2610,7 +2625,7 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 func (p *Parser90) consumeEndLabelIfPresent(tgt *string, endConstruct token.Token) bool {
 	// Check for labeled END IF: label END IF (F77)
 	if p.currentTokenIs(token.IntLit) &&
-		p.peek.tok == token.END || p.peek.tok.EndConstructComposite() == endConstruct {
+		p.peek.tok == token.END || endConstruct.EndConstructComposite() == p.peek.tok {
 		// Capture the end label and advance past it
 		*tgt = string(p.current.lit)
 		p.nextToken()

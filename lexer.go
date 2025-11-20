@@ -123,7 +123,7 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 		l.tokenLine, l.tokenCol = l.line, l.col
 		literal, ok := l.readNumber()
 		if !ok || l.col <= 6 { // Labels are in columns 1-5
-			return token.Label, startPos, literal
+			return token.IntLit, startPos, literal
 		}
 		l.err = errors.New("bad label")
 		return token.Illegal, startPos, literal

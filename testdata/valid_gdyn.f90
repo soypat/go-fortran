@@ -33,4 +33,24 @@ PROGRAM GDYN2E
       end if
       ((k == (/ 0, 
      3  /)))
+   if (k=1) then
+   DO 3800 IT=1,5
+      k = 0
+ 3800      CONTINUE
+      endif
+   DO 500 I=1,NPOINT
+      DO 300 J=1,3
+      VECTOR(J)=ECFSAT(J)-SVECT(I+JJ)
+  300 END DO
+      IF (IPNALB(I).EQ.1) THEN ! just short-wave radiation applies
+         ACCEL=RAMS*APAREA*SFLUXSW(I)
+      ELSEIF (IPNALB(I).EQ.2) THEN ! just long-wave radiation applies
+         ACCEL=RAMS*APAREA*SFLUXLW(I)
+      ELSE ! default: both
+         ACCEL=RAMS*APAREA*SFLUX(I)
+      ENDIF
+      DO 400 J=1,3
+      ACCSUM(J)=ACCSUM(J)+ACCEL*VECTOR(J)/DIST(I)
+  400 END DO
+  500 END DO
 END PROGRAM GDYN2E
