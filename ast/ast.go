@@ -971,9 +971,11 @@ func (cgs *ComputedGotoStmt) AppendString(dst []byte) []byte {
 
 // WriteStmt represents a WRITE statement
 type WriteStmt struct {
-	Unit       Expression   // Unit specifier (e.g., 91, *, variable)
-	OutputList []Expression // List of expressions to write
-	Label      string       // Optional statement label
+	Unit       Expression            // Unit specifier (e.g., 91, *, variable)
+	Format     Expression            // Format specifier
+	Specifiers map[string]Expression // I/O specifiers: END, ERR, IOSTAT, etc.
+	OutputList []Expression          // List of expressions to write
+	Label      string                // Optional statement label
 	Position
 }
 
@@ -982,6 +984,38 @@ var _ Statement = (*WriteStmt)(nil) // compile time check of interface implement
 func (ws *WriteStmt) GetLabel() string { return ws.Label }
 
 func (ws *WriteStmt) statementNode() {}
+
+// ReadStmt represents a READ statement
+type ReadStmt struct {
+	Unit       Expression            // Unit specifier (e.g., 91, *, variable)
+	Format     Expression            // Format specifier
+	Specifiers map[string]Expression // I/O specifiers: END, ERR, IOSTAT, etc.
+	InputList  []Expression          // List of variables to read into
+	Label      string                // Optional statement label
+	Position
+}
+
+var _ Statement = (*ReadStmt)(nil) // compile time check of interface implementation.
+
+func (rs *ReadStmt) GetLabel() string { return rs.Label }
+
+func (rs *ReadStmt) statementNode() {}
+
+func (rs *ReadStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "READ"...)
+}
+
+func (rs *ReadStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "READ(...) "...)
+	for i, expr := range rs.InputList {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		dst = expr.AppendString(dst)
+	}
+	return dst
+}
+
 func (ws *WriteStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "WRITE"...)
 }

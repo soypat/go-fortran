@@ -807,9 +807,7 @@ ENDIF`,
 				t.Fatal("ParseNextProgramUnit returned nil")
 			}
 
-			if len(parser.Errors()) > 0 {
-				t.Fatalf("Parse errors: %v", parser.Errors())
-			}
+			helperFatalErrors(t, &parser, "statement:\n"+wrappedSrc)
 
 			// Extract the statement from the parsed program
 			progBlock, ok := unit.(*ast.ProgramBlock)

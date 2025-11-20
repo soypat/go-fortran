@@ -3,7 +3,9 @@ package fortran
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -66,7 +68,11 @@ type Parser90 struct {
 	maxStatements int
 	maxErrs       int
 	nStatements   int
-	died          bool
+	// nSamePosCheckCount counts amount of times a check was performed on the same sourcePosition
+	// after reaching a thrshold the parser dies.
+	nSamePosCheckCount int
+	lastPosCheck       int
+	died               bool
 }
 
 func (p *Parser90) Reset(source string, r io.Reader) error {
@@ -105,8 +111,9 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 func (p *Parser90) nextToken() {
 	if p.current.tok == token.EOF {
 		return
-	} else if p.current.tok == token.EndParse {
-		p.addErrorFatal("end parse token found")
+	}
+	if p.current.tok == token.EndParse {
+		p.addErrorFatal("end parse token found", 0)
 	}
 	tok, start, lit := p.l.NextToken()
 	// Get the line/col where this token started
@@ -130,6 +137,17 @@ func (p *Parser90) nextToken() {
 	}
 }
 
+func (p *Parser90) posCheck() {
+	if p.current.start == p.lastPosCheck {
+		p.nSamePosCheckCount++
+		if p.nSamePosCheckCount == 1000 {
+			p.addErrorFatal("parser stuck in forever loop", 3)
+		}
+	} else {
+		p.lastPosCheck = p.current.start
+	}
+}
+
 func (p *Parser90) sourcePos() sourcePos {
 	return sourcePos{
 		Source: p.l.Source(),
@@ -140,6 +158,7 @@ func (p *Parser90) sourcePos() sourcePos {
 }
 
 func (p *Parser90) IsDone() bool {
+	p.posCheck()
 	return p.died || p.current.tok == token.EOF || len(p.errors) >= p.maxErrs
 }
 
@@ -241,6 +260,7 @@ func (p *Parser90) parseTopLevelUnit() ast.ProgramUnit {
 // Helper methods
 
 func (p *Parser90) loopUntilEndElseOr(t ...token.Token) bool {
+	p.posCheck()
 	return !p.current.tok.IsEndOrElse() && p.loopUntil(t...)
 }
 
@@ -271,10 +291,12 @@ func (p *Parser90) loopWhile(t ...token.Token) bool {
 }
 
 func (p *Parser90) currentTokenIs(t token.Token) bool {
+	p.posCheck()
 	return p.current.tok == t
 }
 
 func (p *Parser90) peekTokenIs(t token.Token) bool {
+	p.posCheck()
 	return p.peek.tok == t
 }
 
@@ -367,7 +389,7 @@ func (p *Parser90) skipUnexpectedEndConstructs(msg string) (skipped bool) {
 			p.nextToken()
 		}
 		skipped = true
-		p.addErrorFatal(msg)
+		p.addErrorFatal(msg, 1)
 		p.skipNewlinesAndComments()
 	}
 }
@@ -391,17 +413,22 @@ func (p *Parser90) skipNewlinesAndComments() {
 }
 
 func (p *Parser90) addErrorWithPos(pos sourcePos, msg string) {
+	if p.died {
+		msg = "got error with terminated parser: " + msg
+	}
 	p.errors = append(p.errors, ParserError{
 		sp:  pos,
 		msg: msg,
 	})
 }
 
-func (p *Parser90) addErrorFatal(msg string) {
+func (p *Parser90) addErrorFatal(msg string, callstackSkip int) {
 	if p.died {
 		p.addError(msg)
 	} else {
-		p.addError("fatal error encountered: " + msg) // Only one unrecoverable message
+		callstack := getCallStack(callstackSkip)
+		p.addError("tokens: " + p.strToks() + "\n" + callstack + "\nfatal error encountered, terminating run early: " + msg) // Only one unrecoverable message
+
 	}
 	p.died = true
 }
@@ -412,6 +439,11 @@ func (p *Parser90) addError(msg string) {
 
 func (p *Parser90) Errors() []ParserError {
 	return p.errors
+}
+
+func (p *Parser90) strToks() string {
+	return fmt.Sprintf("%q %s %q %s %q %s", p.current.lit, p.current.tok,
+		p.peek.lit, p.peek.tok, p.uberpeek.lit, p.uberpeek.tok)
 }
 
 // canUseAsIdentifier returns true if the current token can be used as an identifier.
@@ -586,8 +618,8 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		stmt = p.parseContinueStmt()
 	case token.GOTO:
 		stmt = p.parseGotoStmt()
-	case token.WRITE:
-		stmt = p.parseWriteStmt()
+	case token.READ, token.WRITE:
+		stmt = p.parseIOStmt()
 	case token.Identifier:
 		// Check for "GO TO" (two separate tokens)
 		if string(p.current.lit) == "GO" && p.peekTokenIs(token.Identifier) {
@@ -707,49 +739,83 @@ func (p *Parser90) parseGotoStmt() ast.Statement {
 	return stmt
 }
 
-// parseWriteStmt parses a WRITE statement
-// Format: WRITE(unit) list or WRITE(unit, format) list
-func (p *Parser90) parseWriteStmt() ast.Statement {
+// parseIOStmt parses READ or WRITE statements
+// Format: READ/WRITE(ctrl_specs) [io_list]
+func (p *Parser90) parseIOStmt() ast.Statement {
 	start := p.current.start
-	stmt := &ast.WriteStmt{}
-	p.expect(token.WRITE, "")
+	var isRead bool
+	if p.consumeIf(token.READ) {
+		isRead = true
+	} else if !p.consumeIf(token.WRITE) {
+		p.addError("expected READ/WRITE")
+	}
 
-	if !p.expect(token.LParen, "opening WRITE unit specifier") {
+	if !p.expect(token.LParen, "in I/O statement") {
 		return nil
 	}
 
-	// Parse unit (could be number, *, or expression)
-	stmt.Unit = p.parseExpression(0)
-	if stmt.Unit == nil {
-		p.addError("expected unit specifier in WRITE statement")
-		return nil
-	}
+	// Parse control spec list: just expressions/assignments until RParen
+	// Track paren depth so END keyword doesn't confuse us
+	var specs []ast.Expression
+	parenDepth := 1
 
-	// Skip optional format specifier (could be comma followed by format)
-	// Format can be: *, format_label, FMT=..., etc.
-	if p.consumeIf(token.Comma) {
-		// Consume format specifier tokens until we hit RParen or construct-ending keyword
-		for p.loopUntilEndElseOr(token.RParen) {
-			p.nextToken()
+	for parenDepth > 0 && !p.IsDone() {
+		if p.currentTokenIs(token.RParen) {
+			parenDepth--
+			if parenDepth == 0 {
+				p.nextToken()
+				break
+			}
+		} else if p.currentTokenIs(token.LParen) {
+			parenDepth++
+		}
+
+		// Parse one spec (expression, keyword=value, etc.)
+		spec := p.parseExpression(0)
+		if spec != nil {
+			specs = append(specs, spec)
+		}
+
+		if !p.consumeIf(token.Comma) && !p.currentTokenIs(token.RParen) {
+			break
 		}
 	}
-	if !p.expect(token.RParen, "closing WRITE unit specifier") {
-		return nil
-	}
 
-	// Parse output list (comma-separated expressions)
-	// Stop at newline or construct-ending keywords to avoid consuming tokens from parent scope
-	for p.loopUntilEndElseOr(token.NewLine) {
+	// Parse I/O list (comma-separated expressions)
+	var ioList []ast.Expression
+	for !p.currentTokenIs(token.NewLine) && !p.current.tok.IsEnd() && !p.IsDone() {
 		if expr := p.parseExpression(0); expr != nil {
-			stmt.OutputList = append(stmt.OutputList, expr)
+			ioList = append(ioList, expr)
 		}
 		if !p.consumeIf(token.Comma) {
 			break
 		}
 	}
 
-	stmt.Position = ast.Pos(start, p.current.start)
-	return stmt
+	// Build appropriate statement type
+	var unit, format ast.Expression
+	if len(specs) > 0 {
+		unit = specs[0]
+	}
+	if len(specs) > 1 {
+		format = specs[1]
+	}
+	pos := ast.Pos(start, p.current.start)
+	if isRead {
+		return &ast.ReadStmt{
+			Unit: unit,
+			// Specifiers: specifiers,
+			InputList: ioList,
+			Position:  pos,
+		}
+	} else {
+		return &ast.WriteStmt{
+			// Specifiers: specifiers,
+			OutputList: ioList,
+			Format:     format,
+			Position:   pos,
+		}
+	}
 }
 
 // parseIfStmt parses an IF construct
@@ -1233,46 +1299,6 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 	default:
 		return nil // Unknown statement, caller will skip
 	}
-}
-
-// parsePrivateStmt parses a PRIVATE statement
-func (p *Parser90) parsePrivateStmt() ast.Statement {
-	start := p.current.start
-	stmt := &ast.PrivateStmt{}
-	p.nextToken() // consume PRIVATE
-
-	if p.consumeIf(token.DoubleColon) {
-		for p.canUseAsIdentifier() {
-			stmt.Entities = append(stmt.Entities, string(p.current.lit))
-			p.nextToken()
-			if !p.currentTokenIs(token.Comma) {
-				break
-			}
-			p.nextToken()
-		}
-	}
-	stmt.Position = ast.Pos(start, p.current.start)
-	return stmt
-}
-
-// parsePublicStmt parses a PUBLIC statement
-func (p *Parser90) parsePublicStmt() ast.Statement {
-	start := p.sourcePos()
-	stmt := &ast.PublicStmt{}
-	p.nextToken() // consume PUBLIC
-
-	if p.consumeIf(token.DoubleColon) {
-		for p.canUseAsIdentifier() {
-			stmt.Entities = append(stmt.Entities, string(p.current.lit))
-			p.nextToken()
-			if !p.currentTokenIs(token.Comma) {
-				break
-			}
-			p.nextToken()
-		}
-	}
-	stmt.Position = ast.Pos(start.Pos, p.current.start)
-	return stmt
 }
 
 // parseInterfaceStmt parses an INTERFACE...END INTERFACE block
@@ -2703,4 +2729,61 @@ func parseCommaSeparatedList[T any](p *Parser90, terminator token.Token, parser 
 		}
 	}
 	return items, nil
+}
+
+// getCallStack returns a formatted string of the current call stack
+// Format: "filename:line in TypeName.FunctionName"
+// Example: "parser.go:592 in Parser90.parseExecutableStatement"
+func getCallStack(skipAdditional int) string {
+	var result strings.Builder
+
+	// Get program counters for up to 32 frames
+	pcs := make([]uintptr, 32)
+	n := runtime.Callers(2+skipAdditional, pcs) // Skip getCallStack and its caller
+
+	if n == 0 {
+		return ""
+	}
+
+	pcs = pcs[:n]
+	frames := runtime.CallersFrames(pcs)
+
+	first := true
+	for {
+		frame, more := frames.Next()
+
+		// Extract just the filename from the full path
+		filename := filepath.Base(frame.File)
+
+		// Extract function name and type if present
+		// Format: "package.Type.Method" or "package.Function"
+		funcName := frame.Function
+		parts := strings.Split(funcName, ".")
+		if len(parts) > 0 {
+			funcName = parts[len(parts)-1]
+		}
+		if len(parts) > 1 {
+			// Include type name if present
+			typeName := parts[len(parts)-2]
+			// Remove package prefix if it starts with (*Type)
+			if strings.HasPrefix(typeName, "(*") && strings.HasSuffix(typeName, ")") {
+				typeName = strings.TrimPrefix(typeName, "(*")
+				typeName = strings.TrimSuffix(typeName, ")")
+			}
+			funcName = typeName + "." + funcName
+		}
+
+		if !first {
+			result.WriteString("\n")
+		}
+		first = false
+
+		fmt.Fprintf(&result, "%s:%d @%s", filename, frame.Line, funcName)
+
+		if !more {
+			break
+		}
+	}
+
+	return result.String()
 }

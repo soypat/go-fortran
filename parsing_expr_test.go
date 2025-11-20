@@ -818,12 +818,23 @@ func TestExpressionParsing(t *testing.T) {
 				t.Fatal("parseExpression returned nil")
 			}
 
-			if len(parser.Errors()) > 0 {
-				t.Fatalf("Parse errors: %v", parser.Errors())
-			}
+			helperFatalErrors(t, &parser, "expected valid expression: "+tt.src)
 
 			// Run the validation function
 			tt.validate(t, expr)
 		})
+	}
+}
+
+func helperPrintErrors(t *testing.T, p *Parser90) {
+	for _, err := range p.Errors() {
+		t.Error(&err)
+	}
+}
+
+func helperFatalErrors(t *testing.T, p *Parser90, msg string) {
+	helperPrintErrors(t, p)
+	if len(p.Errors()) > 0 {
+		t.Fatal(msg)
 	}
 }
