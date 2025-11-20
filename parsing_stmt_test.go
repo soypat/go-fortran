@@ -515,6 +515,34 @@ func TestStatementParsing(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "IF used as variable name in assignment",
+			src:  "IF=0",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assignStmt, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
+				}
+
+				// Check LHS is identifier "IF"
+				ident, ok := assignStmt.Target.(*ast.Identifier)
+				if !ok {
+					t.Fatalf("Expected target to be *ast.Identifier, got %T", assignStmt.Target)
+				}
+				if ident.Value != "IF" {
+					t.Errorf("Expected target 'IF', got %q", ident.Value)
+				}
+
+				// Check RHS is integer literal 0
+				intLit, ok := assignStmt.Value.(*ast.IntegerLiteral)
+				if !ok {
+					t.Fatalf("Expected value to be *ast.IntegerLiteral, got %T", assignStmt.Value)
+				}
+				if intLit.Raw != "0" {
+					t.Errorf("Expected value '0', got %q", intLit.Raw)
+				}
+			},
+		},
 
 		// ===== Array Slice Syntax (F90) =====
 		{

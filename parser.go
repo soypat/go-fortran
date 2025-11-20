@@ -612,7 +612,14 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 	var stmt ast.Statement
 	switch p.current.tok {
 	case token.IF:
-		stmt = p.parseIfStmt()
+		// IF can be used as a variable name: IF=value
+		// Check if it's actually an IF statement (followed by '(') or an assignment
+		if p.peekTokenIs(token.LParen) {
+			stmt = p.parseIfStmt()
+		} else {
+			// IF used as identifier in assignment
+			stmt = p.parseAssignmentStmt()
+		}
 	case token.DO:
 		stmt = p.parseDoLoop()
 	case token.CALL:
@@ -629,7 +636,7 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		stmt = p.parseGotoStmt()
 	case token.READ, token.WRITE:
 		stmt = p.parseIOStmt()
-	case token.Identifier:
+	case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
 		// Check for "GO TO" (two separate tokens)
 		if string(p.current.lit) == "GO" && p.peekTokenIs(token.Identifier) {
 			stmt = p.parseGotoStmt()
