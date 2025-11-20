@@ -504,7 +504,7 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		return nil // Empty statement or misplaced END.
 	}
 	var label string
-	if p.currentTokenIs(token.Label) || p.currentTokenIs(token.IntLit) {
+	if p.currentTokenIs(token.IntLit) {
 		if p.peek.tok.IsEnd() {
 			return nil // Is a Label to an END, should be parsed in parent
 		}
@@ -607,7 +607,7 @@ func (p *Parser90) parseGotoStmt() ast.Statement {
 
 		// Parse label list using parseCommaSeparatedList
 		parseOneLabel := func() (string, error) {
-			if !p.currentTokenIs(token.IntLit) && !p.currentTokenIs(token.Label) {
+			if !p.currentTokenIs(token.IntLit) {
 				return "", fmt.Errorf("expected label in computed GOTO label list")
 			}
 			label := string(p.current.lit)
@@ -639,7 +639,7 @@ func (p *Parser90) parseGotoStmt() ast.Statement {
 
 	// Simple GOTO: GOTO label
 	stmt := &ast.GotoStmt{}
-	if p.currentTokenIs(token.IntLit) || p.currentTokenIs(token.Label) {
+	if p.currentTokenIs(token.IntLit) {
 		stmt.Target = string(p.current.lit)
 		p.nextToken()
 	} else {
@@ -719,7 +719,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 
 	// Check for arithmetic IF (F77): IF (expr) label1, label2, label3
 	// This branches to label1 if expr < 0, label2 if expr == 0, label3 if expr > 0
-	if (p.currentTokenIs(token.IntLit) || p.currentTokenIs(token.Label)) && p.peekTokenIs(token.Comma) {
+	if p.currentTokenIs(token.IntLit) && p.peekTokenIs(token.Comma) {
 		arithmeticStmt := &ast.ArithmeticIfStmt{
 			Condition: stmt.Condition,
 		}
@@ -732,7 +732,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 		}
 
 		// Parse zero label
-		if !p.currentTokenIs(token.IntLit) && !p.currentTokenIs(token.Label) {
+		if !p.currentTokenIs(token.IntLit) {
 			p.addError("expected label for zero case in arithmetic IF")
 			return nil
 		}
@@ -743,7 +743,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 		}
 
 		// Parse positive label
-		if !p.currentTokenIs(token.IntLit) && !p.currentTokenIs(token.Label) {
+		if !p.currentTokenIs(token.IntLit) {
 			p.addError("expected label for positive case in arithmetic IF")
 			return nil
 		}

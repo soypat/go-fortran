@@ -193,7 +193,7 @@ const (
 
 	// ==================== SPECIAL TOKENS ====================
 
-	Label       // <label>
+	// Label       // <label> // REMOVE TEMPORARILY UNTIL IMPLEMENTED IN LEXER UNAMBIGUOUSLY.
 	LineComment // <linecomment>
 	NewLine     // <newline>
 	EOF         // <EOF>
