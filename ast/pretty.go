@@ -171,7 +171,7 @@ func pp(buf *bytes.Buffer, node Node, indent int) {
 		}
 	case *BinaryExpr:
 		pp(buf, n.Left, 0)
-		fmt.Fprintf(buf, " %s ", n.Op)
+		fmt.Fprintf(buf, " %s ", n.Op.String())
 		pp(buf, n.Right, 0)
 	case *UnaryExpr:
 		buf.WriteString(n.Op.String())

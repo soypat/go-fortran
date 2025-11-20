@@ -600,6 +600,7 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 	if p.current.tok.IsEnd() {
 		return nil // Empty statement or misplaced END.
 	}
+	var stmt ast.Statement
 	var label string
 	if p.currentTokenIs(token.IntLit) {
 		if p.peek.tok.IsEnd() {
@@ -608,48 +609,43 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		label = string(p.current.lit)
 		p.nextToken()
 	}
-
-	var stmt ast.Statement
-	switch p.current.tok {
-	case token.IF:
-		// IF can be used as a variable name: IF=value
-		// Check if it's actually an IF statement (followed by '(') or an assignment
-		if p.peekTokenIs(token.LParen) {
+	if p.peekTokenIs(token.Equals) && p.current.tok.CanBeUsedAsIdentifier() {
+		// Most keywords can be used as identifiers in fortran.
+		// i.e: IF=0
+		stmt = p.parseAssignmentStmt()
+	} else {
+		switch p.current.tok {
+		case token.IF:
 			stmt = p.parseIfStmt()
-		} else {
-			// IF used as identifier in assignment
-			stmt = p.parseAssignmentStmt()
-		}
-	case token.DO:
-		stmt = p.parseDoLoop()
-	case token.CALL:
-		stmt = p.parseCallStmt()
-	case token.RETURN:
-		stmt = p.parseReturnStmt()
-	case token.CYCLE:
-		stmt = p.parseCycleStmt()
-	case token.EXIT:
-		stmt = p.parseExitStmt()
-	case token.CONTINUE:
-		stmt = p.parseContinueStmt()
-	case token.GOTO:
-		stmt = p.parseGotoStmt()
-	case token.READ, token.WRITE:
-		stmt = p.parseIOStmt()
-	case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
-		// Check for "GO TO" (two separate tokens)
-		if string(p.current.lit) == "GO" && p.peekTokenIs(token.Identifier) {
+		case token.DO:
+			stmt = p.parseDoLoop()
+		case token.CALL:
+			stmt = p.parseCallStmt()
+		case token.RETURN:
+			stmt = p.parseReturnStmt()
+		case token.CYCLE:
+			stmt = p.parseCycleStmt()
+		case token.EXIT:
+			stmt = p.parseExitStmt()
+		case token.CONTINUE:
+			stmt = p.parseContinueStmt()
+		case token.GOTO:
 			stmt = p.parseGotoStmt()
-		} else {
-			// This could be an assignment statement or a call to a subroutine without the CALL keyword.
-			// For now, we'll assume it's an assignment.
-			stmt = p.parseAssignmentStmt()
+		case token.READ, token.WRITE:
+			stmt = p.parseIOStmt()
+		case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
+			// Check for "GO TO" (two separate tokens)
+			if string(p.current.lit) == "GO" && p.peekTokenIs(token.Identifier) {
+				stmt = p.parseGotoStmt()
+			} else {
+				// This could be an assignment statement or a call to a subroutine without the CALL keyword.
+				// For now, we'll assume it's an assignment.
+				stmt = p.parseAssignmentStmt()
+			}
 		}
-	default:
-		return nil // Unknown statement, caller will skip
 	}
-	p.nStatements++ // add normal statement.
 	if stmt != nil {
+		p.nStatements++ // add normal statement.
 		switch s := stmt.(type) {
 		case *ast.IfStmt:
 			s.Label = label

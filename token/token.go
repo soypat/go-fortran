@@ -248,6 +248,26 @@ func (tok Token) IsKeyword() bool {
 	return tok >= INTEGER && tok <= ENDWHERE
 }
 
+// CanBeUsedAsIdentifier returns true if this token can be used as an identifier.
+// In Fortran, most keywords can be used as variable/function names, but some
+// structural keywords (PROGRAM, SUBROUTINE, FUNCTION, MODULE, END, CONTAINS)
+// would cause ambiguity and are excluded.
+func (tok Token) CanBeUsedAsIdentifier() bool {
+	// Explicit identifiers are always OK
+	if tok == Identifier || tok == FormatSpec {
+		return true
+	}
+
+	// Exclude structural keywords that would cause ambiguity
+	switch tok {
+	case PROGRAM, SUBROUTINE, FUNCTION, MODULE, END, CONTAINS:
+		return false
+	default:
+		// Most other keywords and attributes can be used as identifiers
+		return tok.IsKeyword() || tok.IsAttribute()
+	}
+}
+
 func (tok Token) IsAttributeKeyword() bool {
 	return tok == PURE || tok == RECURSIVE || tok == ELEMENTAL
 }
