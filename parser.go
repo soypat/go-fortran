@@ -2554,7 +2554,9 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 		p.nextToken()
 
 		// Check for function call or array reference/section
-		if p.currentTokenIs(token.LParen) {
+		// Can be chained for substring notation: array(i)(1:5)
+		var result ast.Expression
+		for p.currentTokenIs(token.LParen) {
 			p.nextToken() // consume (
 
 			// Parse argument/subscript list
@@ -2568,14 +2570,30 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 				p.nextToken() // consume )
 			}
 
-			// For now, treat all identifier(...) as function calls
-			// In a full implementation, we'd need symbol table to distinguish
-			// between function calls and array references
-			return &ast.FunctionCall{
-				Name:     name,
-				Args:     args,
-				Position: ast.Pos(startPos, endPos),
+			if result == nil {
+				// First (...) - create function call for identifier
+				result = &ast.FunctionCall{
+					Name:     name,
+					Args:     args,
+					Position: ast.Pos(startPos, endPos),
+				}
+			} else {
+				// Subsequent (...) - substring/section of previous result
+				// Represent as nested FunctionCall where the previous result
+				// is the first (implicit) argument
+				// e.g., array(i)(1:5) becomes FunctionCall{Args: [i]}{Args: [1:5]}
+				// We prepend the base as arg[0] to maintain the chain
+				chainedArgs := append([]ast.Expression{result}, args...)
+				result = &ast.FunctionCall{
+					Name:     "", // Empty name indicates chained subscript/substring
+					Args:     chainedArgs,
+					Position: ast.Pos(startPos, endPos),
+				}
 			}
+		}
+
+		if result != nil {
+			return result
 		}
 
 		// Just an identifier

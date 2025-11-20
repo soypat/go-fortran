@@ -62,4 +62,5 @@ PROGRAM GDYN2E
    END SELECT
    READ ( IUNT14,81200,IOSTAT=IOS,END=60000)CDNAME,IFLD15,IA3, &
    &                                         IFLD78, FIELD
+   if( ASAVE(isave)(1:1) .ne. ' ') k=1
 END PROGRAM GDYN2E

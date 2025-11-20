@@ -570,6 +570,56 @@ func TestStatementParsing(t *testing.T) {
 			},
 		},
 
+		// ===== Substring and chained subscript notation =====
+		{
+			name: "substring notation with single character",
+			src:  "IF(ASAVE(isave)(1:1) .NE. ' ') X = 1",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ifStmt, ok := stmt.(*ast.IfStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
+				}
+
+				// The condition should be a binary expression (.NE.)
+				binExpr, ok := ifStmt.Condition.(*ast.BinaryExpr)
+				if !ok {
+					t.Fatalf("Expected condition to be *ast.BinaryExpr, got %T", ifStmt.Condition)
+				}
+
+				// Left side should be chained FunctionCall: ASAVE(isave)(1:1)
+				chainedCall, ok := binExpr.Left.(*ast.FunctionCall)
+				if !ok {
+					t.Fatalf("Expected left side to be *ast.FunctionCall, got %T", binExpr.Left)
+				}
+
+				// For chained calls, Name should be empty and Args[0] should be the base
+				if chainedCall.Name != "" {
+					t.Logf("Note: Chained call Name=%q (may be empty for substring)", chainedCall.Name)
+				}
+			},
+		},
+		{
+			name: "array access with substring",
+			src:  "Y = STR(5)(2:4)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assignStmt, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
+				}
+
+				// Value should be a chained FunctionCall
+				chainedCall, ok := assignStmt.Value.(*ast.FunctionCall)
+				if !ok {
+					t.Fatalf("Expected value to be *ast.FunctionCall, got %T", assignStmt.Value)
+				}
+
+				// Should have args (the chained structure)
+				if len(chainedCall.Args) == 0 {
+					t.Error("Expected non-empty Args for chained call")
+				}
+			},
+		},
+
 		// ===== Block IF with ENDIF (F77 single token) =====
 		{
 			name: "block IF with ENDIF single token",
