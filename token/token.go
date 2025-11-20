@@ -210,6 +210,17 @@ func (tok Token) IsAttributeKeyword() bool {
 	return tok == PURE || tok == RECURSIVE || tok == ELEMENTAL
 }
 
+func (tok Token) EndConstructComposite() Token {
+	switch tok {
+	case IF:
+		return ENDIF
+	case DO:
+		return ENDDO
+	default:
+		panic(tok.String() + " has no composite")
+	}
+}
+
 // IsExecutableStatement returns true if the token is a executable
 // statement- control structure or built in function.
 // The [Identifier] token returns false as it may or may not represent an executable statement.

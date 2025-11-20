@@ -725,6 +725,31 @@ ENDIF`,
 				}
 			},
 		},
+
+		// ===== F77 labeled END DO =====
+		{
+			name: "F77 labeled END DO",
+			src: `DO 3002 IQP=1,10
+ 3002 END DO`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				doLoop, ok := stmt.(*ast.DoLoop)
+				if !ok {
+					t.Fatalf("Expected *ast.DoLoop, got %T", stmt)
+				}
+				// Verify loop variable
+				if doLoop.Var != "IQP" {
+					t.Errorf("Expected loop variable 'IQP', got %q", doLoop.Var)
+				}
+				// Verify target label was captured
+				if doLoop.TargetLabel != "3002" {
+					t.Errorf("Expected DO target label '3002', got %q", doLoop.TargetLabel)
+				}
+				// Verify end label was captured
+				if doLoop.EndLabel != "3002" {
+					t.Errorf("Expected END label '3002', got %q", doLoop.EndLabel)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

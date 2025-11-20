@@ -3,6 +3,7 @@ package fortran
 import (
 	"fmt"
 	"io"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -59,7 +60,6 @@ type Parser90 struct {
 	l       Lexer90
 	current toktuple
 	peek    toktuple
-
 	stmtFns map[token.Token]statementParseFn // Statement parsers
 	errors  []ParserError                    // Collected parsing errors
 
@@ -475,6 +475,18 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 		} else {
 			// Not a parseable executable statement - skip the construct
 			p.skipToNextStatement()
+			var endlabel string
+			if len(stmts) > 0 && p.consumeEndLabelIfPresent(&endlabel, token.IF) ||
+				p.consumeEndLabelIfPresent(&endlabel, token.ENDDO) {
+				switch stmt := stmts[len(stmts)-1].(type) {
+				case *ast.DoLoop:
+					stmt.EndLabel = endlabel
+				case *ast.IfStmt:
+					stmt.EndLabel = endlabel
+				default:
+					p.addError("labelled END does not correspond to a labellable node: " + reflect.TypeOf(stmt).String())
+				}
+			}
 		}
 	}
 
@@ -645,8 +657,7 @@ func (p *Parser90) parseGotoStmt() ast.Statement {
 func (p *Parser90) parseWriteStmt() ast.Statement {
 	start := p.current.start
 	stmt := &ast.WriteStmt{}
-
-	p.nextToken() // consume WRITE
+	p.expect(token.WRITE, "")
 
 	if !p.expect(token.LParen, "opening WRITE unit specifier") {
 		return nil
@@ -794,6 +805,7 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 		p.expect(token.THEN, "after ELSE IF")
 
 		p.skipNewlinesAndComments()
+		p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
 
 		// Parse ELSE IF block
 		for p.loopUntil(token.ELSE, token.END, token.ENDIF) {
@@ -803,9 +815,11 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 			if s := p.parseExecutableStatement(); s != nil {
 				clause.ThenPart = append(clause.ThenPart, s)
 			} else {
+				p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
 				p.skipToNextStatement()
 			}
 			p.skipNewlinesAndComments()
+			p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
 		}
 		clause.Position = ast.Pos(clauseStart, p.current.start)
 		stmt.ElseIfParts = append(stmt.ElseIfParts, clause)
@@ -815,16 +829,20 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 	if p.currentTokenIs(token.ELSE) {
 		p.nextToken() // consume ELSE
 		p.skipNewlinesAndComments()
-
-		for p.loopUntil(token.END, token.ENDIF) {
+		p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
+		for p.loopUntil(token.END, token.IF) {
 			if s := p.parseExecutableStatement(); s != nil {
 				stmt.ElsePart = append(stmt.ElsePart, s)
 			} else {
+				p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
 				p.skipToNextStatement()
 			}
 			p.skipNewlinesAndComments()
+			p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
 		}
 	}
+
+	p.consumeEndLabelIfPresent(&stmt.EndLabel, token.IF)
 
 	// Expect END IF
 	p.expectEndConstruct(token.IF, token.ENDIF, start)
@@ -836,11 +854,10 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 func (p *Parser90) parseDoLoop() ast.Statement {
 	start := p.sourcePos()
 	stmt := &ast.DoLoop{}
-	p.nextToken() // consume DO
+	p.expect(token.DO, "")
 
-	var doLabel string
 	if p.currentTokenIs(token.IntLit) {
-		doLabel = string(p.current.lit)
+		stmt.TargetLabel = string(p.current.lit)
 		p.nextToken()
 	}
 
@@ -894,6 +911,8 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 	for !p.IsDone() {
 		p.skipNewlinesAndComments()
 
+		p.consumeEndLabelIfPresent(&stmt.EndLabel, token.DO)
+
 		// Check for END DO or ENDDO
 		if p.currentTokenIs(token.END) && p.peekTokenIs(token.DO) {
 			break
@@ -920,7 +939,12 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 	}
 
 	// Expect END DO terminator (labels are not verified without symbol table)
-	if doLabel == "" {
+	// Validate target label matches end label if both present
+	if stmt.TargetLabel != "" && stmt.EndLabel != "" && stmt.TargetLabel != stmt.EndLabel {
+		p.addError("DO target label '" + stmt.TargetLabel + "' does not match end label '" + stmt.EndLabel + "'")
+	}
+	// F77 DO loops with target labels may not have END DO
+	if stmt.TargetLabel == "" || stmt.TargetLabel == stmt.EndLabel {
 		p.expectEndConstruct(token.DO, token.ENDDO, start)
 	}
 	stmt.Position = ast.Pos(start.Pos, p.current.start)
@@ -931,7 +955,7 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 func (p *Parser90) parseCallStmt() ast.Statement {
 	start := p.current.start
 	stmt := &ast.CallStmt{}
-	p.nextToken() // consume CALL
+	p.expect(token.CALL, "") // consume CALL
 
 	if !p.canUseAsIdentifier() {
 		p.addError("expected subroutine name after CALL")
@@ -964,7 +988,7 @@ func (p *Parser90) parseCallStmt() ast.Statement {
 func (p *Parser90) parseReturnStmt() ast.Statement {
 	start := p.current.start
 	stmt := &ast.ReturnStmt{}
-	p.nextToken() // consume RETURN
+	p.expect(token.RETURN, "") // consume RETURN
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
 }
@@ -973,7 +997,7 @@ func (p *Parser90) parseReturnStmt() ast.Statement {
 func (p *Parser90) parseCycleStmt() ast.Statement {
 	start := p.current.start
 	stmt := &ast.CycleStmt{}
-	p.nextToken() // consume CYCLE
+	p.expect(token.CYCLE, "") // consume CYCLE
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
 }
@@ -982,7 +1006,7 @@ func (p *Parser90) parseCycleStmt() ast.Statement {
 func (p *Parser90) parseExitStmt() ast.Statement {
 	start := p.current.start
 	stmt := &ast.ExitStmt{}
-	p.nextToken() // consume EXIT
+	p.expect(token.EXIT, "") // consume EXIT
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
 }
@@ -1055,7 +1079,7 @@ func (p *Parser90) skipToNextStatement() {
 
 // skipTypeDefinition skips from TYPE to END TYPE
 func (p *Parser90) skipTypeDefinition() {
-	p.nextToken() // Skip TYPE
+	p.expect(token.TYPE, "skip") // Skip TYPE
 	depth := 1
 	for depth > 0 && !p.IsDone() {
 		if p.currentTokenIs(token.TYPE) && !p.peekTokenIs(token.LParen) {
@@ -1077,7 +1101,7 @@ func (p *Parser90) skipTypeDefinition() {
 
 // skipInterfaceBlock skips from INTERFACE to END INTERFACE
 func (p *Parser90) skipInterfaceBlock() {
-	p.nextToken() // Skip INTERFACE
+	p.expect(token.INTERFACE, "skip") // Skip INTERFACE
 	depth := 1
 	for depth > 0 && !p.IsDone() {
 		if p.currentTokenIs(token.INTERFACE) {
@@ -2581,6 +2605,22 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 	}
 
 	return stmt
+}
+
+func (p *Parser90) consumeEndLabelIfPresent(tgt *string, endConstruct token.Token) bool {
+	// Check for labeled END IF: label END IF (F77)
+	if p.currentTokenIs(token.IntLit) &&
+		p.peek.tok == token.END || p.peek.tok.EndConstructComposite() == endConstruct {
+		// Capture the end label and advance past it
+		*tgt = string(p.current.lit)
+		p.nextToken()
+		if p.current.tok == token.END && p.peek.tok != endConstruct {
+			p.addError("consumed label " + *tgt + " which did not correspond to " + endConstruct.String() + " construct")
+			*tgt = ""
+		}
+		return true
+	}
+	return false
 }
 
 // parseCommaSeparatedList parses items separated by commas until terminator

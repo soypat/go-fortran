@@ -776,13 +776,14 @@ func (ais *ArithmeticIfStmt) AppendString(dst []byte) []byte {
 
 // DoLoop represents a DO loop
 type DoLoop struct {
-	Var      string // Loop variable (empty for DO WHILE)
-	Start    Expression
-	End      Expression
-	Step     Expression
-	Body     []Statement
-	Label    string
-	EndLabel string // Label on END DO statement (F77)
+	Var         string // Loop variable (empty for DO WHILE)
+	Start       Expression
+	End         Expression
+	Step        Expression
+	Body        []Statement
+	Label       string // Statement label (line prefix, e.g., "10" in "10 DO...")
+	TargetLabel string // DO target label (F77, e.g., "20" in "DO 20 I=1,10")
+	EndLabel    string // Label on END DO statement (F77, e.g., "20" in "20 END DO")
 	Position
 }
 
