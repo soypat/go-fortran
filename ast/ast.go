@@ -48,7 +48,21 @@ func (sp Position) SourcePos() Position {
 	return sp
 }
 
-// Program represents the root node of a Fortran program file
+// Program represents the root node of a Fortran source file, containing one or
+// more program units. A file may contain multiple independent programs, modules,
+// functions, or subroutines.
+//
+// Example:
+//
+//	<program-unit>...
+//
+//	PROGRAM main
+//	  ...
+//	END PROGRAM main
+//
+//	MODULE utilities
+//	  ...
+//	END MODULE utilities
 type Program struct {
 	Units []ProgramUnit
 	Label string
@@ -79,7 +93,20 @@ func (p *Program) SourcePos() Position {
 	return Position{start: p0.start, end: pend.end}
 }
 
-// ProgramBlock represents a PROGRAM...END PROGRAM block
+// ProgramBlock represents the main executable program unit that serves as the
+// entry point for program execution. A Fortran program may contain at most one
+// PROGRAM block, though it may be omitted for simple programs.
+//
+// Example:
+//
+//	PROGRAM <name>
+//	  <specification-statements>
+//	  <executable-statements>
+//	END PROGRAM [<name>]
+//
+//	PROGRAM hello
+//	  PRINT *, 'Hello, World!'
+//	END PROGRAM hello
 type ProgramBlock struct {
 	Name  string
 	Body  []Statement // Specification and executable statements
@@ -102,7 +129,24 @@ func (pb *ProgramBlock) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// Subroutine represents a SUBROUTINE...END SUBROUTINE block
+// Subroutine represents a callable procedure that performs operations but does
+// not return a value. Subroutines are invoked using [CallStmt] and can modify
+// arguments, perform I/O, or change program state.
+//
+// Example:
+//
+//	SUBROUTINE <name>([<parameter-list>])
+//	  <specification-statements>
+//	  <executable-statements>
+//	END SUBROUTINE [<name>]
+//
+//	SUBROUTINE swap(a, b)
+//	  REAL, INTENT(INOUT) :: a, b
+//	  REAL :: temp
+//	  temp = a
+//	  a = b
+//	  b = temp
+//	END SUBROUTINE swap
 type Subroutine struct {
 	Name       string
 	Parameters []Parameter   // Function/subroutine parameters with type information
@@ -135,7 +179,22 @@ func (s *Subroutine) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// Function represents a FUNCTION...END FUNCTION block
+// Function represents a callable procedure that returns a value. Functions can
+// be used in expressions and must assign a value to the function name or result
+// variable before returning.
+//
+// Example:
+//
+//	[<type>] FUNCTION <name>([<parameter-list>]) [RESULT(<var>)]
+//	  <specification-statements>
+//	  <executable-statements>
+//	END FUNCTION [<name>]
+//
+//	REAL FUNCTION average(arr, n)
+//	  REAL :: arr(n)
+//	  INTEGER :: n
+//	  average = SUM(arr) / n
+//	END FUNCTION average
 type Function struct {
 	Name           string
 	ResultType     string        // e.g., "INTEGER", "REAL"
@@ -179,7 +238,22 @@ func (f *Function) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// Module represents a MODULE...END MODULE block
+// Module represents a namespace for data, type definitions, and procedures that
+// can be shared across program units via [UseStatement]. Modules support
+// encapsulation and information hiding through [PublicStmt] and [PrivateStmt].
+//
+// Example:
+//
+//	MODULE <name>
+//	  <specification-statements>
+//	  [CONTAINS
+//	    <module-procedures>]
+//	END MODULE [<name>]
+//
+//	MODULE constants
+//	  IMPLICIT NONE
+//	  REAL, PARAMETER :: PI = 3.14159
+//	END MODULE constants
 type Module struct {
 	Name     string
 	Body     []Statement   // Module-level declarations
@@ -206,7 +280,20 @@ func (m *Module) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// BlockData represents a BLOCK DATA...END BLOCK DATA block (Fortran 77 feature)
+// BlockData represents a named or unnamed BLOCK DATA program unit used in
+// Fortran 77 to initialize variables in COMMON blocks. This feature is largely
+// obsolete in modern Fortran, replaced by module initialization.
+//
+// Example:
+//
+//	BLOCK DATA [<name>]
+//	  <specification-statements>
+//	END BLOCK DATA [<name>]
+//
+//	BLOCK DATA init_common
+//	  COMMON /shared/ x, y
+//	  DATA x, y /1.0, 2.0/
+//	END BLOCK DATA init_common
 type BlockData struct {
 	Name  string
 	Body  []Statement
@@ -241,7 +328,16 @@ type TokenTuple struct {
 
 // Specification Part Statements (Phase 2)
 
-// ImplicitStatement represents an IMPLICIT statement
+// ImplicitStatement controls implicit typing rules for variables. IMPLICIT NONE
+// disables implicit typing, requiring all variables to be explicitly declared.
+// Without IMPLICIT NONE, Fortran uses default typing rules (I-N for INTEGER,
+// A-H and O-Z for REAL).
+//
+// Example:
+//
+//	IMPLICIT NONE
+//	IMPLICIT REAL (A-H, O-Z)
+//	IMPLICIT INTEGER (I-N)
 type ImplicitStatement struct {
 	IsNone bool // true for IMPLICIT NONE
 	Label  string
@@ -263,7 +359,16 @@ func (is *ImplicitStatement) AppendString(dst []byte) []byte {
 	return append(dst, "IMPLICIT"...)
 }
 
-// UseStatement represents a USE statement
+// UseStatement imports entities from a [Module] into the current scope, making
+// module procedures, variables, and types accessible. The ONLY clause restricts
+// which entities are imported.
+//
+// Example:
+//
+//	USE <module-name> [, ONLY: <entity-list>]
+//	USE constants
+//	USE utilities, ONLY: sort, search
+//	USE iso_fortran_env, ONLY: REAL64
 type UseStatement struct {
 	ModuleName string
 	Only       []string // Empty if not using ONLY clause
@@ -294,7 +399,18 @@ func (us *UseStatement) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// TypeDeclaration represents a type declaration with attributes
+// TypeDeclaration declares variables with a specific type and optional attributes.
+// Fortran 90 syntax uses :: to separate attributes from the entity list. Attributes
+// control properties like storage (SAVE, PARAMETER), intent (IN, OUT, INOUT),
+// and shape (DIMENSION, ALLOCATABLE).
+//
+// Example:
+//
+//	<type> [, <attributes>] :: <entity-list>
+//	INTEGER :: i, j, k
+//	REAL, DIMENSION(10) :: array
+//	REAL, PARAMETER :: PI = 3.14159
+//	CHARACTER(LEN=80), INTENT(IN) :: filename
 type TypeDeclaration struct {
 	TypeSpec   string        // e.g., "INTEGER", "REAL", "CHARACTER"
 	Attributes []token.Token // e.g., PARAMETER, SAVE, INTENT, etc.
@@ -404,7 +520,16 @@ func (it IntentType) String() string {
 	}
 }
 
-// Parameter represents a subroutine or function parameter with full type information
+// Parameter represents a formal argument to a [Function] or [Subroutine] with
+// complete type information. Parameters may have INTENT attributes controlling
+// whether they can be read, written, or both.
+//
+// Example:
+//
+//	REAL, INTENT(IN) :: x
+//	INTEGER, INTENT(OUT) :: result
+//	REAL, DIMENSION(:), INTENT(INOUT) :: array
+//	CHARACTER(LEN=*), OPTIONAL :: message
 type Parameter struct {
 	Name       string        // Parameter name
 	Type       string        // Type specification (INTEGER, REAL, etc.)
@@ -414,7 +539,16 @@ type Parameter struct {
 	CharLen    string        // CHARACTER length specification (will become Expression in Phase 4)
 }
 
-// Identifier represents an identifier
+// Identifier represents a variable name, function name, or other named entity
+// in Fortran source code. Fortran identifiers are case-insensitive and can
+// contain letters, digits, and underscores (starting with a letter).
+//
+// Example:
+//
+//	x
+//	temperature
+//	max_iterations
+//	MyVariable
 type Identifier struct {
 	Value string
 	Position
@@ -428,8 +562,17 @@ func (i *Identifier) AppendString(dst []byte) []byte {
 	return append(dst, i.Value...)
 }
 
-// RangeExpr represents array slice/range syntax in Fortran
-// Examples: :, start:end, :end, start:, start:end:stride
+// RangeExpr represents array slice/range syntax used in array sections and
+// subscript triplets. Omitted bounds use defaults: lower bound 1, upper bound
+// equal to dimension size, stride 1.
+//
+// Example:
+//
+//	[<start>]:[<end>][:<stride>]
+//	:
+//	1:10
+//	::2
+//	start:end:step
 type RangeExpr struct {
 	Start  Expression // nil means implicit start (1)
 	End    Expression // nil means implicit end (size)
@@ -458,7 +601,15 @@ func (r *RangeExpr) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// IntegerLiteral represents an integer literal
+// IntegerLiteral represents an integer constant in source code. Fortran supports
+// decimal, octal, and hexadecimal integer literals, with optional kind parameters.
+//
+// Example:
+//
+//	42
+//	-123
+//	1_8
+//	Z'FF'
 type IntegerLiteral struct {
 	Value int64  // Parsed integer value (0 if not yet parsed)
 	Raw   string // Original text representation
@@ -476,7 +627,15 @@ func (il *IntegerLiteral) AppendString(dst []byte) []byte {
 	return append(dst, []byte(string(rune(il.Value)))...)
 }
 
-// RealLiteral represents a floating-point literal
+// RealLiteral represents a floating-point constant in source code. Supports
+// decimal notation, scientific notation, and kind parameters for precision control.
+//
+// Example:
+//
+//	3.14
+//	1.0E-10
+//	2.5D0
+//	1.23_4
 type RealLiteral struct {
 	Value float64
 	Raw   string // Original text representation
@@ -493,7 +652,14 @@ func (rl *RealLiteral) AppendString(dst []byte) []byte {
 	return append(dst, rl.Raw...)
 }
 
-// StringLiteral represents a string literal
+// StringLiteral represents a character string constant enclosed in single quotes,
+// double quotes, or Fortran 2003 delimiters. Used for text data and format strings.
+//
+// Example:
+//
+//	'Hello, World!'
+//	"Fortran 90"
+//	'It''s a quote'
 type StringLiteral struct {
 	Value string
 	Position
@@ -512,7 +678,14 @@ func (sl *StringLiteral) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// LogicalLiteral represents .TRUE. or .FALSE.
+// LogicalLiteral represents a boolean constant in Fortran, enclosed in periods.
+// Fortran uses .TRUE. and .FALSE. for logical values rather than true/false.
+//
+// Example:
+//
+//	.TRUE.
+//	.FALSE.
+//	.true.
 type LogicalLiteral struct {
 	Value bool
 	Position
@@ -531,7 +704,17 @@ func (ll *LogicalLiteral) AppendString(dst []byte) []byte {
 	return append(dst, ".FALSE."...)
 }
 
-// BinaryExpr represents a binary operation (e.g., a + b, x .GT. y)
+// BinaryExpr represents a binary operation with two operands. Fortran supports
+// arithmetic operators (+, -, *, /, **), relational operators (.LT., .GT., etc.),
+// and logical operators (.AND., .OR., .NOT.).
+//
+// Example:
+//
+//	<left> <operator> <right>
+//	a + b
+//	x * y
+//	i .LT. n
+//	flag .AND. status
 type BinaryExpr struct {
 	Op    token.Token // Operator token
 	Left  Expression
@@ -554,7 +737,16 @@ func (be *BinaryExpr) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// UnaryExpr represents a unary prefix operation (e.g., -x, +y, .NOT. flag)
+// UnaryExpr represents a unary prefix operation with a single operand. Common
+// unary operators include arithmetic negation (-), unary plus (+), and logical
+// negation (.NOT.).
+//
+// Example:
+//
+//	<operator> <operand>
+//	-x
+//	+value
+//	.NOT. flag
 type UnaryExpr struct {
 	Op      token.Token // Operator token
 	Operand Expression
@@ -574,7 +766,16 @@ func (ue *UnaryExpr) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// FunctionCall represents a function call expression (e.g., sqrt(x), max(a, b, c))
+// FunctionCall represents an invocation of a function that returns a value.
+// Functions can be intrinsic (built-in) or user-defined. Unlike [CallStmt]
+// for subroutines, function calls appear in expressions.
+//
+// Example:
+//
+//	<function-name>([<argument-list>])
+//	sqrt(x)
+//	max(a, b, c)
+//	my_function(i, j)
 type FunctionCall struct {
 	Name string
 	Args []Expression
@@ -600,7 +801,15 @@ func (fc *FunctionCall) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// ArrayRef represents an array reference (e.g., arr(i), matrix(i,j))
+// ArrayRef represents a reference to a single element of an array using integer
+// subscripts. For array sections (ranges), use [ArraySection] instead.
+//
+// Example:
+//
+//	<array-name>(<subscript-list>)
+//	arr(i)
+//	matrix(i, j)
+//	cube(x, y, z)
 type ArrayRef struct {
 	Name       string
 	Subscripts []Expression
@@ -626,7 +835,15 @@ func (ar *ArrayRef) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// ParenExpr represents a parenthesized expression
+// ParenExpr represents an expression enclosed in parentheses for grouping or
+// to override operator precedence. The parentheses do not change the value
+// but may affect evaluation order.
+//
+// Example:
+//
+//	(<expression>)
+//	(a + b)
+//	(x * y) / z
 type ParenExpr struct {
 	Expr Expression
 	Position
@@ -645,9 +862,15 @@ func (pe *ParenExpr) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// ImpliedDoLoop represents an implied DO loop in I/O statements
-// Syntax: ( expression-list, loop-var = start, end [, stride] )
-// Example: (COVSCR(M,1), M=1, 6)
+// ImpliedDoLoop represents an implied DO loop used in array constructors and
+// I/O lists to generate sequences of values without explicit loop statements.
+//
+// Example:
+//
+//	(<expression-list>, <loop-var> = <start>, <end> [, <stride>])
+//	(i, i=1, 10)
+//	(arr(i), i=1, n, 2)
+//	(matrix(i,j), i=1, rows)
 type ImpliedDoLoop struct {
 	Expressions []Expression // The output list before the loop control
 	LoopVar     string       // Loop variable name
@@ -687,7 +910,16 @@ func (idl *ImpliedDoLoop) AppendString(dst []byte) []byte {
 
 // Executable Statements (Phase 5)
 
-// AssignmentStmt represents an assignment statement (e.g., x = y + 1)
+// AssignmentStmt assigns the value of an expression to a variable, array element,
+// or derived type component. The target must be a valid lvalue (assignable entity).
+//
+// Example:
+//
+//	<target> = <expression>
+//	x = y + 1
+//	arr(i) = 42
+//	matrix(i,j) = a * b
+//	person%age = 30
 type AssignmentStmt struct {
 	Target Expression
 	Value  Expression
@@ -710,7 +942,27 @@ func (as *AssignmentStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// IfStmt represents an IF...THEN...ELSE IF...ELSE...END IF construct
+// IfStmt represents a block IF construct that conditionally executes different
+// code blocks based on logical conditions. It supports multiple branches with
+// ELSE IF and a final ELSE clause.
+//
+// Example:
+//
+//	IF (<condition>) THEN
+//	  <statements>
+//	[ELSE IF (<condition>) THEN
+//	  <statements>]...
+//	[ELSE
+//	  <statements>]
+//	END IF
+//
+//	IF (x > 0) THEN
+//	  PRINT *, 'Positive'
+//	ELSE IF (x < 0) THEN
+//	  PRINT *, 'Negative'
+//	ELSE
+//	  PRINT *, 'Zero'
+//	END IF
 type IfStmt struct {
 	Condition   Expression
 	ThenPart    []Statement
@@ -743,9 +995,17 @@ func (is *IfStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// ArithmeticIfStmt represents the F77 arithmetic IF statement
-// IF (expr) label_negative, label_zero, label_positive
-// Branches based on whether the expression is < 0, == 0, or > 0
+// ArithmeticIfStmt is a three-way branch statement that transfers control based
+// on the sign of an arithmetic expression. This Fortran 77 feature is superseded
+// by the more readable block [IfStmt] in modern Fortran.
+//
+// Example:
+//
+//	IF (<expression>) <neg-label>, <zero-label>, <pos-label>
+//	IF (x - y) 10, 20, 30
+//	IF (balance) 100, 200, 300
+//
+// Branches to the first label if expression < 0, second if == 0, third if > 0.
 type ArithmeticIfStmt struct {
 	Condition     Expression // Arithmetic expression to evaluate
 	NegativeLabel string     // Label to jump to if condition < 0
@@ -774,7 +1034,23 @@ func (ais *ArithmeticIfStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// DoLoop represents a DO loop
+// DoLoop represents an iterative loop construct that executes a block of
+// statements repeatedly. Supports both counted loops (with loop variable)
+// and WHILE loops.
+//
+// Example:
+//
+//	DO [<label>] [<var> = <start>, <end> [, <step>]]
+//	  <statements>
+//	END DO [<label>]
+//
+//	DO i = 1, 10
+//	  PRINT *, i
+//	END DO
+//
+//	DO 100 i = 1, n, 2
+//	  sum = sum + arr(i)
+//	100 CONTINUE
 type DoLoop struct {
 	Var         string // Loop variable (empty for DO WHILE)
 	Start       Expression
@@ -812,7 +1088,29 @@ func (dl *DoLoop) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// SelectCaseStmt represents a SELECT CASE construct
+// SelectCaseStmt represents a multi-way branch construct that executes different
+// code blocks based on the value of an expression. Each case specifies one or
+// more matching values, with an optional default case.
+//
+// Example:
+//
+//	SELECT CASE (<expression>)
+//	CASE (<value-list>)
+//	  <statements>
+//	[CASE (<value-list>)
+//	  <statements>]...
+//	[CASE DEFAULT
+//	  <statements>]
+//	END SELECT
+//
+//	SELECT CASE (status)
+//	CASE (1)
+//	  PRINT *, 'Success'
+//	CASE (2, 3)
+//	  PRINT *, 'Warning'
+//	CASE DEFAULT
+//	  PRINT *, 'Error'
+//	END SELECT
 type SelectCaseStmt struct {
 	Expression Expression   // The expression being selected on
 	Cases      []CaseClause // List of CASE clauses
@@ -845,7 +1143,15 @@ type CaseClause struct {
 	Position
 }
 
-// CallStmt represents a CALL statement
+// CallStmt invokes a subroutine with optional arguments. Unlike functions,
+// subroutines do not return a value but may modify arguments or perform I/O.
+//
+// Example:
+//
+//	CALL <subroutine-name> [(<argument-list>)]
+//	CALL initialize
+//	CALL compute(x, y, result)
+//	CALL output_data(array, n, filename)
 type CallStmt struct {
 	Name  string
 	Args  []Expression
@@ -877,7 +1183,12 @@ func (cs *CallStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// ReturnStmt represents a RETURN statement
+// ReturnStmt transfers control back to the calling program unit (function or
+// subroutine). In functions, the return value must be assigned before returning.
+//
+// Example:
+//
+//	RETURN
 type ReturnStmt struct {
 	Label string
 	Position
@@ -895,7 +1206,17 @@ func (rs *ReturnStmt) AppendString(dst []byte) []byte {
 	return append(dst, "RETURN"...)
 }
 
-// CycleStmt represents a CYCLE statement
+// CycleStmt skips the remaining statements in the current iteration of a
+// [DoLoop] and proceeds to the next iteration. Similar to 'continue' in C.
+//
+// Example:
+//
+//	CYCLE
+//
+//	DO i = 1, 10
+//	  IF (arr(i) < 0) CYCLE
+//	  sum = sum + arr(i)
+//	END DO
 type CycleStmt struct {
 	Label string
 	Position
@@ -913,7 +1234,18 @@ func (cs *CycleStmt) AppendString(dst []byte) []byte {
 	return append(dst, "CYCLE"...)
 }
 
-// ExitStmt represents an EXIT statement
+// ExitStmt terminates execution of the innermost enclosing [DoLoop], transferring
+// control to the statement immediately following the loop's END DO. Unlike
+// [CycleStmt] which continues to the next iteration, EXIT leaves the loop entirely.
+//
+// Example:
+//
+//	EXIT
+//
+//	DO i = 1, 100
+//	  IF (found) EXIT
+//	  CALL search(arr(i), found)
+//	END DO
 type ExitStmt struct {
 	Label string
 	Position
@@ -931,7 +1263,17 @@ func (es *ExitStmt) AppendString(dst []byte) []byte {
 	return append(dst, "EXIT"...)
 }
 
-// ContinueStmt represents a CONTINUE statement
+// ContinueStmt is a no-operation statement primarily used as a labeled target
+// for control flow statements like [GotoStmt], [DoLoop] termination labels,
+// and branch targets in Fortran 77 code.
+//
+// Example:
+//
+//	CONTINUE
+//
+//	DO 100 i = 1, n
+//	  sum = sum + arr(i)
+//	100 CONTINUE
 type ContinueStmt struct {
 	Label string
 	Position
@@ -949,7 +1291,17 @@ func (cs *ContinueStmt) AppendString(dst []byte) []byte {
 	return append(dst, "CONTINUE"...)
 }
 
-// GotoStmt represents a GOTO or GO TO statement
+// GotoStmt unconditionally transfers control to the statement with the specified
+// label. While commonly used in Fortran 77 code, modern Fortran prefers structured
+// control flow with [IfStmt], [DoLoop], and [SelectCaseStmt].
+//
+// Example:
+//
+//	GO TO <label>
+//	GO TO 100
+//	IF (error) GO TO 999
+//
+//	100 PRINT *, 'Target reached'
 type GotoStmt struct {
 	Target string // The label to jump to
 	Label  string // Optional statement label
@@ -970,9 +1322,18 @@ func (gs *GotoStmt) AppendString(dst []byte) []byte {
 	return append(dst, gs.Target...)
 }
 
-// ComputedGotoStmt represents a computed/indexed GOTO statement (F77)
-// GOTO (label1, label2, ..., labeln) expression
-// Jumps to one of the labels based on the value of the expression (1-indexed)
+// ComputedGotoStmt transfers control to one of several labeled statements based
+// on the runtime value of an integer expression. This is a Fortran 77 feature
+// largely replaced by [SelectCaseStmt] in modern Fortran.
+//
+// Example:
+//
+//	GO TO (<label-list>) <integer-expression>
+//	GO TO (10, 20, 30) choice
+//	GO TO (100, 200, 300, 400) status
+//
+// If the expression evaluates to n, control transfers to the nth label in the list.
+// Values less than 1 or greater than the list length fall through to the next statement.
 type ComputedGotoStmt struct {
 	Labels     []string   // List of labels to jump to (stored as strings for consistency)
 	Expression Expression // Expression to evaluate (1-based index into Labels)
@@ -1002,7 +1363,16 @@ func (cgs *ComputedGotoStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// InquireStmt represents an INQUIRE statement
+// InquireStmt queries properties of files or I/O units, such as whether a file
+// exists, is open, its name, access method, and other attributes. Results are
+// returned through variables specified in the inquiry specifiers.
+//
+// Example:
+//
+//	INQUIRE([UNIT=]<unit> | FILE=<filename>, <specifier-list>)
+//	INQUIRE(FILE='data.txt', EXIST=lexist)
+//	INQUIRE(UNIT=10, OPENED=lopen, NAME=fname)
+//	INQUIRE(FILE='output.dat', EXIST=fexist, OPENED=fopen, NUMBER=inum)
 type InquireStmt struct {
 	Specifiers map[string]Expression // INQUIRE specifiers: UNIT, FILE, EXIST, OPENED, etc.
 	Label      string                // Optional statement label
@@ -1032,7 +1402,15 @@ func (is *InquireStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// OpenStmt represents an OPEN statement
+// OpenStmt establishes a connection between a logical unit number and an
+// external file, preparing it for input or output operations with statements
+// such as [WriteStmt] and [ReadStmt]. Specifiers control file properties like
+// access method, format, and status.
+//
+// Example:
+//
+//	OPEN([UNIT=]<unit>, FILE=<filename> [, STATUS=<status>] [, IOSTAT=<var>])
+//	OPEN(10, FILE='data.txt', STATUS='OLD')
 type OpenStmt struct {
 	Specifiers map[string]Expression // OPEN specifiers: UNIT, FILE, STATUS, etc.
 	Label      string                // Optional statement label
@@ -1065,7 +1443,15 @@ func (os *OpenStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// CloseStmt represents a CLOSE statement
+// CloseStmt terminates the connection between a logical unit and an external
+// file that was established by [OpenStmt]. The unit becomes available for
+// reconnection to another file.
+//
+// Example:
+//
+//	CLOSE([UNIT=]<unit> [, STATUS=<status>] [, IOSTAT=<var>])
+//	CLOSE(10)
+//	CLOSE(UNIT=20, STATUS='KEEP')
 type CloseStmt struct {
 	Specifiers map[string]Expression // CLOSE specifiers: UNIT, STATUS, IOSTAT, ERR
 	Label      string                // Optional statement label
@@ -1095,7 +1481,16 @@ func (cs *CloseStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// WriteStmt represents a WRITE statement
+// WriteStmt transfers data from internal storage to an external file or
+// device specified by a unit number. The format specifier controls how the
+// data is formatted.
+//
+// Example:
+//
+//	WRITE([UNIT=]<unit>, [FMT=]<format> [, IOSTAT=<var>]) <output-list>
+//	WRITE(6, *) 'Hello, World!'
+//	WRITE(10, 100) x, y, z
+//	WRITE(UNIT=20, FMT='(I5, F10.2)') num, val
 type WriteStmt struct {
 	Unit       Expression            // Unit specifier (e.g., 91, *, variable)
 	Format     Expression            // Format specifier
@@ -1111,7 +1506,15 @@ func (ws *WriteStmt) GetLabel() string { return ws.Label }
 
 func (ws *WriteStmt) statementNode() {}
 
-// ReadStmt represents a READ statement
+// ReadStmt transfers data from an external file or device into internal
+// storage. The format specifier controls how the data is interpreted.
+//
+// Example:
+//
+//	READ([UNIT=]<unit>, [FMT=]<format> [, IOSTAT=<var>] [, END=<label>]) <input-list>
+//	READ(*, *) x, y
+//	READ(10, 100) name, age
+//	READ(UNIT=15, FMT='(I5)', IOSTAT=ios, END=999) num
 type ReadStmt struct {
 	Unit       Expression            // Unit specifier (e.g., 91, *, variable)
 	Format     Expression            // Format specifier
@@ -1156,7 +1559,15 @@ func (ws *WriteStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// PrintStmt represents a PRINT statement
+// PrintStmt outputs data to the standard output device (typically the terminal).
+// It is a simplified form of [WriteStmt] that always writes to unit *.
+//
+// Example:
+//
+//	PRINT <format> [, <output-list>]
+//	PRINT *, 'Hello, World!'
+//	PRINT 100, x, y, z
+//	PRINT '(I5, F10.2)', num, val
 type PrintStmt struct {
 	Format     Expression   // Format specifier (*, label, or character expression)
 	OutputList []Expression // List of expressions to print
@@ -1191,7 +1602,15 @@ func (ps *PrintStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// BackspaceStmt represents a BACKSPACE statement
+// BackspaceStmt positions a sequential file at the beginning of the preceding
+// record, allowing the next read to re-read the previous record.
+//
+// Example:
+//
+//	BACKSPACE <unit>
+//	BACKSPACE([UNIT=]<unit> [, IOSTAT=<var>] [, ERR=<label>])
+//	BACKSPACE 10
+//	BACKSPACE(UNIT=15, IOSTAT=ierr)
 type BackspaceStmt struct {
 	Specifiers map[string]Expression // BACKSPACE specifiers: UNIT, IOSTAT, ERR
 	Label      string                // Optional statement label
@@ -1221,7 +1640,15 @@ func (bs *BackspaceStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// RewindStmt represents a REWIND statement
+// RewindStmt positions a sequential file at its initial point (beginning),
+// allowing subsequent reads to start from the first record.
+//
+// Example:
+//
+//	REWIND <unit>
+//	REWIND([UNIT=]<unit> [, IOSTAT=<var>] [, ERR=<label>])
+//	REWIND 25
+//	REWIND(UNIT=30, IOSTAT=ierr)
 type RewindStmt struct {
 	Specifiers map[string]Expression // REWIND specifiers: UNIT, IOSTAT, ERR
 	Label      string                // Optional statement label
@@ -1251,7 +1678,15 @@ func (rs *RewindStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// StopStmt represents a STOP statement
+// StopStmt terminates program execution. An optional code (integer or string)
+// can be provided to indicate the reason for termination.
+//
+// Example:
+//
+//	STOP [<code>]
+//	STOP
+//	STOP 123
+//	STOP 'Error: Invalid input'
 type StopStmt struct {
 	Code  Expression // Optional stop code (integer or string)
 	Label string     // Optional statement label
@@ -1274,7 +1709,16 @@ func (ss *StopStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// FormatStmt represents a FORMAT statement
+// FormatStmt defines a reusable format specification that can be referenced by
+// label in I/O statements such as [ReadStmt], [WriteStmt], and [PrintStmt].
+// The format specification controls how data is formatted during I/O operations.
+//
+// Example:
+//
+//	<label> FORMAT(<format-spec>)
+//	100 FORMAT(I5)
+//	200 FORMAT(I5, F10.2, A)
+//	300 FORMAT('Result = ', F8.3)
 type FormatStmt struct {
 	Spec  string // Format specification (stored as string)
 	Label string // Statement label (always present for FORMAT)
@@ -1299,7 +1743,16 @@ func (fs *FormatStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// AllocateStmt represents an ALLOCATE statement
+// AllocateStmt dynamically allocates memory for allocatable arrays and pointer
+// targets at runtime. The allocated memory persists until explicitly deallocated
+// with [DeallocateStmt] or until the program terminates.
+//
+// Example:
+//
+//	ALLOCATE(<object-list> [, STAT=<var>] [, ERRMSG=<var>] [, SOURCE=<expr>])
+//	ALLOCATE(A(10))
+//	ALLOCATE(A(10,20), B(100), STAT=ierr)
+//	ALLOCATE(matrix(n,m), STAT=istat, ERRMSG=emsg)
 type AllocateStmt struct {
 	Objects []Expression          // List of objects to allocate
 	Options map[string]Expression // Optional specifiers: STAT, ERRMSG, SOURCE, MOLD
@@ -1332,7 +1785,16 @@ func (as *AllocateStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// DeallocateStmt represents a DEALLOCATE statement
+// DeallocateStmt releases memory that was previously allocated by [AllocateStmt],
+// making it available for other uses. After deallocation, the objects become
+// undefined and must be reallocated before use.
+//
+// Example:
+//
+//	DEALLOCATE(<object-list> [, STAT=<var>] [, ERRMSG=<var>])
+//	DEALLOCATE(A)
+//	DEALLOCATE(A, B, C, STAT=ierr)
+//	DEALLOCATE(matrix, STAT=istat, ERRMSG=emsg)
 type DeallocateStmt struct {
 	Objects []Expression          // List of objects to deallocate
 	Options map[string]Expression // Optional specifiers: STAT, ERRMSG
@@ -1367,7 +1829,21 @@ func (ds *DeallocateStmt) AppendString(dst []byte) []byte {
 
 // Derived Type Statements (Phase 7)
 
-// DerivedTypeStmt represents a TYPE...END TYPE block
+// DerivedTypeStmt defines a user-defined composite data type that groups related
+// data of different types together. Similar to structs in C or records in Pascal,
+// derived types enable object-oriented-like data structures in Fortran.
+//
+// Example:
+//
+//	TYPE <type-name>
+//	  <component-declarations>
+//	END TYPE [<type-name>]
+//
+//	TYPE :: Person
+//	  CHARACTER(LEN=50) :: name
+//	  INTEGER :: age
+//	  REAL :: height
+//	END TYPE Person
 type DerivedTypeStmt struct {
 	Name       string
 	Components []ComponentDecl
@@ -1389,7 +1865,16 @@ func (dts *DerivedTypeStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// ComponentDecl represents a component in a derived type
+// ComponentDecl represents a single component (field) declaration within a
+// [DerivedTypeStmt]. Each component has a type and may have attributes like
+// POINTER, ALLOCATABLE, or DIMENSION.
+//
+// Example:
+//
+//	<type> [, <attributes>] :: <component-list>
+//	INTEGER :: count
+//	REAL, DIMENSION(3) :: velocity
+//	TYPE(Date), POINTER :: birth_date
 type ComponentDecl struct {
 	Type       string
 	Attributes []token.Token
@@ -1429,7 +1914,19 @@ func (cd *ComponentDecl) AppendString(dst []byte) []byte {
 
 // Interface Blocks (Phase 7)
 
-// InterfaceStmt represents an INTERFACE...END INTERFACE block
+// InterfaceStmt defines a generic interface that can bind multiple specific
+// procedures to a single generic name, enabling function overloading and
+// operator customization in Fortran.
+//
+// Example:
+//
+//	INTERFACE [<generic-name> | OPERATOR(<op>) | ASSIGNMENT(=)]
+//	  <interface-body>
+//	END INTERFACE [<generic-name>]
+//
+//	INTERFACE sort
+//	  MODULE PROCEDURE sort_int, sort_real
+//	END INTERFACE sort
 type InterfaceStmt struct {
 	Name  string
 	Body  []Statement
@@ -1456,7 +1953,15 @@ func (is *InterfaceStmt) AppendString(dst []byte) []byte {
 
 // Accessibility Statements (Phase 7)
 
-// PrivateStmt represents a PRIVATE statement
+// PrivateStmt restricts access to module entities, making them invisible outside
+// the module. Without a list, it sets the default accessibility to private for
+// all entities. With a list, only specified entities become private.
+//
+// Example:
+//
+//	PRIVATE
+//	PRIVATE :: <entity-list>
+//	PRIVATE :: internal_var, helper_func
 type PrivateStmt struct {
 	Entities []string
 	Label    string
@@ -1485,7 +1990,15 @@ func (ps *PrivateStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// PublicStmt represents a PUBLIC statement
+// PublicStmt declares module entities as publicly accessible from outside the
+// module. Without a list, it sets the default accessibility to public. With a
+// list, only specified entities become public.
+//
+// Example:
+//
+//	PUBLIC
+//	PUBLIC :: <entity-list>
+//	PUBLIC :: api_function, OPERATOR(+)
 type PublicStmt struct {
 	Entities []string
 	Label    string
@@ -1516,7 +2029,17 @@ func (ps *PublicStmt) AppendString(dst []byte) []byte {
 
 // Advanced Expressions (Phase 7)
 
-// ArraySection represents an array section (e.g., arr(1:5), arr(:, 1:10:2))
+// ArraySection represents a contiguous or strided subset of an array, specified
+// using range notation. Array sections can be used in expressions, assignments,
+// and as arguments to procedures.
+//
+// Example:
+//
+//	<array-name>(<subscript-list>)
+//	arr(1:5)
+//	matrix(:, 2)
+//	data(1:10:2)
+//	cube(i, :, 1:n)
 type ArraySection struct {
 	Name       string
 	Subscripts []Subscript
@@ -1559,7 +2082,15 @@ type Subscript struct {
 	Stride Expression
 }
 
-// ArrayConstructor represents an array constructor (e.g., (/ 1, 2, 3 /))
+// ArrayConstructor creates array values inline using literal notation. The F90
+// syntax uses (/ ... /), while F2003 introduced the bracket syntax [ ... ].
+//
+// Example:
+//
+//	(/ <value-list> /)
+//	(/ 1, 2, 3, 4, 5 /)
+//	(/ (i, i=1,10) /)
+//	[1.0, 2.0, 3.0]
 type ArrayConstructor struct {
 	Values []Expression
 	Position
@@ -1583,7 +2114,15 @@ func (ac *ArrayConstructor) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// ComponentAccess represents a derived type component access (e.g., person%name)
+// ComponentAccess accesses a component (field) of a derived type variable using
+// the percent operator. Multiple levels of access can be chained for nested types.
+//
+// Example:
+//
+//	<base>%<component>
+//	person%name
+//	car%engine%horsepower
+//	point%x
 type ComponentAccess struct {
 	Base      Expression
 	Component string
@@ -1603,7 +2142,16 @@ func (ca *ComponentAccess) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// PointerAssignmentStmt represents a pointer assignment statement (e.g., ptr => target)
+// PointerAssignmentStmt associates a pointer with a target, using the pointer
+// assignment operator (=>) rather than the standard assignment operator (=).
+// The target must have the TARGET or POINTER attribute.
+//
+// Example:
+//
+//	<pointer> => <target>
+//	ptr => var
+//	node%next => new_node
+//	array_ptr => array_section(1:100)
 type PointerAssignmentStmt struct {
 	Target Expression
 	Value  Expression
