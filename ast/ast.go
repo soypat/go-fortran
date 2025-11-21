@@ -1002,6 +1002,99 @@ func (cgs *ComputedGotoStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// InquireStmt represents an INQUIRE statement
+type InquireStmt struct {
+	Specifiers map[string]Expression // INQUIRE specifiers: UNIT, FILE, EXIST, OPENED, etc.
+	Label      string                // Optional statement label
+	Position
+}
+
+var _ Statement = (*InquireStmt)(nil)
+
+func (is *InquireStmt) GetLabel() string { return is.Label }
+func (is *InquireStmt) statementNode()   {}
+func (is *InquireStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "INQUIRE"...)
+}
+func (is *InquireStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "INQUIRE("...)
+	first := true
+	for key, value := range is.Specifiers {
+		if !first {
+			dst = append(dst, ", "...)
+		}
+		first = false
+		dst = append(dst, key...)
+		dst = append(dst, '=')
+		dst = value.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
+// OpenStmt represents an OPEN statement
+type OpenStmt struct {
+	Specifiers map[string]Expression // OPEN specifiers: UNIT, FILE, STATUS, etc.
+	Label      string                // Optional statement label
+	Position
+}
+
+var _ Statement = (*OpenStmt)(nil) // compile time check of interface implementation.
+
+func (os *OpenStmt) GetLabel() string { return os.Label }
+
+func (os *OpenStmt) statementNode() {}
+
+func (os *OpenStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "OPEN"...)
+}
+
+func (os *OpenStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "OPEN("...)
+	first := true
+	for key, value := range os.Specifiers {
+		if !first {
+			dst = append(dst, ", "...)
+		}
+		first = false
+		dst = append(dst, key...)
+		dst = append(dst, '=')
+		dst = value.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
+// CloseStmt represents a CLOSE statement
+type CloseStmt struct {
+	Specifiers map[string]Expression // CLOSE specifiers: UNIT, STATUS, IOSTAT, ERR
+	Label      string                // Optional statement label
+	Position
+}
+
+var _ Statement = (*CloseStmt)(nil)
+
+func (cs *CloseStmt) GetLabel() string { return cs.Label }
+func (cs *CloseStmt) statementNode()   {}
+func (cs *CloseStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "CLOSE"...)
+}
+func (cs *CloseStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "CLOSE("...)
+	first := true
+	for key, value := range cs.Specifiers {
+		if !first {
+			dst = append(dst, ", "...)
+		}
+		first = false
+		dst = append(dst, key...)
+		dst = append(dst, '=')
+		dst = value.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
 // WriteStmt represents a WRITE statement
 type WriteStmt struct {
 	Unit       Expression            // Unit specifier (e.g., 91, *, variable)
@@ -1095,69 +1188,6 @@ func (ps *PrintStmt) AppendString(dst []byte) []byte {
 			dst = expr.AppendString(dst)
 		}
 	}
-	return dst
-}
-
-// OpenStmt represents an OPEN statement
-type OpenStmt struct {
-	Specifiers map[string]Expression // OPEN specifiers: UNIT, FILE, STATUS, etc.
-	Label      string                // Optional statement label
-	Position
-}
-
-var _ Statement = (*OpenStmt)(nil) // compile time check of interface implementation.
-
-func (os *OpenStmt) GetLabel() string { return os.Label }
-
-func (os *OpenStmt) statementNode() {}
-
-func (os *OpenStmt) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "OPEN"...)
-}
-
-func (os *OpenStmt) AppendString(dst []byte) []byte {
-	dst = append(dst, "OPEN("...)
-	first := true
-	for key, value := range os.Specifiers {
-		if !first {
-			dst = append(dst, ", "...)
-		}
-		first = false
-		dst = append(dst, key...)
-		dst = append(dst, '=')
-		dst = value.AppendString(dst)
-	}
-	dst = append(dst, ')')
-	return dst
-}
-
-// CloseStmt represents a CLOSE statement
-type CloseStmt struct {
-	Specifiers map[string]Expression // CLOSE specifiers: UNIT, STATUS, IOSTAT, ERR
-	Label      string                // Optional statement label
-	Position
-}
-
-var _ Statement = (*CloseStmt)(nil)
-
-func (cs *CloseStmt) GetLabel() string { return cs.Label }
-func (cs *CloseStmt) statementNode()   {}
-func (cs *CloseStmt) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "CLOSE"...)
-}
-func (cs *CloseStmt) AppendString(dst []byte) []byte {
-	dst = append(dst, "CLOSE("...)
-	first := true
-	for key, value := range cs.Specifiers {
-		if !first {
-			dst = append(dst, ", "...)
-		}
-		first = false
-		dst = append(dst, key...)
-		dst = append(dst, '=')
-		dst = value.AppendString(dst)
-	}
-	dst = append(dst, ')')
 	return dst
 }
 
@@ -1265,6 +1295,72 @@ func (fs *FormatStmt) AppendString(dst []byte) []byte {
 	}
 	dst = append(dst, "FORMAT("...)
 	dst = append(dst, fs.Spec...)
+	dst = append(dst, ')')
+	return dst
+}
+
+// AllocateStmt represents an ALLOCATE statement
+type AllocateStmt struct {
+	Objects []Expression          // List of objects to allocate
+	Options map[string]Expression // Optional specifiers: STAT, ERRMSG, SOURCE, MOLD
+	Label   string                // Optional statement label
+	Position
+}
+
+var _ Statement = (*AllocateStmt)(nil)
+
+func (as *AllocateStmt) GetLabel() string { return as.Label }
+func (as *AllocateStmt) statementNode()   {}
+func (as *AllocateStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "ALLOCATE"...)
+}
+func (as *AllocateStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "ALLOCATE("...)
+	for i, obj := range as.Objects {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		dst = obj.AppendString(dst)
+	}
+	for key, value := range as.Options {
+		dst = append(dst, ", "...)
+		dst = append(dst, key...)
+		dst = append(dst, '=')
+		dst = value.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
+// DeallocateStmt represents a DEALLOCATE statement
+type DeallocateStmt struct {
+	Objects []Expression          // List of objects to deallocate
+	Options map[string]Expression // Optional specifiers: STAT, ERRMSG
+	Label   string                // Optional statement label
+	Position
+}
+
+var _ Statement = (*DeallocateStmt)(nil)
+
+func (ds *DeallocateStmt) GetLabel() string { return ds.Label }
+func (ds *DeallocateStmt) statementNode()   {}
+func (ds *DeallocateStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "DEALLOCATE"...)
+}
+func (ds *DeallocateStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "DEALLOCATE("...)
+	for i, obj := range ds.Objects {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		dst = obj.AppendString(dst)
+	}
+	for key, value := range ds.Options {
+		dst = append(dst, ", "...)
+		dst = append(dst, key...)
+		dst = append(dst, '=')
+		dst = value.AppendString(dst)
+	}
 	dst = append(dst, ')')
 	return dst
 }

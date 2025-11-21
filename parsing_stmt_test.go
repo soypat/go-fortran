@@ -1026,6 +1026,93 @@ func TestStatementParsing(t *testing.T) {
 			},
 		},
 
+		// ===== ALLOCATE Statements =====
+		{
+			name: "ALLOCATE with single array",
+			src:  "ALLOCATE(A(10))",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				allocStmt, ok := stmt.(*ast.AllocateStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AllocateStmt, got %T", stmt)
+				}
+				if len(allocStmt.Objects) != 1 {
+					t.Errorf("Expected 1 object, got %d", len(allocStmt.Objects))
+				}
+			},
+		},
+		{
+			name: "ALLOCATE with multiple arrays and STAT",
+			src:  "ALLOCATE(A(10,20), B(100), STAT=ierr)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				allocStmt, ok := stmt.(*ast.AllocateStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AllocateStmt, got %T", stmt)
+				}
+				if allocStmt.Options["STAT"] == nil {
+					t.Error("Expected STAT option")
+				}
+			},
+		},
+
+		// ===== DEALLOCATE Statements =====
+		{
+			name: "DEALLOCATE with single object",
+			src:  "DEALLOCATE(A)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				deallocStmt, ok := stmt.(*ast.DeallocateStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.DeallocateStmt, got %T", stmt)
+				}
+				if len(deallocStmt.Objects) != 1 {
+					t.Errorf("Expected 1 object, got %d", len(deallocStmt.Objects))
+				}
+			},
+		},
+		{
+			name: "DEALLOCATE with multiple objects and STAT",
+			src:  "DEALLOCATE(A, B, C, STAT=ierr)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				deallocStmt, ok := stmt.(*ast.DeallocateStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.DeallocateStmt, got %T", stmt)
+				}
+				if deallocStmt.Options["STAT"] == nil {
+					t.Error("Expected STAT option")
+				}
+			},
+		},
+
+		// ===== INQUIRE Statements =====
+		{
+			name: "INQUIRE with FILE and EXIST",
+			src:  "INQUIRE(FILE='data.txt', EXIST=lexist)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				inquireStmt, ok := stmt.(*ast.InquireStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.InquireStmt, got %T", stmt)
+				}
+				if inquireStmt.Specifiers["FILE"] == nil {
+					t.Error("Expected FILE specifier")
+				}
+				if inquireStmt.Specifiers["EXIST"] == nil {
+					t.Error("Expected EXIST specifier")
+				}
+			},
+		},
+		{
+			name: "INQUIRE with UNIT",
+			src:  "INQUIRE(UNIT=10, OPENED=lopen, NAME=fname)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				inquireStmt, ok := stmt.(*ast.InquireStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.InquireStmt, got %T", stmt)
+				}
+				if inquireStmt.Specifiers["UNIT"] == nil {
+					t.Error("Expected UNIT specifier")
+				}
+			},
+		},
+
 		// ===== Substring and chained subscript notation =====
 		{
 			name: "substring notation with single character",

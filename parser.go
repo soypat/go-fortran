@@ -696,6 +696,12 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseStopStmt()
 		case token.FORMAT:
 			stmt = p.parseFormatStmt()
+		case token.ALLOCATE:
+			stmt = p.parseAllocateStmt()
+		case token.DEALLOCATE:
+			stmt = p.parseDeallocateStmt()
+		case token.INQUIRE:
+			stmt = p.parseInquireStmt()
 		case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
 			stmt = p.parseAssignmentStmt()
 		}
@@ -735,6 +741,12 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		case *ast.StopStmt:
 			s.Label = label
 		case *ast.FormatStmt:
+			s.Label = label
+		case *ast.AllocateStmt:
+			s.Label = label
+		case *ast.DeallocateStmt:
+			s.Label = label
+		case *ast.InquireStmt:
 			s.Label = label
 		case *ast.ReadStmt:
 			s.Label = label
@@ -1404,6 +1416,193 @@ func (p *Parser90) parseFormatStmt() ast.Statement {
 	}
 
 	stmt.Spec = specBuilder.String()
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseAllocateStmt parses an ALLOCATE statement
+// Precondition: current token is ALLOCATE
+// Syntax: ALLOCATE(allocation-list [, option-list])
+// Postcondition: current token is the first token after the ALLOCATE statement
+func (p *Parser90) parseAllocateStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.ALLOCATE, "")
+
+	if !p.expect(token.LParen, "in ALLOCATE statement") {
+		return nil
+	}
+
+	stmt := &ast.AllocateStmt{
+		Options:  make(map[string]ast.Expression),
+		Position: ast.Pos(start, p.current.start),
+	}
+
+	// Parse comma-separated list of allocations and options
+	for !p.currentTokenIs(token.RParen) && !p.IsDone() && !p.current.tok.IsEnd() {
+		expr := p.parseExpression(0)
+		if expr == nil {
+			break
+		}
+
+		// Check if this is a keyword=value option (STAT, ERRMSG, SOURCE, MOLD)
+		if p.currentTokenIs(token.Equals) {
+			var keyword string
+			if ident, ok := expr.(*ast.Identifier); ok {
+				keyword = strings.ToUpper(ident.Value)
+			} else {
+				p.addError("expected identifier before = in ALLOCATE option")
+				if !p.consumeIf(token.Comma) {
+					break
+				}
+				continue
+			}
+
+			p.nextToken() // consume =
+			value := p.parseExpression(0)
+			if value != nil {
+				stmt.Options[keyword] = value
+			}
+		} else {
+			// This is an allocation object
+			stmt.Objects = append(stmt.Objects, expr)
+		}
+
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	if !p.expect(token.RParen, "closing ALLOCATE statement") {
+		return nil
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseDeallocateStmt parses a DEALLOCATE statement
+// Precondition: current token is DEALLOCATE
+// Syntax: DEALLOCATE(object-list [, option-list])
+// Postcondition: current token is the first token after the DEALLOCATE statement
+func (p *Parser90) parseDeallocateStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.DEALLOCATE, "")
+
+	if !p.expect(token.LParen, "in DEALLOCATE statement") {
+		return nil
+	}
+
+	stmt := &ast.DeallocateStmt{
+		Options:  make(map[string]ast.Expression),
+		Position: ast.Pos(start, p.current.start),
+	}
+
+	// Parse comma-separated list of objects and options
+	for !p.currentTokenIs(token.RParen) && !p.IsDone() && !p.current.tok.IsEnd() {
+		expr := p.parseExpression(0)
+		if expr == nil {
+			break
+		}
+
+		// Check if this is a keyword=value option (STAT, ERRMSG)
+		if p.currentTokenIs(token.Equals) {
+			var keyword string
+			if ident, ok := expr.(*ast.Identifier); ok {
+				keyword = strings.ToUpper(ident.Value)
+			} else {
+				p.addError("expected identifier before = in DEALLOCATE option")
+				if !p.consumeIf(token.Comma) {
+					break
+				}
+				continue
+			}
+
+			p.nextToken() // consume =
+			value := p.parseExpression(0)
+			if value != nil {
+				stmt.Options[keyword] = value
+			}
+		} else {
+			// This is a deallocation object
+			stmt.Objects = append(stmt.Objects, expr)
+		}
+
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	if !p.expect(token.RParen, "closing DEALLOCATE statement") {
+		return nil
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseInquireStmt parses an INQUIRE statement
+// Precondition: current token is INQUIRE
+// Syntax: INQUIRE(specifier-list)
+// Postcondition: current token is the first token after the INQUIRE statement
+func (p *Parser90) parseInquireStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.INQUIRE, "")
+
+	if !p.expect(token.LParen, "in INQUIRE statement") {
+		return nil
+	}
+
+	stmt := &ast.InquireStmt{
+		Specifiers: make(map[string]ast.Expression),
+		Position:   ast.Pos(start, p.current.start),
+	}
+
+	// Track if we've seen the first positional argument (which would be UNIT)
+	isFirstArg := true
+
+	// Parse comma-separated specifier list
+	for !p.currentTokenIs(token.RParen) && !p.IsDone() && !p.current.tok.IsEnd() {
+		spec := p.parseExpression(0)
+		if spec == nil {
+			break
+		}
+
+		// Check if this is a keyword=value pattern
+		if p.currentTokenIs(token.Equals) {
+			var keyword string
+			if ident, ok := spec.(*ast.Identifier); ok {
+				keyword = strings.ToUpper(ident.Value)
+			} else {
+				p.addError("expected identifier before = in INQUIRE specifier")
+				if !p.consumeIf(token.Comma) {
+					break
+				}
+				continue
+			}
+
+			p.nextToken() // consume =
+			value := p.parseExpression(0)
+			if value != nil {
+				stmt.Specifiers[keyword] = value
+			}
+			isFirstArg = false
+		} else if isFirstArg {
+			// First positional argument is UNIT
+			stmt.Specifiers["UNIT"] = spec
+			isFirstArg = false
+		} else {
+			p.addError("unexpected expression in INQUIRE statement (expected keyword=value)")
+		}
+
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	if !p.expect(token.RParen, "closing INQUIRE statement") {
+		return nil
+	}
+
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
 }
