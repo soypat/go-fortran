@@ -303,7 +303,7 @@ func (tok Token) EndConstructComposite() Token {
 func (tok Token) IsExecutableStatement() bool {
 	switch tok {
 	case IF, DO, SELECT, CALL, RETURN, STOP, EXIT,
-		ALLOCATE, DEALLOCATE, READ, WRITE, PRINT,
+		ALLOCATE, DEALLOCATE, READ, WRITE, OPEN, PRINT,
 		GOTO, CONTINUE, CYCLE:
 		return true
 	}

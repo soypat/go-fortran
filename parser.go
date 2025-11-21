@@ -658,6 +658,12 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		stmt = p.parseAssignmentStmt()
 	} else {
 		switch p.current.tok {
+		default:
+			if p.current.tok.IsExecutableStatement() {
+				p.addError(p.current.tok.String() + " is an unsupported executable statement")
+			} else {
+				p.addError(p.current.tok.String() + " unable to be parsed as executable statement")
+			}
 		case token.IF:
 			stmt = p.parseIfStmt()
 		case token.DO:
@@ -678,15 +684,8 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseIOStmt()
 		case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
 			stmt = p.parseAssignmentStmt()
-
-			if string(p.current.lit) == "GO" && p.peekTokenIs(token.Identifier) {
-				stmt = p.parseGotoStmt()
-			} else {
-				// This could be an assignment statement or a call to a subroutine without the CALL keyword.
-				// For now, we'll assume it's an assignment.
-
-			}
 		}
+
 	}
 	if stmt != nil {
 		p.nStatements++ // add normal statement.

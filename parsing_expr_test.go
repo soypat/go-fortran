@@ -827,12 +827,14 @@ func TestExpressionParsing(t *testing.T) {
 }
 
 func helperPrintErrors(t *testing.T, p *Parser90) {
+	t.Helper()
 	for _, err := range p.Errors() {
 		t.Error(&err)
 	}
 }
 
 func helperFatalErrors(t *testing.T, p *Parser90, msg string) {
+	t.Helper()
 	helperPrintErrors(t, p)
 	if len(p.Errors()) > 0 {
 		t.Fatal(msg)

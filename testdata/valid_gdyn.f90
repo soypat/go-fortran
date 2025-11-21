@@ -31,8 +31,6 @@ PROGRAM GDYN2E
       
       if (ALL( k==(/ 0 /) )) then
       end if
-      ((k == (/ 0, 
-     3  /)))
    if (k==1) then
    DO 3800 IT=1,5
       k = 0
@@ -64,4 +62,5 @@ PROGRAM GDYN2E
    &                                         IFLD78, FIELD
    if( ASAVE(isave)(1:1) .ne. ' ') k=1
    IF(1) RESULT(N)=1
+   IF(LEXIST) OPEN(IUNT12,FILE='ftn12',STATUS='OLD',FORM='UNFORMATTED')
 END PROGRAM GDYN2E
