@@ -138,13 +138,13 @@ func compareErrors(t *testing.T, srcpath string, expected map[int]string, actual
 			return fmt.Errorf("%s: expected error matching %q, but got: %v", sp.String(), pattern, lineErrFound)
 		}
 	}
-
+	var err error
 	for i, isExpected := range actualAreExpected {
 		if !isExpected {
-			return fmt.Errorf("unexpected error: %v", actual[i].Error())
+			err = &actual[i]
+			t.Errorf("unexpected error: %v", err)
 		}
 	}
-
 	return nil
 }
 

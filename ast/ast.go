@@ -1221,6 +1221,54 @@ func (rs *RewindStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// StopStmt represents a STOP statement
+type StopStmt struct {
+	Code  Expression // Optional stop code (integer or string)
+	Label string     // Optional statement label
+	Position
+}
+
+var _ Statement = (*StopStmt)(nil)
+
+func (ss *StopStmt) GetLabel() string { return ss.Label }
+func (ss *StopStmt) statementNode()   {}
+func (ss *StopStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "STOP"...)
+}
+func (ss *StopStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "STOP"...)
+	if ss.Code != nil {
+		dst = append(dst, ' ')
+		dst = ss.Code.AppendString(dst)
+	}
+	return dst
+}
+
+// FormatStmt represents a FORMAT statement
+type FormatStmt struct {
+	Spec  string // Format specification (stored as string)
+	Label string // Statement label (always present for FORMAT)
+	Position
+}
+
+var _ Statement = (*FormatStmt)(nil)
+
+func (fs *FormatStmt) GetLabel() string { return fs.Label }
+func (fs *FormatStmt) statementNode()   {}
+func (fs *FormatStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "FORMAT"...)
+}
+func (fs *FormatStmt) AppendString(dst []byte) []byte {
+	if fs.Label != "" {
+		dst = append(dst, fs.Label...)
+		dst = append(dst, ' ')
+	}
+	dst = append(dst, "FORMAT("...)
+	dst = append(dst, fs.Spec...)
+	dst = append(dst, ')')
+	return dst
+}
+
 // Derived Type Statements (Phase 7)
 
 // DerivedTypeStmt represents a TYPE...END TYPE block

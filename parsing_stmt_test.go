@@ -932,6 +932,100 @@ func TestStatementParsing(t *testing.T) {
 			},
 		},
 
+		// ===== STOP Statements =====
+		{
+			name: "STOP with no argument",
+			src:  "STOP",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				stopStmt, ok := stmt.(*ast.StopStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.StopStmt, got %T", stmt)
+				}
+				if stopStmt.Code != nil {
+					t.Error("Expected nil Code for simple STOP")
+				}
+			},
+		},
+		{
+			name: "STOP with integer code",
+			src:  "STOP 123",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				stopStmt, ok := stmt.(*ast.StopStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.StopStmt, got %T", stmt)
+				}
+				if stopStmt.Code == nil {
+					t.Fatal("Expected non-nil Code")
+				}
+			},
+		},
+		{
+			name: "STOP with string message",
+			src:  "STOP 'Abnormal termination'",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				stopStmt, ok := stmt.(*ast.StopStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.StopStmt, got %T", stmt)
+				}
+				if stopStmt.Code == nil {
+					t.Fatal("Expected non-nil Code")
+				}
+				strLit, ok := stopStmt.Code.(*ast.StringLiteral)
+				if !ok {
+					t.Errorf("Expected StringLiteral, got %T", stopStmt.Code)
+				} else if strLit.Value != "Abnormal termination" {
+					t.Errorf("Expected message 'Abnormal termination', got %q", strLit.Value)
+				}
+			},
+		},
+
+		// ===== FORMAT Statements =====
+		{
+			name: "FORMAT with simple spec",
+			src:  "100 FORMAT(I5)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				formatStmt, ok := stmt.(*ast.FormatStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.FormatStmt, got %T", stmt)
+				}
+				if formatStmt.Label != "100" {
+					t.Errorf("Expected label '100', got %q", formatStmt.Label)
+				}
+				if formatStmt.Spec == "" {
+					t.Error("Expected non-empty Spec")
+				}
+			},
+		},
+		{
+			name: "FORMAT with multiple specs",
+			src:  "200 FORMAT(I5, F10.2, A)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				formatStmt, ok := stmt.(*ast.FormatStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.FormatStmt, got %T", stmt)
+				}
+				if formatStmt.Label != "200" {
+					t.Errorf("Expected label '200', got %q", formatStmt.Label)
+				}
+				if formatStmt.Spec == "" {
+					t.Error("Expected non-empty Spec")
+				}
+			},
+		},
+		{
+			name: "FORMAT with string literal",
+			src:  "300 FORMAT('Result = ', F8.3)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				formatStmt, ok := stmt.(*ast.FormatStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.FormatStmt, got %T", stmt)
+				}
+				if formatStmt.Label != "300" {
+					t.Errorf("Expected label '300', got %q", formatStmt.Label)
+				}
+			},
+		},
+
 		// ===== Substring and chained subscript notation =====
 		{
 			name: "substring notation with single character",

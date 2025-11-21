@@ -692,6 +692,10 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseBackspaceStmt()
 		case token.REWIND:
 			stmt = p.parseRewindStmt()
+		case token.STOP:
+			stmt = p.parseStopStmt()
+		case token.FORMAT:
+			stmt = p.parseFormatStmt()
 		case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
 			stmt = p.parseAssignmentStmt()
 		}
@@ -727,6 +731,10 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		case *ast.BackspaceStmt:
 			s.Label = label
 		case *ast.RewindStmt:
+			s.Label = label
+		case *ast.StopStmt:
+			s.Label = label
+		case *ast.FormatStmt:
 			s.Label = label
 		case *ast.ReadStmt:
 			s.Label = label
@@ -1320,6 +1328,86 @@ func (p *Parser90) parseRewindStmt() ast.Statement {
 	return stmt
 }
 
+// parseStopStmt parses a STOP statement
+// Precondition: current token is STOP
+// Syntax: STOP [code]
+// Postcondition: current token is the first token after the STOP statement
+func (p *Parser90) parseStopStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.STOP, "")
+
+	stmt := &ast.StopStmt{
+		Position: ast.Pos(start, p.current.start),
+	}
+
+	// Check if there's an optional stop code (integer or string)
+	if !p.currentTokenIs(token.NewLine) && !p.IsDone() && !p.current.tok.IsEnd() {
+		code := p.parseExpression(0)
+		if code != nil {
+			stmt.Code = code
+		}
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseFormatStmt parses a FORMAT statement
+// Precondition: current token is FORMAT
+// Syntax: label FORMAT(format-spec)
+// Postcondition: current token is the first token after the FORMAT statement
+func (p *Parser90) parseFormatStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.FORMAT, "")
+
+	if !p.expect(token.LParen, "in FORMAT statement") {
+		return nil
+	}
+
+	stmt := &ast.FormatStmt{
+		Position: ast.Pos(start, p.current.start),
+	}
+
+	// Collect all tokens inside parentheses as the format specification
+	// We'll store it as a string rather than parsing it in detail
+	var specBuilder strings.Builder
+	parenDepth := 1
+
+	for parenDepth > 0 && !p.IsDone() {
+		if p.currentTokenIs(token.RParen) {
+			parenDepth--
+			if parenDepth == 0 {
+				p.nextToken() // consume closing )
+				break
+			}
+			specBuilder.WriteString(")")
+			p.nextToken()
+		} else if p.currentTokenIs(token.LParen) {
+			parenDepth++
+			specBuilder.WriteString("(")
+			p.nextToken()
+		} else {
+			// Add token to spec
+			if specBuilder.Len() > 0 && !p.currentTokenIs(token.Comma) {
+				// Add space between tokens except before commas
+				if len(p.current.lit) > 0 && p.current.lit[0] != ',' {
+					specBuilder.WriteString(" ")
+				}
+			}
+			if len(p.current.lit) > 0 {
+				specBuilder.WriteString(string(p.current.lit))
+			} else {
+				specBuilder.WriteString(p.current.tok.String())
+			}
+			p.nextToken()
+		}
+	}
+
+	stmt.Spec = specBuilder.String()
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
 // parseIfStmt parses an IF construct
 // Precondition: current token is IF
 func (p *Parser90) parseIfStmt() ast.Statement {
@@ -1873,11 +1961,25 @@ func (p *Parser90) isEndOfProgramUnit() bool {
 // parseSpecStatement parses a specification statement
 // paramMap is used to populate type information for parameters
 func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[string]*ast.Parameter) ast.Statement {
+	// Check for labeled FORMAT statement (can appear in spec section)
+	var label string
+	if p.currentTokenIs(token.IntLit) && p.peekTokenIs(token.FORMAT) {
+		label = string(p.current.lit)
+		p.nextToken() // consume label
+		stmt := p.parseFormatStmt()
+		if formatStmt, ok := stmt.(*ast.FormatStmt); ok {
+			formatStmt.Label = label
+		}
+		return stmt
+	}
+
 	switch p.current.tok {
 	case token.IMPLICIT:
 		return p.parseImplicit(sawImplicit, sawDecl)
 	case token.USE:
 		return p.parseUse()
+	case token.FORMAT:
+		return p.parseFormatStmt()
 	case token.INTEGER, token.REAL, token.DOUBLE, token.COMPLEX, token.LOGICAL, token.CHARACTER:
 		*sawDecl = true
 		return p.parseTypeDecl(paramMap)
@@ -1890,12 +1992,12 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 		} else {
 			// TYPE :: name ... END TYPE - skip entire block
 			p.skipTypeDefinition()
-			return &ast.ImplicitStatement{} // Return non-nil to indicate success
+			return &ast.TypeDeclaration{} // Return non-nil to indicate success
 		}
 	case token.INTERFACE:
 		// INTERFACE block - skip entire block
 		p.skipInterfaceBlock()
-		return &ast.ImplicitStatement{} // Return non-nil to indicate success
+		return &ast.InterfaceStmt{} // Return non-nil to indicate success
 	default:
 		return nil // Unknown statement, caller will skip
 	}
