@@ -458,20 +458,7 @@ func (p *Parser90) strToks() string {
 // canUseAsIdentifier returns true if the current token can be used as an identifier.
 // In Fortran, keywords can be used as variable/function/subroutine names in many contexts.
 func (p *Parser90) canUseAsIdentifier() bool {
-	// Explicit identifiers are always OK
-	if p.currentTokenIs(token.Identifier) || p.currentTokenIs(token.FormatSpec) {
-		return true
-	}
-	// Allow keywords to be used as identifiers
-	// We exclude structural keywords that would cause ambiguity
-	switch p.current.tok {
-	case token.PROGRAM, token.SUBROUTINE, token.FUNCTION, token.MODULE,
-		token.END, token.CONTAINS:
-		return false
-	default:
-		// Most other keywords can be used as identifiers
-		return p.current.tok.IsKeyword() || p.current.tok.IsAttribute()
-	}
+	return p.current.tok.CanBeUsedAsIdentifier()
 }
 
 // parseParameterList parses a parameter list like (a, b, c)
@@ -1857,7 +1844,7 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 		p.expect(token.RParen, "after DO WHILE")
 	} else {
 		// Counter-controlled DO loop
-		if p.currentTokenIs(token.Identifier) {
+		if p.canUseAsIdentifier() {
 			stmt.Var = string(p.current.lit)
 			p.nextToken()
 			p.expect(token.Equals, "after loop variable")

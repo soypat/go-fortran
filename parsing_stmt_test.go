@@ -1555,6 +1555,69 @@ ENDIF`,
 				}
 			},
 		},
+		{
+			name: "F77 labeled DO with CONTINUE (simple)",
+			src: `DO 370 I1=1,6
+370 CONTINUE`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				doLoop, ok := stmt.(*ast.DoLoop)
+				if !ok {
+					t.Fatalf("Expected *ast.DoLoop, got %T", stmt)
+				}
+				// Verify loop variable
+				if doLoop.Var != "I1" {
+					t.Errorf("Expected loop variable 'I1', got %q", doLoop.Var)
+				}
+				// Verify target label
+				if doLoop.TargetLabel != "370" {
+					t.Errorf("Expected DO target label '370', got %q", doLoop.TargetLabel)
+				}
+				// Verify start expression
+				startLit, ok := doLoop.Start.(*ast.IntegerLiteral)
+				if !ok {
+					t.Fatalf("Expected start to be *ast.IntegerLiteral, got %T", doLoop.Start)
+				}
+				if startLit.Raw != "1" {
+					t.Errorf("Expected start '1', got %q", startLit.Raw)
+				}
+				// Verify end expression
+				endLit, ok := doLoop.End.(*ast.IntegerLiteral)
+				if !ok {
+					t.Fatalf("Expected end to be *ast.IntegerLiteral, got %T", doLoop.End)
+				}
+				if endLit.Raw != "6" {
+					t.Errorf("Expected end '6', got %q", endLit.Raw)
+				}
+			},
+		},
+		{
+			name: "string with escaped quote (doubled quote)",
+			src:  "name = 'M1'' '",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
+				}
+				// Check target
+				target, ok := assign.Target.(*ast.Identifier)
+				if !ok {
+					t.Fatalf("Expected target to be *ast.Identifier, got %T", assign.Target)
+				}
+				if target.Value != "name" {
+					t.Errorf("Expected target 'name', got %q", target.Value)
+				}
+				// Check value is a string literal
+				strLit, ok := assign.Value.(*ast.StringLiteral)
+				if !ok {
+					t.Fatalf("Expected value to be *ast.StringLiteral, got %T", assign.Value)
+				}
+				// The string 'M1'' ' should parse as: M1' (M1 followed by single quote and space)
+				expected := "M1' "
+				if strLit.Value != expected {
+					t.Errorf("Expected string value %q, got %q", expected, strLit.Value)
+				}
+			},
+		},
 
 		// ===== SELECT CASE =====
 		{

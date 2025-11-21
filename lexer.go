@@ -396,17 +396,27 @@ func (l *Lexer90) readIdentifier() []byte {
 func (l *Lexer90) readString(quote rune) []byte {
 	start := l.bufstart()
 	l.readChar() // consume opening quote
-	for l.ch != quote && l.ch != 0 {
+	for l.ch != 0 {
 		if l.ch == '\n' {
 			// Newline without continuation - unterminated string
 			l.err = errors.New("unterminated string literal")
 			return l.idbuf[start:]
 		}
+		if l.ch == quote {
+			// Check if this is an escaped quote (doubled quote)
+			if l.peek == quote {
+				// It's an escaped quote - include one quote in the output
+				l.idbuf = utf8.AppendRune(l.idbuf, quote)
+				l.readChar() // consume first quote
+				l.readChar() // consume second quote
+				continue
+			}
+			// It's the closing quote
+			l.readChar() // consume closing quote
+			break
+		}
 		l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
 		l.readChar()
-	}
-	if l.ch == quote {
-		l.readChar() // consume closing quote
 	}
 	return l.idbuf[start:]
 }
