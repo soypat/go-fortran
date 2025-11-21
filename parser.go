@@ -682,6 +682,10 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseContinueStmt()
 		case token.READ, token.WRITE:
 			stmt = p.parseIOStmt()
+		case token.PRINT:
+			stmt = p.parsePrintStmt()
+		case token.OPEN:
+			stmt = p.parseOpenStmt()
 		case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
 			stmt = p.parseAssignmentStmt()
 		}
@@ -707,6 +711,14 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		case *ast.ContinueStmt:
 			s.Label = label
 		case *ast.AssignmentStmt:
+			s.Label = label
+		case *ast.PrintStmt:
+			s.Label = label
+		case *ast.OpenStmt:
+			s.Label = label
+		case *ast.ReadStmt:
+			s.Label = label
+		case *ast.WriteStmt:
 			s.Label = label
 		}
 	}
@@ -831,8 +843,15 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 		// I/O specs can be: unit, format, KEYWORD=value
 		var spec ast.Expression
 
-		// Special case: END is a keyword but can be used as identifier in I/O specs
-		if p.currentTokenIs(token.END) {
+		// Special case: * for list-directed I/O (unit or format)
+		if p.currentTokenIs(token.Asterisk) {
+			spec = &ast.Identifier{
+				Value:    "*",
+				Position: ast.Pos(p.current.start, p.current.start),
+			}
+			p.nextToken()
+		} else if p.currentTokenIs(token.END) {
+			// Special case: END is a keyword but can be used as identifier in I/O specs
 			spec = &ast.Identifier{
 				Value:    "END",
 				Position: ast.Pos(p.current.start, p.current.start+len(p.current.lit)),
@@ -919,6 +938,128 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 			Position:   pos,
 		}
 	}
+}
+
+// parsePrintStmt parses a PRINT statement
+// Precondition: current token is PRINT
+// Syntax: PRINT format [, output-item-list]
+// Postcondition: current token is the first token after the PRINT statement
+func (p *Parser90) parsePrintStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.PRINT, "")
+
+	// Parse format (required): *, integer label, or character expression
+	var format ast.Expression
+
+	// Special handling for * (list-directed format)
+	if p.currentTokenIs(token.Asterisk) {
+		// Create an identifier node for the * format
+		format = &ast.Identifier{
+			Value:    "*",
+			Position: ast.Pos(p.current.start, p.current.start),
+		}
+		p.nextToken() // consume *
+	} else {
+		format = p.parseExpression(0)
+		if format == nil {
+			p.addError("expected format specifier in PRINT statement")
+			return nil
+		}
+	}
+
+	stmt := &ast.PrintStmt{
+		Format:   format,
+		Position: ast.Pos(start, p.current.start),
+	}
+
+	// Parse optional output list (comma-separated expressions)
+	if p.consumeIf(token.Comma) {
+		for !p.currentTokenIs(token.NewLine) && !p.IsDone() && !p.current.tok.IsEnd() {
+			if expr := p.parseExpression(0); expr != nil {
+				stmt.OutputList = append(stmt.OutputList, expr)
+			} else {
+				break
+			}
+
+			if !p.consumeIf(token.Comma) {
+				break
+			}
+		}
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseOpenStmt parses an OPEN statement
+// Precondition: current token is OPEN
+// Syntax: OPEN([UNIT=]u [,specifier-list])
+// Postcondition: current token is the first token after the OPEN statement
+func (p *Parser90) parseOpenStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.OPEN, "")
+
+	if !p.expect(token.LParen, "in OPEN statement") {
+		return nil
+	}
+
+	stmt := &ast.OpenStmt{
+		Specifiers: make(map[string]ast.Expression),
+		Position:   ast.Pos(start, p.current.start),
+	}
+
+	// Track if we've seen the first positional argument (which would be UNIT)
+	isFirstArg := true
+
+	// Parse comma-separated specifier list
+	for !p.currentTokenIs(token.RParen) && !p.IsDone() && !p.current.tok.IsEnd() {
+		// Parse one specifier: either expression or keyword=value
+		spec := p.parseExpression(0)
+		if spec == nil {
+			break
+		}
+
+		// Check if this is a keyword=value pattern
+		if p.currentTokenIs(token.Equals) {
+			// Extract keyword name
+			var keyword string
+			if ident, ok := spec.(*ast.Identifier); ok {
+				keyword = strings.ToUpper(ident.Value)
+			} else {
+				p.addError("expected identifier before = in OPEN specifier")
+				if !p.consumeIf(token.Comma) {
+					break
+				}
+				continue
+			}
+
+			p.nextToken() // consume =
+			value := p.parseExpression(0)
+			if value != nil {
+				stmt.Specifiers[keyword] = value
+			}
+			isFirstArg = false
+		} else if isFirstArg {
+			// First positional argument is UNIT
+			stmt.Specifiers["UNIT"] = spec
+			isFirstArg = false
+		} else {
+			p.addError("unexpected expression in OPEN statement (expected keyword=value)")
+		}
+
+		// Consume comma if present, otherwise should be at RParen
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	// Consume the closing parenthesis
+	if !p.expect(token.RParen, "closing OPEN statement") {
+		return nil
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
 }
 
 // parseIfStmt parses an IF construct

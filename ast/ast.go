@@ -1063,6 +1063,74 @@ func (ws *WriteStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// PrintStmt represents a PRINT statement
+type PrintStmt struct {
+	Format     Expression   // Format specifier (*, label, or character expression)
+	OutputList []Expression // List of expressions to print
+	Label      string       // Optional statement label
+	Position
+}
+
+var _ Statement = (*PrintStmt)(nil) // compile time check of interface implementation.
+
+func (ps *PrintStmt) GetLabel() string { return ps.Label }
+
+func (ps *PrintStmt) statementNode() {}
+
+func (ps *PrintStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "PRINT"...)
+}
+
+func (ps *PrintStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "PRINT "...)
+	if ps.Format != nil {
+		dst = ps.Format.AppendString(dst)
+	}
+	if len(ps.OutputList) > 0 {
+		dst = append(dst, ", "...)
+		for i, expr := range ps.OutputList {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = expr.AppendString(dst)
+		}
+	}
+	return dst
+}
+
+// OpenStmt represents an OPEN statement
+type OpenStmt struct {
+	Specifiers map[string]Expression // OPEN specifiers: UNIT, FILE, STATUS, etc.
+	Label      string                 // Optional statement label
+	Position
+}
+
+var _ Statement = (*OpenStmt)(nil) // compile time check of interface implementation.
+
+func (os *OpenStmt) GetLabel() string { return os.Label }
+
+func (os *OpenStmt) statementNode() {}
+
+func (os *OpenStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "OPEN"...)
+}
+
+func (os *OpenStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "OPEN("...)
+	first := true
+	for key, value := range os.Specifiers {
+		if !first {
+			dst = append(dst, ", "...)
+		}
+		first = false
+		dst = append(dst, key...)
+		dst = append(dst, '=')
+		dst = value.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
 // Derived Type Statements (Phase 7)
 
 // DerivedTypeStmt represents a TYPE...END TYPE block

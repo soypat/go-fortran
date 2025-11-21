@@ -677,6 +677,165 @@ func TestStatementParsing(t *testing.T) {
 			},
 		},
 
+		// ===== PRINT Statements =====
+		{
+			name: "PRINT with list-directed format",
+			src:  "PRINT *, 'Hello World'",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				printStmt, ok := stmt.(*ast.PrintStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.PrintStmt, got %T", stmt)
+				}
+
+				if printStmt.Format == nil {
+					t.Fatal("Expected non-nil Format")
+				}
+
+				if len(printStmt.OutputList) != 1 {
+					t.Errorf("Expected 1 output item, got %d", len(printStmt.OutputList))
+				}
+			},
+		},
+		{
+			name: "PRINT with format label and variables",
+			src:  "PRINT 100, X, Y, Z",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				printStmt, ok := stmt.(*ast.PrintStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.PrintStmt, got %T", stmt)
+				}
+
+				if printStmt.Format == nil {
+					t.Fatal("Expected non-nil Format")
+				}
+
+				if len(printStmt.OutputList) != 3 {
+					t.Errorf("Expected 3 output items, got %d", len(printStmt.OutputList))
+				}
+			},
+		},
+		{
+			name: "PRINT with inline format",
+			src:  "PRINT '(I5,F10.2)', N, X",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				printStmt, ok := stmt.(*ast.PrintStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.PrintStmt, got %T", stmt)
+				}
+
+				if printStmt.Format == nil {
+					t.Fatal("Expected non-nil Format")
+				}
+
+				if len(printStmt.OutputList) != 2 {
+					t.Errorf("Expected 2 output items, got %d", len(printStmt.OutputList))
+				}
+			},
+		},
+		{
+			name: "PRINT with format only (no output list)",
+			src:  "PRINT 10000",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				printStmt, ok := stmt.(*ast.PrintStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.PrintStmt, got %T", stmt)
+				}
+
+				if printStmt.Format == nil {
+					t.Fatal("Expected non-nil Format")
+				}
+
+				if len(printStmt.OutputList) != 0 {
+					t.Errorf("Expected 0 output items, got %d", len(printStmt.OutputList))
+				}
+			},
+		},
+
+		// ===== OPEN Statements =====
+		{
+			name: "OPEN with positional unit and FILE",
+			src:  "OPEN(10, FILE='data.txt')",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				openStmt, ok := stmt.(*ast.OpenStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.OpenStmt, got %T", stmt)
+				}
+
+				if len(openStmt.Specifiers) == 0 {
+					t.Error("Expected non-empty Specifiers map")
+				}
+
+				if openStmt.Specifiers["UNIT"] == nil {
+					t.Error("Expected UNIT specifier")
+				}
+
+				if openStmt.Specifiers["FILE"] == nil {
+					t.Error("Expected FILE specifier")
+				}
+			},
+		},
+		{
+			name: "OPEN with keyword specifiers",
+			src:  "OPEN(UNIT=20, FILE='output.dat', STATUS='NEW', FORM='FORMATTED')",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				openStmt, ok := stmt.(*ast.OpenStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.OpenStmt, got %T", stmt)
+				}
+
+				requiredSpecs := []string{"UNIT", "FILE", "STATUS", "FORM"}
+				for _, spec := range requiredSpecs {
+					if openStmt.Specifiers[spec] == nil {
+						t.Errorf("Expected %s specifier", spec)
+					}
+				}
+			},
+		},
+		{
+			name: "OPEN with IOSTAT and ERR",
+			src:  "OPEN(UNIT=30, FILE=FNAME, IOSTAT=IOS, ERR=999)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				openStmt, ok := stmt.(*ast.OpenStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.OpenStmt, got %T", stmt)
+				}
+
+				if openStmt.Specifiers["UNIT"] == nil {
+					t.Error("Expected UNIT specifier")
+				}
+
+				if openStmt.Specifiers["FILE"] == nil {
+					t.Error("Expected FILE specifier")
+				}
+
+				if openStmt.Specifiers["IOSTAT"] == nil {
+					t.Error("Expected IOSTAT specifier")
+				}
+
+				if openStmt.Specifiers["ERR"] == nil {
+					t.Error("Expected ERR specifier")
+				}
+			},
+		},
+		{
+			name: "OPEN with ACCESS and RECL for direct access",
+			src:  "OPEN(UNIT=40, FILE='direct.dat', ACCESS='DIRECT', RECL=512)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				openStmt, ok := stmt.(*ast.OpenStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.OpenStmt, got %T", stmt)
+				}
+
+				if openStmt.Specifiers["ACCESS"] == nil {
+					t.Error("Expected ACCESS specifier")
+				}
+
+				if openStmt.Specifiers["RECL"] == nil {
+					t.Error("Expected RECL specifier")
+				}
+			},
+		},
+
 		// ===== Substring and chained subscript notation =====
 		{
 			name: "substring notation with single character",
