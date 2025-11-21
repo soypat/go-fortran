@@ -625,7 +625,7 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 	}
 	if p.peekTokenIs(token.Equals) && p.current.tok.CanBeUsedAsIdentifier() {
 		// Most keywords can be used as identifiers in fortran.
-		// i.e: IF=0
+		// e.g: IF=0, RESULT(N)=1, STOP=.TRUE.
 		stmt = p.parseAssignmentStmt()
 	} else if ngotoToks := p.currentIsGOTO(); ngotoToks > 0 {
 		stmt = p.parseGotoStmt()
