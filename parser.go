@@ -593,7 +593,7 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 // or for simpler conjoined GOTO returning 1. Returns 0 if not GOTO found.
 func (p *Parser90) currentIsGOTO() int {
 	switch {
-	case p.current.tok == token.GOTO:
+	case p.current.tok == token.GOTO: // captures both GOTO and goto.
 		return 1
 	case string(p.current.lit) == "GO" && string(p.peek.lit) == "TO":
 		return 2
@@ -601,6 +601,32 @@ func (p *Parser90) currentIsGOTO() int {
 		return 2
 	}
 	return 0
+}
+
+// isLikelyAssignment checks if current token starts an assignment statement.
+// It handles both simple assignments (RESULT=1) and array assignments (RESULT(N)=1).
+// This requires lookahead beyond the standard 3-token window for cases like KEYWORD(...=.
+//
+// Postcondition: Does not consume any tokens; parser state unchanged.
+func (p *Parser90) isLikelyAssignment() bool {
+	maybeIdent, maybeEqOrLParen := p.current.tok, p.peek.tok
+	if maybeIdent == token.DATA || maybeIdent == token.TYPE ||
+		!maybeIdent.CanBeUsedAsIdentifier() {
+		return false
+	}
+	// Ident can be used as identifier by now.
+	if maybeEqOrLParen == token.Equals {
+		return true
+	} else if maybeEqOrLParen != token.LParen {
+		return false
+	}
+	// By now we have a identifier followed by left parentheses.
+	// Check the identifier is not a keyword that may have parentheses in usage.
+	if maybeIdent.IsConstructAdmitsParens() {
+		return false
+	}
+	// Give up trying to prove it is not a assignment, we can be pretty sure it is by now.
+	return true
 }
 
 // parseExecutableStatement parses a single executable statement
@@ -623,12 +649,13 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		label = string(p.current.lit)
 		p.nextToken()
 	}
-	if p.peekTokenIs(token.Equals) && p.current.tok.CanBeUsedAsIdentifier() {
-		// Most keywords can be used as identifiers in fortran.
-		// e.g: IF=0, RESULT(N)=1, STOP=.TRUE.
-		stmt = p.parseAssignmentStmt()
-	} else if ngotoToks := p.currentIsGOTO(); ngotoToks > 0 {
+	// Check for GOTO first (handles both "GO TO" and "GOTO" and computed goto patterns)
+	if ngotoToks := p.currentIsGOTO(); ngotoToks > 0 {
 		stmt = p.parseGotoStmt()
+	} else if p.isLikelyAssignment() {
+		// Check if this looks like an assignment to a keyword used as identifier
+		// Handles both simple (RESULT=1) and array assignments (RESULT(N)=1)
+		stmt = p.parseAssignmentStmt()
 	} else {
 		switch p.current.tok {
 		case token.IF:
@@ -1355,6 +1382,13 @@ func (p *Parser90) isExecutableStatement() bool {
 		// If we see `IDENTIFIER(...)` it could be an assignment to an array element or a function call.
 		// For now, we will treat all identifiers at the start of a statement in the execution part as the start of an executable statement.
 		return true
+	} else if p.current.tok.IsTypeDeclaration() || p.current.tok == token.DATA || p.current.tok == token.TYPE {
+		// Type keywords, DATA, and TYPE start specification statements, not executable statements
+		return false
+	} else if p.isLikelyAssignment() {
+		// Keywords used as identifiers in assignments (RESULT=1, STOP(I)=5, etc.)
+		// But not type keywords which are always declarations
+		return true
 	}
 	return false
 }
@@ -1499,45 +1533,6 @@ func (p *Parser90) parseInterfaceStmt() ast.Statement {
 	// Expect END INTERFACE [name]
 	p.expectEndConstruct(token.INTERFACE, token.ENDINTERFACE, start)
 	p.consumeIf(token.Identifier) // optional interface name
-	stmt.Position = ast.Pos(start.Pos, p.current.start)
-	return stmt
-}
-
-// parseDerivedTypeStmt parses a TYPE...END TYPE block
-func (p *Parser90) parseDerivedTypeStmt() ast.Statement {
-	start := p.sourcePos()
-	stmt := &ast.DerivedTypeStmt{}
-	p.nextToken() // consume TYPE
-
-	if p.currentTokenIs(token.DoubleColon) {
-		p.nextToken() // consume ::
-	}
-
-	if !p.canUseAsIdentifier() {
-		p.addError("expected derived type name")
-		return nil
-	}
-	stmt.Name = string(p.current.lit)
-	p.nextToken()
-	p.skipNewlinesAndComments()
-
-	// Parse component declarations
-	for p.loopUntil(token.END) {
-		if p.peekTokenIs(token.TYPE) && p.currentTokenIs(token.END) {
-			break
-		}
-		if s := p.parseComponentDecl(); s != nil {
-			stmt.Components = append(stmt.Components, *s)
-		} else {
-			p.skipToNextStatement()
-		}
-		p.skipNewlinesAndComments()
-	}
-
-	// Expect END TYPE [name]
-	p.expectEndConstruct(token.TYPE, token.ENDTYPE, start)
-	p.consumeIf(token.Identifier) // optional type name
-
 	stmt.Position = ast.Pos(start.Pos, p.current.start)
 	return stmt
 }

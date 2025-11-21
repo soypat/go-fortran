@@ -317,6 +317,113 @@ func TestStatementParsing(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "inline IF with keyword array assignment",
+			src:  "IF(1) RESULT(N)=1",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ifStmt, ok := stmt.(*ast.IfStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
+				}
+
+				if len(ifStmt.ThenPart) != 1 {
+					t.Fatalf("Expected 1 statement in ThenPart, got %d", len(ifStmt.ThenPart))
+				}
+
+				assignStmt, ok := ifStmt.ThenPart[0].(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignmentStmt in ThenPart, got %T", ifStmt.ThenPart[0])
+				}
+
+				// Verify target is a function call (array reference)
+				_, ok = assignStmt.Target.(*ast.FunctionCall)
+				if !ok {
+					t.Errorf("Expected Target to be *ast.FunctionCall (array ref), got %T", assignStmt.Target)
+				}
+			},
+		},
+
+		// ===== Keywords Used as Identifiers =====
+		{
+			name: "keyword as simple variable assignment",
+			src:  "RESULT=1",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assignStmt, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
+				}
+
+				ident, ok := assignStmt.Target.(*ast.Identifier)
+				if !ok {
+					t.Fatalf("Expected Target to be *ast.Identifier, got %T", assignStmt.Target)
+				}
+
+				if ident.Value != "RESULT" {
+					t.Errorf("Expected identifier 'RESULT', got %q", ident.Value)
+				}
+			},
+		},
+		{
+			name: "keyword as array variable assignment",
+			src:  "RESULT(N)=1",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assignStmt, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
+				}
+
+				funcCall, ok := assignStmt.Target.(*ast.FunctionCall)
+				if !ok {
+					t.Fatalf("Expected Target to be *ast.FunctionCall (array ref), got %T", assignStmt.Target)
+				}
+
+				if funcCall.Name != "RESULT" {
+					t.Errorf("Expected function name 'RESULT', got %q", funcCall.Name)
+				}
+
+				if len(funcCall.Args) != 1 {
+					t.Errorf("Expected 1 argument, got %d", len(funcCall.Args))
+				}
+			},
+		},
+		{
+			name: "STOP keyword as array variable",
+			src:  "STOP(I)=5",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assignStmt, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
+				}
+
+				funcCall, ok := assignStmt.Target.(*ast.FunctionCall)
+				if !ok {
+					t.Fatalf("Expected Target to be *ast.FunctionCall (array ref), got %T", assignStmt.Target)
+				}
+
+				if funcCall.Name != "STOP" {
+					t.Errorf("Expected function name 'STOP', got %q", funcCall.Name)
+				}
+			},
+		},
+		{
+			name: "STOP keyword as simple variable",
+			src:  "STOP=.TRUE.",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assignStmt, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
+				}
+
+				ident, ok := assignStmt.Target.(*ast.Identifier)
+				if !ok {
+					t.Fatalf("Expected Target to be *ast.Identifier, got %T", assignStmt.Target)
+				}
+
+				if ident.Value != "STOP" {
+					t.Errorf("Expected identifier 'STOP', got %q", ident.Value)
+				}
+			},
+		},
 
 		// ===== Implied DO Loops in I/O Statements =====
 		{

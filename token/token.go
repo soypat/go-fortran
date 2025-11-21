@@ -248,6 +248,20 @@ func (tok Token) IsKeyword() bool {
 	return tok >= INTEGER && tok <= ENDWHERE
 }
 
+// IsConstructWithParens returns true if the construct has parentheses
+// that follow after declaration.
+func (tok Token) IsConstructAdmitsParens() bool {
+	switch tok {
+	case IF, GOTO,
+		PARAMETER, EQUIVALENCE, POINTER,
+		READ, WRITE, FORMAT, OPEN, CLOSE,
+		ALLOCATE, DEALLOCATE, REWIND, BACKSPACE, INQUIRE,
+		REAL:
+		return true
+	}
+	return false
+}
+
 // CanBeUsedAsIdentifier returns true if this token can be used as an identifier.
 // In Fortran, most keywords can be used as variable/function names, but some
 // structural keywords (PROGRAM, SUBROUTINE, FUNCTION, MODULE, END, CONTAINS)
