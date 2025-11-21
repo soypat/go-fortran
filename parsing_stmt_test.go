@@ -836,6 +836,102 @@ func TestStatementParsing(t *testing.T) {
 			},
 		},
 
+		// ===== CLOSE Statements =====
+		{
+			name: "CLOSE with positional unit",
+			src:  "CLOSE(10)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				closeStmt, ok := stmt.(*ast.CloseStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.CloseStmt, got %T", stmt)
+				}
+				if closeStmt.Specifiers["UNIT"] == nil {
+					t.Error("Expected UNIT specifier")
+				}
+			},
+		},
+		{
+			name: "CLOSE with UNIT and STATUS keywords",
+			src:  "CLOSE(UNIT=20, STATUS='KEEP')",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				closeStmt, ok := stmt.(*ast.CloseStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.CloseStmt, got %T", stmt)
+				}
+				if closeStmt.Specifiers["UNIT"] == nil {
+					t.Error("Expected UNIT specifier")
+				}
+				if closeStmt.Specifiers["STATUS"] == nil {
+					t.Error("Expected STATUS specifier")
+				}
+			},
+		},
+
+		// ===== BACKSPACE Statements =====
+		{
+			name: "BACKSPACE with positional unit",
+			src:  "BACKSPACE(15)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				backspaceStmt, ok := stmt.(*ast.BackspaceStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.BackspaceStmt, got %T", stmt)
+				}
+				if backspaceStmt.Specifiers["UNIT"] == nil {
+					t.Error("Expected UNIT specifier")
+				}
+			},
+		},
+		{
+			name: "BACKSPACE with IOSTAT and ERR",
+			src:  "BACKSPACE(UNIT=10, IOSTAT=ios, ERR=99)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				backspaceStmt, ok := stmt.(*ast.BackspaceStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.BackspaceStmt, got %T", stmt)
+				}
+				if backspaceStmt.Specifiers["UNIT"] == nil {
+					t.Error("Expected UNIT specifier")
+				}
+				if backspaceStmt.Specifiers["IOSTAT"] == nil {
+					t.Error("Expected IOSTAT specifier")
+				}
+				if backspaceStmt.Specifiers["ERR"] == nil {
+					t.Error("Expected ERR specifier")
+				}
+			},
+		},
+
+		// ===== REWIND Statements =====
+		{
+			name: "REWIND with positional unit",
+			src:  "REWIND(25)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				rewindStmt, ok := stmt.(*ast.RewindStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.RewindStmt, got %T", stmt)
+				}
+				if rewindStmt.Specifiers["UNIT"] == nil {
+					t.Error("Expected UNIT specifier")
+				}
+			},
+		},
+		{
+			name: "REWIND with IOSTAT",
+			src:  "REWIND(UNIT=30, IOSTAT=ierr)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				rewindStmt, ok := stmt.(*ast.RewindStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.RewindStmt, got %T", stmt)
+				}
+				if rewindStmt.Specifiers["UNIT"] == nil {
+					t.Error("Expected UNIT specifier")
+				}
+				if rewindStmt.Specifiers["IOSTAT"] == nil {
+					t.Error("Expected IOSTAT specifier")
+				}
+			},
+		},
+
 		// ===== Substring and chained subscript notation =====
 		{
 			name: "substring notation with single character",

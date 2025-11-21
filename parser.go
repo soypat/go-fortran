@@ -686,6 +686,12 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parsePrintStmt()
 		case token.OPEN:
 			stmt = p.parseOpenStmt()
+		case token.CLOSE:
+			stmt = p.parseCloseStmt()
+		case token.BACKSPACE:
+			stmt = p.parseBackspaceStmt()
+		case token.REWIND:
+			stmt = p.parseRewindStmt()
 		case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
 			stmt = p.parseAssignmentStmt()
 		}
@@ -715,6 +721,12 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		case *ast.PrintStmt:
 			s.Label = label
 		case *ast.OpenStmt:
+			s.Label = label
+		case *ast.CloseStmt:
+			s.Label = label
+		case *ast.BackspaceStmt:
+			s.Label = label
+		case *ast.RewindStmt:
 			s.Label = label
 		case *ast.ReadStmt:
 			s.Label = label
@@ -1055,6 +1067,252 @@ func (p *Parser90) parseOpenStmt() ast.Statement {
 
 	// Consume the closing parenthesis
 	if !p.expect(token.RParen, "closing OPEN statement") {
+		return nil
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseCloseStmt parses a CLOSE statement
+// Precondition: current token is CLOSE
+// Syntax: CLOSE([UNIT=]u [,specifier-list]) or CLOSE unit
+// Postcondition: current token is the first token after the CLOSE statement
+func (p *Parser90) parseCloseStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.CLOSE, "")
+
+	stmt := &ast.CloseStmt{
+		Specifiers: make(map[string]ast.Expression),
+		Position:   ast.Pos(start, p.current.start),
+	}
+
+	// Handle simple form: CLOSE unit (without parentheses)
+	if !p.currentTokenIs(token.LParen) {
+		unit := p.parseExpression(0)
+		if unit != nil {
+			stmt.Specifiers["UNIT"] = unit
+		}
+		stmt.Position = ast.Pos(start, p.current.start)
+		return stmt
+	}
+
+	// Handle full form with parentheses
+	if !p.expect(token.LParen, "in CLOSE statement") {
+		return nil
+	}
+
+	// Track if we've seen the first positional argument (which would be UNIT)
+	isFirstArg := true
+
+	// Parse comma-separated specifier list
+	for !p.currentTokenIs(token.RParen) && !p.IsDone() && !p.current.tok.IsEnd() {
+		// Parse one specifier: either expression or keyword=value
+		spec := p.parseExpression(0)
+		if spec == nil {
+			break
+		}
+
+		// Check if this is a keyword=value pattern
+		if p.currentTokenIs(token.Equals) {
+			// Extract keyword name
+			var keyword string
+			if ident, ok := spec.(*ast.Identifier); ok {
+				keyword = strings.ToUpper(ident.Value)
+			} else {
+				p.addError("expected identifier before = in CLOSE specifier")
+				if !p.consumeIf(token.Comma) {
+					break
+				}
+				continue
+			}
+
+			p.nextToken() // consume =
+			value := p.parseExpression(0)
+			if value != nil {
+				stmt.Specifiers[keyword] = value
+			}
+			isFirstArg = false
+		} else if isFirstArg {
+			// First positional argument is UNIT
+			stmt.Specifiers["UNIT"] = spec
+			isFirstArg = false
+		} else {
+			p.addError("unexpected expression in CLOSE statement (expected keyword=value)")
+		}
+
+		// Consume comma if present, otherwise should be at RParen
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	// Consume the closing parenthesis
+	if !p.expect(token.RParen, "closing CLOSE statement") {
+		return nil
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseBackspaceStmt parses a BACKSPACE statement
+// Precondition: current token is BACKSPACE
+// Syntax: BACKSPACE([UNIT=]u [,specifier-list]) or BACKSPACE unit
+// Postcondition: current token is the first token after the BACKSPACE statement
+func (p *Parser90) parseBackspaceStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.BACKSPACE, "")
+
+	stmt := &ast.BackspaceStmt{
+		Specifiers: make(map[string]ast.Expression),
+		Position:   ast.Pos(start, p.current.start),
+	}
+
+	// Handle simple form: BACKSPACE unit (without parentheses)
+	if !p.currentTokenIs(token.LParen) {
+		unit := p.parseExpression(0)
+		if unit != nil {
+			stmt.Specifiers["UNIT"] = unit
+		}
+		stmt.Position = ast.Pos(start, p.current.start)
+		return stmt
+	}
+
+	// Handle full form with parentheses
+	if !p.expect(token.LParen, "in BACKSPACE statement") {
+		return nil
+	}
+
+	// Track if we've seen the first positional argument (which would be UNIT)
+	isFirstArg := true
+
+	// Parse comma-separated specifier list
+	for !p.currentTokenIs(token.RParen) && !p.IsDone() && !p.current.tok.IsEnd() {
+		// Parse one specifier: either expression or keyword=value
+		spec := p.parseExpression(0)
+		if spec == nil {
+			break
+		}
+
+		// Check if this is a keyword=value pattern
+		if p.currentTokenIs(token.Equals) {
+			// Extract keyword name
+			var keyword string
+			if ident, ok := spec.(*ast.Identifier); ok {
+				keyword = strings.ToUpper(ident.Value)
+			} else {
+				p.addError("expected identifier before = in BACKSPACE specifier")
+				if !p.consumeIf(token.Comma) {
+					break
+				}
+				continue
+			}
+
+			p.nextToken() // consume =
+			value := p.parseExpression(0)
+			if value != nil {
+				stmt.Specifiers[keyword] = value
+			}
+			isFirstArg = false
+		} else if isFirstArg {
+			// First positional argument is UNIT
+			stmt.Specifiers["UNIT"] = spec
+			isFirstArg = false
+		} else {
+			p.addError("unexpected expression in BACKSPACE statement (expected keyword=value)")
+		}
+
+		// Consume comma if present, otherwise should be at RParen
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	// Consume the closing parenthesis
+	if !p.expect(token.RParen, "closing BACKSPACE statement") {
+		return nil
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseRewindStmt parses a REWIND statement
+// Precondition: current token is REWIND
+// Syntax: REWIND([UNIT=]u [,specifier-list]) or REWIND unit
+// Postcondition: current token is the first token after the REWIND statement
+func (p *Parser90) parseRewindStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.REWIND, "")
+
+	stmt := &ast.RewindStmt{
+		Specifiers: make(map[string]ast.Expression),
+		Position:   ast.Pos(start, p.current.start),
+	}
+
+	// Handle simple form: REWIND unit (without parentheses)
+	if !p.currentTokenIs(token.LParen) {
+		unit := p.parseExpression(0)
+		if unit != nil {
+			stmt.Specifiers["UNIT"] = unit
+		}
+		stmt.Position = ast.Pos(start, p.current.start)
+		return stmt
+	}
+
+	// Handle full form with parentheses
+	if !p.expect(token.LParen, "in REWIND statement") {
+		return nil
+	}
+
+	// Track if we've seen the first positional argument (which would be UNIT)
+	isFirstArg := true
+
+	// Parse comma-separated specifier list
+	for !p.currentTokenIs(token.RParen) && !p.IsDone() && !p.current.tok.IsEnd() {
+		// Parse one specifier: either expression or keyword=value
+		spec := p.parseExpression(0)
+		if spec == nil {
+			break
+		}
+
+		// Check if this is a keyword=value pattern
+		if p.currentTokenIs(token.Equals) {
+			// Extract keyword name
+			var keyword string
+			if ident, ok := spec.(*ast.Identifier); ok {
+				keyword = strings.ToUpper(ident.Value)
+			} else {
+				p.addError("expected identifier before = in REWIND specifier")
+				if !p.consumeIf(token.Comma) {
+					break
+				}
+				continue
+			}
+
+			p.nextToken() // consume =
+			value := p.parseExpression(0)
+			if value != nil {
+				stmt.Specifiers[keyword] = value
+			}
+			isFirstArg = false
+		} else if isFirstArg {
+			// First positional argument is UNIT
+			stmt.Specifiers["UNIT"] = spec
+			isFirstArg = false
+		} else {
+			p.addError("unexpected expression in REWIND statement (expected keyword=value)")
+		}
+
+		// Consume comma if present, otherwise should be at RParen
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	// Consume the closing parenthesis
+	if !p.expect(token.RParen, "closing REWIND statement") {
 		return nil
 	}
 

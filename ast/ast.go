@@ -814,10 +814,10 @@ func (dl *DoLoop) AppendString(dst []byte) []byte {
 
 // SelectCaseStmt represents a SELECT CASE construct
 type SelectCaseStmt struct {
-	Expression Expression    // The expression being selected on
-	Cases      []CaseClause  // List of CASE clauses
-	Label      string        // Statement label
-	EndLabel   string        // Label on END SELECT
+	Expression Expression   // The expression being selected on
+	Cases      []CaseClause // List of CASE clauses
+	Label      string       // Statement label
+	EndLabel   string       // Label on END SELECT
 	Position
 }
 
@@ -839,9 +839,9 @@ func (s *SelectCaseStmt) AppendString(dst []byte) []byte {
 
 // CaseClause represents a single CASE clause within a SELECT CASE
 type CaseClause struct {
-	Values   []Expression // Values for this case (nil for CASE DEFAULT)
-	Body     []Statement  // Statements in this case
-	IsDefault bool        // True if this is CASE DEFAULT
+	Values    []Expression // Values for this case (nil for CASE DEFAULT)
+	Body      []Statement  // Statements in this case
+	IsDefault bool         // True if this is CASE DEFAULT
 	Position
 }
 
@@ -1101,7 +1101,7 @@ func (ps *PrintStmt) AppendString(dst []byte) []byte {
 // OpenStmt represents an OPEN statement
 type OpenStmt struct {
 	Specifiers map[string]Expression // OPEN specifiers: UNIT, FILE, STATUS, etc.
-	Label      string                 // Optional statement label
+	Label      string                // Optional statement label
 	Position
 }
 
@@ -1119,6 +1119,96 @@ func (os *OpenStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "OPEN("...)
 	first := true
 	for key, value := range os.Specifiers {
+		if !first {
+			dst = append(dst, ", "...)
+		}
+		first = false
+		dst = append(dst, key...)
+		dst = append(dst, '=')
+		dst = value.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
+// CloseStmt represents a CLOSE statement
+type CloseStmt struct {
+	Specifiers map[string]Expression // CLOSE specifiers: UNIT, STATUS, IOSTAT, ERR
+	Label      string                // Optional statement label
+	Position
+}
+
+var _ Statement = (*CloseStmt)(nil)
+
+func (cs *CloseStmt) GetLabel() string { return cs.Label }
+func (cs *CloseStmt) statementNode()   {}
+func (cs *CloseStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "CLOSE"...)
+}
+func (cs *CloseStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "CLOSE("...)
+	first := true
+	for key, value := range cs.Specifiers {
+		if !first {
+			dst = append(dst, ", "...)
+		}
+		first = false
+		dst = append(dst, key...)
+		dst = append(dst, '=')
+		dst = value.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
+// BackspaceStmt represents a BACKSPACE statement
+type BackspaceStmt struct {
+	Specifiers map[string]Expression // BACKSPACE specifiers: UNIT, IOSTAT, ERR
+	Label      string                // Optional statement label
+	Position
+}
+
+var _ Statement = (*BackspaceStmt)(nil)
+
+func (bs *BackspaceStmt) GetLabel() string { return bs.Label }
+func (bs *BackspaceStmt) statementNode()   {}
+func (bs *BackspaceStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "BACKSPACE"...)
+}
+func (bs *BackspaceStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "BACKSPACE("...)
+	first := true
+	for key, value := range bs.Specifiers {
+		if !first {
+			dst = append(dst, ", "...)
+		}
+		first = false
+		dst = append(dst, key...)
+		dst = append(dst, '=')
+		dst = value.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
+// RewindStmt represents a REWIND statement
+type RewindStmt struct {
+	Specifiers map[string]Expression // REWIND specifiers: UNIT, IOSTAT, ERR
+	Label      string                // Optional statement label
+	Position
+}
+
+var _ Statement = (*RewindStmt)(nil)
+
+func (rs *RewindStmt) GetLabel() string { return rs.Label }
+func (rs *RewindStmt) statementNode()   {}
+func (rs *RewindStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "REWIND"...)
+}
+func (rs *RewindStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "REWIND("...)
+	first := true
+	for key, value := range rs.Specifiers {
 		if !first {
 			dst = append(dst, ", "...)
 		}
@@ -1391,3 +1481,36 @@ func (pa *PointerAssignmentStmt) AppendString(dst []byte) []byte {
 	dst = pa.Value.AppendString(dst)
 	return dst
 }
+
+// type SpecifierKey int
+
+// const (
+// 	SpecUndefined SpecifierKey = iota
+// 	SpecUNIT
+// 	SpecIOSTAT
+// 	SpecERR
+// )
+
+// type speckeyval struct {
+// 	key   SpecifierKey
+// 	value Expression
+// }
+
+// type Specifiers struct {
+// 	kv []speckeyval
+// }
+
+// func (specs *Specifiers) Add(key SpecifierKey, value Expression) {
+// 	specs.kv = append(specs.kv, speckeyval{
+// 		key: key, value: value,
+// 	})
+// }
+
+// func (specs *Specifiers) Get(key SpecifierKey) Expression {
+// 	for _, kv := range specs.kv {
+// 		if kv.key == key {
+// 			return kv.value
+// 		}
+// 	}
+// 	return nil
+// }
