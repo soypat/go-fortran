@@ -276,7 +276,6 @@ func (p *Parser90) loopUntilEndElseOr(t ...token.Token) bool {
 
 // loopUntil returns true as long as current token not in set and EOF not hit.
 func (p *Parser90) loopUntil(t ...token.Token) bool {
-	// time.Sleep(time.Millisecond / 1000)
 	if p.IsDone() {
 		return false
 	}
@@ -2048,6 +2047,22 @@ func (p *Parser90) parseCallStmt() ast.Statement {
 
 	if p.consumeIf(token.LParen) {
 		parseOneArg := func() (ast.Expression, error) {
+			// Check for alternate return argument (Fortran 77): *<label>
+			if p.current.tok == token.Asterisk {
+				argStart := p.current.start
+				p.nextToken() // consume *
+				if !p.canUseAsIdentifier() && p.current.tok != token.IntLit {
+					return nil, fmt.Errorf("expected label after * in alternate return")
+				}
+				label := string(p.current.lit)
+				argEnd := p.current.start + len(p.current.lit)
+				p.nextToken()
+				return &ast.AlternateReturnArg{
+					Label:    label,
+					Position: ast.Pos(argStart, argEnd),
+				}, nil
+			}
+
 			arg := p.parseExpression(0)
 			if arg == nil {
 				return nil, fmt.Errorf("expected expression in argument list")
@@ -2086,11 +2101,20 @@ func (p *Parser90) parseEntryStmt() ast.Statement {
 	return stmt
 }
 
-// parseReturnStmt parses a RETURN statement
+// parseReturnStmt parses a RETURN statement, including Fortran 77 alternate returns
+// RETURN or RETURN <integer-expression>
 func (p *Parser90) parseReturnStmt() ast.Statement {
 	start := p.current.start
 	stmt := &ast.ReturnStmt{}
 	p.expect(token.RETURN, "") // consume RETURN
+
+	// Check for alternate return (Fortran 77): RETURN <integer>
+	// The integer expression indicates which alternate return to use
+	if !p.current.tok.IsEnd() && p.current.tok != token.NewLine && p.current.tok != token.Semicolon {
+		// Parse the integer expression
+		stmt.AlternateReturn = p.parseExpression(0)
+	}
+
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
 }

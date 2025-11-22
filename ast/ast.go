@@ -728,6 +728,31 @@ func (ll *LogicalLiteral) AppendString(dst []byte) []byte {
 	return append(dst, ".FALSE."...)
 }
 
+// AlternateReturnArg represents an alternate return argument in a CALL statement.
+// These are Fortran 77 constructs that allow subroutines to return to different
+// labels in the caller based on error conditions or status.
+//
+// Example:
+//
+//	CALL SUB(*100, *200, x, y)
+//	! *100 and *200 are alternate return labels
+type AlternateReturnArg struct {
+	Label string // The label to jump to (without the *)
+	Position
+}
+
+var _ Expression = (*AlternateReturnArg)(nil) // compile time check of interface implementation.
+
+func (ara *AlternateReturnArg) expressionNode() {}
+func (ara *AlternateReturnArg) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "ALTERNATE_RETURN"...)
+}
+func (ara *AlternateReturnArg) AppendString(dst []byte) []byte {
+	dst = append(dst, '*')
+	dst = append(dst, ara.Label...)
+	return dst
+}
+
 // BinaryExpr represents a binary operation with two operands. Fortran supports
 // arithmetic operators (+, -, *, /, **), relational operators (.LT., .GT., etc.),
 // and logical operators (.AND., .OR., .NOT.).
@@ -1246,12 +1271,15 @@ func (es *EntryStmt) AppendString(dst []byte) []byte {
 
 // ReturnStmt transfers control back to the calling program unit (function or
 // subroutine). In functions, the return value must be assigned before returning.
+// In Fortran 77, RETURN can take an integer argument for alternate returns.
 //
 // Example:
 //
 //	RETURN
+//	RETURN 1
 type ReturnStmt struct {
-	Label string
+	AlternateReturn Expression // Optional: for RETURN <integer> (Fortran 77 alternate returns)
+	Label           string
 	Position
 }
 
@@ -1264,7 +1292,12 @@ func (rs *ReturnStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "RETURN"...)
 }
 func (rs *ReturnStmt) AppendString(dst []byte) []byte {
-	return append(dst, "RETURN"...)
+	dst = append(dst, "RETURN"...)
+	if rs.AlternateReturn != nil {
+		dst = append(dst, ' ')
+		dst = rs.AlternateReturn.AppendString(dst)
+	}
+	return dst
 }
 
 // CycleStmt skips the remaining statements in the current iteration of a

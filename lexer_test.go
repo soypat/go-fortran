@@ -272,6 +272,40 @@ func TestLexer90_tokens(t *testing.T) {
 				{tok: token.FloatLit, literal: "1.5E3"},
 			},
 		},
+		// Test kind specifiers with underscore
+		14: {
+			src: "i=1_8+2_INT32",
+			expect: []testtoktuple{
+				{tok: token.Identifier, literal: "i"},
+				{tok: token.Equals, literal: ""},
+				{tok: token.IntLit, literal: "1_8"},
+				{tok: token.Plus, literal: ""},
+				{tok: token.IntLit, literal: "2_INT32"},
+			},
+		},
+		15: {
+			src: "x=1.5_4*2.0_REAL64",
+			expect: []testtoktuple{
+				{tok: token.Identifier, literal: "x"},
+				{tok: token.Equals, literal: ""},
+				{tok: token.FloatLit, literal: "1.5_4"},
+				{tok: token.Asterisk, literal: ""},
+				{tok: token.FloatLit, literal: "2.0_REAL64"},
+			},
+		},
+		16: {
+			src: "CALL DSYSV('L',-1_INT32)",
+			expect: []testtoktuple{
+				{tok: token.CALL, literal: "CALL"},
+				{tok: token.Identifier, literal: "DSYSV"},
+				{tok: token.LParen, literal: ""},
+				{tok: token.StringLit, literal: "L"},
+				{tok: token.Comma, literal: ""},
+				{tok: token.Minus, literal: ""},
+				{tok: token.IntLit, literal: "1_INT32"},
+				{tok: token.RParen, literal: ""},
+			},
+		},
 	}
 	var l Lexer90
 	for i, test := range cases {

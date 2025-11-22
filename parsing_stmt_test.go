@@ -2002,6 +2002,160 @@ END SELECT`,
 				}
 			},
 		},
+
+		// ===== Alternate Returns (Fortran 77) =====
+		{
+			name: "RETURN with alternate return integer",
+			src:  "RETURN 1",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ret, ok := stmt.(*ast.ReturnStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ReturnStmt, got %T", stmt)
+				}
+				if ret.AlternateReturn == nil {
+					t.Fatal("Expected AlternateReturn to be set")
+				}
+				lit, ok := ret.AlternateReturn.(*ast.IntegerLiteral)
+				if !ok {
+					t.Fatalf("Expected *ast.IntegerLiteral, got %T", ret.AlternateReturn)
+				}
+				if lit.Raw != "1" {
+					t.Errorf("Expected return value '1', got %q", lit.Raw)
+				}
+			},
+		},
+		{
+			name: "RETURN without alternate return",
+			src:  "RETURN",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ret, ok := stmt.(*ast.ReturnStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ReturnStmt, got %T", stmt)
+				}
+				if ret.AlternateReturn != nil {
+					t.Errorf("Expected AlternateReturn to be nil, got %v", ret.AlternateReturn)
+				}
+			},
+		},
+		{
+			name: "CALL with single alternate return argument",
+			src:  "CALL IONLIM(x, y, *200)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				call, ok := stmt.(*ast.CallStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.CallStmt, got %T", stmt)
+				}
+				if call.Name != "IONLIM" {
+					t.Errorf("Expected subroutine name 'IONLIM', got %q", call.Name)
+				}
+				if len(call.Args) != 3 {
+					t.Fatalf("Expected 3 arguments, got %d", len(call.Args))
+				}
+
+				// First two arguments should be identifiers
+				_, ok = call.Args[0].(*ast.Identifier)
+				if !ok {
+					t.Errorf("Expected first arg to be *ast.Identifier, got %T", call.Args[0])
+				}
+				_, ok = call.Args[1].(*ast.Identifier)
+				if !ok {
+					t.Errorf("Expected second arg to be *ast.Identifier, got %T", call.Args[1])
+				}
+
+				// Third argument should be alternate return
+				altRet, ok := call.Args[2].(*ast.AlternateReturnArg)
+				if !ok {
+					t.Fatalf("Expected third arg to be *ast.AlternateReturnArg, got %T", call.Args[2])
+				}
+				if altRet.Label != "200" {
+					t.Errorf("Expected label '200', got %q", altRet.Label)
+				}
+			},
+		},
+		{
+			name: "CALL with multiple alternate returns",
+			src:  "CALL SUB(*100, *200, x, y, *300)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				call, ok := stmt.(*ast.CallStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.CallStmt, got %T", stmt)
+				}
+				if len(call.Args) != 5 {
+					t.Fatalf("Expected 5 arguments, got %d", len(call.Args))
+				}
+
+				// First argument: *100
+				altRet1, ok := call.Args[0].(*ast.AlternateReturnArg)
+				if !ok {
+					t.Fatalf("Expected first arg to be *ast.AlternateReturnArg, got %T", call.Args[0])
+				}
+				if altRet1.Label != "100" {
+					t.Errorf("Expected label '100', got %q", altRet1.Label)
+				}
+
+				// Second argument: *200
+				altRet2, ok := call.Args[1].(*ast.AlternateReturnArg)
+				if !ok {
+					t.Fatalf("Expected second arg to be *ast.AlternateReturnArg, got %T", call.Args[1])
+				}
+				if altRet2.Label != "200" {
+					t.Errorf("Expected label '200', got %q", altRet2.Label)
+				}
+
+				// Third and fourth arguments: regular identifiers
+				_, ok = call.Args[2].(*ast.Identifier)
+				if !ok {
+					t.Errorf("Expected third arg to be *ast.Identifier, got %T", call.Args[2])
+				}
+				_, ok = call.Args[3].(*ast.Identifier)
+				if !ok {
+					t.Errorf("Expected fourth arg to be *ast.Identifier, got %T", call.Args[3])
+				}
+
+				// Fifth argument: *300
+				altRet3, ok := call.Args[4].(*ast.AlternateReturnArg)
+				if !ok {
+					t.Fatalf("Expected fifth arg to be *ast.AlternateReturnArg, got %T", call.Args[4])
+				}
+				if altRet3.Label != "300" {
+					t.Errorf("Expected label '300', got %q", altRet3.Label)
+				}
+			},
+		},
+		{
+			name: "CALL from valid_gdyn.f90 line 97",
+			src:  "call ionlim (rd,pt,htrng(6),rlim1,rlim2,*200)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				call, ok := stmt.(*ast.CallStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.CallStmt, got %T", stmt)
+				}
+				if call.Name != "ionlim" {
+					t.Errorf("Expected subroutine name 'ionlim', got %q", call.Name)
+				}
+				if len(call.Args) != 6 {
+					t.Fatalf("Expected 6 arguments, got %d", len(call.Args))
+				}
+
+				// Last argument should be alternate return *200
+				altRet, ok := call.Args[5].(*ast.AlternateReturnArg)
+				if !ok {
+					t.Fatalf("Expected last arg to be *ast.AlternateReturnArg, got %T", call.Args[5])
+				}
+				if altRet.Label != "200" {
+					t.Errorf("Expected label '200', got %q", altRet.Label)
+				}
+
+				// Third argument should be function call htrng(6)
+				funcCall, ok := call.Args[2].(*ast.FunctionCall)
+				if !ok {
+					t.Fatalf("Expected third arg to be *ast.FunctionCall, got %T", call.Args[2])
+				}
+				if funcCall.Name != "htrng" {
+					t.Errorf("Expected function name 'htrng', got %q", funcCall.Name)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

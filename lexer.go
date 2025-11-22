@@ -313,8 +313,17 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 		} else if isDigit(ch) {
 			var isFloat bool
 			literal, isFloat = l.readNumber()
-			// Check if number is followed by a format letter (e.g., 1X, 2H)
-			if !isFloat && isFormatLetter(l.ch) {
+			// Check if number is followed by a kind specifier (e.g., 1_INT32, 1.5_8)
+			if l.ch == '_' {
+				literal = l.readKindSpecifier(literal)
+				// Kind specifiers preserve the float/int distinction
+				if isFloat {
+					tok = token.FloatLit
+				} else {
+					tok = token.IntLit
+				}
+			} else if !isFloat && isFormatLetter(l.ch) {
+				// Check if number is followed by a format letter (e.g., 1X, 2H)
 				literal = l.readFormatSpec(literal)
 				tok = token.FormatSpec
 			} else if isFloat {
@@ -505,6 +514,27 @@ func (l *Lexer90) readNumber() ([]byte, bool) {
 		l.readChar()
 	}
 	return l.idbuf[start:], seenDot
+}
+
+// readKindSpecifier reads a Fortran kind specifier after a number (e.g., _INT32, _8, _REAL64)
+// The underscore has already been detected, this function consumes it and the kind value
+func (l *Lexer90) readKindSpecifier(prefix []byte) []byte {
+	start := l.bufstart()
+	// Copy prefix into buffer
+	l.idbuf = append(l.idbuf[:start], prefix...)
+
+	// Consume the underscore
+	l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
+	l.readChar()
+
+	// Read the kind value (can be digits or identifier)
+	// Examples: _8, _INT32, _REAL64
+	for isDigit(l.ch) || isIdentifierChar(l.ch) {
+		l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
+		l.readChar()
+	}
+
+	return l.idbuf[start:]
 }
 
 func (l *Lexer90) bufstart() int {
