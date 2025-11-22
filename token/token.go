@@ -1,6 +1,8 @@
 package token
 
-import "bytes"
+import (
+	"bytes"
+)
 
 type Token int
 
@@ -205,6 +207,27 @@ const (
 	Illegal  // <illegal>
 	numToks
 )
+
+func IsEndProgramUnit(current, next Token) int {
+	switch current {
+	case ENDPROGRAM, ENDSUBROUTINE, ENDFUNCTION, ENDMODULE:
+		return 1
+	}
+	if current != END {
+		return 0
+	}
+	switch next {
+	case PROGRAM, SUBROUTINE, FUNCTION, MODULE:
+		return 2
+	case NewLine, EOF, LineComment:
+		// Bare END (common in older Fortran)
+		return 1
+	case Identifier:
+		// Could be "END program_name" or "END BLOCK" (for BLOCK DATA)
+		return 2
+	}
+	return 0
+}
 
 // IsEndConstruct returns non-zero if the current, next, and next-next tokens form an end construct
 // for control structures and blocks contained within a program unit (e.g., IF, DO, SELECT).

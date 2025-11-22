@@ -623,6 +623,12 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		}
 		panic("too many statements parsed")
 	}
+	// Check for "END FILE" before generic END check
+	if p.current.tok == token.END && p.peek.tok == token.Identifier && strings.EqualFold(string(p.peek.lit), "FILE") {
+		// Handle "END FILE" as ENDFILE statement (two-word form)
+		p.nextToken() // consume END
+		return p.parseEndfileStmt()
+	}
 	if p.current.tok.IsEnd() {
 		return nil // Empty statement or misplaced END.
 	}
@@ -1338,10 +1344,18 @@ func (p *Parser90) parseRewindStmt() ast.Statement {
 }
 
 // parseEndfileStmt parses an ENDFILE statement
-// Precondition: current token is ENDFILE
+// Precondition: current token is ENDFILE or FILE (if END was already consumed)
 func (p *Parser90) parseEndfileStmt() ast.Statement {
 	start := p.current.start
-	p.expect(token.ENDFILE, "")
+	// Handle both "ENDFILE" and "END FILE" forms
+	if p.currentTokenIs(token.ENDFILE) {
+		p.nextToken()
+	} else if p.current.tok == token.Identifier && strings.EqualFold(string(p.current.lit), "FILE") {
+		p.nextToken() // consume FILE
+	} else {
+		p.addError("expected ENDFILE or FILE")
+		return nil
+	}
 
 	stmt := &ast.EndfileStmt{
 		Specifiers: make(map[string]ast.Expression),
@@ -2256,27 +2270,13 @@ func (p *Parser90) skipInterfaceBlock() {
 
 // isEndOfProgramUnit checks if current END token ends a program unit
 func (p *Parser90) isEndOfProgramUnit() bool {
-	switch p.current.tok {
-	case token.ENDPROGRAM, token.ENDSUBROUTINE, token.ENDFUNCTION, token.ENDMODULE:
-		return true
-	}
-	if !p.currentTokenIs(token.END) {
+	nEndTok := token.IsEndProgramUnit(p.current.tok, p.peek.tok)
+	if nEndTok == 0 {
+		return false
+	} else if nEndTok == 2 && p.current.tok == token.END && strings.EqualFold(string(p.peek.lit), "FILE") {
 		return false
 	}
-	// Look ahead to see what follows END
-	next := p.peek.tok
-	switch next {
-	case token.PROGRAM, token.SUBROUTINE, token.FUNCTION, token.MODULE:
-		return true
-	case token.NewLine, token.EOF, token.LineComment:
-		// Bare END (common in older Fortran)
-		return true
-	case token.Identifier:
-		// Could be "END program_name" or "END BLOCK" (for BLOCK DATA)
-		return true
-	default:
-		return false
-	}
+	return true
 }
 
 // parseSpecStatement parses a specification statement
