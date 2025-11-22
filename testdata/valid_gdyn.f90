@@ -97,7 +97,12 @@ PROGRAM GDYN2E
    call ionlim (rd,pt,htrng(6),rlim1,rlim2,*200)
    CALL DSYSV('L',-1_INT32)
    ASSIGN 2000 TO IGOTO
+   cycle satloop
 END PROGRAM GDYN2E
+
+SUBROUTINE PASYAW(NCARDS)
+   10 READ(50,5000,END=900) CARD
+ENDSUBROUTINE
 
 FUNCTION NMF_H()
    END FILE IUNTPF
@@ -107,5 +112,11 @@ FUNCTION NMF_H()
    ROW : DO J = 1,91   !NUMBER OF LATITUDE BANDS
    END DO ROW
    inquire( iolength = len ) date_plus_hour, vmf_array
+   GO TO IGOTO,(500,2000)
+!      if compiler does not accept "ASSIGN", use the lines below
+!      IF( IGOTO == 500  ) go to 500
+!      IF( IGOTO == 2000 ) go to 2000
    
-END !
+ENDFUNCTION !
+
+

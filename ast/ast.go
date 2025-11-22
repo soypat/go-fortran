@@ -1494,6 +1494,45 @@ func (cgs *ComputedGotoStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// AssignedGotoStmt transfers control to a label stored in a variable (Fortran 77 feature).
+// The variable must have been previously assigned a label using an ASSIGN statement.
+// The optional label list restricts which labels the variable can contain.
+//
+// Example:
+//
+//	GO TO variable-name [, ( label-list )]
+//	GO TO IGOTO
+//	GO TO IGOTO, (500, 2000)
+type AssignedGotoStmt struct {
+	Variable string   // Variable containing the label to jump to
+	Labels   []string // Optional list of allowed labels
+	Label    string   // Optional statement label
+	Position
+}
+
+var _ Statement = (*AssignedGotoStmt)(nil)
+
+func (ags *AssignedGotoStmt) GetLabel() string { return ags.Label }
+func (ags *AssignedGotoStmt) statementNode()   {}
+func (ags *AssignedGotoStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "GO TO"...)
+}
+func (ags *AssignedGotoStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "GO TO "...)
+	dst = append(dst, ags.Variable...)
+	if len(ags.Labels) > 0 {
+		dst = append(dst, ", ("...)
+		for i, label := range ags.Labels {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = append(dst, label...)
+		}
+		dst = append(dst, ')')
+	}
+	return dst
+}
+
 // InquireStmt queries properties of files or I/O units, such as whether a file
 // exists, is open, its name, access method, and other attributes. Results are
 // returned through variables specified in the inquiry specifiers.

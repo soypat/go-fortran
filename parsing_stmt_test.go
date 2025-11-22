@@ -2263,6 +2263,48 @@ END SELECT`,
 				}
 			},
 		},
+
+		// ===== Assigned GOTO Statements =====
+		{
+			name: "Assigned GOTO from valid_gdyn.f90 line 110",
+			src:  "GO TO IGOTO,(500,2000)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assignedGoto, ok := stmt.(*ast.AssignedGotoStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignedGotoStmt, got %T", stmt)
+				}
+				if assignedGoto.Variable != "IGOTO" {
+					t.Errorf("Expected variable 'IGOTO', got %q", assignedGoto.Variable)
+				}
+				if len(assignedGoto.Labels) != 2 {
+					t.Errorf("Expected 2 labels, got %d", len(assignedGoto.Labels))
+				}
+				if len(assignedGoto.Labels) >= 2 {
+					if assignedGoto.Labels[0] != "500" {
+						t.Errorf("Expected first label '500', got %q", assignedGoto.Labels[0])
+					}
+					if assignedGoto.Labels[1] != "2000" {
+						t.Errorf("Expected second label '2000', got %q", assignedGoto.Labels[1])
+					}
+				}
+			},
+		},
+		{
+			name: "Assigned GOTO without label list",
+			src:  "GO TO jump_var",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assignedGoto, ok := stmt.(*ast.AssignedGotoStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignedGotoStmt, got %T", stmt)
+				}
+				if assignedGoto.Variable != "jump_var" {
+					t.Errorf("Expected variable 'jump_var', got %q", assignedGoto.Variable)
+				}
+				if len(assignedGoto.Labels) != 0 {
+					t.Errorf("Expected no labels, got %d", len(assignedGoto.Labels))
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

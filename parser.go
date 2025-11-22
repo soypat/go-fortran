@@ -837,18 +837,57 @@ func (p *Parser90) parseGotoStmt() ast.Statement {
 		return computedStmt
 	}
 
-	// Simple GOTO: GOTO label
-	stmt := &ast.GotoStmt{}
-	if p.currentTokenIs(token.IntLit) {
-		stmt.Target = string(p.current.lit)
-		p.nextToken()
-	} else {
-		p.addError("expected label after GO TO")
-		return nil
+	// Check for assigned GOTO: GO TO variable [, (label-list)]
+	if p.currentTokenIs(token.Identifier) {
+		assignedStmt := &ast.AssignedGotoStmt{
+			Variable: string(p.current.lit),
+		}
+		p.nextToken() // consume variable name
+
+		// Check for optional comma and label list
+		if p.consumeIf(token.Comma) {
+			if !p.expect(token.LParen, "expected '(' after comma in assigned GOTO") {
+				return nil
+			}
+
+			// Parse label list
+			parseOneLabel := func() (string, error) {
+				if !p.currentTokenIs(token.IntLit) {
+					return "", fmt.Errorf("expected label in assigned GOTO label list")
+				}
+				label := string(p.current.lit)
+				p.nextToken() // consume label
+				return label, nil
+			}
+
+			labels, err := parseCommaSeparatedList(p, token.RParen, parseOneLabel)
+			if err != nil {
+				p.addError(err.Error())
+				return nil
+			}
+			assignedStmt.Labels = labels
+
+			if !p.expect(token.RParen, "closing assigned GOTO label list") {
+				return nil
+			}
+		}
+
+		assignedStmt.Position = ast.Pos(start, p.current.start)
+		return assignedStmt
 	}
 
-	stmt.Position = ast.Pos(start, p.current.start)
-	return stmt
+	// Simple GOTO: GOTO label
+	if p.currentTokenIs(token.IntLit) {
+		stmt := &ast.GotoStmt{
+			Target: string(p.current.lit),
+		}
+		p.nextToken()
+		stmt.Position = ast.Pos(start, p.current.start)
+		return stmt
+	}
+
+	p.addError("expected label or variable after GO TO")
+	return nil
 }
 
 // parseAssignStmt parses an ASSIGN statement (Fortran 77 feature)
