@@ -1113,6 +1113,79 @@ func TestStatementParsing(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "INQUIRE with positional UNIT",
+			src:  "INQUIRE(10, OPENED=lopen)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				inquireStmt, ok := stmt.(*ast.InquireStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.InquireStmt, got %T", stmt)
+				}
+				if inquireStmt.Specifiers["UNIT"] == nil {
+					t.Error("Expected UNIT specifier from positional argument")
+				}
+				if inquireStmt.Specifiers["OPENED"] == nil {
+					t.Error("Expected OPENED specifier")
+				}
+			},
+		},
+		{
+			name: "INQUIRE with IOLENGTH and output list (from valid_gdyn.f90)",
+			src:  "inquire( iolength = len ) date_plus_hour, vmf_array",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				inquireStmt, ok := stmt.(*ast.InquireStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.InquireStmt, got %T", stmt)
+				}
+				if inquireStmt.Specifiers["IOLENGTH"] == nil {
+					t.Error("Expected IOLENGTH specifier")
+				}
+				if len(inquireStmt.OutputList) != 2 {
+					t.Errorf("Expected 2 output items, got %d", len(inquireStmt.OutputList))
+				}
+				// Verify the output list items
+				if len(inquireStmt.OutputList) >= 2 {
+					if ident1, ok := inquireStmt.OutputList[0].(*ast.Identifier); !ok || ident1.Value != "date_plus_hour" {
+						t.Errorf("Expected first output item to be 'date_plus_hour'")
+					}
+					if ident2, ok := inquireStmt.OutputList[1].(*ast.Identifier); !ok || ident2.Value != "vmf_array" {
+						t.Errorf("Expected second output item to be 'vmf_array'")
+					}
+				}
+			},
+		},
+		{
+			name: "INQUIRE with IOLENGTH and single output item",
+			src:  "INQUIRE(IOLENGTH=reclen) buffer",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				inquireStmt, ok := stmt.(*ast.InquireStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.InquireStmt, got %T", stmt)
+				}
+				if inquireStmt.Specifiers["IOLENGTH"] == nil {
+					t.Error("Expected IOLENGTH specifier")
+				}
+				if len(inquireStmt.OutputList) != 1 {
+					t.Errorf("Expected 1 output item, got %d", len(inquireStmt.OutputList))
+				}
+			},
+		},
+		{
+			name: "INQUIRE with multiple specifiers",
+			src:  "INQUIRE(FILE='data.txt', EXIST=lexist, OPENED=lopen, NUMBER=inum)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				inquireStmt, ok := stmt.(*ast.InquireStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.InquireStmt, got %T", stmt)
+				}
+				expectedSpecs := []string{"FILE", "EXIST", "OPENED", "NUMBER"}
+				for _, spec := range expectedSpecs {
+					if inquireStmt.Specifiers[spec] == nil {
+						t.Errorf("Expected %s specifier", spec)
+					}
+				}
+			},
+		},
 
 		// ===== Substring and chained subscript notation =====
 		{

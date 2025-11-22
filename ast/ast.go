@@ -1473,6 +1473,7 @@ func (cgs *ComputedGotoStmt) AppendString(dst []byte) []byte {
 //	INQUIRE(FILE='output.dat', EXIST=fexist, OPENED=fopen, NUMBER=inum)
 type InquireStmt struct {
 	Specifiers map[string]Expression // INQUIRE specifiers: UNIT, FILE, EXIST, OPENED, etc.
+	OutputList []Expression          // Output items for IOLENGTH form: INQUIRE(IOLENGTH=var) output-list
 	Label      string                // Optional statement label
 	Position
 }

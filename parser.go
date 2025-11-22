@@ -683,7 +683,7 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseExitStmt()
 		case token.CONTINUE:
 			stmt = p.parseContinueStmt()
-		case token.READ, token.WRITE:
+		case token.READ, token.WRITE, token.INQUIRE:
 			stmt = p.parseIOStmt()
 		case token.PRINT:
 			stmt = p.parsePrintStmt()
@@ -705,8 +705,6 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseAllocateStmt()
 		case token.DEALLOCATE:
 			stmt = p.parseDeallocateStmt()
-		case token.INQUIRE:
-			stmt = p.parseInquireStmt()
 		case token.DATA:
 			// DATA statement appearing in executable section (non-standard but handle gracefully)
 			stmt = p.parseDataStmt()
@@ -851,15 +849,17 @@ func (p *Parser90) parseGotoStmt() ast.Statement {
 	return stmt
 }
 
-// parseIOStmt parses READ or WRITE statements
-// Format: READ/WRITE(ctrl_specs) [io_list]
+// parseIOStmt parses READ, WRITE, or INQUIRE statements
+// Format: READ/WRITE/INQUIRE(ctrl_specs) [io_list]
 func (p *Parser90) parseIOStmt() ast.Statement {
 	start := p.current.start
-	var isRead bool
+	var isRead, isInquire bool
 	if p.consumeIf(token.READ) {
 		isRead = true
+	} else if p.consumeIf(token.INQUIRE) {
+		isInquire = true
 	} else if !p.consumeIf(token.WRITE) {
-		p.addError("expected READ/WRITE")
+		p.addError("expected READ/WRITE/INQUIRE")
 	}
 
 	if !p.expect(token.LParen, "in I/O statement") {
@@ -962,6 +962,31 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 	}
 
 	// Build appropriate statement type
+	pos := ast.Pos(start, p.current.start)
+
+	if isInquire {
+		// For INQUIRE, convert specs to map
+		specMap := make(map[string]ast.Expression)
+		isFirstSpec := true
+		for _, spec := range specs {
+			if binExpr, ok := spec.(*ast.BinaryExpr); ok && binExpr.Op == token.Equals {
+				// keyword=value form
+				if ident, ok := binExpr.Left.(*ast.Identifier); ok {
+					specMap[strings.ToUpper(ident.Value)] = binExpr.Right
+				}
+			} else if isFirstSpec {
+				// First positional argument is UNIT
+				specMap["UNIT"] = spec
+			}
+			isFirstSpec = false
+		}
+		return &ast.InquireStmt{
+			Specifiers: specMap,
+			OutputList: ioList,
+			Position:   pos,
+		}
+	}
+
 	var unit, format ast.Expression
 	if len(specs) > 0 {
 		unit = specs[0]
@@ -969,7 +994,6 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 	if len(specs) > 1 {
 		format = specs[1]
 	}
-	pos := ast.Pos(start, p.current.start)
 	if isRead {
 		return &ast.ReadStmt{
 			Unit:      unit,

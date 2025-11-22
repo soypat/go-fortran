@@ -96,6 +96,7 @@ PROGRAM GDYN2E
    if (func.lt.zero) return 1
    call ionlim (rd,pt,htrng(6),rlim1,rlim2,*200)
    CALL DSYSV('L',-1_INT32)
+   ASSIGN 2000 TO IGOTO
 END PROGRAM GDYN2E
 
 FUNCTION NMF_H()
@@ -105,4 +106,6 @@ FUNCTION NMF_H()
    TYPE='S1'
    ROW : DO J = 1,91   !NUMBER OF LATITUDE BANDS
    END DO ROW
+   inquire( iolength = len ) date_plus_hour, vmf_array
+   
 END !
