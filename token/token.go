@@ -228,10 +228,10 @@ func IsAssignment(current, next Token) bool {
 	return true
 }
 
-func IsExecutableStatement(current, peek, _ Token) bool {
+func IsExecutableStatement(current, next, _ Token) bool {
 	if current.IsExecutableStatement() {
 		return true
-	} else if current == IntLit && !peek.IsEnd() {
+	} else if current == IntLit && !next.IsEnd() {
 		// Statement label followed by executable statement (e.g., "10 READ(...)")
 		// But not label followed by END (e.g., "100 END PROGRAM")
 		return true
@@ -241,13 +241,13 @@ func IsExecutableStatement(current, peek, _ Token) bool {
 		// If we see `IDENTIFIER(...)` it could be an assignment to an array element or a function call.
 		// For now, we will treat all identifiers at the start of a statement in the execution part as the start of an executable statement.
 		return true
-	} else if current == END && peek == Equals {
+	} else if current == END && next == Equals {
 		// Special case: END used as a variable name in assignment (e.g., "END = a(j) + d")
 		return true
 	} else if current.IsTypeDeclaration() || current == DATA {
 		// Type keywords and DATA start specification statements, not executable statements
 		return false
-	} else if IsAssignment(current, peek) {
+	} else if IsAssignment(current, next) {
 		// Keywords used as identifiers in assignments (RESULT=1, STOP(I)=5, etc.)
 		// But not type keywords which are always declarations
 		return true
@@ -342,16 +342,14 @@ func (tok Token) IsConstructAdmitsParens() bool {
 // would cause ambiguity and are excluded.
 func (tok Token) CanBeUsedAsIdentifier() bool {
 	// Explicit identifiers are always OK
-	if tok == Identifier || tok == FormatSpec {
+	switch tok {
+	case Identifier, FormatSpec:
 		return true
-	} else if tok == DATA || tok == ENDFILE {
+	case DATA, ENDFILE:
 		// Type keywords and DATA start specification statements, not executable statements
 		return false
-	}
-
-	// Exclude structural keywords that would cause ambiguity
-	switch tok {
 	case PROGRAM, SUBROUTINE, FUNCTION, MODULE, END, CONTAINS:
+		// Exclude structural keywords that would cause ambiguity
 		return false
 	default:
 		// Most other keywords and attributes can be used as identifiers

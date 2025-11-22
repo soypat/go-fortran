@@ -612,9 +612,10 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		p.nextToken() // consume END
 		return p.parseEndfileStmt()
 	}
-	// Check for END used as variable name before treating as end-of-program-unit
+	// Check for END tokens (program unit endings and construct endings)
+	// But allow END when used as variable name (e.g., "END = a(j)+d")
 	if p.current.tok.IsEnd() && !(p.current.tok == token.END && p.peek.tok == token.Equals) {
-		return nil // Empty statement or misplaced END (but not "END = ..." assignment)
+		return nil // End of program unit or construct - let parent handle it
 	}
 	var stmt ast.Statement
 	var label string
