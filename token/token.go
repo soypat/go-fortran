@@ -208,6 +208,53 @@ const (
 	numToks
 )
 
+func IsAssignment(current, next Token) bool {
+	maybeIdent, maybeEqOrLParen := current, next
+	if !maybeIdent.CanBeUsedAsIdentifier() {
+		return false
+	}
+	// Ident can be used as identifier by now.
+	if maybeEqOrLParen == Equals {
+		return true
+	} else if maybeEqOrLParen != LParen {
+		return false
+	}
+	// By now we have a identifier followed by left parentheses.
+	// Check the identifier is not a keyword that may have parentheses in usage.
+	if maybeIdent.IsConstructAdmitsParens() {
+		return false
+	}
+	// Give up trying to prove it is not a assignment, we can be pretty sure it is by now.
+	return true
+}
+
+func IsExecutableStatement(current, peek, _ Token) bool {
+	if current.IsExecutableStatement() {
+		return true
+	} else if current == IntLit && !peek.IsEnd() {
+		// Statement label followed by executable statement (e.g., "10 READ(...)")
+		// But not label followed by END (e.g., "100 END PROGRAM")
+		return true
+	} else if current == Identifier {
+		// Could be assignment or procedure call. We need to lookahead to distinguish.
+		// If we see `IDENTIFIER =`, it's an assignment.
+		// If we see `IDENTIFIER(...)` it could be an assignment to an array element or a function call.
+		// For now, we will treat all identifiers at the start of a statement in the execution part as the start of an executable statement.
+		return true
+	} else if current == END && peek == Equals {
+		// Special case: END used as a variable name in assignment (e.g., "END = a(j) + d")
+		return true
+	} else if current.IsTypeDeclaration() || current == DATA {
+		// Type keywords and DATA start specification statements, not executable statements
+		return false
+	} else if IsAssignment(current, peek) {
+		// Keywords used as identifiers in assignments (RESULT=1, STOP(I)=5, etc.)
+		// But not type keywords which are always declarations
+		return true
+	}
+	return false
+}
+
 func IsEndProgramUnit(current, next Token) int {
 	switch current {
 	case ENDPROGRAM, ENDSUBROUTINE, ENDFUNCTION, ENDMODULE:
@@ -297,6 +344,9 @@ func (tok Token) CanBeUsedAsIdentifier() bool {
 	// Explicit identifiers are always OK
 	if tok == Identifier || tok == FormatSpec {
 		return true
+	} else if tok == DATA || tok == ENDFILE {
+		// Type keywords and DATA start specification statements, not executable statements
+		return false
 	}
 
 	// Exclude structural keywords that would cause ambiguity

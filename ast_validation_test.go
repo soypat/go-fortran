@@ -334,9 +334,7 @@ END PROGRAM test
 				t.Fatal("ParseNextProgramUnit returned nil")
 			}
 
-			if len(parser.Errors()) > 0 {
-				t.Fatalf("Parse errors: %v", parser.Errors())
-			}
+			helperFatalErrors(t, &parser, "variable decl")
 
 			// Extract entities from type declarations
 			var entities []ast.DeclEntity

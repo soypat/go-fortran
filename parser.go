@@ -595,24 +595,7 @@ func (p *Parser90) currentIsGOTO() int {
 //
 // Postcondition: Does not consume any tokens; parser state unchanged.
 func (p *Parser90) isLikelyAssignment() bool {
-	maybeIdent, maybeEqOrLParen := p.current.tok, p.peek.tok
-	if maybeIdent == token.DATA || maybeIdent == token.ENDFILE ||
-		!maybeIdent.CanBeUsedAsIdentifier() {
-		return false
-	}
-	// Ident can be used as identifier by now.
-	if maybeEqOrLParen == token.Equals {
-		return true
-	} else if maybeEqOrLParen != token.LParen {
-		return false
-	}
-	// By now we have a identifier followed by left parentheses.
-	// Check the identifier is not a keyword that may have parentheses in usage.
-	if maybeIdent.IsConstructAdmitsParens() {
-		return false
-	}
-	// Give up trying to prove it is not a assignment, we can be pretty sure it is by now.
-	return true
+	return token.IsAssignment(p.current.tok, p.peek.tok)
 }
 
 // parseExecutableStatement parses a single executable statement
@@ -629,8 +612,9 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		p.nextToken() // consume END
 		return p.parseEndfileStmt()
 	}
-	if p.current.tok.IsEnd() {
-		return nil // Empty statement or misplaced END.
+	// Check for END used as variable name before treating as end-of-program-unit
+	if p.current.tok.IsEnd() && !(p.current.tok == token.END && p.peek.tok == token.Equals) {
+		return nil // Empty statement or misplaced END (but not "END = ..." assignment)
 	}
 	var stmt ast.Statement
 	var label string
@@ -649,13 +633,9 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 	// Check for GOTO first (handles both "GO TO" and "GOTO" and computed goto patterns)
 	if ngotoToks := p.currentIsGOTO(); ngotoToks > 0 {
 		stmt = p.parseGotoStmt()
-	} else if p.current.tok == token.POINTER && p.peek.tok == token.LParen {
+	} else if p.isLikelyAssignment() {
 		// Special case: POINTER used as a variable name in legacy Fortran (e.g., pointer(m) = k)
 		// In executable section, POINTER(...) is an assignment, not a specification statement
-		stmt = p.parseAssignmentStmt()
-	} else if p.isLikelyAssignment() {
-		// Check if this looks like an assignment to a keyword used as identifier
-		// Handles both simple (RESULT=1) and array assignments (RESULT(N)=1)
 		stmt = p.parseAssignmentStmt()
 	} else {
 		switch p.current.tok {
@@ -2324,27 +2304,7 @@ func (p *Parser90) parseAssignmentStmt() ast.Statement {
 
 // isExecutableStatement returns true if current token starts an executable statement
 func (p *Parser90) isExecutableStatement() bool {
-	if p.current.tok.IsExecutableStatement() {
-		return true
-	} else if p.current.tok == token.IntLit && !p.peek.tok.IsEnd() {
-		// Statement label followed by executable statement (e.g., "10 READ(...)")
-		// But not label followed by END (e.g., "100 END PROGRAM")
-		return true
-	} else if p.current.tok == token.Identifier {
-		// Could be assignment or procedure call. We need to lookahead to distinguish.
-		// If we see `IDENTIFIER =`, it's an assignment.
-		// If we see `IDENTIFIER(...)` it could be an assignment to an array element or a function call.
-		// For now, we will treat all identifiers at the start of a statement in the execution part as the start of an executable statement.
-		return true
-	} else if p.current.tok.IsTypeDeclaration() || p.current.tok == token.DATA {
-		// Type keywords and DATA start specification statements, not executable statements
-		return false
-	} else if p.isLikelyAssignment() {
-		// Keywords used as identifiers in assignments (RESULT=1, STOP(I)=5, etc.)
-		// But not type keywords which are always declarations
-		return true
-	}
-	return false
+	return token.IsExecutableStatement(p.current.tok, p.peek.tok, p.uberpeek.tok)
 }
 
 // skipToNextStatement skips tokens until the next newline or construct-ending keyword
