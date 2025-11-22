@@ -764,6 +764,9 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		case *ast.WriteStmt:
 			s.Label = label
 		}
+		if constructLabel != "" && string(p.current.lit) == constructLabel {
+			p.nextToken() // Consume ending construct label.
+		}
 	}
 
 	return stmt
