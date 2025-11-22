@@ -329,7 +329,7 @@ func (tok Token) IsExecutableStatement() bool {
 	case IF, DO, SELECT, CALL, ENTRY, RETURN, STOP, EXIT,
 		ALLOCATE, DEALLOCATE, READ, WRITE, OPEN, PRINT,
 		CLOSE, BACKSPACE, REWIND, ENDFILE, INQUIRE,
-		GOTO, CONTINUE, CYCLE:
+		GOTO, CONTINUE, CYCLE, ASSIGN:
 		return true
 	}
 	return false

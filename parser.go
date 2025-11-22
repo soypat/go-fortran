@@ -683,6 +683,8 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseExitStmt()
 		case token.CONTINUE:
 			stmt = p.parseContinueStmt()
+		case token.ASSIGN:
+			stmt = p.parseAssignStmt()
 		case token.READ, token.WRITE, token.INQUIRE:
 			stmt = p.parseIOStmt()
 		case token.PRINT:
@@ -844,6 +846,42 @@ func (p *Parser90) parseGotoStmt() ast.Statement {
 		p.addError("expected label after GO TO")
 		return nil
 	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseAssignStmt parses an ASSIGN statement (Fortran 77 feature)
+// Syntax: ASSIGN <label> TO <variable>
+// Example: ASSIGN 100 TO jump_target
+func (p *Parser90) parseAssignStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.ASSIGN, "")
+
+	stmt := &ast.AssignStmt{}
+
+	// Parse the label
+	if !p.currentTokenIs(token.IntLit) {
+		p.addError("expected label after ASSIGN")
+		return nil
+	}
+	stmt.LabelValue = string(p.current.lit)
+	p.nextToken()
+
+	// Expect TO keyword
+	if !p.currentTokenIs(token.Identifier) || !strings.EqualFold(string(p.current.lit), "TO") {
+		p.addError("expected TO after ASSIGN label")
+		return nil
+	}
+	p.nextToken() // consume TO
+
+	// Parse the variable
+	if !p.currentTokenIs(token.Identifier) {
+		p.addError("expected variable after ASSIGN <label> TO")
+		return nil
+	}
+	stmt.Variable = string(p.current.lit)
+	p.nextToken()
 
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt

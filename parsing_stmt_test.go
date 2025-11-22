@@ -2229,6 +2229,40 @@ END SELECT`,
 				}
 			},
 		},
+
+		// ===== ASSIGN Statements =====
+		{
+			name: "ASSIGN from valid_gdyn.f90 line 99",
+			src:  "ASSIGN 2000 TO IGOTO",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign, ok := stmt.(*ast.AssignStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignStmt, got %T", stmt)
+				}
+				if assign.LabelValue != "2000" {
+					t.Errorf("Expected label '2000', got %q", assign.LabelValue)
+				}
+				if assign.Variable != "IGOTO" {
+					t.Errorf("Expected variable 'IGOTO', got %q", assign.Variable)
+				}
+			},
+		},
+		{
+			name: "ASSIGN with different label",
+			src:  "ASSIGN 100 TO jump_target",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign, ok := stmt.(*ast.AssignStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignStmt, got %T", stmt)
+				}
+				if assign.LabelValue != "100" {
+					t.Errorf("Expected label '100', got %q", assign.LabelValue)
+				}
+				if assign.Variable != "jump_target" {
+					t.Errorf("Expected variable 'jump_target', got %q", assign.Variable)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

@@ -1420,6 +1420,39 @@ func (gs *GotoStmt) AppendString(dst []byte) []byte {
 	return append(dst, gs.Target...)
 }
 
+// AssignStmt assigns a statement label to an integer variable (Fortran 77 feature).
+// Used with assigned GOTO statements.
+//
+// Example:
+//
+//	ASSIGN <label> TO <variable>
+//	ASSIGN 100 TO jump_target
+//	ASSIGN 2000 TO IGOTO
+type AssignStmt struct {
+	LabelValue string // The label being assigned
+	Variable   string // The variable to assign to
+	Label      string // Optional statement label
+	Position
+}
+
+var _ Statement = (*AssignStmt)(nil)
+
+func (as *AssignStmt) GetLabel() string { return as.Label }
+
+func (as *AssignStmt) statementNode() {}
+func (as *AssignStmt) AppendTokenLiteral(dst []byte) []byte {
+	dst = append(dst, "ASSIGN "...)
+	dst = append(dst, as.LabelValue...)
+	dst = append(dst, " TO "...)
+	return append(dst, as.Variable...)
+}
+func (as *AssignStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "ASSIGN "...)
+	dst = append(dst, as.LabelValue...)
+	dst = append(dst, " TO "...)
+	return append(dst, as.Variable...)
+}
+
 // ComputedGotoStmt transfers control to one of several labeled statements based
 // on the runtime value of an integer expression. This is a Fortran 77 feature
 // largely replaced by [SelectCaseStmt] in modern Fortran.
