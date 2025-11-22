@@ -2202,12 +2202,12 @@ func (p *Parser90) isExecutableStatement() bool {
 
 // skipToNextStatement skips tokens until the next newline or construct-ending keyword
 func (p *Parser90) skipToNextStatement() {
-	for p.loopUntilEndElseOr(token.NewLine) {
+	for p.loopUntilEndElseOr(token.NewLine, token.LineComment) {
 		p.nextToken()
 	}
-	if p.currentTokenIs(token.NewLine) {
-		p.nextToken()
-	}
+	// Consume trailing line comment and newline
+	p.consumeIf(token.LineComment)
+	p.consumeIf(token.NewLine)
 }
 
 // skipTypeDefinition skips from TYPE to END TYPE
@@ -2268,7 +2268,7 @@ func (p *Parser90) isEndOfProgramUnit() bool {
 	switch next {
 	case token.PROGRAM, token.SUBROUTINE, token.FUNCTION, token.MODULE:
 		return true
-	case token.NewLine, token.EOF:
+	case token.NewLine, token.EOF, token.LineComment:
 		// Bare END (common in older Fortran)
 		return true
 	case token.Identifier:
