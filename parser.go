@@ -1807,6 +1807,7 @@ func (p *Parser90) parseInquireStmt() ast.Statement {
 func (p *Parser90) parseIfStmt() ast.Statement {
 	start := p.sourcePos()
 	p.expect(token.IF, "")
+
 	condition, assign := p.parseIndexCallOrAssignment("opening IF")
 	if assign != nil {
 		return assign
@@ -2331,18 +2332,19 @@ func (p *Parser90) parseIndexCallOrAssignment(context string) (parenExpr ast.Exp
 	if lhs == nil {
 		return nil, nil
 	}
-	if p.expect(token.RParen, context) {
+	if !p.expect(token.RParen, context) {
 		return nil, nil
 	}
-	assignmentConcrete := &ast.AssignmentStmt{
-		Target: lhs,
-	}
-	switch p.peek.tok {
+
+	switch p.current.tok {
 	default:
 		// Not an assignment, just an expression inside parentheses.
 		// i.e: IF(blabla)THEN or POINTER(blabla) (blabla)
 		return lhs, nil
 	case token.Equals, token.PointerAssign:
+		assignmentConcrete := &ast.AssignmentStmt{
+			Target: lhs,
+		}
 		if !p.parseAssignmentRHS(assignmentConcrete, startPos) {
 			return nil, nil
 		}
