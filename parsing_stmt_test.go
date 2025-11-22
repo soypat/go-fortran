@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/soypat/go-fortran/ast"
+	"github.com/soypat/go-fortran/token"
 )
 
 // TestStatementParsing verifies that the statement parser correctly constructs
@@ -1755,6 +1756,148 @@ END SELECT`,
 				// Third case: default
 				if !selectStmt.Cases[2].IsDefault {
 					t.Errorf("Expected third case to be DEFAULT")
+				}
+			},
+		},
+
+		// ===== KEYWORD ARGUMENTS IN FUNCTION CALLS =====
+		{
+			name: "function call with keyword argument",
+			src:  "result = REAL(value, KIND=KIND(result))",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
+				}
+
+				// Check the value is a function call
+				funcCall, ok := assign.Value.(*ast.FunctionCall)
+				if !ok {
+					t.Fatalf("Expected value to be *ast.FunctionCall, got %T", assign.Value)
+				}
+
+				if funcCall.Name != "REAL" {
+					t.Errorf("Expected function name 'REAL', got %q", funcCall.Name)
+				}
+
+				// Should have 2 arguments
+				if len(funcCall.Args) != 2 {
+					t.Fatalf("Expected 2 arguments, got %d", len(funcCall.Args))
+				}
+
+				// Second argument should be a BinaryExpr representing KIND=KIND(result)
+				binExpr, ok := funcCall.Args[1].(*ast.BinaryExpr)
+				if !ok {
+					t.Fatalf("Expected second argument to be *ast.BinaryExpr, got %T", funcCall.Args[1])
+				}
+
+				if binExpr.Op != token.Equals {
+					t.Errorf("Expected operator to be Equals, got %v", binExpr.Op)
+				}
+
+				// Left side should be identifier "KIND"
+				leftIdent, ok := binExpr.Left.(*ast.Identifier)
+				if !ok {
+					t.Fatalf("Expected left side to be *ast.Identifier, got %T", binExpr.Left)
+				}
+				if leftIdent.Value != "KIND" {
+					t.Errorf("Expected keyword name 'KIND', got %q", leftIdent.Value)
+				}
+
+				// Right side should be a function call KIND(result)
+				rightFunc, ok := binExpr.Right.(*ast.FunctionCall)
+				if !ok {
+					t.Fatalf("Expected right side to be *ast.FunctionCall, got %T", binExpr.Right)
+				}
+				if rightFunc.Name != "KIND" {
+					t.Errorf("Expected function name 'KIND', got %q", rightFunc.Name)
+				}
+			},
+		},
+
+		// ===== ENTRY STATEMENT =====
+		{
+			name: "ENTRY statement with parameters",
+			src:  "ENTRY alternate_entry(param1, param2, param3)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				entry, ok := stmt.(*ast.EntryStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.EntryStmt, got %T", stmt)
+				}
+
+				if entry.Name != "alternate_entry" {
+					t.Errorf("Expected entry name 'alternate_entry', got %q", entry.Name)
+				}
+
+				if len(entry.Parameters) != 3 {
+					t.Fatalf("Expected 3 parameters, got %d", len(entry.Parameters))
+				}
+
+				expectedParams := []string{"param1", "param2", "param3"}
+				for i, expectedName := range expectedParams {
+					if entry.Parameters[i].Name != expectedName {
+						t.Errorf("Parameter %d: expected name %q, got %q", i, expectedName, entry.Parameters[i].Name)
+					}
+				}
+			},
+		},
+		{
+			name: "ENTRY statement without parameters",
+			src:  "ENTRY simple_entry",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				entry, ok := stmt.(*ast.EntryStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.EntryStmt, got %T", stmt)
+				}
+
+				if entry.Name != "simple_entry" {
+					t.Errorf("Expected entry name 'simple_entry', got %q", entry.Name)
+				}
+
+				if len(entry.Parameters) != 0 {
+					t.Errorf("Expected no parameters, got %d", len(entry.Parameters))
+				}
+			},
+		},
+
+		// ===== POINTER AS VARIABLE NAME =====
+		{
+			name: "POINTER keyword used as array variable",
+			src:  "pointer(index) = value",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
+				}
+
+				// Target can be either ArrayRef or FunctionCall (parser can't distinguish without type info)
+				// Check if it's parsed correctly as an identifier-with-parens structure
+				switch target := assign.Target.(type) {
+				case *ast.ArrayRef:
+					if target.Name != "pointer" {
+						t.Errorf("Expected array name 'pointer', got %q", target.Name)
+					}
+					if len(target.Subscripts) != 1 {
+						t.Fatalf("Expected 1 subscript, got %d", len(target.Subscripts))
+					}
+				case *ast.FunctionCall:
+					if target.Name != "pointer" {
+						t.Errorf("Expected function name 'pointer', got %q", target.Name)
+					}
+					if len(target.Args) != 1 {
+						t.Fatalf("Expected 1 argument, got %d", len(target.Args))
+					}
+				default:
+					t.Fatalf("Expected target to be *ast.ArrayRef or *ast.FunctionCall, got %T", assign.Target)
+				}
+
+				// Value should be identifier "value"
+				value, ok := assign.Value.(*ast.Identifier)
+				if !ok {
+					t.Fatalf("Expected value to be *ast.Identifier, got %T", assign.Value)
+				}
+				if value.Value != "value" {
+					t.Errorf("Expected value 'value', got %q", value.Value)
 				}
 			},
 		},

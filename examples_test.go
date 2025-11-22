@@ -156,7 +156,7 @@ END PROGRAM hello
 	//         }
 	//       }
 	//       Value: BinaryExpr {
-	//         Op: 90
+	//         Op: 91
 	//         Left: Identifier {
 	//           Value: "x"
 	//           Position: Position {

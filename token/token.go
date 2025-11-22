@@ -38,6 +38,7 @@ const (
 	MODULE        // MODULE
 	ENDMODULE     // ENDMODULE
 	CONTAINS      // CONTAINS
+	ENTRY         // ENTRY
 
 	// Control flow keywords
 	IF        // IF
@@ -302,7 +303,7 @@ func (tok Token) EndConstructComposite() Token {
 // The [Identifier] token returns false as it may or may not represent an executable statement.
 func (tok Token) IsExecutableStatement() bool {
 	switch tok {
-	case IF, DO, SELECT, CALL, RETURN, STOP, EXIT,
+	case IF, DO, SELECT, CALL, ENTRY, RETURN, STOP, EXIT,
 		ALLOCATE, DEALLOCATE, READ, WRITE, OPEN, PRINT,
 		CLOSE, BACKSPACE, REWIND, INQUIRE,
 		GOTO, CONTINUE, CYCLE:
@@ -487,6 +488,8 @@ func LookupKeyword(maybeKeyword []byte) Token {
 		return ONLY
 	case "CONTAINS":
 		return CONTAINS
+	case "ENTRY":
+		return ENTRY
 	case "INTERFACE":
 		return INTERFACE
 	case "ENDINTERFACE", "END INTERFACE":

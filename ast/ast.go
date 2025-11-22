@@ -1183,6 +1183,43 @@ func (cs *CallStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// EntryStmt defines an alternate entry point in a subroutine or function (F77 feature).
+// It allows multiple entry points into a single program unit.
+//
+// Example:
+//
+//	ENTRY alternate_name(param1, param2)
+type EntryStmt struct {
+	Name       string
+	Parameters []Parameter
+	Label      string
+	Position
+}
+
+var _ Statement = (*EntryStmt)(nil) // compile time check of interface implementation.
+
+func (es *EntryStmt) GetLabel() string { return es.Label }
+
+func (es *EntryStmt) statementNode() {}
+func (es *EntryStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "ENTRY"...)
+}
+func (es *EntryStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "ENTRY "...)
+	dst = append(dst, es.Name...)
+	if len(es.Parameters) > 0 {
+		dst = append(dst, '(')
+		for i, param := range es.Parameters {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = append(dst, param.Name...)
+		}
+		dst = append(dst, ')')
+	}
+	return dst
+}
+
 // ReturnStmt transfers control back to the calling program unit (function or
 // subroutine). In functions, the return value must be assigned before returning.
 //

@@ -75,4 +75,7 @@ PROGRAM GDYN2E
    DO 370 I1=1,6
       name = 'M1'' '
    370 CONTINUE
+   POSPRT = REAL(NPERT, KIND=KIND(POSPRT))
+   entry prthip(buffer,lu, filename, models )
+   pointer(m) = k
 END PROGRAM GDYN2E

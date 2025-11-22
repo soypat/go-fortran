@@ -609,7 +609,8 @@ func (p *Parser90) isLikelyAssignment() bool {
 	}
 	// By now we have a identifier followed by left parentheses.
 	// Check the identifier is not a keyword that may have parentheses in usage.
-	if maybeIdent.IsConstructAdmitsParens() {
+	// Exception: POINTER is commonly used as a variable name in legacy Fortran.
+	if maybeIdent.IsConstructAdmitsParens() && maybeIdent != token.POINTER {
 		return false
 	}
 	// Give up trying to prove it is not a assignment, we can be pretty sure it is by now.
@@ -659,6 +660,8 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseSelectCaseStmt()
 		case token.CALL:
 			stmt = p.parseCallStmt()
+		case token.ENTRY:
+			stmt = p.parseEntryStmt()
 		case token.RETURN:
 			stmt = p.parseReturnStmt()
 		case token.CYCLE:
@@ -1970,6 +1973,26 @@ func (p *Parser90) parseCallStmt() ast.Statement {
 		}
 		stmt.Args = args
 		p.consumeIf(token.RParen) // TODO: should be expect?
+	}
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseEntryStmt parses an ENTRY statement (F77 feature for alternate entry points)
+func (p *Parser90) parseEntryStmt() ast.Statement {
+	start := p.current.start
+	stmt := &ast.EntryStmt{}
+	p.expect(token.ENTRY, "") // consume ENTRY
+
+	if !p.canUseAsIdentifier() {
+		p.addError("expected entry point name after ENTRY")
+		return nil
+	}
+	stmt.Name = string(p.current.lit)
+	p.nextToken()
+
+	if p.currentTokenIs(token.LParen) {
+		stmt.Parameters = p.parseParameterList()
 	}
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
@@ -3289,6 +3312,7 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 
 // parseOneArg parses an argument in a parentheses preceding an identifier.
 // since identifier could be a function or an array we must handle both cases here.
+// Also handles keyword arguments like KIND=value in intrinsic function calls.
 func (p *Parser90) parseOneArg() (ast.Expression, error) {
 	start := p.sourcePos()
 	// Handle array slice syntax: : or start:end or start:end:stride
@@ -3304,6 +3328,34 @@ func (p *Parser90) parseOneArg() (ast.Expression, error) {
 			rangeExpr.End = p.parseExpression(0) // This is actually end, not stride
 		}
 		return rangeExpr, nil
+	}
+
+	// Check for keyword argument (name=value) in function calls
+	// Look ahead to see if this is a keyword argument
+	// TODO: can this be simplified?
+	if p.canUseAsIdentifier() && p.peekTokenIs(token.Equals) {
+		// Parse keyword argument manually: name=value
+		keywordStart := p.current.start
+		keywordName := &ast.Identifier{
+			Value:    string(p.current.lit),
+			Position: ast.Pos(p.current.start, p.current.start+len(p.current.lit)),
+		}
+		p.nextToken() // consume keyword name
+		p.nextToken() // consume =
+
+		// Parse the value expression
+		value := p.parseExpression(0)
+		if value == nil {
+			return nil, fmt.Errorf("expected expression after '=' in keyword argument")
+		}
+
+		// Return as a BinaryExpr with = operator to represent name=value
+		return &ast.BinaryExpr{
+			Op:       token.Equals,
+			Left:     keywordName,
+			Right:    value,
+			Position: ast.Pos(keywordStart, value.SourcePos().End()),
+		}, nil
 	}
 
 	arg := p.parseExpression(0)
