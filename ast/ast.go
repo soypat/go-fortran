@@ -970,9 +970,10 @@ func (idl *ImpliedDoLoop) AppendString(dst []byte) []byte {
 //	matrix(i,j) = a * b
 //	person%age = 30
 type AssignmentStmt struct {
-	Target Expression
-	Value  Expression
-	Label  string
+	Target              Expression
+	Value               Expression
+	Label               string
+	IsPointerAssignment bool
 	Position
 }
 
@@ -982,11 +983,16 @@ func (as *AssignmentStmt) GetLabel() string { return as.Label }
 
 func (as *AssignmentStmt) statementNode() {}
 func (as *AssignmentStmt) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "="...)
+	if as.IsPointerAssignment {
+		return append(dst, "=>"...)
+	}
+	return append(dst, '=')
 }
 func (as *AssignmentStmt) AppendString(dst []byte) []byte {
 	dst = as.Target.AppendString(dst)
-	dst = append(dst, " = "...)
+	dst = append(dst, ' ')
+	dst = as.AppendTokenLiteral(dst)
+	dst = append(dst, ' ')
 	dst = as.Value.AppendString(dst)
 	return dst
 }
@@ -2350,38 +2356,6 @@ func (ca *ComponentAccess) AppendString(dst []byte) []byte {
 	dst = ca.Base.AppendString(dst)
 	dst = append(dst, '%')
 	dst = append(dst, ca.Component...)
-	return dst
-}
-
-// PointerAssignmentStmt associates a pointer with a target, using the pointer
-// assignment operator (=>) rather than the standard assignment operator (=).
-// The target must have the TARGET or POINTER attribute.
-//
-// Example:
-//
-//	<pointer> => <target>
-//	ptr => var
-//	node%next => new_node
-//	array_ptr => array_section(1:100)
-type PointerAssignmentStmt struct {
-	Target Expression
-	Value  Expression
-	Label  string
-	Position
-}
-
-var _ Statement = (*PointerAssignmentStmt)(nil) // compile time check of interface implementation.
-
-func (pa *PointerAssignmentStmt) GetLabel() string { return pa.Label }
-
-func (pa *PointerAssignmentStmt) statementNode() {}
-func (pa *PointerAssignmentStmt) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "=>"...)
-}
-func (pa *PointerAssignmentStmt) AppendString(dst []byte) []byte {
-	dst = pa.Target.AppendString(dst)
-	dst = append(dst, " => "...)
-	dst = pa.Value.AppendString(dst)
 	return dst
 }
 

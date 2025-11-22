@@ -634,9 +634,20 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 	// Check for GOTO first (handles both "GO TO" and "GOTO" and computed goto patterns)
 	if ngotoToks := p.currentIsGOTO(); ngotoToks > 0 {
 		stmt = p.parseGotoStmt()
+	} else if p.current.tok == token.POINTER && p.peek.tok == token.LParen {
+		// Ambiguous case: POINTER(...) could be assignment or would be declaration in spec section
+		// Use parseIndexCallOrAssignment to resolve by looking past the parentheses
+		p.nextToken()
+		expr, assign := p.parseIndexCallOrAssignment("pointer open parens")
+		if assign != nil {
+			stmt = assign // pointer(i) = value
+		} else {
+			// POINTER(...) without assignment in executable section is an error
+			// (would be valid in specification section, but we're in executable section)
+			p.addError("POINTER statement only valid in specification section")
+			_ = expr // parsed expression is discarded
+		}
 	} else if p.isLikelyAssignment() {
-		// Special case: POINTER used as a variable name in legacy Fortran (e.g., pointer(m) = k)
-		// In executable section, POINTER(...) is an assignment, not a specification statement
 		stmt = p.parseAssignmentStmt()
 	} else {
 		switch p.current.tok {
@@ -1796,14 +1807,11 @@ func (p *Parser90) parseInquireStmt() ast.Statement {
 func (p *Parser90) parseIfStmt() ast.Statement {
 	start := p.sourcePos()
 	p.expect(token.IF, "")
-	if !p.expect(token.LParen, "opening IF") {
-		return nil
-	}
-	condition := p.parseExpression(0)
-	if condition == nil {
+	condition, assign := p.parseIndexCallOrAssignment("opening IF")
+	if assign != nil {
+		return assign
+	} else if condition == nil {
 		p.addError("expected condition in IF statement")
-		return nil
-	} else if !p.expect(token.RParen, "closing IF condition") {
 		return nil
 	}
 
@@ -2272,35 +2280,74 @@ func (p *Parser90) parseAssignmentStmt() ast.Statement {
 		p.addError("invalid target for assignment")
 		return nil
 	}
-
-	if p.consumeIf(token.Equals) {
-		value := p.parseExpression(0)
-		if value == nil {
-			p.addError("expected expression after '='")
-			return nil
-		}
-		return &ast.AssignmentStmt{
-			Target:   target,
-			Value:    value,
-			Position: ast.Pos(startPos, p.current.start),
-		}
-	} else if p.consumeIf(token.PointerAssign) {
-		value := p.parseExpression(0)
-		if value == nil {
-			p.addError("expected expression after '=>'")
-			return nil
-		}
-		return &ast.PointerAssignmentStmt{
-			Target:   target,
-			Value:    value,
-			Position: ast.Pos(startPos, p.current.start),
-		}
+	assignment := &ast.AssignmentStmt{
+		Target: target,
 	}
+	if !p.parseAssignmentRHS(assignment, startPos) {
+		return nil
+	}
+	return assignment
+}
 
-	// This might be a subroutine call without the CALL keyword.
-	// For now, we'll treat it as an error.
-	p.addError("expected '=' or '=>' for assignment statement")
-	return nil
+func (p *Parser90) parseAssignmentRHS(dst *ast.AssignmentStmt, startPos int) bool {
+	isPtrAssign := p.currentTokenIs(token.PointerAssign)
+	isEquals := p.currentTokenIs(token.Equals)
+	if !isPtrAssign && !isEquals {
+		p.addError("expected '=' or '=>' for assignment statement")
+		return false
+	}
+	p.nextToken()
+	value := p.parseExpression(0)
+	if value == nil {
+		p.addError("expected expression after '='")
+		return false
+	}
+	dst.IsPointerAssignment = isPtrAssign
+	dst.Value = value
+	dst.Position = ast.Pos(startPos, p.current.start)
+	return true
+}
+
+// parseIndexCallOrAssignment handles ambiguous constructs like POINTER(...) that could be either:
+// - An assignment: pointer(i) = value
+// - A declaration/statement: POINTER(x,y) or READ(10,*) x
+//
+// Strategy: Parse the expression including parentheses, then check what follows.
+// If '=' or '=>' follows, it's an assignment. Otherwise, return the parsed expression
+// for the caller to interpret in context.
+//
+// Precondition: current token is the keyword/identifier (POINTER, READ, etc.)
+// Postcondition: If assignment, returns (nil, assignmentStmt). Otherwise returns (parenExpr, nil)
+//
+//	and parser is positioned after the closing parenthesis.
+func (p *Parser90) parseIndexCallOrAssignment(context string) (parenExpr ast.Expression, assignment ast.Statement) {
+	startPos := p.current.start
+	if !p.expect(token.LParen, context) {
+		return nil, nil
+	}
+	// Parse the full expression: keyword(...) or identifier(...)
+	// This handles: pointer(i), pointer(i,j), pointer(a+b(k)), etc.
+	lhs := p.parseExpression(0)
+	if lhs == nil {
+		return nil, nil
+	}
+	if p.expect(token.RParen, context) {
+		return nil, nil
+	}
+	assignmentConcrete := &ast.AssignmentStmt{
+		Target: lhs,
+	}
+	switch p.peek.tok {
+	default:
+		// Not an assignment, just an expression inside parentheses.
+		// i.e: IF(blabla)THEN or POINTER(blabla) (blabla)
+		return lhs, nil
+	case token.Equals, token.PointerAssign:
+		if !p.parseAssignmentRHS(assignmentConcrete, startPos) {
+			return nil, nil
+		}
+		return nil, assignmentConcrete
+	}
 }
 
 // isExecutableStatement returns true if current token starts an executable statement
