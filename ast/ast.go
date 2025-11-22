@@ -1013,12 +1013,13 @@ func (as *AssignmentStmt) AppendString(dst []byte) []byte {
 //	  PRINT *, 'Zero'
 //	END IF
 type IfStmt struct {
-	Condition   Expression
-	ThenPart    []Statement
-	ElseIfParts []ElseIfClause
-	ElsePart    []Statement
-	Label       string
-	EndLabel    string // Label on END IF statement (F77)
+	Condition      Expression
+	ThenPart       []Statement
+	ElseIfParts    []ElseIfClause
+	ElsePart       []Statement
+	Label          string
+	ConstructLabel string
+	EndLabel       string // Label on END IF statement (F77)
 	Position
 }
 
@@ -1101,14 +1102,15 @@ func (ais *ArithmeticIfStmt) AppendString(dst []byte) []byte {
 //	  sum = sum + arr(i)
 //	100 CONTINUE
 type DoLoop struct {
-	Var         string // Loop variable (empty for DO WHILE)
-	Start       Expression
-	End         Expression
-	Step        Expression
-	Body        []Statement
-	Label       string // Statement label (line prefix, e.g., "10" in "10 DO...")
-	TargetLabel string // DO target label (F77, e.g., "20" in "DO 20 I=1,10")
-	EndLabel    string // Label on END DO statement (F77, e.g., "20" in "20 END DO")
+	Var            string // Loop variable (empty for DO WHILE)
+	Start          Expression
+	End            Expression
+	Step           Expression
+	Body           []Statement
+	Label          string // Statement label (line prefix, e.g., "10" in "10 DO...")
+	TargetLabel    string // DO target label (F77, e.g., "20" in "DO 20 I=1,10")
+	EndLabel       string // Label on END DO statement (F77, e.g., "20" in "20 END DO")
+	ConstructLabel string
 	Position
 }
 
@@ -1161,10 +1163,12 @@ func (dl *DoLoop) AppendString(dst []byte) []byte {
 //	  PRINT *, 'Error'
 //	END SELECT
 type SelectCaseStmt struct {
-	Expression Expression   // The expression being selected on
-	Cases      []CaseClause // List of CASE clauses
-	Label      string       // Statement label
-	EndLabel   string       // Label on END SELECT
+	Expression     Expression   // The expression being selected on
+	Cases          []CaseClause // List of CASE clauses
+	Label          string       // Statement label
+	ConstructLabel string
+	EndLabel       string // Label on END SELECT
+
 	Position
 }
 

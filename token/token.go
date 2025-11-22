@@ -357,7 +357,7 @@ func (tok Token) IsEnd() bool {
 
 // IsTypeDeclaration returns true if the token is a type declaration keyword.
 func (tok Token) IsTypeDeclaration() bool {
-	return tok >= INTEGER && tok <= DOUBLEPRECISION
+	return tok >= INTEGER && tok <= DOUBLEPRECISION || tok == TYPE
 }
 
 // IsAttribute returns true if the token is a Fortran 90 attribute.

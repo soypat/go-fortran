@@ -596,7 +596,7 @@ func (p *Parser90) currentIsGOTO() int {
 // Postcondition: Does not consume any tokens; parser state unchanged.
 func (p *Parser90) isLikelyAssignment() bool {
 	maybeIdent, maybeEqOrLParen := p.current.tok, p.peek.tok
-	if maybeIdent == token.DATA || maybeIdent == token.TYPE || maybeIdent == token.ENDFILE ||
+	if maybeIdent == token.DATA || maybeIdent == token.ENDFILE ||
 		!maybeIdent.CanBeUsedAsIdentifier() {
 		return false
 	}
@@ -634,11 +634,16 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 	}
 	var stmt ast.Statement
 	var label string
+	var constructLabel string
 	if p.currentTokenIs(token.IntLit) {
 		if p.peek.tok.IsEnd() {
 			return nil // Is a Label to an END, should be parsed in parent
 		}
 		label = string(p.current.lit)
+		p.nextToken()
+	} else if p.currentTokenIs(token.Identifier) && p.peekTokenIs(token.Colon) && p.uberpeek.tok.IsConstruct() {
+		constructLabel = string(p.current.lit)
+		p.nextToken()
 		p.nextToken()
 	}
 	// Check for GOTO first (handles both "GO TO" and "GOTO" and computed goto patterns)
@@ -715,10 +720,13 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		switch s := stmt.(type) {
 		case *ast.IfStmt:
 			s.Label = label
+			s.ConstructLabel = constructLabel
 		case *ast.DoLoop:
 			s.Label = label
+			s.ConstructLabel = constructLabel
 		case *ast.SelectCaseStmt:
 			s.Label = label
+			s.ConstructLabel = constructLabel
 		case *ast.CallStmt:
 			s.Label = label
 		case *ast.ReturnStmt:
@@ -2203,8 +2211,8 @@ func (p *Parser90) isExecutableStatement() bool {
 		// If we see `IDENTIFIER(...)` it could be an assignment to an array element or a function call.
 		// For now, we will treat all identifiers at the start of a statement in the execution part as the start of an executable statement.
 		return true
-	} else if p.current.tok.IsTypeDeclaration() || p.current.tok == token.DATA || p.current.tok == token.TYPE {
-		// Type keywords, DATA, and TYPE start specification statements, not executable statements
+	} else if p.current.tok.IsTypeDeclaration() || p.current.tok == token.DATA {
+		// Type keywords and DATA start specification statements, not executable statements
 		return false
 	} else if p.isLikelyAssignment() {
 		// Keywords used as identifiers in assignments (RESULT=1, STOP(I)=5, etc.)
