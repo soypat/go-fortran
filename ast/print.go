@@ -12,12 +12,15 @@ import (
 // If it returns false, the field is excluded from the output.
 type FieldFilter func(name string, value reflect.Value) bool
 
-// NotNilFilter returns true for all fields that are not nil.
-// This is useful for excluding nil pointers, slices, and maps from the output.
+// NotNilFilter returns true for all fields that are not nil or zero-value.
+// This is useful for excluding nil pointers, slices, maps, and false bools from the output.
 func NotNilFilter(_ string, v reflect.Value) bool {
 	switch v.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return !v.IsNil()
+	case reflect.Bool:
+		// Skip false bools (zero value)
+		return v.Bool()
 	}
 	return true
 }

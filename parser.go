@@ -1810,6 +1810,10 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 
 	condition, assign := p.parseIndexCallOrAssignment("opening IF")
 	if assign != nil {
+		assign.Target = &ast.Identifier{
+			Value:    "IF",
+			Position: ast.Pos(start.Pos, start.Pos+2),
+		}
 		return assign
 	} else if condition == nil {
 		p.addError("expected condition in IF statement")
@@ -2321,7 +2325,7 @@ func (p *Parser90) parseAssignmentRHS(dst *ast.AssignmentStmt, startPos int) boo
 // Postcondition: If assignment, returns (nil, assignmentStmt). Otherwise returns (parenExpr, nil)
 //
 //	and parser is positioned after the closing parenthesis.
-func (p *Parser90) parseIndexCallOrAssignment(context string) (parenExpr ast.Expression, assignment ast.Statement) {
+func (p *Parser90) parseIndexCallOrAssignment(context string) (parenExpr ast.Expression, assignment *ast.AssignmentStmt) {
 	startPos := p.current.start
 	if !p.expect(token.LParen, context) {
 		return nil, nil
