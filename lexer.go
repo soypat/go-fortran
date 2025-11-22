@@ -456,9 +456,23 @@ func (l *Lexer90) readNumber() ([]byte, bool) {
 				// - whitespace/operator (e.g., 1. + 2)
 				// The '.' is NOT part of the number if next is:
 				// - a letter that's not E/D/Q (e.g., 1.OR., 1.AND.)
-				if isIdentifierChar(next) && next != 'E' && next != 'e' && next != 'D' && next != 'd' && next != 'Q' && next != 'q' {
-					// The '.' starts a dot operator, don't consume it
-					break
+				// - E/D/Q followed by a letter (e.g., 1.EQ.1, 1.OR.x)
+				if isIdentifierChar(next) {
+					// Check if it's E/D/Q followed by something that's NOT valid for exponent
+					if next == 'E' || next == 'e' || next == 'D' || next == 'd' || next == 'Q' || next == 'q' {
+						// Look ahead one more character to see if this is scientific notation
+						peek2 := l.peek2Char()
+						// Scientific notation requires digit, +, or - after E/D/Q
+						if !isDigit(peek2) && peek2 != '+' && peek2 != '-' {
+							// This looks like a dot operator (e.g., .EQ., .NE.)
+							// Don't consume the '.'
+							break
+						}
+						// Otherwise fall through to consume the '.' as scientific notation
+					} else {
+						// It's another letter (not E/D/Q), so definitely a dot operator
+						break
+					}
 				}
 				// Consume the '.'
 				seenDot = true
@@ -555,6 +569,22 @@ func (l *Lexer90) readChar() {
 
 func (l *Lexer90) peekChar() rune {
 	return l.peek
+}
+
+// peek2Char looks two characters ahead without consuming. Returns 0 if not available.
+// This is used to disambiguate patterns like 1.EQ.1 vs 1.E5
+// It returns the character that comes after l.peek (i.e., two positions ahead of l.ch)
+func (l *Lexer90) peek2Char() rune {
+	// Use bufio.Reader's Peek to look ahead without consuming
+	// The input reader is positioned to read the character after l.peek
+	bytes, err := l.input.Peek(1)
+	if err != nil || len(bytes) < 1 {
+		return 0
+	}
+	// Return the first byte as a rune (assuming ASCII for operators/digits)
+	// For full UTF-8 support we'd need to decode, but for our use case (checking for digits/+/-)
+	// ASCII is sufficient
+	return rune(bytes[0])
 }
 
 // readCharLL reads the next character at the lowest level without any processing.

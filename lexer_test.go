@@ -210,6 +210,68 @@ func TestLexer90_tokens(t *testing.T) {
 				{tok: token.FloatLit, literal: "180.Q0"},
 			},
 		},
+		// Test comparison operators without spaces (issue: lexer was treating 1.EQ.1 as float 1.E)
+		9: {
+			src: "a=1.EQ.1",
+			expect: []testtoktuple{
+				{tok: token.Identifier, literal: "a"},
+				{tok: token.Equals, literal: ""},
+				{tok: token.IntLit, literal: "1"},
+				{tok: token.EQ, literal: "EQ"},
+				{tok: token.IntLit, literal: "1"},
+			},
+		},
+		10: {
+			src: "x=2.LT.3.AND.4.GT.1",
+			expect: []testtoktuple{
+				{tok: token.Identifier, literal: "x"},
+				{tok: token.Equals, literal: ""},
+				{tok: token.IntLit, literal: "2"},
+				{tok: token.LT, literal: "LT"},
+				{tok: token.IntLit, literal: "3"},
+				{tok: token.AND, literal: "AND"},
+				{tok: token.IntLit, literal: "4"},
+				{tok: token.GT, literal: "GT"},
+				{tok: token.IntLit, literal: "1"},
+			},
+		},
+		11: {
+			src: "flag=5.LE.10.OR.x.GE.y",
+			expect: []testtoktuple{
+				{tok: token.Identifier, literal: "flag"},
+				{tok: token.Equals, literal: ""},
+				{tok: token.IntLit, literal: "5"},
+				{tok: token.LE, literal: "LE"},
+				{tok: token.IntLit, literal: "10"},
+				{tok: token.OR, literal: "OR"},
+				{tok: token.Identifier, literal: "x"},
+				{tok: token.GE, literal: "GE"},
+				{tok: token.Identifier, literal: "y"},
+			},
+		},
+		// Test that scientific notation still works
+		12: {
+			src: "val=1.E5+2.E+10-3.E-5",
+			expect: []testtoktuple{
+				{tok: token.Identifier, literal: "val"},
+				{tok: token.Equals, literal: ""},
+				{tok: token.FloatLit, literal: "1.E5"},
+				{tok: token.Plus, literal: ""},
+				{tok: token.FloatLit, literal: "2.E+10"},
+				{tok: token.Minus, literal: ""},
+				{tok: token.FloatLit, literal: "3.E-5"},
+			},
+		},
+		13: {
+			src: "x=100.D0*1.5E3",
+			expect: []testtoktuple{
+				{tok: token.Identifier, literal: "x"},
+				{tok: token.Equals, literal: ""},
+				{tok: token.FloatLit, literal: "100.D0"},
+				{tok: token.Asterisk, literal: ""},
+				{tok: token.FloatLit, literal: "1.5E3"},
+			},
+		},
 	}
 	var l Lexer90
 	for i, test := range cases {

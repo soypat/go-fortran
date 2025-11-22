@@ -84,7 +84,7 @@ PROGRAM GDYN2E
    POSPRT = REAL(NPERT, KIND=KIND(POSPRT))
    entry prthip(buffer,lu, filename, models )
    pointer(m) = k
-   ! LPARTS=MOD(IDRAD,4)/2.EQ.1
+   a=1.EQ.1
    ENDFILE IUNTMT
       data (ah_mean(i),i=1,55)/   &
      &+1.2517D+02, +8.503D-01, +6.936D-02, -6.760D+00, +1.771D-01,      &
@@ -93,4 +93,7 @@ PROGRAM GDYN2E
    do i = 1,(2*n + 1)
       dfac(i+1) = dfac(i)*i
    end do
+   if (func.lt.zero) return 1
+   call ionlim (rd,pt,htrng(6),rlim1,rlim2,*200)
+   CALL DSYSV('L',-1_INT32)
 END PROGRAM GDYN2E
