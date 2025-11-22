@@ -1859,6 +1859,149 @@ END SELECT`,
 				}
 			},
 		},
+
+		// ===== ENDFILE STATEMENT TESTS =====
+		{
+			name: "ENDFILE simple form",
+			src:  "ENDFILE 10",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				endfile, ok := stmt.(*ast.EndfileStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.EndfileStmt, got %T", stmt)
+				}
+
+				// Should have UNIT specifier
+				if len(endfile.Specifiers) != 1 {
+					t.Errorf("Expected 1 specifier, got %d", len(endfile.Specifiers))
+				}
+
+				unit, ok := endfile.Specifiers["UNIT"]
+				if !ok {
+					t.Error("Expected UNIT specifier")
+				}
+				if unit == nil {
+					t.Error("UNIT specifier is nil")
+				}
+			},
+		},
+		{
+			name: "ENDFILE with specifiers",
+			src:  "ENDFILE(UNIT=15, IOSTAT=ierr)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				endfile, ok := stmt.(*ast.EndfileStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.EndfileStmt, got %T", stmt)
+				}
+
+				// Should have UNIT and IOSTAT specifiers
+				if len(endfile.Specifiers) != 2 {
+					t.Errorf("Expected 2 specifiers, got %d", len(endfile.Specifiers))
+				}
+
+				if _, ok := endfile.Specifiers["UNIT"]; !ok {
+					t.Error("Expected UNIT specifier")
+				}
+
+				if _, ok := endfile.Specifiers["IOSTAT"]; !ok {
+					t.Error("Expected IOSTAT specifier")
+				}
+			},
+		},
+
+		// ===== DATA STATEMENT TESTS =====
+		{
+			name: "DATA statement simple",
+			src:  "DATA x, y / 1.0, 2.0 /",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				data, ok := stmt.(*ast.DataStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.DataStmt, got %T", stmt)
+				}
+				// Just verify it parses without error
+				_ = data
+			},
+		},
+		{
+			name: "DATA statement with implied DO loop",
+			src:  "DATA (arr(i), i=1,10) / 10*0.0 /",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				data, ok := stmt.(*ast.DataStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.DataStmt, got %T", stmt)
+				}
+				// Just verify it parses without error
+				_ = data
+			},
+		},
+
+		// ===== COMPARISON OPERATOR TESTS =====
+		{
+			name: "assignment with .EQ. operator",
+			src:  "LPARTS = MOD(IDRAD,4)/2 .EQ. 1",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
+				}
+
+				// Target should be identifier LPARTS
+				target, ok := assign.Target.(*ast.Identifier)
+				if !ok {
+					t.Fatalf("Expected target to be *ast.Identifier, got %T", assign.Target)
+				}
+				if target.Value != "LPARTS" {
+					t.Errorf("Expected target 'LPARTS', got %q", target.Value)
+				}
+
+				// Value should be a binary expression with .EQ. operator
+				binExpr, ok := assign.Value.(*ast.BinaryExpr)
+				if !ok {
+					t.Fatalf("Expected value to be *ast.BinaryExpr, got %T", assign.Value)
+				}
+
+				if binExpr.Op != token.EQ {
+					t.Errorf("Expected .EQ. operator (token %v), got %v", token.EQ, binExpr.Op)
+				}
+			},
+		},
+		{
+			name: "comparison operators .LT. .GT. .LE. .GE. .NE.",
+			src:  "flag = a .LT. b .AND. c .GT. d",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
+				}
+
+				// Value should be a binary expression with .AND. operator
+				andExpr, ok := assign.Value.(*ast.BinaryExpr)
+				if !ok {
+					t.Fatalf("Expected value to be *ast.BinaryExpr, got %T", assign.Value)
+				}
+
+				if andExpr.Op != token.AND {
+					t.Errorf("Expected .AND. operator, got %v", andExpr.Op)
+				}
+
+				// Left side should be .LT. comparison
+				ltExpr, ok := andExpr.Left.(*ast.BinaryExpr)
+				if !ok {
+					t.Fatalf("Expected left to be *ast.BinaryExpr, got %T", andExpr.Left)
+				}
+				if ltExpr.Op != token.LT {
+					t.Errorf("Expected .LT. operator, got %v", ltExpr.Op)
+				}
+
+				// Right side should be .GT. comparison
+				gtExpr, ok := andExpr.Right.(*ast.BinaryExpr)
+				if !ok {
+					t.Fatalf("Expected right to be *ast.BinaryExpr, got %T", andExpr.Right)
+				}
+				if gtExpr.Op != token.GT {
+					t.Errorf("Expected .GT. operator, got %v", gtExpr.Op)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

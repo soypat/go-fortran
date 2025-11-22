@@ -597,7 +597,7 @@ func (p *Parser90) currentIsGOTO() int {
 // Postcondition: Does not consume any tokens; parser state unchanged.
 func (p *Parser90) isLikelyAssignment() bool {
 	maybeIdent, maybeEqOrLParen := p.current.tok, p.peek.tok
-	if maybeIdent == token.DATA || maybeIdent == token.TYPE ||
+	if maybeIdent == token.DATA || maybeIdent == token.TYPE || maybeIdent == token.ENDFILE ||
 		!maybeIdent.CanBeUsedAsIdentifier() {
 		return false
 	}
@@ -685,6 +685,8 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseBackspaceStmt()
 		case token.REWIND:
 			stmt = p.parseRewindStmt()
+		case token.ENDFILE:
+			stmt = p.parseEndfileStmt()
 		case token.STOP:
 			stmt = p.parseStopStmt()
 		case token.FORMAT:
@@ -695,6 +697,9 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseDeallocateStmt()
 		case token.INQUIRE:
 			stmt = p.parseInquireStmt()
+		case token.DATA:
+			// DATA statement appearing in executable section (non-standard but handle gracefully)
+			stmt = p.parseDataStmt()
 		case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
 			stmt = p.parseAssignmentStmt()
 		}
@@ -1326,6 +1331,86 @@ func (p *Parser90) parseRewindStmt() ast.Statement {
 
 	// Consume the closing parenthesis
 	if !p.expect(token.RParen, "closing REWIND statement") {
+		return nil
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
+}
+
+// parseEndfileStmt parses an ENDFILE statement
+// Precondition: current token is ENDFILE
+func (p *Parser90) parseEndfileStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.ENDFILE, "")
+
+	stmt := &ast.EndfileStmt{
+		Specifiers: make(map[string]ast.Expression),
+		Position:   ast.Pos(start, p.current.start),
+	}
+
+	// Handle simple form: ENDFILE unit (without parentheses)
+	if !p.currentTokenIs(token.LParen) {
+		unit := p.parseExpression(0)
+		if unit != nil {
+			stmt.Specifiers["UNIT"] = unit
+		}
+		stmt.Position = ast.Pos(start, p.current.start)
+		return stmt
+	}
+
+	// Handle full form with parentheses
+	if !p.expect(token.LParen, "in ENDFILE statement") {
+		return nil
+	}
+
+	// Track if we've seen the first positional argument (which would be UNIT)
+	isFirstArg := true
+
+	// Parse comma-separated specifier list
+	for !p.currentTokenIs(token.RParen) && !p.IsDone() && !p.current.tok.IsEnd() {
+		// Parse one specifier: either expression or keyword=value
+		spec := p.parseExpression(0)
+		if spec == nil {
+			break
+		}
+
+		// Check if this is a keyword=value pattern
+		if p.currentTokenIs(token.Equals) {
+			// Extract keyword name
+			var keyword string
+			if ident, ok := spec.(*ast.Identifier); ok {
+				keyword = strings.ToUpper(ident.Value)
+			} else {
+				p.addError("expected identifier before = in ENDFILE specifier")
+				if !p.consumeIf(token.Comma) {
+					break
+				}
+				continue
+			}
+
+			p.nextToken() // consume =
+			value := p.parseExpression(0)
+			if value != nil {
+				stmt.Specifiers[keyword] = value
+			}
+			isFirstArg = false
+		} else if isFirstArg {
+			// First positional argument is UNIT
+			stmt.Specifiers["UNIT"] = spec
+			isFirstArg = false
+		} else {
+			p.addError("unexpected expression in ENDFILE statement (expected keyword=value)")
+		}
+
+		// Consume comma if present, otherwise should be at RParen
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	// Consume the closing parenthesis
+	if !p.expect(token.RParen, "closing ENDFILE statement") {
 		return nil
 	}
 
@@ -2210,9 +2295,33 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 		// INTERFACE block - skip entire block
 		p.skipInterfaceBlock()
 		return &ast.InterfaceStmt{} // Return non-nil to indicate success
+	case token.DATA:
+		// DATA statement - skip to end of statement (complex to parse fully)
+		return p.parseDataStmt()
 	default:
 		return nil // Unknown statement, caller will skip
 	}
+}
+
+// parseDataStmt parses a DATA statement (simplified version that skips to end)
+// Precondition: current token is DATA
+// DATA statements have complex syntax with implied DO loops, so for now we just skip to end
+func (p *Parser90) parseDataStmt() ast.Statement {
+	start := p.current.start
+	p.expect(token.DATA, "")
+
+	stmt := &ast.DataStmt{
+		Position: ast.Pos(start, p.current.start),
+	}
+
+	// Skip to end of statement (newline or semicolon)
+	// DATA statements can span multiple lines with continuations
+	for !p.currentTokenIs(token.NewLine) && !p.current.tok.IsEnd() && !p.IsDone() {
+		p.nextToken()
+	}
+
+	stmt.Position = ast.Pos(start, p.current.start)
+	return stmt
 }
 
 // parseInterfaceStmt parses an INTERFACE...END INTERFACE block

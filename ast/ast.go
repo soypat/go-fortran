@@ -399,6 +399,30 @@ func (us *UseStatement) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// DataStmt initializes variables with specified values in Fortran 77 style.
+// DATA statements can use implied DO loops for array initialization.
+//
+// Example:
+//
+//	DATA x, y / 1.0, 2.0 /
+//	DATA (arr(i), i=1,10) / 10*0.0 /
+//	DATA a, b, c / 1, 2, 3 /
+type DataStmt struct {
+	Label string
+	Position
+}
+
+var _ Statement = (*DataStmt)(nil)
+
+func (ds *DataStmt) GetLabel() string { return ds.Label }
+func (ds *DataStmt) statementNode()   {}
+func (ds *DataStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "DATA"...)
+}
+func (ds *DataStmt) AppendString(dst []byte) []byte {
+	return append(dst, "DATA"...)
+}
+
 // TypeDeclaration declares variables with a specific type and optional attributes.
 // Fortran 90 syntax uses :: to separate attributes from the entity list. Attributes
 // control properties like storage (SAVE, PARAMETER), intent (IN, OUT, INOUT),
@@ -1703,6 +1727,44 @@ func (rs *RewindStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "REWIND("...)
 	first := true
 	for key, value := range rs.Specifiers {
+		if !first {
+			dst = append(dst, ", "...)
+		}
+		first = false
+		dst = append(dst, key...)
+		dst = append(dst, '=')
+		dst = value.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
+// EndfileStmt writes an end-of-file record to a sequential file, typically used
+// to mark logical divisions in data files or signal the end of usable data.
+//
+// Example:
+//
+//	ENDFILE <unit>
+//	ENDFILE([UNIT=]<unit> [, IOSTAT=<var>] [, ERR=<label>])
+//	ENDFILE 10
+//	ENDFILE(UNIT=15, IOSTAT=ierr)
+type EndfileStmt struct {
+	Specifiers map[string]Expression // ENDFILE specifiers: UNIT, IOSTAT, ERR
+	Label      string                // Optional statement label
+	Position
+}
+
+var _ Statement = (*EndfileStmt)(nil)
+
+func (es *EndfileStmt) GetLabel() string { return es.Label }
+func (es *EndfileStmt) statementNode()   {}
+func (es *EndfileStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "ENDFILE"...)
+}
+func (es *EndfileStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "ENDFILE("...)
+	first := true
+	for key, value := range es.Specifiers {
 		if !first {
 			dst = append(dst, ", "...)
 		}

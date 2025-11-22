@@ -305,7 +305,7 @@ func (tok Token) IsExecutableStatement() bool {
 	switch tok {
 	case IF, DO, SELECT, CALL, ENTRY, RETURN, STOP, EXIT,
 		ALLOCATE, DEALLOCATE, READ, WRITE, OPEN, PRINT,
-		CLOSE, BACKSPACE, REWIND, INQUIRE,
+		CLOSE, BACKSPACE, REWIND, ENDFILE, INQUIRE,
 		GOTO, CONTINUE, CYCLE:
 		return true
 	}
