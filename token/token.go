@@ -225,6 +225,9 @@ func IsEndProgramUnit(current, next Token) int {
 	case Identifier:
 		// Could be "END program_name" or "END BLOCK" (for BLOCK DATA)
 		return 2
+	case Equals:
+		// END= is an I/O specifier (e.g., READ(10,END=900)), not end of program unit
+		return 0
 	}
 	return 0
 }

@@ -2305,6 +2305,99 @@ END SELECT`,
 				}
 			},
 		},
+
+		// ===== CYCLE Statements with Construct Names =====
+		{
+			name: "CYCLE with construct name from valid_gdyn.f90",
+			src:  "CYCLE satloop",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				cycle, ok := stmt.(*ast.CycleStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.CycleStmt, got %T", stmt)
+				}
+				if cycle.ConstructName != "satloop" {
+					t.Errorf("Expected construct name 'satloop', got %q", cycle.ConstructName)
+				}
+			},
+		},
+		{
+			name: "CYCLE without construct name (backward compatibility)",
+			src:  "CYCLE",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				cycle, ok := stmt.(*ast.CycleStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.CycleStmt, got %T", stmt)
+				}
+				if cycle.ConstructName != "" {
+					t.Errorf("Expected empty construct name, got %q", cycle.ConstructName)
+				}
+			},
+		},
+
+		// ===== EXIT Statements with Construct Names =====
+		{
+			name: "EXIT with construct name",
+			src:  "EXIT myloop",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				exit, ok := stmt.(*ast.ExitStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ExitStmt, got %T", stmt)
+				}
+				if exit.ConstructName != "myloop" {
+					t.Errorf("Expected construct name 'myloop', got %q", exit.ConstructName)
+				}
+			},
+		},
+		{
+			name: "EXIT without construct name (backward compatibility)",
+			src:  "EXIT",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				exit, ok := stmt.(*ast.ExitStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ExitStmt, got %T", stmt)
+				}
+				if exit.ConstructName != "" {
+					t.Errorf("Expected empty construct name, got %q", exit.ConstructName)
+				}
+			},
+		},
+
+		// ===== Labeled READ Statements with END= =====
+		{
+			name: "Labeled READ with END= specifier from valid_gdyn.f90",
+			src:  "10 READ(50,5000,END=900) CARD",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				readStmt, ok := stmt.(*ast.ReadStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ReadStmt, got %T", stmt)
+				}
+				if readStmt.Label != "10" {
+					t.Errorf("Expected statement label '10', got %q", readStmt.Label)
+				}
+				if readStmt.Unit == nil {
+					t.Error("Expected non-nil Unit")
+				}
+				if len(readStmt.InputList) == 0 {
+					t.Error("Expected at least one input item")
+				}
+			},
+		},
+		{
+			name: "Labeled READ with multiple I/O specs including END=",
+			src:  "20 READ(14,81200,IOSTAT=IOS,END=60000) X, Y",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				readStmt, ok := stmt.(*ast.ReadStmt)
+				if !ok {
+					t.Fatalf("Expected *ast.ReadStmt, got %T", stmt)
+				}
+				if readStmt.Label != "20" {
+					t.Errorf("Expected statement label '20', got %q", readStmt.Label)
+				}
+				if len(readStmt.InputList) != 2 {
+					t.Errorf("Expected 2 input items, got %d", len(readStmt.InputList))
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

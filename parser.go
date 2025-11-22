@@ -2246,19 +2246,36 @@ func (p *Parser90) parseReturnStmt() ast.Statement {
 }
 
 // parseCycleStmt parses a CYCLE statement
+// Syntax: CYCLE [construct-name]
 func (p *Parser90) parseCycleStmt() ast.Statement {
 	start := p.current.start
 	stmt := &ast.CycleStmt{}
 	p.expect(token.CYCLE, "") // consume CYCLE
+
+	// Check for optional construct name
+	// TODO: this should likely be parsed in parseExecStmt like for other constructs. Consider token.Token.CanHaveConstructLabel()
+	if p.currentTokenIs(token.Identifier) {
+		stmt.ConstructName = string(p.current.lit)
+		p.nextToken()
+	}
+
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
 }
 
 // parseExitStmt parses an EXIT statement
+// Syntax: EXIT [construct-name]
 func (p *Parser90) parseExitStmt() ast.Statement {
 	start := p.current.start
 	stmt := &ast.ExitStmt{}
 	p.expect(token.EXIT, "") // consume EXIT
+
+	// Check for optional construct name
+	if p.currentTokenIs(token.Identifier) {
+		stmt.ConstructName = string(p.current.lit)
+		p.nextToken()
+	}
+
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
 }
@@ -2308,6 +2325,10 @@ func (p *Parser90) parseAssignmentStmt() ast.Statement {
 // isExecutableStatement returns true if current token starts an executable statement
 func (p *Parser90) isExecutableStatement() bool {
 	if p.current.tok.IsExecutableStatement() {
+		return true
+	} else if p.current.tok == token.IntLit && !p.peek.tok.IsEnd() {
+		// Statement label followed by executable statement (e.g., "10 READ(...)")
+		// But not label followed by END (e.g., "100 END PROGRAM")
 		return true
 	} else if p.current.tok == token.Identifier {
 		// Could be assignment or procedure call. We need to lookahead to distinguish.

@@ -1316,7 +1316,8 @@ func (rs *ReturnStmt) AppendString(dst []byte) []byte {
 //	  sum = sum + arr(i)
 //	END DO
 type CycleStmt struct {
-	Label string
+	Label         string // Statement label (e.g., "10" in "10 CYCLE")
+	ConstructName string // Loop construct name to cycle (e.g., "loop1" in "CYCLE loop1")
 	Position
 }
 
@@ -1345,7 +1346,8 @@ func (cs *CycleStmt) AppendString(dst []byte) []byte {
 //	  CALL search(arr(i), found)
 //	END DO
 type ExitStmt struct {
-	Label string
+	Label         string // Statement label (e.g., "10" in "10 EXIT")
+	ConstructName string // Loop construct name to exit (e.g., "loop1" in "EXIT loop1")
 	Position
 }
 
