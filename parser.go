@@ -609,8 +609,7 @@ func (p *Parser90) isLikelyAssignment() bool {
 	}
 	// By now we have a identifier followed by left parentheses.
 	// Check the identifier is not a keyword that may have parentheses in usage.
-	// Exception: POINTER is commonly used as a variable name in legacy Fortran.
-	if maybeIdent.IsConstructAdmitsParens() && maybeIdent != token.POINTER {
+	if maybeIdent.IsConstructAdmitsParens() {
 		return false
 	}
 	// Give up trying to prove it is not a assignment, we can be pretty sure it is by now.
@@ -640,6 +639,10 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 	// Check for GOTO first (handles both "GO TO" and "GOTO" and computed goto patterns)
 	if ngotoToks := p.currentIsGOTO(); ngotoToks > 0 {
 		stmt = p.parseGotoStmt()
+	} else if p.current.tok == token.POINTER && p.peek.tok == token.LParen {
+		// Special case: POINTER used as a variable name in legacy Fortran (e.g., pointer(m) = k)
+		// In executable section, POINTER(...) is an assignment, not a specification statement
+		stmt = p.parseAssignmentStmt()
 	} else if p.isLikelyAssignment() {
 		// Check if this looks like an assignment to a keyword used as identifier
 		// Handles both simple (RESULT=1) and array assignments (RESULT(N)=1)

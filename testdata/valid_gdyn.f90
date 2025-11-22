@@ -1,6 +1,12 @@
 PROGRAM GDYN2E
 ! &
-! 
+!
+      INTEGER ::  MAXDM1 =   6000000
+      INTEGER :: ISTATAA
+      use antphc_module
+      POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1))
+      COMMON/TRQANG/DTQDAN(3,3,2)
+      INCLUDE 'COMMON_DECL.inc'
       COMMON/APHASE/NANT_sat
       DOUBLEPRECISION          :: DEFALT
       IF(LNORMP) CALL TITLE(IOUT15)

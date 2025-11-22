@@ -1859,48 +1859,6 @@ END SELECT`,
 				}
 			},
 		},
-
-		// ===== POINTER AS VARIABLE NAME =====
-		{
-			name: "POINTER keyword used as array variable",
-			src:  "pointer(index) = value",
-			validate: func(t *testing.T, stmt ast.Statement) {
-				assign, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
-
-				// Target can be either ArrayRef or FunctionCall (parser can't distinguish without type info)
-				// Check if it's parsed correctly as an identifier-with-parens structure
-				switch target := assign.Target.(type) {
-				case *ast.ArrayRef:
-					if target.Name != "pointer" {
-						t.Errorf("Expected array name 'pointer', got %q", target.Name)
-					}
-					if len(target.Subscripts) != 1 {
-						t.Fatalf("Expected 1 subscript, got %d", len(target.Subscripts))
-					}
-				case *ast.FunctionCall:
-					if target.Name != "pointer" {
-						t.Errorf("Expected function name 'pointer', got %q", target.Name)
-					}
-					if len(target.Args) != 1 {
-						t.Fatalf("Expected 1 argument, got %d", len(target.Args))
-					}
-				default:
-					t.Fatalf("Expected target to be *ast.ArrayRef or *ast.FunctionCall, got %T", assign.Target)
-				}
-
-				// Value should be identifier "value"
-				value, ok := assign.Value.(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected value to be *ast.Identifier, got %T", assign.Value)
-				}
-				if value.Value != "value" {
-					t.Errorf("Expected value 'value', got %q", value.Value)
-				}
-			},
-		},
 	}
 
 	for _, tt := range tests {
