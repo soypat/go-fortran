@@ -2520,3 +2520,106 @@ END SELECT`,
 		})
 	}
 }
+
+// TestParameterNameEdgeCases tests that keywords like END and DATA can be used as parameter names
+func TestParameterNameEdgeCases(t *testing.T) {
+	tests := []struct {
+		name          string
+		src           string
+		validateParam func(*testing.T, []ast.Parameter)
+	}{
+		{
+			name: "END as parameter name in subroutine",
+			src: `SUBROUTINE TOBNRY(IN,HDATAS,END,INTYPE,IDAT,MWORDS)
+   X = 1
+END SUBROUTINE`,
+			validateParam: func(t *testing.T, params []ast.Parameter) {
+				if len(params) != 6 {
+					t.Errorf("Expected 6 parameters, got %d", len(params))
+				}
+				// Check that END is the third parameter
+				if len(params) >= 3 && params[2].Name != "END" {
+					t.Errorf("Expected third parameter to be 'END', got '%s'", params[2].Name)
+				}
+			},
+		},
+		{
+			name: "DATA as parameter name in subroutine",
+			src: `SUBROUTINE EXAMPLE(IN,DATA,OUT)
+   X = 1
+END SUBROUTINE`,
+			validateParam: func(t *testing.T, params []ast.Parameter) {
+				if len(params) != 3 {
+					t.Errorf("Expected 3 parameters, got %d", len(params))
+				}
+				// Check that DATA is the second parameter
+				if len(params) >= 2 && params[1].Name != "DATA" {
+					t.Errorf("Expected second parameter to be 'DATA', got '%s'", params[1].Name)
+				}
+			},
+		},
+		{
+			name: "Both END and DATA as parameter names",
+			src: `SUBROUTINE TESTFUNC(START,END,DATA,RESULT)
+   X = 1
+END SUBROUTINE`,
+			validateParam: func(t *testing.T, params []ast.Parameter) {
+				if len(params) != 4 {
+					t.Errorf("Expected 4 parameters, got %d", len(params))
+				}
+				// Check parameter names
+				expectedNames := []string{"START", "END", "DATA", "RESULT"}
+				for i, expected := range expectedNames {
+					if i < len(params) && params[i].Name != expected {
+						t.Errorf("Expected parameter %d to be '%s', got '%s'", i, expected, params[i].Name)
+					}
+				}
+			},
+		},
+		{
+			name: "END as parameter in function",
+			src: `FUNCTION CALCULATE(BEGIN,END) RESULT(VALUE)
+   VALUE = 1
+END FUNCTION`,
+			validateParam: func(t *testing.T, params []ast.Parameter) {
+				if len(params) != 2 {
+					t.Errorf("Expected 2 parameters, got %d", len(params))
+				}
+				// Check that END is the second parameter
+				if len(params) >= 2 && params[1].Name != "END" {
+					t.Errorf("Expected second parameter to be 'END', got '%s'", params[1].Name)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var parser Parser90
+			err := parser.Reset(tt.name+".f90", strings.NewReader(tt.src))
+			if err != nil {
+				t.Fatalf("Reset failed: %v", err)
+			}
+
+			unit := parser.ParseNextProgramUnit()
+			if unit == nil {
+				t.Fatal("ParseNextProgramUnit returned nil")
+			}
+
+			helperFatalErrors(t, &parser, "source:\n"+tt.src)
+
+			// Extract parameters based on unit type
+			var params []ast.Parameter
+			switch u := unit.(type) {
+			case *ast.Subroutine:
+				params = u.Parameters
+			case *ast.Function:
+				params = u.Parameters
+			default:
+				t.Fatalf("Expected Subroutine or Function, got %T", unit)
+			}
+
+			tt.validateParam(t, params)
+		})
+	}
+}
