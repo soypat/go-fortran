@@ -149,4 +149,5 @@ PROGRAM GDYN2S
          GO TO 60000
       ENDIF
       II1(JNREXC+IEXCG-1) = &                       ! jjm
+     &                      42
 END PROGRAM

@@ -565,13 +565,30 @@ func (l *Lexer90) readChar() {
 	}
 	l.readCharLL()
 
-	// Handle Fortran 90 line continuation: '&' followed by '\n'
+	// Handle Fortran 90 line continuation: '&' at end of line
+	// The '&' can be followed by whitespace and/or a comment before the newline
 	// The continuation, along with any surrounding whitespace and optional '&'
 	// on the next line, is consumed transparently.
-	for l.err == nil && l.ch == '&' && l.peek == '\n' {
-		// Consume continuation line commence string "&\n"
+	for l.err == nil && l.ch == '&' && l.isContinuationChar() {
+		// Consume the '&'
 		l.readCharLL()
-		l.readCharLL()
+
+		// Skip trailing whitespace after '&'
+		for l.err == nil && (l.ch == ' ' || l.ch == '\t') {
+			l.readCharLL()
+		}
+
+		// Skip trailing comment if present
+		if l.ch == '!' {
+			for l.err == nil && l.ch != '\n' && l.ch != 0 {
+				l.readCharLL()
+			}
+		}
+
+		// Now we should be at newline - consume it
+		if l.ch == '\n' {
+			l.readCharLL()
+		}
 
 		// Skip any comment lines between continuations
 		// In Fortran, comment lines can appear between continuation lines
@@ -597,6 +614,43 @@ func (l *Lexer90) readChar() {
 	}
 }
 
+// isContinuationChar checks if the current '&' is a continuation character.
+// It returns true if '&' is followed by only whitespace and/or a comment before newline.
+// This does NOT consume any characters.
+func (l *Lexer90) isContinuationChar() bool {
+	if l.ch != '&' {
+		return false
+	}
+
+	// Look ahead to see if there's only whitespace and/or comment before newline
+	i := 1
+	for {
+		ch := l.peekAhead(i)
+		if ch == 0 {
+			return false // EOF
+		}
+		if ch == '\n' {
+			return true // Found newline after whitespace/comment
+		}
+		if ch == ' ' || ch == '\t' {
+			i++
+			continue // Skip whitespace
+		}
+		if ch == '!' {
+			// Comment found - skip to end of line
+			for {
+				i++
+				ch = l.peekAhead(i)
+				if ch == '\n' || ch == 0 {
+					return ch == '\n' // True if we found newline, false if EOF
+				}
+			}
+		}
+		// Found non-whitespace, non-comment character - not a continuation
+		return false
+	}
+}
+
 func (l *Lexer90) peekChar() rune {
 	return l.peek
 }
@@ -615,6 +669,25 @@ func (l *Lexer90) peek2Char() rune {
 	// For full UTF-8 support we'd need to decode, but for our use case (checking for digits/+/-)
 	// ASCII is sufficient
 	return rune(bytes[0])
+}
+
+// peekAhead looks n characters ahead without consuming. Returns 0 if not available.
+// n=1 looks at l.peek, n=2 looks at the character after l.peek, etc.
+func (l *Lexer90) peekAhead(n int) rune {
+	if n <= 0 {
+		return l.ch
+	}
+	if n == 1 {
+		return l.peek
+	}
+	// Look ahead n-1 characters (since l.peek is already 1 ahead)
+	bytes, err := l.input.Peek(n - 1)
+	if err != nil || len(bytes) < n-1 {
+		return 0
+	}
+	// Return the character at position n-2 (0-indexed in the bytes slice)
+	// For simplicity, assuming ASCII for continuation checks (whitespace, !, \n)
+	return rune(bytes[n-2])
 }
 
 // readCharLL reads the next character at the lowest level without any processing.

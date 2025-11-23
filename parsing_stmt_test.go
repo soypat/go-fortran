@@ -2461,6 +2461,28 @@ END SELECT`,
 				}
 			},
 		},
+		{
+			name: "Assignment with continuation and trailing comment",
+			src: `II1(JNREXC+IEXCG-1) = &                       ! jjm
+     &                      42`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected AssignmentStmt, got %T", stmt)
+				}
+				// Check that target is array reference or function call (same syntax in Fortran)
+				switch assign.Target.(type) {
+				case *ast.ArrayRef, *ast.FunctionCall:
+					// OK - both are valid representations
+				default:
+					t.Errorf("Expected target to be ArrayRef or FunctionCall, got %T", assign.Target)
+				}
+				// Check that value is parsed (continuation worked)
+				if assign.Value == nil {
+					t.Errorf("Expected value to be non-nil (continuation should have been processed)")
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
