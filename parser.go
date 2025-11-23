@@ -3164,7 +3164,8 @@ func (p *Parser90) tryParseImpliedDoLoop(startPos int, firstExpr ast.Expression)
 		p.nextToken() // consume comma
 
 		// Check if this is the loop control part: identifier =
-		if p.currentTokenIs(token.Identifier) && p.peekTokenIs(token.Equals) {
+		// Accept any token that can be used as identifier (includes keywords used as variables)
+		if p.canUseAsIdentifier() && p.peekTokenIs(token.Equals) {
 			// Found the loop variable
 			loopVar := string(p.current.lit)
 			p.nextToken() // consume identifier
