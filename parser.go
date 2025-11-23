@@ -1020,8 +1020,10 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 	}
 
 	// Parse I/O list (comma-separated expressions)
+	// Note: Use loopUntil instead of loopUntilEndElseOr because END can be a variable name
+	// in the output list (e.g., WRITE(1,100) s,END,t)
 	var ioList []ast.Expression
-	for p.loopUntilEndElseOr(token.NewLine) {
+	for p.loopUntil(token.NewLine) {
 		if expr := p.parseExpression(0); expr != nil {
 			ioList = append(ioList, expr)
 		}
@@ -1778,7 +1780,12 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 	p.skipNewlinesAndComments()
 
 	// THEN block parsing.
-	for p.loopUntil(token.ELSE, token.ELSEIF, token.END, token.ENDIF) {
+	for p.loopUntil(token.ELSE, token.ELSEIF, token.ENDIF) {
+		// Stop if we see END not followed by = (this is the end of the IF block)
+		// Allow END = to be parsed as an assignment statement
+		if p.currentTokenIs(token.END) && !p.peekTokenIs(token.Equals) {
+			break
+		}
 		if s := p.parseExecutableStatement(); s != nil {
 			stmt.ThenPart = append(stmt.ThenPart, s)
 		} else {
@@ -1804,7 +1811,12 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 		// Parse ELSE IF block
 		p.expect(token.THEN, "after ELSE IF") // This is required in fortran, no inline ELSE IF.
 		p.skipNewlinesAndComments()
-		for p.loopUntil(token.ELSE, token.END, token.ENDIF, token.ELSEIF) {
+		for p.loopUntil(token.ELSE, token.ENDIF, token.ELSEIF) {
+			// Stop if we see END not followed by = (this is the end of the IF block)
+			// Allow END = to be parsed as an assignment statement
+			if p.currentTokenIs(token.END) && !p.peekTokenIs(token.Equals) {
+				break
+			}
 			if s := p.parseExecutableStatement(); s != nil {
 				clause.ThenPart = append(clause.ThenPart, s)
 			} else {
@@ -1820,7 +1832,12 @@ func (p *Parser90) parseIfStmt() ast.Statement {
 	// Parse ELSE part
 	if p.consumeIf(token.ELSE) {
 		p.skipNewlinesAndComments()
-		for p.loopUntil(token.END, token.ENDIF) {
+		for p.loopUntil(token.ENDIF) {
+			// Stop if we see END not followed by = (this is the end of the IF block)
+			// Allow END = to be parsed as an assignment statement
+			if p.currentTokenIs(token.END) && !p.peekTokenIs(token.Equals) {
+				break
+			}
 			if s := p.parseExecutableStatement(); s != nil {
 				stmt.ElsePart = append(stmt.ElsePart, s)
 			} else {

@@ -126,4 +126,27 @@ END !
 
 PROGRAM GDYN2S
          WRITE(1,1) s,END,t
+         IF(CARD(1:4).EQ.'DATA'.OR.CARD(1:6).EQ.'ENDARC') THEN
+         DO 40 I=1,80
+         CARD(I:I)=' '
+   40    CONTINUE
+         CARD(1:6)='ORBTVU'
+         CALL MJDYMD(IET,IYE,IHE,4)
+         ITS=IET-10
+         CALL MJDYMD(ITS,IYS,IHS,4)
+         START=1000000.D0*DBLE(IYS)+DBLE(IHS)
+         END=1000000.D0*DBLE(IYE)+DBLE(IHE)
+         TINC=10.D0
+         WRITE(CARD(28:68),70004) START,END,TINC
+         NREC50=NREC50+1
+         WRITE(IUNT50,70000) CARD
+         DO 30 I=1,80
+         CARD(I:I)=' '
+   30    CONTINUE
+         CARD(1:6)='ENDARC'
+         NREC50=NREC50+1
+         WRITE(IUNT50,70000) CARD
+         GO TO 60000
+      ENDIF
+      II1(JNREXC+IEXCG-1) = &                       ! jjm
 END PROGRAM

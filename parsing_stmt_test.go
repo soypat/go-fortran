@@ -2398,6 +2398,69 @@ END SELECT`,
 				}
 			},
 		},
+		{
+			name: "WRITE with END as variable in output list",
+			src:  "WRITE(1,100) s,END,t",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				writeStmt, ok := stmt.(*ast.WriteStmt)
+				if !ok {
+					t.Fatalf("Expected WriteStmt, got %T", stmt)
+				}
+				// Should have 3 output items: s, END, t
+				if len(writeStmt.OutputList) != 3 {
+					t.Errorf("Expected 3 output items, got %d", len(writeStmt.OutputList))
+				}
+				// Check that second item is identifier named "END"
+				if len(writeStmt.OutputList) >= 2 {
+					endVar, ok := writeStmt.OutputList[1].(*ast.Identifier)
+					if !ok {
+						t.Errorf("Expected second output item to be Identifier, got %T", writeStmt.OutputList[1])
+					} else if endVar.Value != "END" {
+						t.Errorf("Expected identifier 'END', got '%s'", endVar.Value)
+					}
+				}
+			},
+		},
+		{
+			name: "END as variable in assignment",
+			src:  "END = DPSR(JPOLE)+DELTA",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected AssignmentStmt, got %T", stmt)
+				}
+				endVar, ok := assign.Target.(*ast.Identifier)
+				if !ok {
+					t.Errorf("Expected target to be Identifier, got %T", assign.Target)
+				} else if endVar.Value != "END" {
+					t.Errorf("Expected target 'END', got '%s'", endVar.Value)
+				}
+			},
+		},
+		{
+			name: "DATA keyword as array name in assignment",
+			src:  "accX1 = data(i,j)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected AssignmentStmt, got %T", stmt)
+				}
+				// Check target is accX1
+				target, ok := assign.Target.(*ast.Identifier)
+				if !ok {
+					t.Errorf("Expected target to be Identifier, got %T", assign.Target)
+				} else if target.Value != "accX1" {
+					t.Errorf("Expected target 'accX1', got '%s'", target.Value)
+				}
+				// Check value is data(i,j) - a function call
+				funcCall, ok := assign.Value.(*ast.FunctionCall)
+				if !ok {
+					t.Errorf("Expected value to be FunctionCall, got %T", assign.Value)
+				} else if funcCall.Name != "data" {
+					t.Errorf("Expected function 'data', got '%s'", funcCall.Name)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
