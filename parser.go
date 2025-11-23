@@ -1735,73 +1735,6 @@ func (p *Parser90) parseDeallocateStmt() ast.Statement {
 	return stmt
 }
 
-// parseInquireStmt parses an INQUIRE statement
-// Precondition: current token is INQUIRE
-// Syntax: INQUIRE(specifier-list)
-// Postcondition: current token is the first token after the INQUIRE statement
-func (p *Parser90) parseInquireStmt() ast.Statement {
-	start := p.current.start
-	p.expect(token.INQUIRE, "")
-
-	if !p.expect(token.LParen, "in INQUIRE statement") {
-		return nil
-	}
-
-	stmt := &ast.InquireStmt{
-		Specifiers: make(map[string]ast.Expression),
-		Position:   ast.Pos(start, p.current.start),
-	}
-
-	// Track if we've seen the first positional argument (which would be UNIT)
-	isFirstArg := true
-
-	// Parse comma-separated specifier list
-	for !p.currentTokenIs(token.RParen) && !p.IsDone() && !p.current.tok.IsEnd() {
-		spec := p.parseExpression(0)
-		if spec == nil {
-			break
-		}
-
-		// Check if this is a keyword=value pattern
-		if p.currentTokenIs(token.Equals) {
-			var keyword string
-			if ident, ok := spec.(*ast.Identifier); ok {
-				keyword = strings.ToUpper(ident.Value)
-			} else {
-				p.addError("expected identifier before = in INQUIRE specifier")
-				if !p.consumeIf(token.Comma) {
-					break
-				}
-				continue
-			}
-
-			p.nextToken() // consume =
-			value := p.parseExpression(0)
-			if value != nil {
-				stmt.Specifiers[keyword] = value
-			}
-			isFirstArg = false
-		} else if isFirstArg {
-			// First positional argument is UNIT
-			stmt.Specifiers["UNIT"] = spec
-			isFirstArg = false
-		} else {
-			p.addError("unexpected expression in INQUIRE statement (expected keyword=value)")
-		}
-
-		if !p.consumeIf(token.Comma) {
-			break
-		}
-	}
-
-	if !p.expect(token.RParen, "closing INQUIRE statement") {
-		return nil
-	}
-
-	stmt.Position = ast.Pos(start, p.current.start)
-	return stmt
-}
-
 // parseIfStmt parses an IF construct
 // Precondition: current token is IF
 func (p *Parser90) parseIfStmt() ast.Statement {
@@ -2491,133 +2424,6 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 		p.nextToken()
 	}
 
-	stmt.Position = ast.Pos(start, p.current.start)
-	return stmt
-}
-
-// parseInterfaceStmt parses an INTERFACE...END INTERFACE block
-func (p *Parser90) parseInterfaceStmt() ast.Statement {
-	start := p.sourcePos()
-	stmt := &ast.InterfaceStmt{}
-	p.nextToken() // consume INTERFACE
-
-	if p.canUseAsIdentifier() {
-		stmt.Name = string(p.current.lit)
-		p.nextToken()
-	}
-	p.skipNewlinesAndComments()
-
-	// Parse interface body
-	for p.loopUntil(token.END) {
-		if p.peekTokenIs(token.INTERFACE) && p.currentTokenIs(token.END) {
-			break
-		}
-		// The body of an interface block can contain procedure headings
-		// (subroutines and functions). We can reuse the top-level parsers for this.
-		if unit := p.parseTopLevelUnit(); unit != nil {
-			stmt.Body = append(stmt.Body, unit)
-		} else {
-			p.skipToNextStatement()
-		}
-		p.skipNewlinesAndComments()
-	}
-
-	// Expect END INTERFACE [name]
-	p.expectEndConstruct(token.INTERFACE, token.ENDINTERFACE, start)
-	p.consumeIf(token.Identifier) // optional interface name
-	stmt.Position = ast.Pos(start.Pos, p.current.start)
-	return stmt
-}
-
-// parseComponentDecl parses a component declaration within a derived type
-func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
-	start := p.current.start
-	stmt := &ast.ComponentDecl{}
-	if !p.current.tok.IsTypeDeclaration() && p.current.tok != token.TYPE {
-		p.addError("expected type specifier for component declaration")
-		return nil
-	}
-	stmt.Type = p.current.tok.String()
-	p.nextToken()
-
-	// Handle DOUBLE PRECISION (two tokens) or DOUBLEPRECISION (one token)
-	if stmt.Type == "DOUBLE" && p.currentTokenIs(token.PRECISION) {
-		stmt.Type = "DOUBLE PRECISION"
-		p.nextToken()
-	} else if stmt.Type == "DOUBLEPRECISION" {
-		stmt.Type = "DOUBLE PRECISION" // Normalize to canonical form
-	}
-
-	// Handle CHARACTER length specification
-	if stmt.Type == "CHARACTER" {
-		if p.currentTokenIs(token.LParen) {
-			stmt.Type += p.parseCharacterLength()
-		} else if p.currentTokenIs(token.Asterisk) {
-			p.nextToken() // consume *
-			if p.currentTokenIs(token.IntLit) || p.canUseAsIdentifier() {
-				stmt.Type += "*" + string(p.current.lit)
-				p.nextToken()
-			}
-		}
-	}
-
-	// Handle TYPE(typename) for derived types
-	if stmt.Type == "TYPE" && p.currentTokenIs(token.LParen) {
-		// Skip (typename)
-		depth := 1
-		p.nextToken()
-		for depth > 0 && !p.IsDone() {
-			if p.currentTokenIs(token.LParen) {
-				depth++
-			} else if p.currentTokenIs(token.RParen) {
-				depth--
-			}
-			p.nextToken()
-		}
-	}
-
-	// Parse attributes
-	if p.currentTokenIs(token.Comma) { // TODO remove this if statement?
-		for p.loopWhile(token.Comma) {
-			p.nextToken()
-			if p.current.tok.IsAttribute() {
-				stmt.Attributes = append(stmt.Attributes, p.current.tok)
-				p.nextToken()
-			}
-		}
-	}
-
-	if p.currentTokenIs(token.DoubleColon) {
-		p.nextToken()
-	}
-
-	// Parse component list
-	for p.canUseAsIdentifier() {
-		entityName := string(p.current.lit)
-		entity := ast.DeclEntity{Name: entityName}
-		p.nextToken()
-
-		// Check for array declarator
-		if p.currentTokenIs(token.LParen) {
-			entity.ArraySpec = p.parseArraySpec()
-		}
-
-		// Parse initialization expression
-		if p.currentTokenIs(token.Equals) || p.currentTokenIs(token.PointerAssign) {
-			p.nextToken() // consume = or =>
-			// For now, just consume the expression, stop at construct endings
-			for p.loopUntilEndElseOr(token.Comma, token.NewLine) {
-				p.nextToken()
-			}
-		}
-
-		stmt.Components = append(stmt.Components, entity)
-
-		if !p.currentTokenIs(token.Comma) {
-			break
-		}
-		p.nextToken()
-	}
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
 }
@@ -3535,7 +3341,7 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 	}
 
 	// Handle identifiers, function calls, and array references
-	if p.canUseAsIdentifier() {
+	if p.current.tok.IsKeyword() || p.current.tok.IsAttribute() || p.canUseAsIdentifier() {
 		name := string(p.current.lit)
 		endPos := p.current.start + len(p.current.lit)
 		p.nextToken()
