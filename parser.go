@@ -483,8 +483,21 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 		if p.currentTokenIs(token.Asterisk) {
 			paramName = "*"
 			p.nextToken()
-		} else if p.currentTokenIs(token.Identifier) || len(p.current.lit) > 0 {
-			paramName = string(p.current.lit)
+
+		} else if p.currentTokenIs(token.END) || p.currentTokenIs(token.DATA) {
+			// TODO: figure out way to not have this special case.
+			// Special case: END and DATA can be used as parameter names
+			// even though they're excluded from canUseAsIdentifier()
+			paramName = p.current.tok.String()
+			p.nextToken()
+		} else if p.canUseAsIdentifier() {
+			// Accept any token that can be used as an identifier (includes keywords)
+			// For keywords, use token.String(); for identifiers, use the literal
+			if len(p.current.lit) > 0 {
+				paramName = string(p.current.lit)
+			} else {
+				paramName = p.current.tok.String()
+			}
 			p.nextToken()
 		} else {
 			return ast.Parameter{}, fmt.Errorf("expected parameter name")
@@ -495,10 +508,21 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 		return ast.Parameter{Name: paramName}, nil
 	}
 
-	var err error
-	params, err = parseCommaSeparatedList(p, token.RParen, parseOneParam)
-	if err != nil {
-		p.addError(err.Error())
+	// Parse comma-separated parameters manually to avoid loopUntilEndElseOr
+	// which would stop on END token (which can be a valid parameter name)
+	for p.loopUntil(token.RParen) {
+		param, err := parseOneParam()
+		if err != nil {
+			p.addError(err.Error())
+			break
+		}
+		params = append(params, param)
+		if p.currentTokenIs(token.Comma) {
+			p.nextToken()
+		} else if !p.currentTokenIs(token.RParen) {
+			p.addError("expected ',' or ')' in parameter list")
+			break
+		}
 	}
 
 	p.expect(token.RParen, "closing parameter list")
