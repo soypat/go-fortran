@@ -2483,6 +2483,166 @@ END SELECT`,
 				}
 			},
 		},
+		{
+			name: "Continuation with only trailing whitespace",
+			src: `x = 1 + &
+       & 2`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected AssignmentStmt, got %T", stmt)
+				}
+				if assign.Value == nil {
+					t.Errorf("Expected value to be parsed after continuation")
+				}
+			},
+		},
+		{
+			name: "Multiple continuations with comments",
+			src: `x = 1 + & ! first
+       & 2 + & ! second
+       & 3`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign, ok := stmt.(*ast.AssignmentStmt)
+				if !ok {
+					t.Fatalf("Expected AssignmentStmt, got %T", stmt)
+				}
+				if assign.Value == nil {
+					t.Errorf("Expected value to be parsed after multiple continuations")
+				}
+			},
+		},
+		{
+			name: "Continuation in WRITE with string concatenation",
+			src: `WRITE(*,*) 'A very long string that needs to be ' // &
+              & 'continued on the next line'`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				write, ok := stmt.(*ast.WriteStmt)
+				if !ok {
+					t.Fatalf("Expected WriteStmt, got %T", stmt)
+				}
+				if len(write.OutputList) == 0 {
+					t.Errorf("Expected output list to be parsed")
+				}
+			},
+		},
+		{
+			name: "Continuation in CALL statement",
+			src: `CALL SUBROUTINE_NAME(ARG1, ARG2, &
+                        & ARG3, ARG4)`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				call, ok := stmt.(*ast.CallStmt)
+				if !ok {
+					t.Fatalf("Expected CallStmt, got %T", stmt)
+				}
+				if len(call.Args) != 4 {
+					t.Errorf("Expected 4 arguments, got %d", len(call.Args))
+				}
+			},
+		},
+		{
+			name: "END variable inside IF block",
+			src: `IF(x.EQ.1) THEN
+      START = 100.0
+      END = 200.0
+   ENDIF`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ifStmt, ok := stmt.(*ast.IfStmt)
+				if !ok {
+					t.Fatalf("Expected IfStmt, got %T", stmt)
+				}
+				if len(ifStmt.ThenPart) != 2 {
+					t.Errorf("Expected 2 statements in THEN part, got %d", len(ifStmt.ThenPart))
+				}
+				// Check that second statement is END assignment
+				if len(ifStmt.ThenPart) >= 2 {
+					assign, ok := ifStmt.ThenPart[1].(*ast.AssignmentStmt)
+					if !ok {
+						t.Errorf("Expected second statement to be AssignmentStmt, got %T", ifStmt.ThenPart[1])
+					} else {
+						target, ok := assign.Target.(*ast.Identifier)
+						if ok && target.Value != "END" {
+							t.Errorf("Expected target to be 'END', got '%s'", target.Value)
+						}
+					}
+				}
+			},
+		},
+		{
+			name: "END variable in nested IF blocks",
+			src: `IF(a.EQ.1) THEN
+      IF(b.EQ.2) THEN
+         END = a + b
+      ENDIF
+   ENDIF`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ifStmt, ok := stmt.(*ast.IfStmt)
+				if !ok {
+					t.Fatalf("Expected IfStmt, got %T", stmt)
+				}
+				// Check outer IF has nested IF
+				if len(ifStmt.ThenPart) != 1 {
+					t.Errorf("Expected 1 statement in outer THEN part, got %d", len(ifStmt.ThenPart))
+				}
+				// Verify inner IF exists
+				if len(ifStmt.ThenPart) > 0 {
+					_, ok := ifStmt.ThenPart[0].(*ast.IfStmt)
+					if !ok {
+						t.Errorf("Expected nested IfStmt, got %T", ifStmt.ThenPart[0])
+					}
+				}
+			},
+		},
+		{
+			name: "Implied DO with IN as loop variable",
+			src:  "WRITE(6,100) (A(IN),IN=1,10)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				write, ok := stmt.(*ast.WriteStmt)
+				if !ok {
+					t.Fatalf("Expected WriteStmt, got %T", stmt)
+				}
+				if len(write.OutputList) == 0 {
+					t.Errorf("Expected non-empty output list")
+				}
+				// Check for implied DO loop in output
+				foundImpliedDO := false
+				for _, item := range write.OutputList {
+					if _, ok := item.(*ast.ImpliedDoLoop); ok {
+						foundImpliedDO = true
+						break
+					}
+				}
+				if !foundImpliedDO {
+					t.Errorf("Expected implied DO loop in output list")
+				}
+			},
+		},
+		{
+			name: "Implied DO with OUT as loop variable",
+			src:  "WRITE(6,100) (B(OUT),OUT=1,5)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				write, ok := stmt.(*ast.WriteStmt)
+				if !ok {
+					t.Fatalf("Expected WriteStmt, got %T", stmt)
+				}
+				if len(write.OutputList) == 0 {
+					t.Errorf("Expected non-empty output list")
+				}
+			},
+		},
+		{
+			name: "Nested implied DO with keyword loop variable",
+			src:  "WRITE(6,100) I,(ARRAY(I3),I3=1,3)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				write, ok := stmt.(*ast.WriteStmt)
+				if !ok {
+					t.Fatalf("Expected WriteStmt, got %T", stmt)
+				}
+				if len(write.OutputList) < 2 {
+					t.Errorf("Expected at least 2 items in output list, got %d", len(write.OutputList))
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
