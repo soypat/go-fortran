@@ -348,7 +348,7 @@ func (tok Token) CanBeUsedAsIdentifier() bool {
 	case DATA, ENDFILE:
 		// Type keywords and DATA start specification statements, not executable statements
 		return false
-	case PROGRAM, SUBROUTINE, FUNCTION, MODULE, END, CONTAINS:
+	case PROGRAM, SUBROUTINE, FUNCTION, MODULE, CONTAINS:
 		// Exclude structural keywords that would cause ambiguity
 		return false
 	default:
