@@ -733,10 +733,8 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			stmt = p.parseStopStmt()
 		case token.FORMAT:
 			stmt = p.parseFormatStmt()
-		case token.ALLOCATE:
-			stmt = p.parseAllocateStmt()
-		case token.DEALLOCATE:
-			stmt = p.parseDeallocateStmt()
+		case token.ALLOCATE, token.DEALLOCATE:
+			stmt = p.parseAllocateOrDeallocateStmt()
 		case token.DATA:
 			// DATA statement appearing in executable section (non-standard but handle gracefully)
 			stmt = p.parseDataStmt()
@@ -1655,24 +1653,30 @@ func (p *Parser90) parseFormatStmt() ast.Statement {
 	return stmt
 }
 
-// parseAllocateStmt parses an ALLOCATE statement
-// Precondition: current token is ALLOCATE
+// parseAllocateOrDeallocateStmt parses ALLOCATE or DEALLOCATE statements
+// Precondition: current token is ALLOCATE or DEALLOCATE
 // Syntax: ALLOCATE(allocation-list [, option-list])
-// Postcondition: current token is the first token after the ALLOCATE statement
-func (p *Parser90) parseAllocateStmt() ast.Statement {
+//
+//	DEALLOCATE(object-list [, option-list])
+//
+// Postcondition: current token is the first token after the statement
+func (p *Parser90) parseAllocateOrDeallocateStmt() ast.Statement {
 	start := p.current.start
-	p.expect(token.ALLOCATE, "")
-
-	if !p.expect(token.LParen, "in ALLOCATE statement") {
+	stmtName := p.current.tok.String()
+	isAllocate := p.consumeIf(token.ALLOCATE)
+	if !isAllocate && !p.consumeIf(token.DEALLOCATE) {
+		p.addError("expected ALLOCATE or DEALLOCATE")
 		return nil
 	}
 
-	stmt := &ast.AllocateStmt{
-		Options:  make(map[string]ast.Expression),
-		Position: ast.Pos(start, p.current.start),
+	if !p.expect(token.LParen, "in "+stmtName+" statement") {
+		return nil
 	}
 
-	// Parse comma-separated list of allocations and options
+	// Parse comma-separated list of objects and options
+	var objects []ast.Expression
+	options := make(map[string]ast.Expression)
+
 	for !p.currentTokenIs(token.RParen) && !p.IsDone() && !p.current.tok.IsEnd() {
 		expr := p.parseExpression(0)
 		if expr == nil {
@@ -1685,7 +1689,7 @@ func (p *Parser90) parseAllocateStmt() ast.Statement {
 			if ident, ok := expr.(*ast.Identifier); ok {
 				keyword = strings.ToUpper(ident.Value)
 			} else {
-				p.addError("expected identifier before = in ALLOCATE option")
+				p.addError("expected identifier before = in " + stmtName + " option")
 				if !p.consumeIf(token.Comma) {
 					break
 				}
@@ -1695,11 +1699,11 @@ func (p *Parser90) parseAllocateStmt() ast.Statement {
 			p.nextToken() // consume =
 			value := p.parseExpression(0)
 			if value != nil {
-				stmt.Options[keyword] = value
+				options[keyword] = value
 			}
 		} else {
-			// This is an allocation object
-			stmt.Objects = append(stmt.Objects, expr)
+			// This is an allocation/deallocation object
+			objects = append(objects, expr)
 		}
 
 		if !p.consumeIf(token.Comma) {
@@ -1707,72 +1711,26 @@ func (p *Parser90) parseAllocateStmt() ast.Statement {
 		}
 	}
 
-	if !p.expect(token.RParen, "closing ALLOCATE statement") {
+	if !p.expect(token.RParen, "closing "+stmtName+" statement") {
 		return nil
 	}
 
-	stmt.Position = ast.Pos(start, p.current.start)
-	return stmt
-}
+	pos := ast.Pos(start, p.current.start)
 
-// parseDeallocateStmt parses a DEALLOCATE statement
-// Precondition: current token is DEALLOCATE
-// Syntax: DEALLOCATE(object-list [, option-list])
-// Postcondition: current token is the first token after the DEALLOCATE statement
-func (p *Parser90) parseDeallocateStmt() ast.Statement {
-	start := p.current.start
-	p.expect(token.DEALLOCATE, "")
-
-	if !p.expect(token.LParen, "in DEALLOCATE statement") {
-		return nil
-	}
-
-	stmt := &ast.DeallocateStmt{
-		Options:  make(map[string]ast.Expression),
-		Position: ast.Pos(start, p.current.start),
-	}
-
-	// Parse comma-separated list of objects and options
-	for !p.currentTokenIs(token.RParen) && !p.IsDone() && !p.current.tok.IsEnd() {
-		expr := p.parseExpression(0)
-		if expr == nil {
-			break
+	// Build appropriate statement type
+	if isAllocate {
+		return &ast.AllocateStmt{
+			Objects:  objects,
+			Options:  options,
+			Position: pos,
 		}
-
-		// Check if this is a keyword=value option (STAT, ERRMSG)
-		if p.currentTokenIs(token.Equals) {
-			var keyword string
-			if ident, ok := expr.(*ast.Identifier); ok {
-				keyword = strings.ToUpper(ident.Value)
-			} else {
-				p.addError("expected identifier before = in DEALLOCATE option")
-				if !p.consumeIf(token.Comma) {
-					break
-				}
-				continue
-			}
-
-			p.nextToken() // consume =
-			value := p.parseExpression(0)
-			if value != nil {
-				stmt.Options[keyword] = value
-			}
-		} else {
-			// This is a deallocation object
-			stmt.Objects = append(stmt.Objects, expr)
-		}
-
-		if !p.consumeIf(token.Comma) {
-			break
+	} else {
+		return &ast.DeallocateStmt{
+			Objects:  objects,
+			Options:  options,
+			Position: pos,
 		}
 	}
-
-	if !p.expect(token.RParen, "closing DEALLOCATE statement") {
-		return nil
-	}
-
-	stmt.Position = ast.Pos(start, p.current.start)
-	return stmt
 }
 
 // parseIfStmt parses an IF construct
