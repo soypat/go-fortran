@@ -18,7 +18,6 @@ const (
 	FlagUsed
 	FlagPointer
 	FlagTarget
-	FlagIntrinsic
 )
 
 func (f Flags) HasAny(hasBits Flags) bool { return f&hasBits != 0 }
@@ -436,9 +435,7 @@ func NewModuleInfo(name string, scope *Scope) *ModuleInfo {
 type Intrinsic struct {
 	name       string
 	kind       IntrinsicKind
-	signature  string // Human-readable signature
 	returnType string // For functions
-	goMapping  string // Go equivalent (if exists)
 }
 
 // Name returns the intrinsic name
@@ -451,28 +448,17 @@ func (i *Intrinsic) Kind() IntrinsicKind {
 	return i.kind
 }
 
-// Signature returns the human-readable signature
-func (i *Intrinsic) Signature() string {
-	return i.signature
-}
-
 // ReturnType returns the return type for functions
 func (i *Intrinsic) ReturnType() string {
 	return i.returnType
 }
 
-// GoMapping returns the Go equivalent if it exists
-func (i *Intrinsic) GoMapping() string {
-	return i.goMapping
-}
-
 // NewIntrinsic creates a new intrinsic
-func NewIntrinsic(name, returnType, goMapping string, kind IntrinsicKind) *Intrinsic {
+func NewIntrinsic(name, returnType string, kind IntrinsicKind) *Intrinsic {
 	return &Intrinsic{
 		name:       name,
 		kind:       kind,
 		returnType: returnType,
-		goMapping:  goMapping,
 	}
 }
 
@@ -568,49 +554,49 @@ func loadIntrinsics() map[string]*Intrinsic {
 	intrinsics := make(map[string]*Intrinsic)
 
 	// Math functions
-	add := func(name, returnType, goMapping string) {
-		intrinsics[name] = NewIntrinsic(name, returnType, goMapping, IntrinsicFunction)
+	add := func(name, returnType string) {
+		intrinsics[name] = NewIntrinsic(name, returnType, IntrinsicFunction)
 	}
 
 	// Trigonometric
-	add("SIN", "REAL", "math.Sin")
-	add("COS", "REAL", "math.Cos")
-	add("TAN", "REAL", "math.Tan")
-	add("ASIN", "REAL", "math.Asin")
-	add("ACOS", "REAL", "math.Acos")
-	add("ATAN", "REAL", "math.Atan")
-	add("ATAN2", "REAL", "math.Atan2")
+	add("SIN", "REAL")
+	add("COS", "REAL")
+	add("TAN", "REAL")
+	add("ASIN", "REAL")
+	add("ACOS", "REAL")
+	add("ATAN", "REAL")
+	add("ATAN2", "REAL")
 
 	// Exponential and logarithmic
-	add("EXP", "REAL", "math.Exp")
-	add("LOG", "REAL", "math.Log")
-	add("LOG10", "REAL", "math.Log10")
-	add("SQRT", "REAL", "math.Sqrt")
+	add("EXP", "REAL")
+	add("LOG", "REAL")
+	add("LOG10", "REAL")
+	add("SQRT", "REAL")
 
 	// Type conversion
-	add("INT", "INTEGER", "int")
-	add("REAL", "REAL", "float64")
-	add("DBLE", "REAL", "float64")
-	add("CMPLX", "COMPLEX", "complex")
+	add("INT", "INTEGER")
+	add("REAL", "REAL")
+	add("DBLE", "REAL")
+	add("CMPLX", "COMPLEX")
 
 	// Numeric inquiry and manipulation
-	add("ABS", "REAL", "math.Abs")
-	add("MOD", "INTEGER", "%")
-	add("SIGN", "REAL", "math.Copysign")
-	add("DIM", "REAL", "math.Dim")
-	add("MAX", "REAL", "math.Max")
-	add("MIN", "REAL", "math.Min")
+	add("ABS", "REAL")
+	add("MOD", "INTEGER")
+	add("SIGN", "REAL")
+	add("DIM", "REAL")
+	add("MAX", "REAL")
+	add("MIN", "REAL")
 
 	// String functions
-	add("LEN", "INTEGER", "len")
-	add("INDEX", "INTEGER", "strings.Index")
-	add("TRIM", "CHARACTER", "strings.TrimSpace")
+	add("LEN", "INTEGER")
+	add("INDEX", "INTEGER")
+	add("TRIM", "CHARACTER")
 
 	// Array functions
-	add("SIZE", "INTEGER", "len")
-	add("SHAPE", "INTEGER", "")
-	add("LBOUND", "INTEGER", "")
-	add("UBOUND", "INTEGER", "")
+	add("SIZE", "INTEGER")
+	add("SHAPE", "INTEGER")
+	add("LBOUND", "INTEGER")
+	add("UBOUND", "INTEGER")
 
 	return intrinsics
 }

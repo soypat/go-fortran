@@ -417,10 +417,6 @@ func TestLoadIntrinsics(t *testing.T) {
 		if intrinsic.ReturnType() != tc.returnType {
 			t.Errorf("%s: expected return type %q, got %q", tc.name, tc.returnType, intrinsic.ReturnType())
 		}
-
-		if intrinsic.GoMapping() == "" {
-			t.Errorf("%s: GoMapping is empty", tc.name)
-		}
 	}
 }
 
