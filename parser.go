@@ -2446,11 +2446,13 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 //   - IMPLICIT NONE
 //   - IMPLICIT type-spec (letter-spec-list)
 //   - IMPLICIT type-spec (letter-spec-list), type-spec (letter-spec-list), ...
+//
 // Examples:
-//   IMPLICIT NONE
-//   IMPLICIT REAL (A-H, O-Z)
-//   IMPLICIT INTEGER (I-N)
-//   IMPLICIT REAL(KIND=8) (A-C, X-Z), INTEGER (I-N)
+//
+//	IMPLICIT NONE
+//	IMPLICIT REAL (A-H, O-Z)
+//	IMPLICIT INTEGER (I-N)
+//	IMPLICIT REAL(KIND=8) (A-C, X-Z), INTEGER (I-N)
 func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
 	start := p.current.start
 	stmt := &ast.ImplicitStatement{}
@@ -2496,16 +2498,14 @@ func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
 		// Invalid: IMPLICIT REAL(8) (A-H) - ambiguous, use KIND= form
 		if rule.Type == "CHARACTER" {
 			// CHARACTER can have length: CHARACTER*10 or CHARACTER(LEN=10)
-			if p.currentTokenIs(token.Asterisk) {
-				p.nextToken()
+			if p.consumeIf(token.Asterisk) {
 				rule.CharLen = p.parseExpression(0)
 			} else if p.currentTokenIs(token.LParen) && p.peek.tok == token.LEN {
 				rule.CharLen = p.parseCharacterLength()
 			}
 		} else if rule.Type != "DOUBLE PRECISION" {
 			// Other types can have KIND with * or (KIND=...)
-			if p.currentTokenIs(token.Asterisk) {
-				p.nextToken()
+			if p.consumeIf(token.Asterisk) {
 				rule.Kind = p.parseExpression(0)
 			} else if p.currentTokenIs(token.LParen) && p.peek.tok == token.KIND {
 				rule.Kind = p.parseKindSelector()
