@@ -30,7 +30,7 @@ Build a Fortran 77/90 to Go transpiler that correctly handles type resolution, s
 - ❌ **Semantic Analysis**: Not implemented
 
 ### Required Work
-1. **Parser Enhancements** (~1-2 weeks): Add KIND parameters, COMMON blocks, EXTERNAL/INTRINSIC, complete IMPLICIT parsing
+1. ✅ **Parser Enhancements** (COMPLETED 2025-11-24): Added KIND parameters, COMMON blocks, EXTERNAL/INTRINSIC, complete IMPLICIT parsing
 2. **Symbol Table** (~1 week): Design and implement symbol table with scope management
 3. **Type Resolution** (~1-2 weeks): Implement IMPLICIT rules, type inference, function/array disambiguation
 4. **Semantic Validation** (~1 week): Type checking, array conformance, INTENT validation
@@ -245,9 +245,11 @@ The parser has a complete expression system with proper precedence climbing:
 
 ### Critical Gaps That Block Type Resolution
 
-#### 1. KIND Parameters (NOT CAPTURED) ❌
+#### 1. KIND Parameters (IMPLEMENTED) ✅
 
-**Problem**: KIND specifications are completely missing from AST
+**Status**: Fully implemented as of 2025-11-24
+
+**Problem**: KIND specifications were completely missing from AST
 
 **Fortran 77/90 Specification**:
 - F77: Type size with `*N` suffix: `INTEGER*4`, `REAL*8`, `COMPLEX*16`
@@ -270,12 +272,12 @@ REAL*8 FUNCTION dbl(x)
 3. Parser skips KIND= in type declarations
 4. Parser may skip `*8` suffix in F77 syntax
 
-**Required Changes**:
+**Implementation Completed**:
 ```go
 type TypeDeclaration struct {
     TypeSpec   string
-    KindParam  Expression  // NEW: for KIND=8 or *8
-    CharLen    Expression  // Change from string to Expression
+    KindParam  Expression  // ✅ DONE: for KIND=8 or *8
+    CharLen    Expression  // ✅ DONE: Changed from string to Expression
     Attributes []token.Token
     Entities   []DeclEntity
     Label      string
@@ -284,30 +286,33 @@ type TypeDeclaration struct {
 
 type Function struct {
     Name         string
-    ResultType   TypeSpec  // NEW: struct instead of string
-    ResultKind   Expression // NEW: KIND parameter
+    ResultType   string
+    ResultKind   Expression // ✅ DONE: KIND parameter for result
     // ... rest unchanged
 }
 
-type TypeSpec struct {
-    Type string      // "INTEGER", "REAL", etc.
-    Kind Expression  // KIND parameter
+type Parameter struct {
+    Name       string
+    Type       string
+    TypeKind   Expression // ✅ DONE: KIND parameter for parameters
+    // ... rest unchanged
 }
 ```
 
-**Parser Changes Needed**:
-- `parser.go:2525` (parseTypeDecl): Parse KIND= or `*N` after type keyword
-- `parser.go:1510` (parseFunctionStmt): Parse result type with KIND
-- Add `parseKindSelector()` function
+**Parser Changes Completed**:
+- ✅ `parser.go:2540` (parseTypeDecl): Parses KIND= or `*N` after type keyword
+- ✅ `parser.go:3630` (parseTypePrefixedConstruct): Parses function result type with KIND
+- ✅ `parser.go:3078` (parseKindSelector): New function for parsing KIND specifications
+- ✅ `parser.go:3802` (parseInt64): Helper for parsing integer literals with kind suffixes
+- ✅ Comprehensive tests in `ast_validation_test.go:944-1230`
 
-**Impact**: Without KIND, cannot distinguish:
-- `INTEGER` (default, usually 4 bytes) vs `INTEGER*8` (8 bytes)
-- `REAL` (single precision) vs `REAL*8`/`DOUBLE PRECISION` (double precision)
-- Critical for numerical codes where precision matters
+**Tests**: 13 test cases covering INTEGER, REAL, CHARACTER with various KIND syntaxes
 
-#### 2. COMMON Blocks (NOT PARSED) ❌
+#### 2. COMMON Blocks (IMPLEMENTED) ✅
 
-**Problem**: No AST node for COMMON blocks, statements completely skipped
+**Status**: Fully implemented as of 2025-11-24
+
+**Problem**: No AST node for COMMON blocks, statements were completely skipped
 
 **Fortran 77 Specification**: COMMON blocks for shared memory between program units
 
@@ -318,15 +323,9 @@ COMMON /block2/ x1, y1, z1
 COMMON // blank_common    ! Blank COMMON (no name)
 ```
 
-**What's Missing**:
-- No `CommonStmt` AST node
-- Token exists (`token.COMMON`) but parser ignores it
-- Cannot track storage association
-- Cannot understand variable scope in F77 code
-
-**Required Changes**:
+**Implementation Completed**:
 ```go
-// ast/ast.go - Add new node
+// ast/ast.go:403-445 - New AST node
 type CommonStmt struct {
     BlockName string   // Empty string for blank COMMON
     Variables []string // Variable names in this block
@@ -336,17 +335,19 @@ type CommonStmt struct {
 
 func (c *CommonStmt) statementNode() {}
 func (c *CommonStmt) GetLabel() string { return c.Label }
+func (c *CommonStmt) AppendString(dst []byte) []byte { ... }
 ```
 
-**Parser Changes**:
-- Add `parseCommonStmt()` function
-- Call from `parseSpecStatement()` when token.COMMON encountered
-- Handle both named (`/name/`) and blank COMMON syntax
+**Parser Changes Completed**:
+- ✅ `parser.go:3823` (parseCommonStmt): Parses COMMON statements
+- ✅ `parser.go:2446`: Called from `parseSpecStatement()` when token.COMMON encountered
+- ✅ Handles named COMMON: `COMMON /BLOCK1/ A, B, C`
+- ✅ Handles blank COMMON with slashes: `COMMON // X, Y`
+- ✅ Handles blank COMMON without slashes: `COMMON Z`
+- ✅ Handles arrays with dimensions: `COMMON /ARRAYS/ ARR(10, 20)`
+- ✅ Fixed tokenization issue where `//` is StringConcat token
 
-**Impact**:
-- Cannot properly scope variables in F77 code
-- Cannot determine which variables are shared between program units
-- Blocks transpilation of F77 codebases heavily using COMMON
+**Tests**: 5 test cases in `ast_validation_test.go:1285-1405` covering all COMMON syntax variations
 
 #### 3. EQUIVALENCE Statements (NOT PARSED) ❌
 
@@ -384,9 +385,11 @@ type EquivalenceStmt struct {
 - Very difficult construct to map to Go (no equivalent)
 - May need to refuse transpilation if EQUIVALENCE detected
 
-#### 4. EXTERNAL and INTRINSIC Declarations (NOT PARSED) ❌
+#### 4. EXTERNAL and INTRINSIC Declarations (IMPLEMENTED) ✅
 
-**Problem**: No AST nodes, declarations skipped
+**Status**: Fully implemented as of 2025-11-24
+
+**Problem**: No AST nodes, declarations were skipped
 
 **Fortran 77/90 Specification**: Declare whether names are external procedures or intrinsic functions
 
@@ -401,8 +404,9 @@ INTRINSIC sin, cos, sqrt     ! These are intrinsic, not user-defined
 - Cannot determine what's user-defined vs built-in
 - Required for correct function resolution
 
-**Required Changes**:
+**Implementation Completed**:
 ```go
+// ast/ast.go:447-511
 type ExternalStmt struct {
     Names []string  // Procedure names declared EXTERNAL
     Label string
@@ -416,18 +420,20 @@ type IntrinsicStmt struct {
 }
 ```
 
-**Parser Changes**:
-- Add `parseExternalStmt()` and `parseIntrinsicStmt()`
-- Call from `parseSpecStatement()`
-- Simple comma-separated list parsing
+**Parser Changes Completed**:
+- ✅ `parser.go:3891` (parseExternalStmt): Parses EXTERNAL statements
+- ✅ `parser.go:3916` (parseIntrinsicStmt): Parses INTRINSIC statements
+- ✅ `parser.go:2448-2450`: Called from `parseSpecStatement()`
+- ✅ Handles comma-separated lists of names
+- ✅ Allows keywords like DATA as block names in COMMON (fixed CanBeUsedAsIdentifier check)
 
-**Impact**:
-- Function/array disambiguation requires this
-- Symbol table needs to know SymbolKind (external vs intrinsic vs variable)
+**Tests**: 5 test cases in `ast_validation_test.go:1407-1525` covering single and multiple names
 
-#### 5. IMPLICIT Type Rules (INCOMPLETE) ❌
+#### 5. IMPLICIT Type Rules (IMPLEMENTED) ✅
 
-**Problem**: Only `IMPLICIT NONE` is parsed, not type range rules
+**Status**: Fully implemented as of 2025-11-24
+
+**Problem**: Only `IMPLICIT NONE` was parsed, not type range rules
 
 **Fortran 77/90 Specification**:
 - Default implicit rules (if no IMPLICIT statement):
@@ -436,44 +442,40 @@ type IntrinsicStmt struct {
 - Custom rules: `IMPLICIT REAL (A-H, O-Z)`, `IMPLICIT INTEGER (I-N)`
 - Letter ranges: `IMPLICIT REAL (A-C, X-Z)`
 
-**What's Missing from ImplicitStatement**:
+**Implementation Completed**:
 ```go
-// Current (only handles IMPLICIT NONE)
-type ImplicitStatement struct {
-    IsNone bool
-    Label  string
-    Position
-}
-
-// What's needed
-type ImplicitStatement struct {
-    IsNone bool
-    Rules  []ImplicitRule  // NEW: custom type rules
-    Label  string
-    Position
+// ast/ast.go:332-410
+type LetterRange struct {
+    Start byte  // 'A' to 'Z'
+    End   byte  // 'A' to 'Z', Start <= End
 }
 
 type ImplicitRule struct {
     Type         string        // "INTEGER", "REAL", etc.
     Kind         Expression    // Optional KIND parameter
+    CharLen      Expression    // Optional CHARACTER length
     LetterRanges []LetterRange // Letter ranges this applies to
 }
 
-type LetterRange struct {
-    Start byte  // 'A' to 'Z'
-    End   byte  // 'A' to 'Z', Start <= End
+type ImplicitStatement struct {
+    IsNone bool            // true for IMPLICIT NONE
+    Rules  []ImplicitRule  // ✅ DONE: custom type rules
+    Label  string
+    Position
 }
 ```
 
-**Parser Changes** (`parser.go:2473`):
-- Extend `parseImplicit()` to parse type specifications
-- Parse letter ranges: `(A-H, O-Z)` or `(I, J, K-N)`
-- Parse optional KIND: `IMPLICIT REAL(KIND=8) (A-H)`
+**Parser Changes Completed** (`parser.go:2445-2580`):
+- ✅ Extended `parseImplicit()` to parse type specifications
+- ✅ Parses letter ranges: `(A-H, O-Z)` or `(I, J, K-N)` or `(I, J, K)`
+- ✅ Parses optional KIND: `IMPLICIT REAL*8 (A-H)` or `IMPLICIT REAL(KIND=8) (A-H)`
+- ✅ Handles multiple type specs: `IMPLICIT REAL (A-H), INTEGER (I-N)`
+- ✅ Validates letter ranges (A-Z only, start <= end)
+- ✅ Fixed ambiguity between KIND parens and letter range parens
 
-**Impact**:
-- Cannot resolve types of undeclared variables
-- Cannot implement Fortran implicit typing semantics
-- **Blocks all type resolution work**
+**Tests**: 6 test cases in `ast_validation_test.go:1527-1736` covering all IMPLICIT syntax variations
+
+**Note**: In IMPLICIT statements, KIND must use explicit `KIND=` form or `*` syntax to avoid ambiguity with letter ranges
 
 #### 6. NAMELIST (NOT PARSED) ❌
 

@@ -1527,6 +1527,63 @@ func TestStatementParsing(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "IMPLICIT DOUBLE PRECISION and LOGICAL with multiple ranges",
+			src:  "IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				implStmt, ok := stmt.(*ast.ImplicitStatement)
+				if !ok {
+					t.Fatalf("Expected *ast.ImplicitStatement, got %T", stmt)
+				}
+				if implStmt.IsNone {
+					t.Error("Expected IsNone to be false")
+				}
+
+				// Verify we have exactly 2 rules
+				if len(implStmt.Rules) != 2 {
+					t.Fatalf("Expected 2 rules, got %d", len(implStmt.Rules))
+				}
+
+				// First rule: DOUBLE PRECISION (A-H, O-Z)
+				rule1 := implStmt.Rules[0]
+				if rule1.Type != "DOUBLE PRECISION" {
+					t.Errorf("Rule 0: expected type 'DOUBLE PRECISION', got %q", rule1.Type)
+				}
+				if rule1.Kind != nil {
+					t.Errorf("Rule 0: expected no KIND parameter, got %v", rule1.Kind)
+				}
+				if len(rule1.LetterRanges) != 2 {
+					t.Fatalf("Rule 0: expected 2 letter ranges, got %d", len(rule1.LetterRanges))
+				}
+				// First range: A-H
+				if rule1.LetterRanges[0].Start != 'A' || rule1.LetterRanges[0].End != 'H' {
+					t.Errorf("Rule 0, Range 0: expected A-H, got %c-%c",
+						rule1.LetterRanges[0].Start, rule1.LetterRanges[0].End)
+				}
+				// Second range: O-Z
+				if rule1.LetterRanges[1].Start != 'O' || rule1.LetterRanges[1].End != 'Z' {
+					t.Errorf("Rule 0, Range 1: expected O-Z, got %c-%c",
+						rule1.LetterRanges[1].Start, rule1.LetterRanges[1].End)
+				}
+
+				// Second rule: LOGICAL (L)
+				rule2 := implStmt.Rules[1]
+				if rule2.Type != "LOGICAL" {
+					t.Errorf("Rule 1: expected type 'LOGICAL', got %q", rule2.Type)
+				}
+				if rule2.Kind != nil {
+					t.Errorf("Rule 1: expected no KIND parameter, got %v", rule2.Kind)
+				}
+				if len(rule2.LetterRanges) != 1 {
+					t.Fatalf("Rule 1: expected 1 letter range, got %d", len(rule2.LetterRanges))
+				}
+				// Single letter L
+				if rule2.LetterRanges[0].Start != 'L' || rule2.LetterRanges[0].End != 'L' {
+					t.Errorf("Rule 1, Range 0: expected L-L, got %c-%c",
+						rule2.LetterRanges[0].Start, rule2.LetterRanges[0].End)
+				}
+			},
+		},
 
 		// ===== Edge cases for construct-ending keywords =====
 		// These tests verify that parsing loops stop at construct-ending keywords

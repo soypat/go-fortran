@@ -1523,3 +1523,214 @@ END PROGRAM
 		})
 	}
 }
+
+// TestImplicitStatementParsing verifies that IMPLICIT statements are correctly parsed
+func TestImplicitStatementParsing(t *testing.T) {
+	tests := []struct {
+		name          string
+		src           string
+		expectNone    bool
+		expectedRules []struct {
+			typ    string
+			ranges []struct{ start, end byte }
+		}
+	}{
+		{
+			name: "IMPLICIT NONE",
+			src: `
+PROGRAM test
+  IMPLICIT NONE
+END PROGRAM
+`,
+			expectNone: true,
+		},
+		{
+			name: "IMPLICIT REAL (A-H)",
+			src: `
+PROGRAM test
+  IMPLICIT REAL (A-H)
+END PROGRAM
+`,
+			expectNone: false,
+			expectedRules: []struct {
+				typ    string
+				ranges []struct{ start, end byte }
+			}{
+				{
+					typ: "REAL",
+					ranges: []struct{ start, end byte }{
+						{start: 'A', end: 'H'},
+					},
+				},
+			},
+		},
+		{
+			name: "IMPLICIT REAL (A-H, O-Z)",
+			src: `
+PROGRAM test
+  IMPLICIT REAL (A-H, O-Z)
+END PROGRAM
+`,
+			expectNone: false,
+			expectedRules: []struct {
+				typ    string
+				ranges []struct{ start, end byte }
+			}{
+				{
+					typ: "REAL",
+					ranges: []struct{ start, end byte }{
+						{start: 'A', end: 'H'},
+						{start: 'O', end: 'Z'},
+					},
+				},
+			},
+		},
+		{
+			name: "IMPLICIT INTEGER (I-N)",
+			src: `
+PROGRAM test
+  IMPLICIT INTEGER (I-N)
+END PROGRAM
+`,
+			expectNone: false,
+			expectedRules: []struct {
+				typ    string
+				ranges []struct{ start, end byte }
+			}{
+				{
+					typ: "INTEGER",
+					ranges: []struct{ start, end byte }{
+						{start: 'I', end: 'N'},
+					},
+				},
+			},
+		},
+		{
+			name: "IMPLICIT with single letters",
+			src: `
+PROGRAM test
+  IMPLICIT INTEGER (I, J, K)
+END PROGRAM
+`,
+			expectNone: false,
+			expectedRules: []struct {
+				typ    string
+				ranges []struct{ start, end byte }
+			}{
+				{
+					typ: "INTEGER",
+					ranges: []struct{ start, end byte }{
+						{start: 'I', end: 'I'},
+						{start: 'J', end: 'J'},
+						{start: 'K', end: 'K'},
+					},
+				},
+			},
+		},
+		{
+			name: "IMPLICIT multiple type specs",
+			src: `
+PROGRAM test
+  IMPLICIT REAL (A-H, O-Z), INTEGER (I-N)
+END PROGRAM
+`,
+			expectNone: false,
+			expectedRules: []struct {
+				typ    string
+				ranges []struct{ start, end byte }
+			}{
+				{
+					typ: "REAL",
+					ranges: []struct{ start, end byte }{
+						{start: 'A', end: 'H'},
+						{start: 'O', end: 'Z'},
+					},
+				},
+				{
+					typ: "INTEGER",
+					ranges: []struct{ start, end byte }{
+						{start: 'I', end: 'N'},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var parser Parser90
+			err := parser.Reset(tt.name+".f90", strings.NewReader(tt.src))
+			if err != nil {
+				t.Fatalf("Reset failed: %v", err)
+			}
+
+			unit := parser.ParseNextProgramUnit()
+			if unit == nil {
+				t.Fatal("ParseNextProgramUnit returned nil")
+			}
+
+			if len(parser.Errors()) > 0 {
+				t.Fatalf("Parse errors: %v", parser.Errors())
+			}
+
+			prog, ok := unit.(*ast.ProgramBlock)
+			if !ok {
+				t.Fatalf("Expected ProgramBlock, got %T", unit)
+			}
+
+			// Find the IMPLICIT statement in the program body
+			var implicitStmt *ast.ImplicitStatement
+			for _, stmt := range prog.Body {
+				if is, ok := stmt.(*ast.ImplicitStatement); ok {
+					implicitStmt = is
+					break
+				}
+			}
+
+			if implicitStmt == nil {
+				t.Fatalf("IMPLICIT statement not found in program body")
+			}
+
+			// Verify IsNone
+			if implicitStmt.IsNone != tt.expectNone {
+				t.Errorf("Expected IsNone=%v, got %v", tt.expectNone, implicitStmt.IsNone)
+			}
+
+			// Verify rules
+			if !tt.expectNone {
+				if len(implicitStmt.Rules) != len(tt.expectedRules) {
+					t.Errorf("Expected %d rules, got %d", len(tt.expectedRules), len(implicitStmt.Rules))
+				}
+
+				for i, expectedRule := range tt.expectedRules {
+					if i >= len(implicitStmt.Rules) {
+						break
+					}
+					rule := implicitStmt.Rules[i]
+
+					if rule.Type != expectedRule.typ {
+						t.Errorf("Rule %d: expected type '%s', got '%s'", i, expectedRule.typ, rule.Type)
+					}
+
+					if len(rule.LetterRanges) != len(expectedRule.ranges) {
+						t.Errorf("Rule %d: expected %d ranges, got %d", i, len(expectedRule.ranges), len(rule.LetterRanges))
+					}
+
+					for j, expectedRange := range expectedRule.ranges {
+						if j >= len(rule.LetterRanges) {
+							break
+						}
+						lr := rule.LetterRanges[j]
+
+						if lr.Start != expectedRange.start {
+							t.Errorf("Rule %d, Range %d: expected start '%c', got '%c'", i, j, expectedRange.start, lr.Start)
+						}
+						if lr.End != expectedRange.end {
+							t.Errorf("Rule %d, Range %d: expected end '%c', got '%c'", i, j, expectedRange.end, lr.End)
+						}
+					}
+				}
+			}
+		})
+	}
+}

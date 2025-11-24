@@ -329,6 +329,27 @@ type TokenTuple struct {
 
 // Specification Part Statements (Phase 2)
 
+// LetterRange represents a range of letters (A-Z) for implicit typing rules.
+// Used in IMPLICIT statements to specify which variable names get a certain type.
+//
+// Example: In "IMPLICIT REAL (A-H)", the range is A to H
+type LetterRange struct {
+	Start byte // 'A' to 'Z'
+	End   byte // 'A' to 'Z', Start <= End
+}
+
+// ImplicitRule specifies a type for a set of letter ranges.
+// Used in IMPLICIT statements to define custom typing rules.
+//
+// Example: "IMPLICIT REAL(KIND=8) (A-H, O-Z)" creates a rule with
+// Type="REAL", Kind=8, and two letter ranges
+type ImplicitRule struct {
+	Type         string        // "INTEGER", "REAL", "CHARACTER", etc.
+	Kind         Expression    // Optional KIND parameter
+	CharLen      Expression    // Optional CHARACTER length
+	LetterRanges []LetterRange // Letter ranges this rule applies to
+}
+
 // ImplicitStatement controls implicit typing rules for variables. IMPLICIT NONE
 // disables implicit typing, requiring all variables to be explicitly declared.
 // Without IMPLICIT NONE, Fortran uses default typing rules (I-N for INTEGER,
@@ -339,8 +360,10 @@ type TokenTuple struct {
 //	IMPLICIT NONE
 //	IMPLICIT REAL (A-H, O-Z)
 //	IMPLICIT INTEGER (I-N)
+//	IMPLICIT REAL(KIND=8) (A-C, X-Z)
 type ImplicitStatement struct {
-	IsNone bool // true for IMPLICIT NONE
+	IsNone bool            // true for IMPLICIT NONE
+	Rules  []ImplicitRule  // Custom type rules (empty if IsNone)
 	Label  string
 	Position
 }
@@ -357,7 +380,33 @@ func (is *ImplicitStatement) AppendString(dst []byte) []byte {
 	if is.IsNone {
 		return append(dst, "IMPLICIT NONE"...)
 	}
-	return append(dst, "IMPLICIT"...)
+	dst = append(dst, "IMPLICIT"...)
+	for i, rule := range is.Rules {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		} else {
+			dst = append(dst, ' ')
+		}
+		dst = append(dst, rule.Type...)
+		if rule.Kind != nil {
+			dst = append(dst, '(')
+			dst = rule.Kind.AppendString(dst)
+			dst = append(dst, ')')
+		}
+		dst = append(dst, " ("...)
+		for j, lr := range rule.LetterRanges {
+			if j > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = append(dst, lr.Start)
+			if lr.Start != lr.End {
+				dst = append(dst, '-')
+				dst = append(dst, lr.End)
+			}
+		}
+		dst = append(dst, ')')
+	}
+	return dst
 }
 
 // UseStatement imports entities from a [Module] into the current scope, making

@@ -2442,11 +2442,21 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 	return stmt
 }
 
-// parseImplicit parses IMPLICIT [NONE] with validation
+// parseImplicit parses IMPLICIT statements:
+//   - IMPLICIT NONE
+//   - IMPLICIT type-spec (letter-spec-list)
+//   - IMPLICIT type-spec (letter-spec-list), type-spec (letter-spec-list), ...
+// Examples:
+//   IMPLICIT NONE
+//   IMPLICIT REAL (A-H, O-Z)
+//   IMPLICIT INTEGER (I-N)
+//   IMPLICIT REAL(KIND=8) (A-C, X-Z), INTEGER (I-N)
 func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
 	start := p.current.start
 	stmt := &ast.ImplicitStatement{}
 	p.expect(token.IMPLICIT, "")
+
+	// Check for IMPLICIT NONE
 	if p.currentTokenIs(token.Identifier) && strings.EqualFold(string(p.current.lit), "NONE") {
 		if *sawImplicit {
 			p.addError("duplicate IMPLICIT statement")
@@ -2456,7 +2466,129 @@ func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
 		*sawImplicit = true
 		stmt.IsNone = true
 		p.nextToken()
+		stmt.Position = ast.Pos(start, p.current.start)
+		return stmt
 	}
+
+	// Parse type rules: type-spec (letter-spec-list) [, type-spec (letter-spec-list)]...
+	for {
+		rule := ast.ImplicitRule{}
+
+		// Parse type spec (INTEGER, REAL, CHARACTER, etc.)
+		if !p.current.tok.IsTypeDeclaration() {
+			p.addError("expected type specification in IMPLICIT statement")
+			break
+		}
+		rule.Type = strings.ToUpper(string(p.current.lit))
+		p.nextToken()
+
+		// Handle DOUBLE PRECISION (two tokens) or DOUBLEPRECISION (one token)
+		if rule.Type == "DOUBLE" && p.currentTokenIs(token.PRECISION) {
+			rule.Type = "DOUBLE PRECISION"
+			p.nextToken()
+		} else if rule.Type == "DOUBLEPRECISION" {
+			rule.Type = "DOUBLE PRECISION" // Normalize to canonical form
+		}
+
+		// Parse optional KIND or CHARACTER length
+		// In IMPLICIT statements, KIND/length must be specified before letter ranges
+		// Valid: IMPLICIT REAL*8 (A-H) or IMPLICIT REAL(KIND=8) (A-H)
+		// Invalid: IMPLICIT REAL(8) (A-H) - ambiguous, use KIND= form
+		if rule.Type == "CHARACTER" {
+			// CHARACTER can have length: CHARACTER*10 or CHARACTER(LEN=10)
+			if p.currentTokenIs(token.Asterisk) {
+				p.nextToken()
+				rule.CharLen = p.parseExpression(0)
+			} else if p.currentTokenIs(token.LParen) && p.peek.tok == token.LEN {
+				rule.CharLen = p.parseCharacterLength()
+			}
+		} else if rule.Type != "DOUBLE PRECISION" {
+			// Other types can have KIND with * or (KIND=...)
+			if p.currentTokenIs(token.Asterisk) {
+				p.nextToken()
+				rule.Kind = p.parseExpression(0)
+			} else if p.currentTokenIs(token.LParen) && p.peek.tok == token.KIND {
+				rule.Kind = p.parseKindSelector()
+			}
+		}
+
+		// Parse letter ranges: (A-H, O-Z) or (I, J, K-N)
+		if !p.expect(token.LParen, "in IMPLICIT statement letter range") {
+			break
+		}
+
+		// Parse comma-separated letter ranges
+		for !p.currentTokenIs(token.RParen) && !p.IsDone() {
+			// Parse a single letter or letter range
+			if !p.canUseAsIdentifier() {
+				p.addError("expected letter in IMPLICIT range")
+				break
+			}
+
+			startLetter := p.current.lit
+			if len(startLetter) != 1 {
+				p.addError("IMPLICIT letter range must be a single letter")
+				p.nextToken()
+				continue
+			}
+			letterStart := byte(strings.ToUpper(string(startLetter))[0])
+
+			// Validate it's A-Z
+			if letterStart < 'A' || letterStart > 'Z' {
+				p.addError("IMPLICIT letter must be A-Z")
+			}
+
+			p.nextToken()
+
+			// Check for range (A-H) vs single letter (I)
+			letterEnd := letterStart
+			if p.consumeIf(token.Minus) {
+				if !p.canUseAsIdentifier() {
+					p.addError("expected letter after '-' in IMPLICIT range")
+					break
+				}
+				endLetter := p.current.lit
+				if len(endLetter) != 1 {
+					p.addError("IMPLICIT letter range must be a single letter")
+				} else {
+					letterEnd = byte(strings.ToUpper(string(endLetter))[0])
+					if letterEnd < 'A' || letterEnd > 'Z' {
+						p.addError("IMPLICIT letter must be A-Z")
+					}
+					if letterEnd < letterStart {
+						p.addError("IMPLICIT letter range end must be >= start")
+					}
+				}
+				p.nextToken()
+			}
+
+			rule.LetterRanges = append(rule.LetterRanges, ast.LetterRange{
+				Start: letterStart,
+				End:   letterEnd,
+			})
+
+			if !p.consumeIf(token.Comma) {
+				break
+			}
+		}
+
+		if !p.expect(token.RParen, "closing IMPLICIT letter range") {
+			break
+		}
+
+		stmt.Rules = append(stmt.Rules, rule)
+
+		// Check for another type spec
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	if *sawImplicit {
+		p.addError("duplicate IMPLICIT statement")
+	}
+	*sawImplicit = true
+
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
 }
