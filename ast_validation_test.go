@@ -1280,3 +1280,246 @@ END SUBROUTINE`
 		}
 	}
 }
+
+// TestCommonBlockParsing verifies that COMMON blocks are correctly parsed
+func TestCommonBlockParsing(t *testing.T) {
+	tests := []struct {
+		name          string
+		src           string
+		expectedBlock string
+		expectedVars  []string
+	}{
+		{
+			name: "named COMMON block",
+			src: `
+PROGRAM test
+  INTEGER A, B, C
+  COMMON /BLOCK1/ A, B, C
+END PROGRAM
+`,
+			expectedBlock: "BLOCK1",
+			expectedVars:  []string{"A", "B", "C"},
+		},
+		{
+			name: "blank COMMON with slashes",
+			src: `
+PROGRAM test
+  REAL X, Y
+  COMMON // X, Y
+END PROGRAM
+`,
+			expectedBlock: "",
+			expectedVars:  []string{"X", "Y"},
+		},
+		{
+			name: "blank COMMON without slashes",
+			src: `
+PROGRAM test
+  REAL Z
+  COMMON Z
+END PROGRAM
+`,
+			expectedBlock: "",
+			expectedVars:  []string{"Z"},
+		},
+		{
+			name: "COMMON with array",
+			src: `
+PROGRAM test
+  REAL ARR(10, 20)
+  COMMON /ARRAYS/ ARR
+END PROGRAM
+`,
+			expectedBlock: "ARRAYS",
+			expectedVars:  []string{"ARR"},
+		},
+		{
+			name: "COMMON with multiple variables",
+			src: `
+PROGRAM test
+  INTEGER I, J
+  REAL X
+  COMMON /DATA/ I, J, X
+END PROGRAM
+`,
+			expectedBlock: "DATA",
+			expectedVars:  []string{"I", "J", "X"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var parser Parser90
+			err := parser.Reset(tt.name+".f90", strings.NewReader(tt.src))
+			if err != nil {
+				t.Fatalf("Reset failed: %v", err)
+			}
+
+			unit := parser.ParseNextProgramUnit()
+			if unit == nil {
+				t.Fatal("ParseNextProgramUnit returned nil")
+			}
+
+			if len(parser.Errors()) > 0 {
+				t.Fatalf("Parse errors: %v", parser.Errors())
+			}
+
+			prog, ok := unit.(*ast.ProgramBlock)
+			if !ok {
+				t.Fatalf("Expected ProgramBlock, got %T", unit)
+			}
+
+			// Find the COMMON statement in the program body
+			var commonStmt *ast.CommonStmt
+			for _, stmt := range prog.Body {
+				if cs, ok := stmt.(*ast.CommonStmt); ok {
+					commonStmt = cs
+					break
+				}
+			}
+
+			if commonStmt == nil {
+				t.Fatalf("COMMON statement not found in program body")
+			}
+
+			// Verify block name
+			if commonStmt.BlockName != tt.expectedBlock {
+				t.Errorf("Expected block name '%s', got '%s'", tt.expectedBlock, commonStmt.BlockName)
+			}
+
+			// Verify variables
+			if len(commonStmt.Variables) != len(tt.expectedVars) {
+				t.Errorf("Expected %d variables, got %d", len(tt.expectedVars), len(commonStmt.Variables))
+			}
+
+			for i, expectedVar := range tt.expectedVars {
+				if i >= len(commonStmt.Variables) {
+					break
+				}
+				if commonStmt.Variables[i] != expectedVar {
+					t.Errorf("Variable %d: expected '%s', got '%s'", i, expectedVar, commonStmt.Variables[i])
+				}
+			}
+		})
+	}
+}
+
+// TestExternalIntrinsicParsing verifies that EXTERNAL and INTRINSIC statements are correctly parsed
+func TestExternalIntrinsicParsing(t *testing.T) {
+	tests := []struct {
+		name          string
+		src           string
+		stmtType      string // "external" or "intrinsic"
+		expectedNames []string
+	}{
+		{
+			name: "EXTERNAL single name",
+			src: `
+PROGRAM test
+  EXTERNAL mysub
+END PROGRAM
+`,
+			stmtType:      "external",
+			expectedNames: []string{"mysub"},
+		},
+		{
+			name: "EXTERNAL multiple names",
+			src: `
+PROGRAM test
+  EXTERNAL mysub, myfunc, another
+END PROGRAM
+`,
+			stmtType:      "external",
+			expectedNames: []string{"mysub", "myfunc", "another"},
+		},
+		{
+			name: "INTRINSIC single name",
+			src: `
+PROGRAM test
+  INTRINSIC sin
+END PROGRAM
+`,
+			stmtType:      "intrinsic",
+			expectedNames: []string{"sin"},
+		},
+		{
+			name: "INTRINSIC multiple names",
+			src: `
+PROGRAM test
+  INTRINSIC sin, cos, sqrt, exp
+END PROGRAM
+`,
+			stmtType:      "intrinsic",
+			expectedNames: []string{"sin", "cos", "sqrt", "exp"},
+		},
+		{
+			name: "EXTERNAL and INTRINSIC together",
+			src: `
+PROGRAM test
+  EXTERNAL external_func
+  INTRINSIC sin, cos
+END PROGRAM
+`,
+			stmtType:      "external",
+			expectedNames: []string{"external_func"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var parser Parser90
+			err := parser.Reset(tt.name+".f90", strings.NewReader(tt.src))
+			if err != nil {
+				t.Fatalf("Reset failed: %v", err)
+			}
+
+			unit := parser.ParseNextProgramUnit()
+			if unit == nil {
+				t.Fatal("ParseNextProgramUnit returned nil")
+			}
+
+			if len(parser.Errors()) > 0 {
+				t.Fatalf("Parse errors: %v", parser.Errors())
+			}
+
+			prog, ok := unit.(*ast.ProgramBlock)
+			if !ok {
+				t.Fatalf("Expected ProgramBlock, got %T", unit)
+			}
+
+			// Find the EXTERNAL or INTRINSIC statement in the program body
+			var names []string
+			for _, stmt := range prog.Body {
+				if tt.stmtType == "external" {
+					if es, ok := stmt.(*ast.ExternalStmt); ok {
+						names = es.Names
+						break
+					}
+				} else if tt.stmtType == "intrinsic" {
+					if is, ok := stmt.(*ast.IntrinsicStmt); ok {
+						names = is.Names
+						break
+					}
+				}
+			}
+
+			if names == nil {
+				t.Fatalf("%s statement not found in program body", strings.ToUpper(tt.stmtType))
+			}
+
+			// Verify names
+			if len(names) != len(tt.expectedNames) {
+				t.Errorf("Expected %d names, got %d", len(tt.expectedNames), len(names))
+			}
+
+			for i, expectedName := range tt.expectedNames {
+				if i >= len(names) {
+					break
+				}
+				if names[i] != expectedName {
+					t.Errorf("Name %d: expected '%s', got '%s'", i, expectedName, names[i])
+				}
+			}
+		})
+	}
+}

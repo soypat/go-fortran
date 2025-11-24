@@ -400,6 +400,116 @@ func (us *UseStatement) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// CommonStmt declares variables in a COMMON block for shared storage between
+// program units. COMMON blocks are a Fortran 77 feature for sharing variables
+// without explicit parameter passing.
+//
+// Example:
+//
+//	COMMON /block1/ a, b, c
+//	COMMON /block2/ x, y, z
+//	COMMON // blank_var        ! Blank COMMON (no name)
+type CommonStmt struct {
+	BlockName string   // Empty string for blank COMMON
+	Variables []string // Variable names in this block
+	Label     string
+	Position
+}
+
+var _ Statement = (*CommonStmt)(nil) // compile time check of interface implementation.
+
+func (cs *CommonStmt) GetLabel() string { return cs.Label }
+
+func (cs *CommonStmt) statementNode() {}
+func (cs *CommonStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "COMMON"...)
+}
+func (cs *CommonStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "COMMON"...)
+	if cs.BlockName != "" {
+		dst = append(dst, " /"...)
+		dst = append(dst, cs.BlockName...)
+		dst = append(dst, '/')
+	} else {
+		dst = append(dst, " //"...)
+	}
+	for i, v := range cs.Variables {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		} else {
+			dst = append(dst, ' ')
+		}
+		dst = append(dst, v...)
+	}
+	return dst
+}
+
+// ExternalStmt declares names as external procedures (user-defined functions/subroutines).
+// This helps distinguish user procedures from intrinsic functions.
+//
+// Example:
+//
+//	EXTERNAL mysub, myfunc
+type ExternalStmt struct {
+	Names []string // Procedure names declared EXTERNAL
+	Label string
+	Position
+}
+
+var _ Statement = (*ExternalStmt)(nil) // compile time check of interface implementation.
+
+func (es *ExternalStmt) GetLabel() string { return es.Label }
+
+func (es *ExternalStmt) statementNode() {}
+func (es *ExternalStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "EXTERNAL"...)
+}
+func (es *ExternalStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "EXTERNAL"...)
+	for i, name := range es.Names {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		} else {
+			dst = append(dst, ' ')
+		}
+		dst = append(dst, name...)
+	}
+	return dst
+}
+
+// IntrinsicStmt declares names as intrinsic functions (built-in Fortran functions).
+// This prevents name conflicts with user-defined procedures.
+//
+// Example:
+//
+//	INTRINSIC sin, cos, sqrt
+type IntrinsicStmt struct {
+	Names []string // Function names declared INTRINSIC
+	Label string
+	Position
+}
+
+var _ Statement = (*IntrinsicStmt)(nil) // compile time check of interface implementation.
+
+func (is *IntrinsicStmt) GetLabel() string { return is.Label }
+
+func (is *IntrinsicStmt) statementNode() {}
+func (is *IntrinsicStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "INTRINSIC"...)
+}
+func (is *IntrinsicStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "INTRINSIC"...)
+	for i, name := range is.Names {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		} else {
+			dst = append(dst, ' ')
+		}
+		dst = append(dst, name...)
+	}
+	return dst
+}
+
 // DataStmt initializes variables with specified values in Fortran 77 style.
 // DATA statements can use implied DO loops for array initialization.
 //
