@@ -74,12 +74,10 @@ END PROGRAM hello
 	//         0: DeclEntity {
 	//           Name: "x"
 	//           Initializer: ""
-	//           CharLen: ""
 	//         }
 	//         1: DeclEntity {
 	//           Name: "y"
 	//           Initializer: ""
-	//           CharLen: ""
 	//         }
 	//       ]
 	//       Label: ""
@@ -94,7 +92,6 @@ END PROGRAM hello
 	//         0: DeclEntity {
 	//           Name: "result"
 	//           Initializer: ""
-	//           CharLen: ""
 	//         }
 	//       ]
 	//       Label: ""
@@ -112,7 +109,7 @@ END PROGRAM hello
 	//         }
 	//       }
 	//       Value: IntegerLiteral {
-	//         Value: 0
+	//         Value: 10
 	//         Raw: "10"
 	//         Position: Position {
 	//           Start: 75
@@ -134,7 +131,7 @@ END PROGRAM hello
 	//         }
 	//       }
 	//       Value: IntegerLiteral {
-	//         Value: 0
+	//         Value: 20
 	//         Raw: "20"
 	//         Position: Position {
 	//           Start: 84

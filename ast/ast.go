@@ -198,6 +198,7 @@ func (s *Subroutine) AppendString(dst []byte) []byte {
 type Function struct {
 	Name           string
 	ResultType     string        // e.g., "INTEGER", "REAL"
+	ResultKind     Expression    // KIND parameter for result type (nil if default kind)
 	Parameters     []Parameter   // Function parameters with type information
 	ResultVariable string        // For RESULT(var) clause
 	Attributes     []token.Token // RECURSIVE, PURE, ELEMENTAL
@@ -437,6 +438,7 @@ func (ds *DataStmt) AppendString(dst []byte) []byte {
 //	CHARACTER(LEN=80), INTENT(IN) :: filename
 type TypeDeclaration struct {
 	TypeSpec   string        // e.g., "INTEGER", "REAL", "CHARACTER"
+	KindParam  Expression    // KIND parameter: INTEGER(KIND=8), REAL*8, etc. (nil if not specified)
 	Attributes []token.Token // e.g., PARAMETER, SAVE, INTENT, etc.
 	Entities   []DeclEntity  // Variables being declared
 	Label      string
@@ -517,7 +519,7 @@ type DeclEntity struct {
 	Name        string
 	ArraySpec   *ArraySpec // Array dimensions if this is an array
 	Initializer string     // Initialization expression (will become Expression in Phase 4)
-	CharLen     string     // CHARACTER length specification (will become Expression in Phase 4)
+	CharLen     Expression // CHARACTER length specification (nil if not specified or using type default)
 }
 
 // IntentType represents the INTENT attribute direction
@@ -557,10 +559,11 @@ func (it IntentType) String() string {
 type Parameter struct {
 	Name       string        // Parameter name
 	Type       string        // Type specification (INTEGER, REAL, etc.)
+	TypeKind   Expression    // KIND parameter for this type (nil if default kind)
 	Intent     IntentType    // INTENT(IN/OUT/INOUT)
 	Attributes []token.Token // Other attributes (OPTIONAL, POINTER, TARGET, etc.)
 	ArraySpec  *ArraySpec    // Array dimensions if this is an array parameter
-	CharLen    string        // CHARACTER length specification (will become Expression in Phase 4)
+	CharLen    Expression    // CHARACTER length specification (nil if using type default or *)
 }
 
 // Identifier represents a variable name, function name, or other named entity

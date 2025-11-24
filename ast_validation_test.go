@@ -362,13 +362,18 @@ END PROGRAM test
 			for i, exp := range tt.expected {
 				var found bool
 				var actualCharLen, actualInit, actualType string
+				var actualCharLenExpr ast.Expression
 
 				// Check parameters first
 				for _, param := range params {
 					if param.Name == exp.name {
 						found = true
 						actualType = param.Type
-						actualCharLen = param.CharLen
+						actualCharLenExpr = param.CharLen
+						// Convert Expression to string for comparison if present
+						if actualCharLenExpr != nil {
+							actualCharLen = exprToString(actualCharLenExpr)
+						}
 						// Parameters don't have initializers (they're arguments)
 						break
 					}
@@ -380,7 +385,11 @@ END PROGRAM test
 						if entity.Name == exp.name {
 							found = true
 							actualInit = entity.Initializer
-							actualCharLen = entity.CharLen
+							actualCharLenExpr = entity.CharLen
+							// Convert Expression to string for comparison if present
+							if actualCharLenExpr != nil {
+								actualCharLen = exprToString(actualCharLenExpr)
+							}
 							// Get type from the TypeDeclaration that contains this entity
 							// We need to find which TypeDeclaration this entity belongs to
 							switch u := unit.(type) {
@@ -937,5 +946,337 @@ func exprEqual(t *testing.T, got, want ast.Expression) bool {
 	default:
 		t.Errorf("unhandled expression type in exprEqual: %T", got)
 		return false
+	}
+}
+// TestKindParameterSupport verifies that KIND parameters are correctly captured
+// in type declarations for INTEGER, REAL, and other types
+func TestKindParameterSupport(t *testing.T) {
+	tests := []struct {
+		name          string
+		src           string
+		expectKind    bool
+		kindIsLiteral bool
+		kindValue     int64
+	}{
+		{
+			name: "INTEGER with KIND selector F90 syntax",
+			src: `PROGRAM test
+    INTEGER(KIND=8) :: bigint
+END PROGRAM`,
+			expectKind:    true,
+			kindIsLiteral: true,
+			kindValue:     8,
+		},
+		{
+			name: "INTEGER with KIND shorthand",
+			src: `PROGRAM test
+    INTEGER(8) :: shorthand
+END PROGRAM`,
+			expectKind:    true,
+			kindIsLiteral: true,
+			kindValue:     8,
+		},
+		{
+			name: "REAL with F77 kind syntax",
+			src: `PROGRAM test
+    REAL*8 :: dbl
+END PROGRAM`,
+			expectKind:    true,
+			kindIsLiteral: true,
+			kindValue:     8,
+		},
+		{
+			name: "REAL with F90 KIND syntax",
+			src: `PROGRAM test
+    REAL(KIND=8) :: dbl
+END PROGRAM`,
+			expectKind:    true,
+			kindIsLiteral: true,
+			kindValue:     8,
+		},
+		{
+			name: "INTEGER without KIND (default)",
+			src: `PROGRAM test
+    INTEGER :: normal
+END PROGRAM`,
+			expectKind: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var parser Parser90
+			err := parser.Reset("test.f90", strings.NewReader(tt.src))
+			if err != nil {
+				t.Fatalf("Reset failed: %v", err)
+			}
+
+			unit := parser.ParseNextProgramUnit()
+			if unit == nil {
+				t.Fatal("ParseNextProgramUnit returned nil")
+			}
+
+			if len(parser.Errors()) > 0 {
+				t.Fatalf("Parse errors: %v", parser.Errors())
+			}
+
+			prog, ok := unit.(*ast.ProgramBlock)
+			if !ok {
+				t.Fatalf("Expected ProgramBlock, got %T", unit)
+			}
+
+			if len(prog.Body) == 0 {
+				t.Fatal("Expected at least one statement in body")
+			}
+
+			// Find the type declaration
+			var typeDecl *ast.TypeDeclaration
+			for _, stmt := range prog.Body {
+				if td, ok := stmt.(*ast.TypeDeclaration); ok {
+					typeDecl = td
+					break
+				}
+			}
+
+			if typeDecl == nil {
+				t.Fatal("No TypeDeclaration found in program body")
+			}
+
+			// Check KIND parameter
+			if tt.expectKind {
+				if typeDecl.KindParam == nil {
+					t.Errorf("Expected KindParam to be non-nil")
+					return
+				}
+
+				if tt.kindIsLiteral {
+					lit, ok := typeDecl.KindParam.(*ast.IntegerLiteral)
+					if !ok {
+						t.Errorf("Expected KIND to be IntegerLiteral, got %T", typeDecl.KindParam)
+						return
+					}
+					if lit.Value != tt.kindValue {
+						t.Errorf("Expected KIND value %d, got %d", tt.kindValue, lit.Value)
+					}
+				}
+			} else {
+				if typeDecl.KindParam != nil {
+					t.Errorf("Expected KindParam to be nil for default kind, got %T", typeDecl.KindParam)
+				}
+			}
+		})
+	}
+}
+
+// TestCharacterLengthAsExpression verifies that CHARACTER length is stored
+// as an Expression node, not a string
+func TestCharacterLengthAsExpression(t *testing.T) {
+	tests := []struct {
+		name         string
+		src          string
+		expectLength bool
+		lengthValue  int64 // if length is integer literal
+	}{
+		{
+			name: "CHARACTER with LEN= syntax",
+			src: `PROGRAM test
+    CHARACTER(LEN=80) :: str
+END PROGRAM`,
+			expectLength: true,
+			lengthValue:  80,
+		},
+		{
+			name: "CHARACTER shorthand syntax",
+			src: `PROGRAM test
+    CHARACTER(80) :: str
+END PROGRAM`,
+			expectLength: true,
+			lengthValue:  80,
+		},
+		{
+			name: "CHARACTER F77 syntax",
+			src: `PROGRAM test
+    CHARACTER*10 :: str
+END PROGRAM`,
+			expectLength: true,
+			lengthValue:  10,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var parser Parser90
+			err := parser.Reset("test.f90", strings.NewReader(tt.src))
+			if err != nil {
+				t.Fatalf("Reset failed: %v", err)
+			}
+
+			unit := parser.ParseNextProgramUnit()
+			if unit == nil {
+				t.Fatal("ParseNextProgramUnit returned nil")
+			}
+
+			if len(parser.Errors()) > 0 {
+				t.Fatalf("Parse errors: %v", parser.Errors())
+			}
+
+			prog, ok := unit.(*ast.ProgramBlock)
+			if !ok {
+				t.Fatalf("Expected ProgramBlock, got %T", unit)
+			}
+
+			// Find the type declaration
+			var typeDecl *ast.TypeDeclaration
+			for _, stmt := range prog.Body {
+				if td, ok := stmt.(*ast.TypeDeclaration); ok {
+					typeDecl = td
+					break
+				}
+			}
+
+			if typeDecl == nil {
+				t.Fatal("No TypeDeclaration found")
+			}
+
+			if len(typeDecl.Entities) == 0 {
+				t.Fatal("No entities in type declaration")
+			}
+
+			entity := typeDecl.Entities[0]
+
+			if tt.expectLength {
+				if entity.CharLen == nil {
+					t.Errorf("Expected CharLen to be non-nil Expression")
+					return
+				}
+
+				lit, ok := entity.CharLen.(*ast.IntegerLiteral)
+				if !ok {
+					t.Errorf("Expected CharLen to be IntegerLiteral, got %T", entity.CharLen)
+					return
+				}
+
+				if lit.Value != tt.lengthValue {
+					t.Errorf("Expected length %d, got %d", tt.lengthValue, lit.Value)
+				}
+			}
+		})
+	}
+}
+
+// TestFunctionKindParameter verifies that function result types capture KIND
+func TestFunctionKindParameter(t *testing.T) {
+	src := `REAL*8 FUNCTION compute(x)
+    REAL*8 :: x
+    compute = x * 2.0d0
+END FUNCTION`
+
+	var parser Parser90
+	err := parser.Reset("test.f90", strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Reset failed: %v", err)
+	}
+
+	unit := parser.ParseNextProgramUnit()
+	if unit == nil {
+		t.Fatal("ParseNextProgramUnit returned nil")
+	}
+
+	if len(parser.Errors()) > 0 {
+		t.Fatalf("Parse errors: %v", parser.Errors())
+	}
+
+	fn, ok := unit.(*ast.Function)
+	if !ok {
+		t.Fatalf("Expected Function, got %T", unit)
+	}
+
+	if fn.ResultType != "REAL" {
+		t.Errorf("Expected ResultType 'REAL', got '%s'", fn.ResultType)
+	}
+
+	if fn.ResultKind == nil {
+		t.Errorf("Expected ResultKind to be non-nil")
+		return
+	}
+
+	lit, ok := fn.ResultKind.(*ast.IntegerLiteral)
+	if !ok {
+		t.Errorf("Expected ResultKind to be IntegerLiteral, got %T", fn.ResultKind)
+		return
+	}
+
+	if lit.Value != 8 {
+		t.Errorf("Expected ResultKind value 8, got %d", lit.Value)
+	}
+}
+
+// TestParameterKindCapture verifies that parameter KIND is captured
+func TestParameterKindCapture(t *testing.T) {
+	src := `SUBROUTINE process(n, arr)
+    INTEGER(KIND=4), INTENT(IN) :: n
+    REAL(KIND=8), DIMENSION(n), INTENT(INOUT) :: arr
+END SUBROUTINE`
+
+	var parser Parser90
+	err := parser.Reset("test.f90", strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Reset failed: %v", err)
+	}
+
+	unit := parser.ParseNextProgramUnit()
+	if unit == nil {
+		t.Fatal("ParseNextProgramUnit returned nil")
+	}
+
+	if len(parser.Errors()) > 0 {
+		t.Fatalf("Parse errors: %v", parser.Errors())
+	}
+
+	sub, ok := unit.(*ast.Subroutine)
+	if !ok {
+		t.Fatalf("Expected Subroutine, got %T", unit)
+	}
+
+	if len(sub.Parameters) != 2 {
+		t.Fatalf("Expected 2 parameters, got %d", len(sub.Parameters))
+	}
+
+	// Check first parameter (n)
+	param0 := sub.Parameters[0]
+	if param0.Name != "n" {
+		t.Errorf("Expected parameter 0 name 'n', got '%s'", param0.Name)
+	}
+	if param0.Type != "INTEGER" {
+		t.Errorf("Expected parameter 0 type 'INTEGER', got '%s'", param0.Type)
+	}
+	if param0.TypeKind == nil {
+		t.Errorf("Expected parameter 0 TypeKind to be non-nil")
+	} else {
+		lit, ok := param0.TypeKind.(*ast.IntegerLiteral)
+		if !ok {
+			t.Errorf("Expected parameter 0 TypeKind to be IntegerLiteral, got %T", param0.TypeKind)
+		} else if lit.Value != 4 {
+			t.Errorf("Expected parameter 0 TypeKind value 4, got %d", lit.Value)
+		}
+	}
+
+	// Check second parameter (arr)
+	param1 := sub.Parameters[1]
+	if param1.Name != "arr" {
+		t.Errorf("Expected parameter 1 name 'arr', got '%s'", param1.Name)
+	}
+	if param1.Type != "REAL" {
+		t.Errorf("Expected parameter 1 type 'REAL', got '%s'", param1.Type)
+	}
+	if param1.TypeKind == nil {
+		t.Errorf("Expected parameter 1 TypeKind to be non-nil")
+	} else {
+		lit, ok := param1.TypeKind.(*ast.IntegerLiteral)
+		if !ok {
+			t.Errorf("Expected parameter 1 TypeKind to be IntegerLiteral, got %T", param1.TypeKind)
+		} else if lit.Value != 8 {
+			t.Errorf("Expected parameter 1 TypeKind value 8, got %d", lit.Value)
+		}
 	}
 }

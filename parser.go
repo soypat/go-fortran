@@ -2537,8 +2537,17 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		stmt.TypeSpec = "DOUBLE PRECISION" // Normalize to canonical form
 	}
 
+	// Handle KIND parameter for non-CHARACTER types: INTEGER(KIND=8), REAL*8, etc.
+	// For CHARACTER, we handle length separately below
+	if stmt.TypeSpec != "CHARACTER" && stmt.TypeSpec != "TYPE" && stmt.TypeSpec != "DOUBLE PRECISION" {
+		// Try to parse KIND selector
+		if p.currentTokenIs(token.Asterisk) || p.currentTokenIs(token.LParen) {
+			stmt.KindParam = p.parseKindSelector()
+		}
+	}
+
 	// Handle CHARACTER length specification: CHARACTER(LEN=80) or CHARACTER*80 or CHARACTER(*)
-	var charLen string
+	var charLen ast.Expression
 	if stmt.TypeSpec == "CHARACTER" {
 		if p.currentTokenIs(token.LParen) {
 			// CHARACTER(LEN=n) or CHARACTER(n) or CHARACTER(*)
@@ -2547,8 +2556,8 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 			// CHARACTER*n form
 			p.nextToken() // consume *
 			if p.currentTokenIs(token.IntLit) || p.canUseAsIdentifier() {
-				charLen = string(p.current.lit)
-				p.nextToken()
+				// Parse as expression
+				charLen = p.parseExpression(0)
 			}
 		}
 	}
@@ -2657,7 +2666,7 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		entity := ast.DeclEntity{Name: entityName}
 
 		// Set CHARACTER length if this is a CHARACTER type
-		if charLen != "" {
+		if charLen != nil {
 			entity.CharLen = charLen
 		}
 
@@ -2721,6 +2730,7 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		if paramMap != nil {
 			if param, exists := paramMap[entityName]; exists {
 				param.Type = stmt.TypeSpec
+				param.TypeKind = stmt.KindParam
 				param.Intent = intentType
 				param.Attributes = append(param.Attributes, stmt.Attributes...)
 				param.CharLen = entity.CharLen
@@ -3053,14 +3063,12 @@ func (p *Parser90) parseArraySpec() *ast.ArraySpec {
 
 // parseCharacterLength parses CHARACTER length specification from (LEN=n), (n), (*), or (LEN=:)
 // Expects current token to be '(' and consumes up to and including ')'
-// Returns the length specification as a string
-func (p *Parser90) parseCharacterLength() string {
+// Returns the length specification as an Expression
+func (p *Parser90) parseCharacterLength() ast.Expression {
 	if !p.currentTokenIs(token.LParen) {
-		return ""
+		return nil
 	}
 	p.nextToken() // consume '('
-
-	var lengthTokens []byte
 
 	// Check for LEN= prefix
 	if p.currentTokenIs(token.LEN) {
@@ -3068,19 +3076,58 @@ func (p *Parser90) parseCharacterLength() string {
 		p.consumeIf(token.Equals) // consume =
 	}
 
-	// Collect tokens until closing paren, stop at construct endings for safety
-	for p.loopUntilEndElseOr(token.RParen) {
-		if len(lengthTokens) > 0 {
-			lengthTokens = append(lengthTokens, ' ')
-		}
-		lengthTokens = append(lengthTokens, p.current.lit...)
-		p.nextToken()
-	}
+	// Parse as expression (handles *, :, integer literals, identifiers, etc.)
+	expr := p.parseExpression(0)
 
 	// Consume closing paren
 	p.consumeIf(token.RParen)
 
-	return string(lengthTokens)
+	return expr
+}
+
+// parseKindSelector parses KIND parameter specification
+// Handles: (KIND=expr), (expr), or *N
+// Returns the KIND parameter as an Expression, or nil if not present
+func (p *Parser90) parseKindSelector() ast.Expression {
+	// Handle F77 syntax: *N (e.g., INTEGER*4, REAL*8)
+	if p.currentTokenIs(token.Asterisk) {
+		p.nextToken() // consume *
+		if p.currentTokenIs(token.IntLit) {
+			kind := p.parseExpression(0)
+			return kind
+		}
+		// If not followed by integer, this might be something else
+		// Back up would be complex, so we'll require proper syntax
+		p.addError("expected integer after * in type kind specification")
+		return nil
+	}
+
+	// Handle F90 syntax: (KIND=expr) or (expr)
+	if p.currentTokenIs(token.LParen) {
+		p.nextToken() // consume (
+
+		// Check for KIND= prefix
+		if p.currentTokenIs(token.KIND) {
+			p.nextToken() // consume KIND
+			if p.currentTokenIs(token.Equals) {
+				p.nextToken() // consume =
+			}
+		}
+
+		// Parse kind expression
+		kind := p.parseExpression(0)
+
+		// Consume closing paren
+		if !p.currentTokenIs(token.RParen) {
+			p.addError("expected ')' after KIND parameter")
+		} else {
+			p.nextToken()
+		}
+
+		return kind
+	}
+
+	return nil
 }
 
 // getOperatorPrecedence returns the precedence level for operators
@@ -3333,10 +3380,15 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 	pos := ast.Pos(startPos, p.current.start+len(p.current.lit))
 	// Handle integer literals
 	if p.currentTokenIs(token.IntLit) {
-		// TODO: Parse actual integer value
+		rawStr := string(p.current.lit)
+		value, err := parseInt64(rawStr)
+		if err != nil {
+			p.addError(fmt.Sprintf("invalid integer literal: %s", rawStr))
+			value = 0
+		}
 		lit := &ast.IntegerLiteral{
-			Value:    0,                     // Will need proper parsing
-			Raw:      string(p.current.lit), // Store original text
+			Value:    value,
+			Raw:      rawStr,
 			Position: pos,
 		}
 		p.nextToken()
@@ -3575,32 +3627,9 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 	}
 
 	// Handle type length/kind specifiers: CHARACTER*4, REAL*8, INTEGER*4, etc.
-	if p.currentTokenIs(token.Asterisk) {
-		typeSpec += "*"
-		p.nextToken()
-		// Consume the length/kind value
-		if p.currentTokenIs(token.IntLit) || p.currentTokenIs(token.LParen) {
-			typeSpec += string(p.current.lit)
-			p.nextToken()
-			// Handle (kind) notation like INTEGER(4) or CHARACTER(LEN=*)
-			if p.currentTokenIs(token.LParen) {
-				depth := 1
-				typeSpec += "("
-				p.nextToken()
-				for depth > 0 && !p.IsDone() {
-					if p.currentTokenIs(token.LParen) {
-						depth++
-					} else if p.currentTokenIs(token.RParen) {
-						depth--
-					}
-					if depth > 0 {
-						typeSpec += string(p.current.lit)
-					}
-					p.nextToken()
-				}
-				typeSpec += ")"
-			}
-		}
+	var kindParam ast.Expression
+	if p.currentTokenIs(token.Asterisk) || p.currentTokenIs(token.LParen) {
+		kindParam = p.parseKindSelector()
 	}
 
 	// Check if this is a function
@@ -3608,6 +3637,7 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 		// Parse as function
 		fn := p.parseFunction().(*ast.Function)
 		fn.ResultType = typeSpec
+		fn.ResultKind = kindParam
 		return fn
 	}
 
@@ -3646,11 +3676,19 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 		// Type-prefixed function with attributes
 		typeToken := p.current.tok
 		p.nextToken()
+
+		// Parse KIND if present (e.g., REAL*8 FUNCTION)
+		var kindParam ast.Expression
+		if p.currentTokenIs(token.Asterisk) || p.currentTokenIs(token.LParen) {
+			kindParam = p.parseKindSelector()
+		}
+
 		if p.currentTokenIs(token.FUNCTION) {
 			stmt = p.parseFunction()
 			if fn, ok := stmt.(*ast.Function); ok {
 				fn.Attributes = attributes
 				fn.ResultType = typeToken.String()
+				fn.ResultKind = kindParam
 			}
 		} else {
 			p.addError("expected FUNCTION after type keyword")
@@ -3759,4 +3797,17 @@ func getCallStack(skipAdditional int) string {
 	}
 
 	return result.String()
+}
+
+// parseInt64 parses a Fortran integer literal string to int64
+// Handles decimal integers with optional kind suffix (e.g., 123_8, 1_INT32)
+func parseInt64(s string) (int64, error) {
+	// Handle kind suffix: 123_8 or 1_INT32
+	// Split on underscore and take only the numeric part
+	if idx := strings.Index(s, "_"); idx >= 0 {
+		s = s[:idx] // Take only the part before underscore
+	}
+
+	// Parse as base 10 integer
+	return strconv.ParseInt(s, 10, 64)
 }
