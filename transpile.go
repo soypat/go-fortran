@@ -55,6 +55,10 @@ func (tg *TranspileToGo) transformStatements(stmts []f90.Statement) []ast.Stmt {
 // transformStatement transforms a single Fortran statement to a Go statement
 func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 	switch s := stmt.(type) {
+	case *f90.TypeDeclaration:
+		return tg.transformTypeDeclaration(s)
+	case *f90.AssignmentStmt:
+		return tg.transformAssignment(s)
 	case *f90.PrintStmt:
 		return tg.transformPrint(s)
 	default:
@@ -107,6 +111,60 @@ func (tg *TranspileToGo) transformExpressions(exprs []f90.Expression) []ast.Expr
 	return goExprs
 }
 
+// transformTypeDeclaration transforms a Fortran type declaration to Go var declaration
+func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast.Stmt {
+	// Map Fortran type to Go type
+	var goType ast.Expr
+	switch decl.TypeSpec {
+	case "INTEGER":
+		goType = ast.NewIdent("int32")
+	case "REAL":
+		goType = ast.NewIdent("float32")
+	case "DOUBLE PRECISION":
+		goType = ast.NewIdent("float64")
+	case "LOGICAL":
+		goType = ast.NewIdent("bool")
+	case "CHARACTER":
+		goType = ast.NewIdent("string")
+	default:
+		// Unknown type, skip
+		return nil
+	}
+
+	// Create var declarations for each entity
+	specs := make([]ast.Spec, 0, len(decl.Entities))
+	for _, entity := range decl.Entities {
+		spec := &ast.ValueSpec{
+			Names: []*ast.Ident{ast.NewIdent(entity.Name)},
+			Type:  goType,
+		}
+		specs = append(specs, spec)
+	}
+
+	return &ast.DeclStmt{
+		Decl: &ast.GenDecl{
+			Tok:   token.VAR,
+			Specs: specs,
+		},
+	}
+}
+
+// transformAssignment transforms a Fortran assignment to Go assignment
+func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stmt {
+	lhs := tg.transformExpression(assign.Target)
+	rhs := tg.transformExpression(assign.Value)
+
+	if lhs == nil || rhs == nil {
+		return nil
+	}
+
+	return &ast.AssignStmt{
+		Lhs: []ast.Expr{lhs},
+		Tok: token.ASSIGN,
+		Rhs: []ast.Expr{rhs},
+	}
+}
+
 // transformExpression transforms a single Fortran expression to a Go expression
 func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 	switch e := expr.(type) {
@@ -115,6 +173,24 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 			Kind:  token.STRING,
 			Value: fmt.Sprintf("%q", e.Value),
 		}
+	case *f90.IntegerLiteral:
+		return &ast.BasicLit{
+			Kind:  token.INT,
+			Value: e.Raw,
+		}
+	case *f90.RealLiteral:
+		return &ast.BasicLit{
+			Kind:  token.FLOAT,
+			Value: e.Raw,
+		}
+	case *f90.LogicalLiteral:
+		// .TRUE. → true, .FALSE. → false
+		if e.Value {
+			return ast.NewIdent("true")
+		}
+		return ast.NewIdent("false")
+	case *f90.Identifier:
+		return ast.NewIdent(e.Value)
 	default:
 		// For now, unsupported expressions return nil
 		return nil

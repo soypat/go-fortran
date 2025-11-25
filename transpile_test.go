@@ -84,7 +84,7 @@ func TestTranspileGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("got errors collecting symbols in golden.f90: %v", err)
 	}
-	const maxLvl = 1
+	const maxLvl = 2
 	// TODO: Fix type resolver to skip format specifiers
 	// For now, skip type resolution as it's not needed for basic transpilation
 	// resolver := symbol.NewTypeResolver(syms)
@@ -130,10 +130,33 @@ func TestTranspileGolden(t *testing.T) {
 		t.Fatalf("failed to read golden.out: %v", err)
 	}
 
-	// Extract only the first maxLvl lines from expected output
+	// Map of which output lines each LEVEL produces (0-indexed)
+	// LEVEL 1: line 0 (1 line)
+	// LEVEL 2: lines 1-3 (3 lines)
+	// LEVEL 3: lines 4-5 (2 lines)
+	// etc.
+	levelLineRanges := map[int][2]int{
+		1:  {0, 1},   // lines 0-0 (1 line)
+		2:  {1, 4},   // lines 1-3 (3 lines)
+		3:  {4, 6},   // lines 4-5 (2 lines)
+		4:  {6, 9},   // lines 6-8 (3 lines)
+		5:  {9, 14},  // lines 9-13 (5 lines)
+		6:  {14, 16}, // lines 14-15 (2 lines)
+		7:  {16, 21}, // lines 16-20 (5 lines)
+		8:  {21, 23}, // lines 21-22 (2 lines)
+		9:  {23, 25}, // lines 23-24 (2 lines)
+		10: {25, 28}, // lines 25-27 (3 lines)
+		11: {28, 29}, // lines 28-28 (1 line)
+		12: {29, 33}, // lines 29-32 (4 lines)
+	}
+
+	// Determine how many lines to expect based on maxLvl
+	endLine := levelLineRanges[maxLvl][1]
+
+	// Extract lines 0 through endLine-1
 	expectedLines := bytes.Split(expectedFull, []byte("\n"))
 	var expected bytes.Buffer
-	for i := 0; i < maxLvl && i < len(expectedLines); i++ {
+	for i := 0; i < endLine && i < len(expectedLines); i++ {
 		expected.Write(expectedLines[i])
 		expected.WriteByte('\n')
 	}

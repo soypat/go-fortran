@@ -1989,6 +1989,886 @@ func (p *Parser90) parseImplicit() ast.Statement {
 
 ---
 
+## Phase 5: Code Generation - Detailed Implementation Plan
+
+### Architectural Decisions
+
+Based on analysis of `testdata/golden.f90` (LEVEL01-12) and mapping challenges, the following architectural decisions have been confirmed:
+
+| Decision Area | Approach | Rationale |
+|--------------|----------|-----------|
+| **Array Indexing** | Runtime wrapper (Option B) - ALL cases | Use `intrinsic.Array[T]` for all array access. Handles 1-based indexing, arbitrary lower bounds, and variable indices correctly. Prioritize correctness over generated code verbosity. |
+| **INTENT Parameters** | Pointer-based translation | INTENT(IN) → pass by value, INTENT(OUT/INOUT) → pass by pointer (*T). Clear semantics, matches Fortran reference behavior. |
+| **GOTO Statements** | Direct label translation (Approach A) | Use Go's `goto` and labels directly. Keep implementation simple. Advanced control flow reconstruction can be added later if needed. |
+| **Type Mapping** | Conservative sizing | INTEGER → int32, REAL → float32, DOUBLE PRECISION → float64, LOGICAL → bool, CHARACTER(LEN=n) → string (variable length for now) |
+
+### Array Wrapper Implementation
+
+**Location**: `intrinsic/array.go` (already exists with basic structure)
+
+**Current Implementation**:
+```go
+type Array[T any] struct {
+    data  []T
+    lower int
+}
+
+func (a *Array[T]) Set(i int, v T) {
+    a.data[i-a.lower] = v
+}
+```
+
+**Required Additions**:
+```go
+// Constructor
+func NewArray[T any](size int, lower int) *Array[T] {
+    return &Array[T]{
+        data:  make([]T, size),
+        lower: lower,
+    }
+}
+
+// Get method
+func (a *Array[T]) Get(i int) T {
+    return a.data[i-a.lower]
+}
+
+// Size method
+func (a *Array[T]) Len() int {
+    return len(a.data)
+}
+```
+
+**Multi-dimensional arrays** (needed for LEVEL05):
+- Use nested Array types: `Array[Array[T]]` for 2D
+- OR create Array2D, Array3D specialized types
+- Decision: Start with nested approach, optimize later if needed
+
+**Transpiler Usage Pattern**:
+```fortran
+! Fortran
+INTEGER, DIMENSION(5) :: arr1
+arr1(1) = 10
+x = arr1(3)
+```
+```go
+// Generated Go
+arr1 := intrinsic.NewArray[int32](5, 1)  // size=5, lower=1
+arr1.Set(1, 10)
+x := arr1.Get(3)
+```
+
+### LEVEL-by-LEVEL Implementation Roadmap
+
+#### LEVEL02: Variables and Assignments (1-2 days)
+
+**Status**: Not implemented
+**Dependencies**: None (LEVEL01 complete ✅)
+
+**Fortran Constructs**:
+```fortran
+INTEGER :: i
+REAL :: x
+LOGICAL :: flag
+CHARACTER(LEN=20) :: message
+i = 42
+x = 3.14159
+flag = .TRUE.
+message = 'Variables assigned'
+PRINT *, 'LEVEL 2: i = ', i, ', x = ', x
+PRINT *, 'LEVEL 2: flag = ', flag
+PRINT *, 'LEVEL 2:', message
+```
+
+**New Transpiler Functions Needed**:
+- `transformTypeDeclaration()` - Map Fortran types to Go types
+- `transformAssignmentStmt()` - Handle variable = expression
+- `transformIntegerLiteral()` - Integer constants
+- `transformRealLiteral()` - Float constants
+- `transformLogicalLiteral()` - .TRUE./.FALSE. to true/false
+- `transformIdentifier()` - Variable references
+- Extend `transformPrint()` to handle multiple arguments and variable output
+
+**AST Nodes to Handle**:
+- `*f90.TypeDeclaration`
+- `*f90.AssignmentStmt`
+- `*f90.IntegerLiteral`
+- `*f90.RealLiteral`
+- `*f90.LogicalLiteral`
+- `*f90.Identifier`
+
+**Go Code Pattern**:
+```go
+// Generated main() wrapper
+var i int32
+var x float32
+var flag bool
+var message string
+i = 42
+x = 3.14159
+flag = true
+message = "Variables assigned"
+fmt.Println(" LEVEL 2: i = ", i, ", x = ", x)
+fmt.Println(" LEVEL 2: flag = ", flag)
+fmt.Println(" LEVEL 2:", message)
+```
+
+**Success Criteria**:
+- TypeDeclaration generates Go var declarations
+- Assignment statements generate Go assignments
+- PRINT with variables outputs correct values
+- Test: increment maxLvl to 2, output matches golden.out lines 1-4
+
+---
+
+#### LEVEL03: Arithmetic Expressions (1 day)
+
+**Status**: Not implemented
+**Dependencies**: LEVEL02 (variables)
+
+**Fortran Constructs**:
+```fortran
+INTEGER :: j, k
+REAL :: y, z
+j = i + 10
+k = j * 2
+y = x * 2.0
+z = y + REAL(k)
+PRINT *, 'LEVEL 3: j = ', j, ', k = ', k
+PRINT *, 'LEVEL 3: y = ', y, ', z = ', z
+```
+
+**New Transpiler Functions Needed**:
+- `transformBinaryExpr()` - Handle +, -, *, / operators
+- `transformFunctionCall()` - For type conversion intrinsics (REAL, INT, etc.)
+
+**AST Nodes to Handle**:
+- `*f90.BinaryExpr`
+- `*f90.FunctionCall` (for intrinsics)
+
+**Challenges**:
+- Type conversion: `REAL(k)` → `float32(k)`
+- Operator precedence (already correct in parser, preserve in generated code)
+- Mixed-type arithmetic (Go handles automatically)
+
+**Success Criteria**:
+- Binary operations transpile correctly
+- REAL() type conversion generates float32() cast
+- Arithmetic results match Fortran output
+- Test: maxLvl = 3, lines 1-6 match
+
+---
+
+#### LEVEL04: Conditional Statements (1-2 days)
+
+**Status**: Not implemented
+**Dependencies**: LEVEL03 (expressions)
+
+**Fortran Constructs**:
+```fortran
+IF (i .GT. 40) THEN
+    PRINT *, 'LEVEL 4: i is greater than 40'
+END IF
+
+IF (flag) THEN
+    PRINT *, 'LEVEL 4: flag is true'
+END IF
+
+IF (x .LT. 3.0) THEN
+    PRINT *, 'LEVEL 4: x < 3.0'
+ELSE IF (x .GE. 3.0 .AND. x .LT. 4.0) THEN
+    PRINT *, 'LEVEL 4: 3.0 <= x < 4.0'
+ELSE
+    PRINT *, 'LEVEL 4: x >= 4.0'
+END IF
+```
+
+**New Transpiler Functions Needed**:
+- `transformIfStmt()` - IF/THEN/ELSE/END IF structures
+- Extend `transformBinaryExpr()` for relational operators (.GT., .LT., .GE., .LE., .EQ., .NE.)
+- Handle logical operators (.AND., .OR., .NOT.)
+
+**AST Nodes to Handle**:
+- `*f90.IfStmt`
+
+**Operator Mapping**:
+```
+.GT.  → >
+.GE.  → >=
+.LT.  → <
+.LE.  → <=
+.EQ.  → ==
+.NE.  → !=
+.AND. → &&
+.OR.  → ||
+.NOT. → !
+```
+
+**Go Code Pattern**:
+```go
+if i > 40 {
+    fmt.Println(" LEVEL 4: i is greater than 40")
+}
+
+if flag {
+    fmt.Println(" LEVEL 4: flag is true")
+}
+
+if x < 3.0 {
+    fmt.Println(" LEVEL 4: x < 3.0")
+} else if x >= 3.0 && x < 4.0 {
+    fmt.Println(" LEVEL 4: 3.0 <= x < 4.0")
+} else {
+    fmt.Println(" LEVEL 4: x >= 4.0")
+}
+```
+
+**Success Criteria**:
+- IF/THEN/END IF → if { }
+- ELSE IF → else if
+- Relational operators map correctly
+- Test: maxLvl = 4, lines 1-9 match
+
+---
+
+#### LEVEL05: Arrays ⚠️ CRITICAL (2-3 days)
+
+**Status**: Not implemented
+**Dependencies**: LEVEL02 (variables), `intrinsic.Array[T]` complete
+
+**Fortran Constructs**:
+```fortran
+INTEGER, DIMENSION(5) :: arr1
+REAL, DIMENSION(3, 3) :: matrix
+arr1(1) = 10
+arr1(3) = 30
+arr1(5) = 50
+matrix(1,1) = 1.0
+matrix(2,2) = 1.0
+PRINT *, 'LEVEL 5: arr1(1) = ', arr1(1)
+PRINT *, 'LEVEL 5: arr1(3) = ', arr1(3)
+PRINT *, 'LEVEL 5: arr1(5) = ', arr1(5)
+PRINT *, 'LEVEL 5: matrix(1,1) = ', matrix(1,1)
+PRINT *, 'LEVEL 5: matrix(2,2) = ', matrix(2,2)
+```
+
+**New Transpiler Functions Needed**:
+- `transformArrayDeclaration()` - DIMENSION(...) → NewArray[T](...)
+- `transformArrayRef()` - arr(i) → arr.Get(i) or arr.Set(i, v)
+- Handle 2D arrays (nested Array or specialized Array2D)
+
+**AST Nodes to Handle**:
+- `*f90.TypeDeclaration` with `ArraySpec != nil`
+- `*f90.ArrayRef` (in expressions and assignments)
+
+**Go Code Pattern**:
+```go
+arr1 := intrinsic.NewArray[int32](5, 1)  // DIMENSION(5) → size=5, lower=1
+matrix := intrinsic.NewArray2D[float32](3, 3, 1, 1)  // 2D: rows=3, cols=3
+
+arr1.Set(1, 10)
+arr1.Set(3, 30)
+arr1.Set(5, 50)
+matrix.Set(1, 1, 1.0)
+matrix.Set(2, 2, 1.0)
+
+fmt.Println(" LEVEL 5: arr1(1) = ", arr1.Get(1))
+fmt.Println(" LEVEL 5: arr1(3) = ", arr1.Get(3))
+fmt.Println(" LEVEL 5: arr1(5) = ", arr1.Get(5))
+fmt.Println(" LEVEL 5: matrix(1,1) = ", matrix.Get(1, 1))
+fmt.Println(" LEVEL 5: matrix(2,2) = ", matrix.Get(2, 2))
+```
+
+**Implementation Notes**:
+- ALL array access uses wrapper methods (user decision)
+- 1-based indexing handled by Array.Set/Get internally
+- ArrayRef in assignment LHS → Set(), in RHS → Get()
+- Must distinguish array reference from function call (both use parentheses)
+
+**Success Criteria**:
+- 1D arrays work with Get/Set
+- 2D arrays work (implement Array2D or nested Array)
+- 1-based indexing transparent to generated code
+- Test: maxLvl = 5, lines 1-14 match
+
+---
+
+#### LEVEL06: DO Loops ⚠️ CRITICAL (2-3 days)
+
+**Status**: Not implemented
+**Dependencies**: LEVEL05 (arrays - loops iterate over array indices)
+
+**Fortran Constructs**:
+```fortran
+INTEGER :: sum_val, count, i, j
+sum_val = 0
+DO i = 1, 5
+    sum_val = sum_val + arr1(i)
+END DO
+PRINT *, 'LEVEL 6: sum of arr1 = ', sum_val
+
+count = 0
+DO i = 1, 3
+    DO j = 1, 3
+        count = count + 1
+    END DO
+END DO
+PRINT *, 'LEVEL 6: nested loop count = ', count
+```
+
+**New Transpiler Functions Needed**:
+- `transformDoStmt()` - DO i = start, end → for i := start; i <= end; i++
+
+**AST Nodes to Handle**:
+- `*f90.DoStmt`
+
+**Critical Details**:
+- **Inclusive upper bound**: `DO i = 1, 5` includes i=5 → `for i := int32(1); i <= 5; i++`
+- **Loop variable persistence**: Fortran loop variables retain value after loop
+- **Nested scoping**: Inner loops can shadow outer loop variables (Fortran allows, Go requires different names)
+
+**Go Code Pattern**:
+```go
+var sum_val int32 = 0
+for i := int32(1); i <= 5; i++ {
+    sum_val = sum_val + arr1.Get(i)
+}
+fmt.Println(" LEVEL 6: sum of arr1 = ", sum_val)
+
+var count int32 = 0
+for i := int32(1); i <= 3; i++ {
+    for j := int32(1); j <= 3; j++ {
+        count = count + 1
+    }
+}
+fmt.Println(" LEVEL 6: nested loop count = ", count)
+```
+
+**Success Criteria**:
+- DO loops generate correct Go for loops
+- Inclusive upper bound handled (<=, not <)
+- Nested loops work
+- Array access inside loops works (Get method)
+- Test: maxLvl = 6, lines 1-16 match
+
+---
+
+#### LEVEL07: Subroutine Calls ⚠️ CRITICAL (2-3 days)
+
+**Status**: Not implemented
+**Dependencies**: LEVEL06 (loops), parameter passing strategy
+
+**Fortran Constructs**:
+```fortran
+CALL SIMPLE_SUB()
+CALL ADD_VALUES(10, 20, result)
+CALL MODIFY_ARRAY(arr1, 5)
+
+! Helper subroutines:
+SUBROUTINE SIMPLE_SUB()
+    PRINT *, 'LEVEL 7: Inside SIMPLE_SUB'
+END SUBROUTINE
+
+SUBROUTINE ADD_VALUES(a, b, result)
+    INTEGER, INTENT(IN) :: a, b
+    INTEGER, INTENT(OUT) :: result
+    result = a + b
+END SUBROUTINE
+
+SUBROUTINE MODIFY_ARRAY(arr, n)
+    INTEGER, INTENT(IN) :: n
+    INTEGER, DIMENSION(n), INTENT(INOUT) :: arr
+    DO i = 1, n
+        arr(i) = arr(i) * 2
+    END DO
+END SUBROUTINE
+```
+
+**New Transpiler Functions Needed**:
+- `transformCallStmt()` - CALL foo(args) → foo(args)
+- Update `TransformSubroutine()` to handle parameters with INTENT
+- Generate pointer parameters for OUT/INOUT
+
+**AST Nodes to Handle**:
+- `*f90.CallStmt`
+- `*f90.Subroutine` with `Parameters` field
+
+**Parameter Translation Strategy**:
+
+| Fortran INTENT | Go Parameter | Call Site |
+|---------------|-------------|-----------|
+| INTENT(IN) | `a int32` | pass by value: `a` |
+| INTENT(OUT) | `result *int32` | pass address: `&result` |
+| INTENT(INOUT) | `arr *intrinsic.Array[int32]` | pass pointer: `arr` (already pointer) |
+| (no INTENT) | assume INOUT | pass pointer |
+
+**Go Code Pattern**:
+```go
+// Subroutine declarations
+func SIMPLE_SUB() {
+    fmt.Println(" LEVEL 7: Inside SIMPLE_SUB")
+}
+
+func ADD_VALUES(a int32, b int32, result *int32) {
+    *result = a + b
+}
+
+func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
+    for i := int32(1); i <= n; i++ {
+        arr.Set(i, arr.Get(i) * 2)
+    }
+}
+
+// Call sites
+SIMPLE_SUB()
+
+var result int32
+ADD_VALUES(10, 20, &result)
+fmt.Println(" LEVEL 7: Inside ADD_VALUES")
+fmt.Println(" LEVEL 7: ADD_VALUES(10, 20) = ", result)
+
+MODIFY_ARRAY(arr1, 5)
+fmt.Println(" LEVEL 7: Inside MODIFY_ARRAY")
+fmt.Printf(" LEVEL 7: arr1 after modify: ")
+for i := int32(1); i <= 3; i++ {
+    fmt.Print(arr1.Get(i), " ")
+}
+fmt.Println()
+```
+
+**Challenges**:
+- Distinguish IN/OUT/INOUT from Parameter.Intent field
+- Array parameters: pass *Array, not Array (already pointer from NewArray)
+- Size parameter (n) might be redundant (Go has arr.Len()), but keep for compatibility
+
+**Success Criteria**:
+- CALL statements generate function calls
+- INTENT(OUT) generates pointer parameters and &address at call site
+- Array parameters work (INOUT)
+- Test: maxLvl = 7, lines 1-21 match
+
+---
+
+#### LEVEL08: Functions (2 days)
+
+**Status**: Not implemented
+**Dependencies**: LEVEL07 (procedure calls)
+
+**Fortran Constructs**:
+```fortran
+result = FACTORIAL(5)
+x = SQUARE_ROOT(16.0)
+
+INTEGER FUNCTION FACTORIAL(n)
+    INTEGER, INTENT(IN) :: n
+    INTEGER :: i, result
+    result = 1
+    DO i = 1, n
+        result = result * i
+    END DO
+    FACTORIAL = result  ! Assign to function name
+END FUNCTION
+
+REAL FUNCTION SQUARE_ROOT(x)
+    REAL, INTENT(IN) :: x
+    SQUARE_ROOT = SQRT(x)  ! Intrinsic function
+END FUNCTION
+```
+
+**New Transpiler Functions Needed**:
+- `TransformFunction()` - Handle FUNCTION with result type
+- Transform function result assignment (FACTORIAL = result)
+- Handle RETURN statement
+- Map intrinsic functions (SQRT → math.Sqrt)
+
+**AST Nodes to Handle**:
+- `*f90.Function`
+- `*f90.ReturnStmt`
+
+**Function Result Pattern**:
+- Fortran: assigns to function name (`FACTORIAL = result`)
+- Go: explicit return statement (`return result`)
+- Strategy: Track assignments to function name, convert to return at END FUNCTION or RETURN
+
+**Intrinsic Function Mapping**:
+```
+SQRT(x)  → math.Sqrt(x)
+ABS(x)   → math.Abs(x) or abs(x) depending on type
+SIN(x)   → math.Sin(x)
+COS(x)   → math.Cos(x)
+MAX(...) → custom variadic function
+MIN(...) → custom variadic function
+```
+
+**Go Code Pattern**:
+```go
+func FACTORIAL(n int32) int32 {
+    var i, result int32
+    result = 1
+    for i = 1; i <= n; i++ {
+        result = result * i
+    }
+    return result  // FACTORIAL = result becomes return
+}
+
+func SQUARE_ROOT(x float32) float32 {
+    return float32(math.Sqrt(float64(x)))  // SQRT intrinsic
+}
+
+// Usage
+result := FACTORIAL(5)
+x := SQUARE_ROOT(16.0)
+```
+
+**Success Criteria**:
+- Function declarations generate correct signatures
+- Function result assignments convert to return
+- RETURN statement handled
+- SQRT intrinsic maps to math.Sqrt
+- Test: maxLvl = 8, lines 1-23 match
+
+---
+
+#### LEVEL09: DO WHILE Loops (1 day)
+
+**Status**: Not implemented
+**Dependencies**: LEVEL06 (loops), LEVEL04 (conditionals)
+
+**Fortran Constructs**:
+```fortran
+INTEGER :: i, fib
+fib = FIBONACCI(7)
+
+i = 1
+sum_val = 0
+DO WHILE (i .LE. 10)
+    sum_val = sum_val + i
+    i = i + 1
+END DO
+
+INTEGER FUNCTION FIBONACCI(n)
+    INTEGER, INTENT(IN) :: n
+    IF (n .LE. 1) THEN
+        FIBONACCI = n
+        RETURN  ! Early return
+    END IF
+    FIBONACCI = FIBONACCI(n-1) + FIBONACCI(n-2)  ! Recursive
+END FUNCTION
+```
+
+**New Transpiler Functions Needed**:
+- `transformDoWhileStmt()` - DO WHILE (cond) → for cond { }
+
+**AST Nodes to Handle**:
+- `*f90.DoWhileStmt`
+
+**Go Code Pattern**:
+```go
+for i <= 10 {
+    sum_val = sum_val + i
+    i = i + 1
+}
+
+func FIBONACCI(n int32) int32 {
+    if n <= 1 {
+        return n  // Early return
+    }
+    return FIBONACCI(n-1) + FIBONACCI(n-2)
+}
+```
+
+**Success Criteria**:
+- DO WHILE generates Go for with condition only
+- Early RETURN handled in functions
+- Recursive functions work
+- Test: maxLvl = 9, lines 1-25 match
+
+---
+
+#### LEVEL10: Complex Expressions (1 day)
+
+**Status**: Not implemented
+**Dependencies**: LEVEL03 (expressions), LEVEL04 (conditionals)
+
+**Fortran Constructs**:
+```fortran
+REAL :: complex_expr
+LOGICAL :: cond1, cond2, cond3
+complex_expr = (x + y) * z - REAL(k) / 2.0
+cond1 = (i .GT. 5) .AND. (j .LT. 100)
+cond2 = (x .GE. 1.0) .OR. (y .LE. 10.0)
+cond3 = .NOT. flag
+```
+
+**Focus**: Verify operator precedence and logical operators
+
+**Operator Precedence** (already correct in parser, preserve in codegen):
+1. ** (exponentiation)
+2. Unary +, -, .NOT.
+3. *, /
+4. Binary +, -
+5. // (string concat)
+6. Relational: .EQ., .NE., .LT., .LE., .GT., .GE.
+7. .AND.
+8. .OR.
+9. .EQV., .NEQV.
+
+**Success Criteria**:
+- Complex expressions generate correct Go code
+- Operator precedence preserved
+- Logical operators work (.AND. → &&, .OR. → ||, .NOT. → !)
+- Test: maxLvl = 10, lines 1-28 match
+
+---
+
+#### LEVEL11: String Concatenation (1-2 days)
+
+**Status**: Not implemented
+**Dependencies**: LEVEL02 (variables)
+
+**Fortran Constructs**:
+```fortran
+CHARACTER(LEN=10) :: str1, str2
+CHARACTER(LEN=20) :: result_str
+str1 = 'Hello'
+str2 = 'World'
+result_str = str1 // ' ' // str2  ! String concatenation
+PRINT *, 'LEVEL 11: concatenation:', result_str
+```
+
+**Challenge**: String concatenation operator `//`
+
+**Operator Mapping**:
+```
+Fortran: str1 // str2
+Go:      str1 + str2
+```
+
+**Go Code Pattern**:
+```go
+var str1, str2 string
+var result_str string
+str1 = "Hello"
+str2 = "World"
+result_str = str1 + " " + str2  // // → +
+```
+
+**Note**: Fortran CHARACTER(LEN=n) is fixed-length, Go string is variable-length. For now, use Go strings directly. Consider adding padding/truncation later if needed.
+
+**Success Criteria**:
+- String concatenation // → + in Go
+- Multiple concatenations in one expression work
+- Test: maxLvl = 11, line 29 matches
+
+---
+
+#### LEVEL12: Intrinsic Functions ⚠️ REQUIRES TYPE RESOLUTION (2-3 days)
+
+**Status**: Not implemented
+**Dependencies**: LEVEL08 (functions), Type resolution (Week 4)
+
+**Fortran Constructs**:
+```fortran
+REAL :: sin_val, cos_val, abs_val
+INTEGER :: max_val, min_val
+sin_val = SIN(0.5)
+cos_val = COS(0.5)
+abs_val = ABS(-5.5)
+max_val = MAX(i, j, k)
+min_val = MIN(10, 20, 5)
+```
+
+**Intrinsic Function Database**:
+
+| Fortran | Return Type | Go Equivalent | Notes |
+|---------|------------|---------------|-------|
+| SIN(x) | REAL | math.Sin(x) | Cast to float64 if needed |
+| COS(x) | REAL | math.Cos(x) | Cast to float64 if needed |
+| ABS(x) | same as x | math.Abs(x) for REAL, custom for INTEGER | Type-dependent |
+| SQRT(x) | REAL | math.Sqrt(x) | Already used in LEVEL08 |
+| MAX(...) | same as args | Custom variadic function | Fortran accepts any number of args |
+| MIN(...) | same as args | Custom variadic function | Fortran accepts any number of args |
+
+**Variadic Intrinsic Challenge**:
+- Fortran: `MAX(i, j, k)` - accepts any number of arguments
+- Go: `math.Max(a, b)` - only accepts 2 arguments
+- Solution: Generate custom helper function in intrinsic package:
+
+```go
+// intrinsic/math.go
+func MaxInt32(vals ...int32) int32 {
+    max := vals[0]
+    for _, v := range vals[1:] {
+        if v > max {
+            max = v
+        }
+    }
+    return max
+}
+
+func MinInt32(vals ...int32) int32 {
+    min := vals[0]
+    for _, v := range vals[1:] {
+        if v < min {
+            min = v
+        }
+    }
+    return min
+}
+```
+
+**Type-Dependent Intrinsics**:
+- ABS(x) returns INTEGER if x is INTEGER, REAL if x is REAL
+- Requires type information from symbol table
+- Generate `abs(x)` for INTEGER, `math.Abs(x)` for REAL
+
+**Go Code Pattern**:
+```go
+sin_val := float32(math.Sin(float64(0.5)))
+cos_val := float32(math.Cos(float64(0.5)))
+abs_val := float32(math.Abs(float64(-5.5)))
+max_val := intrinsic.MaxInt32(i, j, k)
+min_val := intrinsic.MinInt32(10, 20, 5)
+```
+
+**Success Criteria**:
+- Mathematical intrinsics map to math package
+- Variadic intrinsics (MAX/MIN) generate helper calls
+- Type-dependent intrinsics use correct Go function
+- Test: maxLvl = 12, all 36 lines match golden.out exactly
+
+---
+
+### Control Flow Translation Strategies
+
+#### IF Statement Translation
+```fortran
+IF (condition) THEN
+    statements
+ELSE IF (condition2) THEN
+    statements2
+ELSE
+    statements3
+END IF
+```
+→
+```go
+if condition {
+    statements
+} else if condition2 {
+    statements2
+} else {
+    statements3
+}
+```
+
+**Implementation**: Direct structural mapping, no analysis needed.
+
+---
+
+#### DO Loop Translation
+```fortran
+DO var = start, end [, step]
+    statements
+END DO
+```
+→
+```go
+for var := start; var <= end; var += step {
+    statements
+}
+```
+
+**Critical Details**:
+- Inclusive upper bound: Use `<=` not `<`
+- Default step is 1 if omitted
+- Loop variable persists after loop (declare before for loop if needed)
+- Negative step: `DO i = 10, 1, -1` → `for i := 10; i >= 1; i += -1`
+
+---
+
+#### DO WHILE Translation
+```fortran
+DO WHILE (condition)
+    statements
+END DO
+```
+→
+```go
+for condition {
+    statements
+}
+```
+
+**Implementation**: Direct mapping to Go's for-with-condition.
+
+---
+
+#### GOTO and Label Translation (Approach A: Direct)
+```fortran
+      GOTO 100
+      x = 1
+100   CONTINUE
+      y = 2
+```
+→
+```go
+    goto label100
+    x = 1
+label100:
+    y = 2
+```
+
+**Implementation**:
+- `GOTO n` → `goto labelN`
+- `n CONTINUE` → `labelN:`
+- Labeled statements → `labelN:` before statement
+- Keep simple: no control flow reconstruction in initial implementation
+
+**Limitations of Go's goto**:
+- Cannot jump into block scope (if, for, switch)
+- Cannot jump over variable declarations
+- If Fortran code violates these, transpilation will fail with Go compile error
+
+**Future Enhancement**: Implement control flow graph analysis to reconstruct structured control flow (loops, ifs) from GOTO spaghetti code.
+
+---
+
+### Updated Phase 5 Timeline
+
+| Level | Constructs | Days | Cumulative | Complexity |
+|-------|-----------|------|------------|------------|
+| LEVEL02 | Variables, assignments | 1-2 | 1-2 | Low |
+| LEVEL03 | Arithmetic, type conversion | 1 | 2-3 | Low |
+| LEVEL04 | IF/THEN/ELSE | 1-2 | 3-5 | Low |
+| LEVEL05 | Arrays (intrinsic.Array wrapper) | 2-3 | 5-8 | **HIGH** |
+| LEVEL06 | DO loops | 2-3 | 7-11 | **HIGH** |
+| LEVEL07 | CALL, INTENT parameters | 2-3 | 9-14 | **HIGH** |
+| LEVEL08 | Functions, RETURN | 2 | 11-16 | Medium |
+| LEVEL09 | DO WHILE | 1 | 12-17 | Low |
+| LEVEL10 | Complex expressions | 1 | 13-18 | Low |
+| LEVEL11 | String concat (//) | 1-2 | 14-20 | Medium |
+| LEVEL12 | Intrinsics (needs type resolution) | 2-3 | 16-23 | **HIGH** |
+
+**Total Estimated Time**: 3-5 weeks for complete LEVEL01-12 implementation
+
+**Critical Path**: LEVEL05 (arrays) → LEVEL06 (loops) → LEVEL07 (parameters) → LEVEL12 (intrinsics)
+
+---
+
+### Success Criteria for Phase 5
+
+- ✅ Each LEVEL's output matches corresponding lines in `testdata/golden.out` exactly
+- ✅ Generated Go code compiles without errors
+- ✅ Generated Go code runs and produces correct output
+- ✅ Increment `maxLvl` progressively (2, 3, ..., 12) as each level is completed
+- ✅ All transpiler unit tests pass
+- ✅ `intrinsic` package contains complete Array wrapper and intrinsic functions
+- ✅ Type resolution integrated for LEVEL12 (type-dependent intrinsics)
+- ✅ Complete golden test suite: `go test -run TestTranspileGolden` passes with maxLvl=12
+
+---
+
 ## Fortran-to-Go Mapping Challenges
 
 ### Challenge 1: COMMON Blocks

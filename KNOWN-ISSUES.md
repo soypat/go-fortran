@@ -375,7 +375,18 @@ The transpiler test suite includes workarounds for known issues:
 - Fixed test to only compare implemented levels (maxLvl)
 - Fixed transpiler to add leading space to PRINT output (Fortran list-directed I/O adds space)
 
-**LEVEL02-12**: Not yet implemented in transpiler
+**LEVEL02 (Variables and Assignments)**: ⚠️ Partially working
+- Parses correctly
+- Transpiles to Go successfully
+- Generated code compiles and runs
+- **Known limitation**: Output formatting differs from Fortran
+  - Fortran list-directed I/O uses specific field widths for INTEGER/REAL
+  - Fortran prints LOGICAL as "T"/"F", Go prints as "true"/"false"
+  - Fortran adds specific spacing between output items
+  - Values are correct, but formatting doesn't match byte-for-byte
+  - **Future work**: Implement Fortran-compatible formatting in `intrinsic` package
+
+**LEVEL03-12**: Not yet implemented in transpiler
 
 ---
 
