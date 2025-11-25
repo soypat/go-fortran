@@ -17,7 +17,8 @@ _old*
 *.so
 *.dylib
 *.hex
-
+testdata/golden
+testdata/golden.out
 
 # `__debug_bin` Debug binary generated in VSCode when using the built-in debugger.
 **__debug_bin*

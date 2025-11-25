@@ -29,7 +29,7 @@ func TestIntegrationFullPipeline(t *testing.T) {
 						},
 					},
 					&ast.TypeDeclaration{
-						TypeSpec: "REAL",
+						TypeSpec:   "REAL",
 						Attributes: []token.Token{token.PARAMETER},
 						Entities: []ast.DeclEntity{
 							{Name: "PI", Initializer: "3.14159"},
@@ -87,9 +87,9 @@ func TestIntegrationFullPipeline(t *testing.T) {
 	}
 
 	// Step 1: Collect declarations
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("CollectFromProgram errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("CollectFromProgram errors: %v", err)
 	}
 
 	// Verify symbol table structure
@@ -104,7 +104,7 @@ func TestIntegrationFullPipeline(t *testing.T) {
 
 	// Step 2: Resolve types
 	resolver := NewTypeResolver(table)
-	errs = resolver.Resolve(program)
+	errs := resolver.ResolveProgram(program)
 	if len(errs) > 0 {
 		t.Fatalf("Type resolution errors: %v", errs)
 	}
@@ -177,15 +177,15 @@ func TestIntegrationImplicitTyping(t *testing.T) {
 
 					// Assignments to implicitly typed variables
 					&ast.AssignmentStmt{
-						Target: &ast.Identifier{Value: "index"},  // I = INTEGER
+						Target: &ast.Identifier{Value: "index"}, // I = INTEGER
 						Value:  &ast.IntegerLiteral{Value: 1},
 					},
 					&ast.AssignmentStmt{
-						Target: &ast.Identifier{Value: "sum"},    // S = REAL
+						Target: &ast.Identifier{Value: "sum"}, // S = REAL
 						Value:  &ast.RealLiteral{Value: 0.0},
 					},
 					&ast.AssignmentStmt{
-						Target: &ast.Identifier{Value: "count"},  // C = REAL
+						Target: &ast.Identifier{Value: "count"}, // C = REAL
 						Value:  &ast.IntegerLiteral{Value: 0},
 					},
 
@@ -193,9 +193,9 @@ func TestIntegrationImplicitTyping(t *testing.T) {
 					&ast.AssignmentStmt{
 						Target: &ast.Identifier{Value: "result"}, // R = REAL
 						Value: &ast.BinaryExpr{
-							Left:  &ast.Identifier{Value: "index"},  // INTEGER
+							Left:  &ast.Identifier{Value: "index"}, // INTEGER
 							Op:    token.Plus,
-							Right: &ast.Identifier{Value: "sum"},    // REAL
+							Right: &ast.Identifier{Value: "sum"}, // REAL
 						},
 					},
 				},
@@ -204,14 +204,14 @@ func TestIntegrationImplicitTyping(t *testing.T) {
 	}
 
 	// Collect and resolve
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("CollectFromProgram errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("CollectFromProgram errors: %v", err)
 	}
 
 	resolver := NewTypeResolver(table)
-	errs = resolver.Resolve(program)
-	if len(errs) > 0 {
+	errs := resolver.ResolveProgram(program)
+	if len(errs) != 0 {
 		t.Fatalf("Type resolution errors: %v", errs)
 	}
 
@@ -223,10 +223,10 @@ func TestIntegrationImplicitTyping(t *testing.T) {
 		wantType string
 		implicit bool
 	}{
-		{"index", "INTEGER", true},   // I-N = INTEGER
-		{"sum", "REAL", true},         // S = REAL (O-Z)
-		{"count", "REAL", true},       // C = REAL (A-H)
-		{"result", "REAL", true},      // R = REAL (O-Z)
+		{"index", "INTEGER", true}, // I-N = INTEGER
+		{"sum", "REAL", true},      // S = REAL (O-Z)
+		{"count", "REAL", true},    // C = REAL (A-H)
+		{"result", "REAL", true},   // R = REAL (O-Z)
 	}
 
 	for _, tt := range tests {
@@ -296,13 +296,13 @@ func TestIntegrationCustomImplicit(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("CollectFromProgram errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("CollectFromProgram errors: %v", err)
 	}
 
 	resolver := NewTypeResolver(table)
-	errs = resolver.Resolve(program)
+	errs := resolver.ResolveProgram(program)
 	if len(errs) > 0 {
 		t.Fatalf("Type resolution errors: %v", errs)
 	}
@@ -356,13 +356,13 @@ func TestIntegrationFunctionWithImplicitVars(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("CollectFromProgram errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("CollectFromProgram errors: %v", err)
 	}
 
 	resolver := NewTypeResolver(table)
-	errs = resolver.Resolve(program)
+	errs := resolver.ResolveProgram(program)
 	if len(errs) > 0 {
 		t.Fatalf("Type resolution errors: %v", errs)
 	}
@@ -453,13 +453,13 @@ func TestIntegrationExpressionTypeInference(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("CollectFromProgram errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("CollectFromProgram errors: %v", err)
 	}
 
 	resolver := NewTypeResolver(table)
-	errs = resolver.Resolve(program)
+	errs := resolver.ResolveProgram(program)
 	if len(errs) > 0 {
 		t.Fatalf("Type resolution errors: %v", errs)
 	}
@@ -507,13 +507,13 @@ func TestIntegrationErrorReporting(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("CollectFromProgram errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("CollectFromProgram errors: %v", err)
 	}
 
 	resolver := NewTypeResolver(table)
-	errs = resolver.Resolve(program)
+	errs := resolver.ResolveProgram(program)
 
 	// Should have errors about undeclared variable
 	if len(errs) == 0 {

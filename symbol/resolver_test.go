@@ -31,14 +31,14 @@ func TestResolveIdentifierImplicitTyping(t *testing.T) {
 	}
 
 	// Build symbol table
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("CollectFromProgram errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("CollectFromProgram errors: %v", err)
 	}
 
 	// Resolve types
 	resolver := NewTypeResolver(table)
-	errs = resolver.Resolve(program)
+	errs := resolver.ResolveProgram(program)
 	if len(errs) > 0 {
 		t.Fatalf("Resolve errors: %v", errs)
 	}
@@ -94,14 +94,14 @@ func TestResolveWithIMPLICITNONE(t *testing.T) {
 	}
 
 	// Build symbol table
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("CollectFromProgram errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("CollectFromProgram errors: %v", err)
 	}
 
 	// Resolve types
 	resolver := NewTypeResolver(table)
-	errs = resolver.Resolve(program)
+	errs := resolver.ResolveProgram(program)
 
 	// Should get an error about 'x' being undeclared
 	if len(errs) == 0 {
@@ -151,14 +151,14 @@ func TestResolveWithCustomIMPLICIT(t *testing.T) {
 	}
 
 	// Build symbol table
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("CollectFromProgram errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("CollectFromProgram errors: %v", err)
 	}
 
 	// Resolve types
 	resolver := NewTypeResolver(table)
-	errs = resolver.Resolve(program)
+	errs := resolver.ResolveProgram(program)
 	if len(errs) > 0 {
 		t.Fatalf("Resolve errors: %v", errs)
 	}
@@ -346,14 +346,14 @@ func TestResolveFunctionCallIntrinsic(t *testing.T) {
 	}
 
 	// Build symbol table
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("CollectFromProgram errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("CollectFromProgram errors: %v", err)
 	}
 
 	// Resolve types
 	resolver := NewTypeResolver(table)
-	errs = resolver.Resolve(program)
+	errs := resolver.ResolveProgram(program)
 	if len(errs) > 0 {
 		t.Fatalf("Resolve errors: %v", errs)
 	}
@@ -419,14 +419,14 @@ func TestResolveArrayRef(t *testing.T) {
 	}
 
 	// Build symbol table
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("CollectFromProgram errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("CollectFromProgram errors: %v", err)
 	}
 
 	// Resolve types
 	resolver := NewTypeResolver(table)
-	errs = resolver.Resolve(program)
+	errs := resolver.ResolveProgram(program)
 	if len(errs) > 0 {
 		t.Fatalf("Resolve errors: %v", errs)
 	}
@@ -500,14 +500,14 @@ func TestResolveCompleteProgram(t *testing.T) {
 	}
 
 	// Build symbol table
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("CollectFromProgram errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("CollectFromProgram errors: %v", err)
 	}
 
 	// Resolve types
 	resolver := NewTypeResolver(table)
-	errs = resolver.Resolve(program)
+	errs := resolver.ResolveProgram(program)
 	if len(errs) > 0 {
 		t.Fatalf("Resolve errors: %v", errs)
 	}

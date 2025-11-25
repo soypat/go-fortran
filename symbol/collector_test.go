@@ -33,9 +33,9 @@ func TestCollectSimpleTypeDeclarations(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("unexpected errors: %v", err)
 	}
 
 	// Should have global scope + program scope
@@ -94,9 +94,9 @@ func TestCollectImplicitNone(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("unexpected errors: %v", err)
 	}
 
 	progScope := table.GlobalScope().Children()[0]
@@ -142,9 +142,9 @@ func TestCollectImplicitRules(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("unexpected errors: %v", err)
 	}
 
 	progScope := table.GlobalScope().Children()[0]
@@ -189,9 +189,9 @@ func TestCollectFunction(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("unexpected errors: %v", err)
 	}
 
 	// Function should be defined in global scope
@@ -262,9 +262,9 @@ func TestCollectSubroutine(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("unexpected errors: %v", err)
 	}
 
 	// Subroutine should be defined in global scope
@@ -307,9 +307,9 @@ func TestCollectCommonBlock(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("unexpected errors: %v", err)
 	}
 
 	// Check common block was registered
@@ -361,9 +361,9 @@ func TestCollectExternalStmt(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("unexpected errors: %v", err)
 	}
 
 	progScope := table.GlobalScope().Children()[0]
@@ -399,9 +399,9 @@ func TestCollectIntrinsicStmt(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("unexpected errors: %v", err)
 	}
 
 	progScope := table.GlobalScope().Children()[0]
@@ -455,9 +455,9 @@ func TestCollectNestedScopes(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("unexpected errors: %v", err)
 	}
 
 	// Module should be in global scope
@@ -516,9 +516,9 @@ func TestCollectParameterAttribute(t *testing.T) {
 		},
 	}
 
-	table, errs := CollectFromProgram(program)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+	table, err := CollectFromProgram(program)
+	if err != nil {
+		t.Fatalf("unexpected errors: %v", err)
 	}
 
 	progScope := table.GlobalScope().Children()[0]

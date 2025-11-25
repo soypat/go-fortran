@@ -1,6 +1,7 @@
 package symbol
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/soypat/go-fortran/ast"
@@ -10,7 +11,7 @@ import (
 // DeclarationCollector traverses an AST and populates a SymbolTable with
 // all declarations, handling scope management and implicit typing rules.
 type DeclarationCollector struct {
-	table      *SymbolTable
+	table      *Table
 	errors     []error
 	scopeStack []ast.Node // Track which nodes opened scopes for proper exit
 }
@@ -25,9 +26,16 @@ func NewDeclarationCollector() *DeclarationCollector {
 
 // Collect processes an AST and returns the populated symbol table.
 // Any errors encountered during collection are accumulated and returned.
-func (dc *DeclarationCollector) Collect(program *ast.Program) (*SymbolTable, []error) {
+func (dc *DeclarationCollector) Collect(program ast.ProgramUnit) []error {
 	dc.errors = nil
 	ast.Walk(dc, program)
+	if len(dc.errors) != 0 {
+		return dc.errors
+	}
+	return nil
+}
+
+func (dc *DeclarationCollector) SymbolTable() (*Table, []error) {
 	return dc.table, dc.errors
 }
 
@@ -372,7 +380,13 @@ func (dc *DeclarationCollector) addError(err error) {
 
 // CollectFromProgram is a convenience function that creates a collector,
 // processes a program, and returns the symbol table and any errors.
-func CollectFromProgram(program *ast.Program) (*SymbolTable, []error) {
+func CollectFromProgram(program *ast.Program) (*Table, error) {
 	collector := NewDeclarationCollector()
-	return collector.Collect(program)
+	for i := range program.Units {
+		collector.Collect(program.Units[i])
+		if len(collector.errors) != 0 {
+			return collector.table, errors.Join(collector.errors...)
+		}
+	}
+	return collector.table, nil
 }

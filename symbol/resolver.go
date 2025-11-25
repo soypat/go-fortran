@@ -10,21 +10,27 @@ import (
 // TypeResolver walks an AST and resolves all identifier types using
 // explicit declarations and implicit typing rules.
 type TypeResolver struct {
-	table  *SymbolTable
+	table  *Table
 	errors []error
 }
 
 // NewTypeResolver creates a new type resolver for the given symbol table.
-func NewTypeResolver(table *SymbolTable) *TypeResolver {
+func NewTypeResolver(table *Table) *TypeResolver {
 	return &TypeResolver{
 		table:  table,
 		errors: nil,
 	}
 }
 
-// Resolve performs type resolution on a program AST.
+// ResolveProgram performs type resolution on a program AST.
 // Returns any errors encountered during resolution.
-func (tr *TypeResolver) Resolve(program *ast.Program) []error {
+func (tr *TypeResolver) ResolveProgram(program *ast.Program) []error {
+	tr.errors = nil
+	ast.Walk(tr, program)
+	return tr.errors
+}
+
+func (tr *TypeResolver) Resolve(program ast.ProgramUnit) []error {
 	tr.errors = nil
 	ast.Walk(tr, program)
 	return tr.errors

@@ -317,8 +317,8 @@ func (ir *ImplicitRules) Copy() *ImplicitRules {
 	return newRules
 }
 
-// SymbolTable is the root of the symbol table hierarchy
-type SymbolTable struct {
+// Table is the root of the symbol table hierarchy
+type Table struct {
 	globalScope  *Scope                  // Global scope
 	currentScope *Scope                  // Current scope during analysis
 	commonBlocks map[string]*CommonBlock // COMMON block registry
@@ -327,27 +327,27 @@ type SymbolTable struct {
 }
 
 // GlobalScope returns the global scope
-func (st *SymbolTable) GlobalScope() *Scope {
+func (st *Table) GlobalScope() *Scope {
 	return st.globalScope
 }
 
 // CurrentScope returns the current scope during analysis
-func (st *SymbolTable) CurrentScope() *Scope {
+func (st *Table) CurrentScope() *Scope {
 	return st.currentScope
 }
 
 // CommonBlock returns a COMMON block by name (nil if not found)
-func (st *SymbolTable) CommonBlock(name string) *CommonBlock {
+func (st *Table) CommonBlock(name string) *CommonBlock {
 	return st.commonBlocks[normalizeCase(name)]
 }
 
 // Module returns a module by name (nil if not found)
-func (st *SymbolTable) Module(name string) *ModuleInfo {
+func (st *Table) Module(name string) *ModuleInfo {
 	return st.modules[normalizeCase(name)]
 }
 
 // Intrinsic returns an intrinsic function by name (nil if not found)
-func (st *SymbolTable) Intrinsic(name string) *Intrinsic {
+func (st *Table) Intrinsic(name string) *Intrinsic {
 	return st.intrinsics[normalizeCase(name)]
 }
 
@@ -483,8 +483,8 @@ func (ik IntrinsicKind) String() string {
 }
 
 // NewSymbolTable creates a new symbol table with global scope
-func NewSymbolTable() *SymbolTable {
-	st := &SymbolTable{
+func NewSymbolTable() *Table {
+	st := &Table{
 		commonBlocks: make(map[string]*CommonBlock),
 		modules:      make(map[string]*ModuleInfo),
 		intrinsics:   loadIntrinsics(),
@@ -499,7 +499,7 @@ func NewSymbolTable() *SymbolTable {
 }
 
 // EnterScope creates a new scope as child of current scope
-func (st *SymbolTable) EnterScope(unit ast.ProgramUnit, scopeType ScopeType) *Scope {
+func (st *Table) EnterScope(unit ast.ProgramUnit, scopeType ScopeType) *Scope {
 	newScope := &Scope{
 		parent:      st.currentScope,
 		symbols:     make(map[string]*Symbol),
@@ -513,7 +513,7 @@ func (st *SymbolTable) EnterScope(unit ast.ProgramUnit, scopeType ScopeType) *Sc
 }
 
 // ExitScope returns to parent scope
-func (st *SymbolTable) ExitScope() {
+func (st *Table) ExitScope() {
 	if st.currentScope.parent != nil {
 		st.currentScope = st.currentScope.parent
 	}
