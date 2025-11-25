@@ -2,6 +2,7 @@ package main
 
 import(
 	"github.com/soypat/go-fortran/intrinsic"
+	"math"
 )
 
 func main() {
@@ -12,6 +13,7 @@ func main() {
 	LEVEL05()
 	LEVEL06()
 	LEVEL07()
+	LEVEL08()
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
@@ -134,6 +136,14 @@ func LEVEL07() {
 	MODIFY_ARRAY(arr1, 5)
 	intrinsic.Print("LEVEL 7: arr1 after modify:", arr1.At(int(1)), arr1.At(int(2)), arr1.At(int(3)))
 }
+func LEVEL08() {
+	var fact_result int32
+	var sqrt_result float32
+	fact_result = FACTORIAL(5)
+	intrinsic.Print("LEVEL 8: FACTORIAL(5) =", fact_result)
+	sqrt_result = SQUARE_ROOT(16.0)
+	intrinsic.Print("LEVEL 8: SQUARE_ROOT(16.0) =", sqrt_result)
+}
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
 }
@@ -147,4 +157,37 @@ func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 		arr.Set(arr.At(int(i))*2, int(i))
 	}
 	intrinsic.Print("LEVEL 7: Inside MODIFY_ARRAY")
+}
+func FACTORIAL(n int32) int32 {
+	var (
+		i	int32
+		result	int32
+	)
+	result = 1
+	for i = 1; i <= n; i += 1 {
+		result = result * i
+	}
+	return result
+}
+func SQUARE_ROOT(x float32) float32 {
+	return float32(math.Sqrt(float64(x)))
+}
+func FIBONACCI(n int32) int32 {
+	var (
+		a	int32
+		b	int32
+		temp	int32
+		i	int32
+	)
+	if n <= 1 {
+		return n
+	}
+	a = 0
+	b = 1
+	for i = 2; i <= n; i += 1 {
+		temp = a + b
+		a = b
+		b = temp
+	}
+	return b
 }

@@ -87,7 +87,7 @@ func TestTranspileGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("got errors collecting symbols in golden.f90: %v", err)
 	}
-	const maxLvl = 7 // Currently testing up to LEVEL07
+	const maxLvl = 8 // Currently testing up to LEVEL08
 	// TODO: Fix type resolver to skip format specifiers
 	// For now, skip type resolution as it's not needed for basic transpilation
 	// resolver := symbol.NewTypeResolver(syms)
@@ -126,6 +126,17 @@ func TestTranspileGolden(t *testing.T) {
 			gofunc, err := tp.TransformSubroutine(sub)
 			if err != nil {
 				t.Fatalf("failed to transpile helper %s: %v", sub.Name, err)
+			}
+			helperWriteGoFunc(t, &funcsrc, gofunc)
+		}
+	}
+
+	// write helper functions:
+	for _, pu := range progUnits {
+		if fn, ok := pu.(*f90.Function); ok {
+			gofunc, err := tp.TransformFunction(fn)
+			if err != nil {
+				t.Fatalf("failed to transpile function %s: %v", fn.Name, err)
 			}
 			helperWriteGoFunc(t, &funcsrc, gofunc)
 		}

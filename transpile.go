@@ -33,9 +33,12 @@ func (tg *TranspileToGo) Reset(symTable *symbol.Table) error {
 	return nil
 }
 
-// TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration
-func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl, error) {
-	// Reset array tracking for this subroutine
+// enterProcedure initializes tracking maps for a function or subroutine
+// and marks parameters to avoid redeclaration in the body.
+// additionalParams can be used to mark additional names as parameters
+// (e.g., function result variable)
+func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams ...string) {
+	// Reset tracking maps
 	tg.arrays = make(map[string]*f90.ArraySpec)
 	tg.arrayTypes = make(map[string]ast.Expr)
 	tg.parameters = make(map[string]bool)
@@ -44,7 +47,7 @@ func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl
 	// Mark all parameters to avoid redeclaration in body
 	// Also mark pointer parameters (OUT/INOUT scalars) for dereference in assignments
 	// Also track array parameters for proper array reference handling
-	for _, param := range sub.Parameters {
+	for _, param := range params {
 		tg.parameters[strings.ToUpper(param.Name)] = true
 		// Track array parameters so array references work correctly
 		if param.ArraySpec != nil {
@@ -57,6 +60,17 @@ func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl
 			tg.pointerParams[strings.ToUpper(param.Name)] = true
 		}
 	}
+
+	// Mark additional parameters (e.g., function result variable)
+	for _, name := range additionalParams {
+		tg.parameters[strings.ToUpper(name)] = true
+	}
+}
+
+// TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration
+func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl, error) {
+	// Initialize procedure tracking
+	tg.enterProcedure(sub.Parameters)
 
 	// Transform parameters
 	paramFields := tg.transformParameters(sub.Parameters)
@@ -78,6 +92,134 @@ func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl
 	}
 
 	return funcDecl, nil
+}
+
+// TransformFunction transforms a Fortran FUNCTION to a Go function declaration
+// Functions are like subroutines but return a value
+func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, error) {
+	// Initialize procedure tracking
+	// Mark function name as additional parameter (Fortran uses it as result variable)
+	tg.enterProcedure(fn.Parameters, fn.Name)
+
+	// Transform parameters
+	paramFields := tg.transformParameters(fn.Parameters)
+
+	// Transform body statements
+	bodyStmts := tg.transformStatements(fn.Body)
+
+	// Add return statement if function assigns to its name
+	// In Fortran: FACTORIAL = result
+	// In Go: return result
+	bodyStmts = tg.convertFunctionResultToReturn(fn.Name, bodyStmts)
+
+	// Map Fortran result type to Go type
+	resultType := tg.fortranTypeToGoType(fn.ResultType)
+
+	// Create function declaration
+	funcDecl := &ast.FuncDecl{
+		Name: ast.NewIdent(fn.Name),
+		Type: &ast.FuncType{
+			Params: &ast.FieldList{
+				List: paramFields,
+			},
+			Results: &ast.FieldList{
+				List: []*ast.Field{
+					{Type: resultType},
+				},
+			},
+		},
+		Body: &ast.BlockStmt{
+			List: bodyStmts,
+		},
+	}
+
+	return funcDecl, nil
+}
+
+// convertFunctionResultToReturn converts assignments to function name into return statements
+// Fortran: FACTORIAL = result → Go: return result
+// Also handles early RETURN statements
+// Processes statements recursively to handle nested blocks (IF, DO, etc.)
+func (tg *TranspileToGo) convertFunctionResultToReturn(funcName string, stmts []ast.Stmt) []ast.Stmt {
+	funcNameUpper := strings.ToUpper(funcName)
+	return tg.convertStatementsRecursive(funcNameUpper, stmts)
+}
+
+// convertStatementsRecursive recursively processes statements to convert function assignments
+func (tg *TranspileToGo) convertStatementsRecursive(funcNameUpper string, stmts []ast.Stmt) []ast.Stmt {
+	var result []ast.Stmt
+	var lastAssignValue ast.Expr
+
+	for i, stmt := range stmts {
+		// Check if this is an assignment to the function name
+		if assignStmt, ok := stmt.(*ast.AssignStmt); ok {
+			if len(assignStmt.Lhs) == 1 && len(assignStmt.Rhs) == 1 {
+				if ident, ok := assignStmt.Lhs[0].(*ast.Ident); ok {
+					if strings.ToUpper(ident.Name) == funcNameUpper {
+						// This is an assignment to function result
+						// Check if next statement is RETURN
+						if i+1 < len(stmts) {
+							if _, isReturn := stmts[i+1].(*ast.ReturnStmt); isReturn {
+								// Skip this assignment, next iteration will handle return
+								lastAssignValue = assignStmt.Rhs[0]
+								continue
+							}
+						}
+						// Save value for end-of-function return
+						lastAssignValue = assignStmt.Rhs[0]
+						continue
+					}
+				}
+			}
+		}
+
+		// Check for RETURN statement
+		if retStmt, ok := stmt.(*ast.ReturnStmt); ok {
+			// If we have a saved result value and no explicit return value, use it
+			if len(retStmt.Results) == 0 && lastAssignValue != nil {
+				retStmt.Results = []ast.Expr{lastAssignValue}
+			}
+			result = append(result, retStmt)
+			lastAssignValue = nil
+			continue
+		}
+
+		// Recursively process nested blocks (IF statements, DO loops, etc.)
+		if ifStmt, ok := stmt.(*ast.IfStmt); ok {
+			// Process THEN block
+			if ifStmt.Body != nil {
+				ifStmt.Body.List = tg.convertStatementsRecursive(funcNameUpper, ifStmt.Body.List)
+			}
+			// Process ELSE block
+			if ifStmt.Else != nil {
+				if elseBlock, ok := ifStmt.Else.(*ast.BlockStmt); ok {
+					elseBlock.List = tg.convertStatementsRecursive(funcNameUpper, elseBlock.List)
+				} else if elseIf, ok := ifStmt.Else.(*ast.IfStmt); ok {
+					// Recursive ELSE IF
+					converted := tg.convertStatementsRecursive(funcNameUpper, []ast.Stmt{elseIf})
+					if len(converted) > 0 {
+						ifStmt.Else = converted[0]
+					}
+				}
+			}
+		} else if forStmt, ok := stmt.(*ast.ForStmt); ok {
+			// Process DO loop body
+			if forStmt.Body != nil {
+				forStmt.Body.List = tg.convertStatementsRecursive(funcNameUpper, forStmt.Body.List)
+			}
+		}
+
+		result = append(result, stmt)
+	}
+
+	// If function ends without explicit RETURN, add return with last assigned value
+	if lastAssignValue != nil {
+		result = append(result, &ast.ReturnStmt{
+			Results: []ast.Expr{lastAssignValue},
+		})
+	}
+
+	return result
 }
 
 // transformParameters transforms Fortran subroutine parameters to Go function parameters
@@ -173,6 +315,10 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 		return tg.transformDoLoop(s)
 	case *f90.CallStmt:
 		return tg.transformCallStmt(s)
+	case *f90.ReturnStmt:
+		// RETURN statement in functions will be handled by convertFunctionResultToReturn
+		// For now, just generate empty return (will be filled with result value later)
+		return &ast.ReturnStmt{}
 	default:
 		// For now, unsupported statements are skipped
 		return nil
@@ -792,9 +938,43 @@ func (tg *TranspileToGo) transformFunctionCall(call *f90.FunctionCall) ast.Expr 
 			Fun:  ast.NewIdent("float64"),
 			Args: []ast.Expr{arg},
 		}
+	case "SQRT":
+		// SQRT(x) → float32(math.Sqrt(float64(x)))
+		// math.Sqrt takes and returns float64, so need conversions
+		if len(call.Args) != 1 {
+			return nil
+		}
+		arg := tg.transformExpression(call.Args[0])
+		if arg == nil {
+			return nil
+		}
+		tg.useImport("math")
+		// Wrap: float32(math.Sqrt(float64(arg)))
+		return &ast.CallExpr{
+			Fun: ast.NewIdent("float32"),
+			Args: []ast.Expr{
+				&ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent("math"),
+						Sel: ast.NewIdent("Sqrt"),
+					},
+					Args: []ast.Expr{
+						&ast.CallExpr{
+							Fun:  ast.NewIdent("float64"),
+							Args: []ast.Expr{arg},
+						},
+					},
+				},
+			},
+		}
 	default:
-		// For now, unsupported functions return nil
-		return nil
+		// For other functions, assume they're user-defined and call directly
+		// Transform arguments
+		args := tg.transformExpressions(call.Args)
+		return &ast.CallExpr{
+			Fun:  ast.NewIdent(funcName),
+			Args: args,
+		}
 	}
 }
 
