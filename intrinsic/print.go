@@ -6,13 +6,13 @@ import (
 	"strconv"
 )
 
-type Formatter struct {
-	FieldWidth int
+var defaultFormatter Formatter
+
+func Print(v ...any) {
+	defaultFormatter.Print(v...)
 }
 
-// NewFormatter creates a Formatter with Fortran-compatible default field width
-func NewFormatter() Formatter {
-	return Formatter{FieldWidth: 14} // Typical Fortran list-directed I/O field width
+type Formatter struct {
 }
 
 // Print formats and prints values with Fortran list-directed I/O formatting
@@ -62,10 +62,15 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 	case float32: // REAL (kind=4): width=18, 2 left + value + right
 		// gfortran uses variable precision to keep value at 10 chars total
 		x := float64(v)
-		dst = strconv.AppendFloat(dst, x, 'f', 8, 32)
+		// Calculate integer digits to determine decimal places
 		nIntDig := int(math.Log10(math.Abs(x))) + 1
-		leftPad = 3 - nIntDig
-		rightPad = 16 - (len(dst) - prevLen) - leftPad
+		if x < 1.0 && x > -1.0 {
+			nIntDig = 1 // Values like 0.5 have 1 integer digit
+		}
+		decPlaces := 10 - nIntDig - 1 // Keep total at 10 chars: intDigits + '.' + decPlaces
+		dst = strconv.AppendFloat(dst, x, 'f', decPlaces, 32)
+		leftPad = 2
+		rightPad = 14 - (len(dst) - prevLen)
 
 	case float64: // DOUBLE PRECISION (kind=8): width=25, right-aligned
 		dst = strconv.AppendFloat(dst, v, 'f', 16, 64)

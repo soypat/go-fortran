@@ -5,6 +5,8 @@ import (
 	"go/ast"
 	"go/token"
 	"slices"
+	"strconv"
+	"strings"
 
 	f90 "github.com/soypat/go-fortran/ast"
 	"github.com/soypat/go-fortran/symbol"
@@ -13,13 +15,15 @@ import (
 
 // TranspileToGo transforms Fortran AST to Go AST
 type TranspileToGo struct {
-	symTable *symbol.Table
-	imports  []string
+	symTable    *symbol.Table
+	imports     []string
+	charLengths map[string]int // Track CHARACTER(LEN=n) for padding assignments
 }
 
 // Reset initializes the transpiler with a symbol table
 func (tg *TranspileToGo) Reset(symTable *symbol.Table) error {
 	tg.symTable = symTable
+	tg.charLengths = make(map[string]int)
 	return nil
 }
 
@@ -81,12 +85,7 @@ func (tg *TranspileToGo) transformPrint(print *f90.PrintStmt) ast.Stmt {
 	return &ast.ExprStmt{
 		X: &ast.CallExpr{
 			Fun: &ast.SelectorExpr{
-				X: &ast.CallExpr{
-					Fun: &ast.SelectorExpr{
-						X:   ast.NewIdent("intrinsic"),
-						Sel: ast.NewIdent("NewFormatter"),
-					},
-				},
+				X:   ast.NewIdent("intrinsic"),
 				Sel: ast.NewIdent("Print"),
 			},
 			Args: args,
@@ -112,6 +111,7 @@ func (tg *TranspileToGo) transformExpressions(exprs []f90.Expression) []ast.Expr
 func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast.Stmt {
 	// Map Fortran type to Go type
 	var goType ast.Expr
+
 	switch decl.TypeSpec {
 	case "INTEGER":
 		goType = ast.NewIdent("int32")
@@ -123,6 +123,8 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		goType = ast.NewIdent("bool")
 	case "CHARACTER":
 		goType = ast.NewIdent("string")
+		// CHARACTER(LEN=n) is specified per-entity in entity.CharLen
+		// We'll handle initialization per-entity below
 	default:
 		// Unknown type, skip
 		return nil
@@ -130,11 +132,27 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 
 	// Create var declarations for each entity
 	specs := make([]ast.Spec, 0, len(decl.Entities))
-	for _, entity := range decl.Entities {
+	for i := range decl.Entities {
+		entity := &decl.Entities[i]
 		spec := &ast.ValueSpec{
 			Names: []*ast.Ident{ast.NewIdent(entity.Name)},
 			Type:  goType,
 		}
+
+		// For CHARACTER, check entity-specific length and initialize with spaces
+		if decl.TypeSpec == "CHARACTER" && entity.CharLen != nil {
+			if length := tg.extractIntLiteral(entity.CharLen); length > 0 {
+				// Track CHARACTER length for padding assignments
+				tg.charLengths[entity.Name] = length
+				// Initialize with spaces
+				spaces := strings.Repeat(" ", length)
+				spec.Values = []ast.Expr{&ast.BasicLit{
+					Kind:  token.STRING,
+					Value: fmt.Sprintf("%q", spaces),
+				}}
+			}
+		}
+
 		specs = append(specs, spec)
 	}
 
@@ -146,6 +164,15 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 	}
 }
 
+// extractIntLiteral extracts an integer value from a simple expression
+// Returns 0 if the expression is not a simple integer literal
+func (tg *TranspileToGo) extractIntLiteral(expr f90.Expression) int {
+	if lit, ok := expr.(*f90.IntegerLiteral); ok {
+		return int(lit.Value)
+	}
+	return 0
+}
+
 // transformAssignment transforms a Fortran assignment to Go assignment
 func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stmt {
 	lhs := tg.transformExpression(assign.Target)
@@ -155,11 +182,38 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 		return nil
 	}
 
+	// Pad string literals when assigning to CHARACTER(LEN=n) variables
+	if ident, ok := lhs.(*ast.Ident); ok {
+		if charLen, isChar := tg.charLengths[ident.Name]; isChar {
+			rhs = tg.padStringLiteral(rhs, charLen)
+		}
+	}
+
 	return &ast.AssignStmt{
 		Lhs: []ast.Expr{lhs},
 		Tok: token.ASSIGN,
 		Rhs: []ast.Expr{rhs},
 	}
+}
+
+// padStringLiteral pads a string literal to the specified length with trailing spaces
+func (tg *TranspileToGo) padStringLiteral(expr ast.Expr, targetLen int) ast.Expr {
+	if lit, ok := expr.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+		// Properly unquote the string to handle escape sequences
+		str, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			return expr // Return original if unquoting fails
+		}
+		if len(str) < targetLen {
+			// Pad with spaces to target length
+			str = str + strings.Repeat(" ", targetLen-len(str))
+			return &ast.BasicLit{
+				Kind:  token.STRING,
+				Value: strconv.Quote(str), // Re-quote with proper escaping
+			}
+		}
+	}
+	return expr
 }
 
 // transformExpression transforms a single Fortran expression to a Go expression

@@ -125,6 +125,7 @@ func TestTranspileGolden(t *testing.T) {
 	}
 	outsrc.WriteString("}\n")
 	funcsrc.WriteTo(&outsrc)
+	os.WriteFile("testdata/golden.go", outsrc.Bytes(), 0777)
 	output := helperRunGo(t, &outsrc)
 
 	// Read expected output and extract only the lines for implemented levels
@@ -141,7 +142,7 @@ func TestTranspileGolden(t *testing.T) {
 	if nlIdx < 0 {
 		t.Fatal("no newline terminating level string", maxLvl)
 	}
-	expected := expectedFull[:idx+nlIdx]
+	expected := expectedFull[:idx+nlIdx+1] // +1 to include the newline
 	if !bytes.Equal(expected, output) {
 		t.Errorf("output mismatch:\nExpected: %q\nGot:      %q", expected, string(output))
 		os.WriteFile("testdata/bad.out", output, 0777)
