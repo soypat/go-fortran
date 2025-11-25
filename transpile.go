@@ -15,11 +15,13 @@ import (
 
 // TranspileToGo transforms Fortran AST to Go AST
 type TranspileToGo struct {
-	symTable    *symbol.Table
-	imports     []string
-	charLengths map[string]int            // Track CHARACTER(LEN=n) for padding assignments
-	arrays      map[string]*f90.ArraySpec // Track array dimensions for initialization
-	arrayTypes  map[string]ast.Expr       // Track element types for arrays
+	symTable       *symbol.Table
+	imports        []string
+	charLengths    map[string]int            // Track CHARACTER(LEN=n) for padding assignments
+	arrays         map[string]*f90.ArraySpec // Track array dimensions for initialization
+	arrayTypes     map[string]ast.Expr       // Track element types for arrays
+	parameters     map[string]bool           // Track parameter names to avoid redeclaration
+	pointerParams  map[string]bool           // Track OUT/INOUT scalar parameters (need dereference in assignments)
 }
 
 // Reset initializes the transpiler with a symbol table
@@ -36,6 +38,28 @@ func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl
 	// Reset array tracking for this subroutine
 	tg.arrays = make(map[string]*f90.ArraySpec)
 	tg.arrayTypes = make(map[string]ast.Expr)
+	tg.parameters = make(map[string]bool)
+	tg.pointerParams = make(map[string]bool)
+
+	// Mark all parameters to avoid redeclaration in body
+	// Also mark pointer parameters (OUT/INOUT scalars) for dereference in assignments
+	// Also track array parameters for proper array reference handling
+	for _, param := range sub.Parameters {
+		tg.parameters[strings.ToUpper(param.Name)] = true
+		// Track array parameters so array references work correctly
+		if param.ArraySpec != nil {
+			tg.arrays[param.Name] = param.ArraySpec
+			// Array element type will be set from parameter type
+			tg.arrayTypes[param.Name] = tg.fortranTypeToGoType(param.Type)
+		}
+		// Scalar OUT/INOUT parameters are pointers, need dereference in assignments
+		if param.ArraySpec == nil && (param.Intent == f90.IntentOut || param.Intent == f90.IntentInOut) {
+			tg.pointerParams[strings.ToUpper(param.Name)] = true
+		}
+	}
+
+	// Transform parameters
+	paramFields := tg.transformParameters(sub.Parameters)
 
 	// Transform body statements
 	bodyStmts := tg.transformStatements(sub.Body)
@@ -44,7 +68,9 @@ func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl
 	funcDecl := &ast.FuncDecl{
 		Name: ast.NewIdent(sub.Name),
 		Type: &ast.FuncType{
-			Params: &ast.FieldList{}, // TODO: handle parameters later
+			Params: &ast.FieldList{
+				List: paramFields,
+			},
 		},
 		Body: &ast.BlockStmt{
 			List: bodyStmts,
@@ -52,6 +78,70 @@ func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl
 	}
 
 	return funcDecl, nil
+}
+
+// transformParameters transforms Fortran subroutine parameters to Go function parameters
+// Handles INTENT attributes:
+// - INTENT(IN) → pass by value (e.g., a int32)
+// - INTENT(OUT) → pass by pointer (e.g., result *int32)
+// - INTENT(INOUT) → pass by pointer (e.g., arr *intrinsic.Array[int32])
+// - No INTENT → assume INOUT (pass by pointer)
+func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Field {
+	var fields []*ast.Field
+
+	for _, param := range params {
+		// Get the Go type for this parameter
+		goType := tg.fortranTypeToGoType(param.Type)
+
+		// Handle arrays - always use intrinsic.Array[T]
+		if param.ArraySpec != nil {
+			// Array parameters: *intrinsic.Array[T]
+			goType = &ast.StarExpr{
+				X: &ast.IndexExpr{
+					X: &ast.SelectorExpr{
+						X:   ast.NewIdent("intrinsic"),
+						Sel: ast.NewIdent("Array"),
+					},
+					Index: goType,
+				},
+			}
+		} else {
+			// Scalar parameters: check INTENT
+			// INTENT(OUT) or INTENT(INOUT) require pointer
+			if param.Intent == f90.IntentOut || param.Intent == f90.IntentInOut {
+				goType = &ast.StarExpr{X: goType}
+			}
+			// INTENT(IN) or default intent use pass by value (no pointer)
+		}
+
+		// Create parameter field
+		field := &ast.Field{
+			Names: []*ast.Ident{ast.NewIdent(param.Name)},
+			Type:  goType,
+		}
+		fields = append(fields, field)
+	}
+
+	return fields
+}
+
+// fortranTypeToGoType maps a Fortran type name to a Go type expression
+func (tg *TranspileToGo) fortranTypeToGoType(fortranType string) ast.Expr {
+	switch fortranType {
+	case "INTEGER":
+		return ast.NewIdent("int32")
+	case "REAL":
+		return ast.NewIdent("float32")
+	case "DOUBLE PRECISION":
+		return ast.NewIdent("float64")
+	case "LOGICAL":
+		return ast.NewIdent("bool")
+	case "CHARACTER":
+		return ast.NewIdent("string")
+	default:
+		// Unknown type, default to interface{}
+		return ast.NewIdent("interface{}")
+	}
 }
 
 // transformStatements transforms a slice of Fortran statements to Go statements
@@ -81,6 +171,8 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 		return tg.transformIfStmt(s)
 	case *f90.DoLoop:
 		return tg.transformDoLoop(s)
+	case *f90.CallStmt:
+		return tg.transformCallStmt(s)
 	default:
 		// For now, unsupported statements are skipped
 		return nil
@@ -221,6 +313,68 @@ func (tg *TranspileToGo) transformDoLoop(loop *f90.DoLoop) ast.Stmt {
 	}
 }
 
+// transformCallStmt transforms a Fortran CALL statement to Go function call
+// Fortran: CALL subname(arg1, arg2, ...)
+// Go:      subname(arg1, &arg2, ...)  (with & for OUT/INOUT parameters)
+//
+// IMPORTANT: INTENT(OUT) and INTENT(INOUT) parameters must be passed by pointer in Go
+// to match Fortran's reference semantics. We look up the subroutine in the symbol table
+// to determine which arguments need & (address-of operator).
+func (tg *TranspileToGo) transformCallStmt(call *f90.CallStmt) ast.Stmt {
+	// Transform arguments, adding & for OUT/INOUT parameters
+	var args []ast.Expr
+
+	// Look up the subroutine in the symbol table to get parameter INTENT info
+	var params []f90.Parameter
+	if tg.symTable != nil {
+		subSym := tg.symTable.GlobalScope().Lookup(call.Name)
+		if subSym != nil {
+			// Get the Subroutine AST node from the symbol
+			if subNode, ok := subSym.DeclNode().(*f90.Subroutine); ok {
+				params = subNode.Parameters
+			}
+		}
+	}
+
+	for i, arg := range call.Args {
+		goArg := tg.transformExpression(arg)
+		if goArg == nil {
+			continue
+		}
+
+		// Check if this parameter needs & (OUT or INOUT)
+		needsAddressOf := false
+		if i < len(params) {
+			param := params[i]
+			// Arrays are already pointers, don't add &
+			if param.ArraySpec == nil {
+				// Scalar parameters with INTENT(OUT) or INTENT(INOUT) need &
+				if param.Intent == f90.IntentOut || param.Intent == f90.IntentInOut {
+					needsAddressOf = true
+				}
+			}
+		}
+
+		if needsAddressOf {
+			// Wrap with & (address-of operator)
+			goArg = &ast.UnaryExpr{
+				Op: token.AND,
+				X:  goArg,
+			}
+		}
+
+		args = append(args, goArg)
+	}
+
+	// Generate: subname(args...)
+	return &ast.ExprStmt{
+		X: &ast.CallExpr{
+			Fun:  ast.NewIdent(call.Name),
+			Args: args,
+		},
+	}
+}
+
 // transformExpressions transforms a slice of Fortran expressions to Go expressions
 func (tg *TranspileToGo) transformExpressions(exprs []f90.Expression) []ast.Expr {
 	var goExprs []ast.Expr
@@ -263,6 +417,11 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 	for i := range decl.Entities {
 		entity := &decl.Entities[i]
 
+		// Skip parameters - they're already declared in function signature
+		if tg.parameters[strings.ToUpper(entity.Name)] {
+			continue
+		}
+
 		// Check if this is an array
 		if entity.ArraySpec != nil {
 			// Handle array declarations
@@ -291,6 +450,11 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		}
 
 		specs = append(specs, spec)
+	}
+
+	// If all entities were skipped (all were parameters), don't generate empty var statement
+	if len(specs) == 0 {
+		return nil
 	}
 
 	return &ast.DeclStmt{
@@ -389,10 +553,15 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 		return nil
 	}
 
-	// Pad string literals when assigning to CHARACTER(LEN=n) variables
+	// Check if LHS is a pointer parameter (OUT/INOUT scalar) - need to dereference
 	if ident, ok := lhs.(*ast.Ident); ok {
+		// Check character length for padding
 		if charLen, isChar := tg.charLengths[ident.Name]; isChar {
 			rhs = tg.padStringLiteral(rhs, charLen)
+		}
+		// Check if this is a pointer parameter - need to dereference for assignment
+		if tg.pointerParams[strings.ToUpper(ident.Name)] {
+			lhs = &ast.StarExpr{X: lhs}
 		}
 	}
 

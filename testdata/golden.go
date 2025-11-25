@@ -11,6 +11,7 @@ func main() {
 	LEVEL04()
 	LEVEL05()
 	LEVEL06()
+	LEVEL07()
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
@@ -118,4 +119,32 @@ func LEVEL06() {
 		}
 	}
 	intrinsic.Print("LEVEL 6: nested loop count =", sum_val)
+}
+func LEVEL07() {
+	var arr1 = intrinsic.NewArray[int32](5)
+	var result int32
+	arr1.Set(10, int(1))
+	arr1.Set(20, int(2))
+	arr1.Set(30, int(3))
+	arr1.Set(40, int(4))
+	arr1.Set(50, int(5))
+	SIMPLE_SUB()
+	ADD_VALUES(10, 20, &result)
+	intrinsic.Print("LEVEL 7: ADD_VALUES(10, 20) =", result)
+	MODIFY_ARRAY(arr1, 5)
+	intrinsic.Print("LEVEL 7: arr1 after modify:", arr1.At(int(1)), arr1.At(int(2)), arr1.At(int(3)))
+}
+func SIMPLE_SUB() {
+	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
+}
+func ADD_VALUES(a int32, b int32, result *int32) {
+	*result = a + b
+	intrinsic.Print("LEVEL 7: Inside ADD_VALUES")
+}
+func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
+	var i int32
+	for i = 1; i <= n; i += 1 {
+		arr.Set(arr.At(int(i))*2, int(i))
+	}
+	intrinsic.Print("LEVEL 7: Inside MODIFY_ARRAY")
 }
