@@ -1,0 +1,830 @@
+Compact Fortran 95 Language Summary
+  This summary was extracted from various sources.
+  It is not intended to be 100% complete. Hopefully it will be
+  useful as a memory aid in writing Fortran programs.
+Contents
+Introduction to Fortran 95 Language
+Meta language used in this compact summary
+Structure of files that can be compiled
+Executable Statements and Constructs
+Declarations
+Key words (other than I/O)
+Key words related to I/O
+Operators
+Constants
+Input/Output Statements
+Formats
+Intrinsic Functions
+Other Links
+Introduction to Fortran 95 Language ISO/IEC 1539:1995
+
+  Brought to you by ANSI committee X3J3 and ISO-IEC/JTC1/SC22/WG5 (Fortran)
+  This is neither complete nor precisely accurate, but hopefully, after
+  a small investment of time it is easy to read and very useful.
+
+  This is the free form version of Fortran, no statement numbers,
+  no C in column 1, start in column 1 (not column 7),
+  typically indent 2, 3, or 4 spaces per each structure.
+  The typical extension is  .f90  .
+
+  Continue a statement on the next line by ending the previous line with
+  an ampersand  & .  Start the continuation with  &  for strings.
+
+  The rest of any line is a comment starting with an exclamation mark  ! .
+
+  Put more than one statement per line by separating statements with a
+  semicolon  ; . Null statements are OK, so lines can end with semicolons.
+
+  Separate words with space or any form of "white space" or punctuation.
+Meta language used in this compact summary
+
+  <xxx> means fill in something appropriate for xxx and do not type
+        the  "<"  or  ">" .
+
+  ...  ellipsis means the usual, fill in something, one or more lines
+
+  [stuff] means supply nothing or at most one copy of "stuff"
+          [stuff1 [stuff2]] means if "stuff1" is included, supply nothing
+          or at most one copy of stuff2.
+
+  "old" means it is in the language, like almost every feature of past
+  Fortran standards, but should not be used to write new programs.
+
+Structure of files that can be compiled
+
+  program <name>                  usually file name is  <name>.f90
+    use <module_name>             bring in any needed modules
+    implicit none                 good for error detection
+    <declarations>
+    <executable statements>       order is important, no more declarations
+  end program <name>
+
+
+  block data <name>               old
+    <declarations>                common, dimension, equivalence now obsolete
+  end block data <name>
+
+
+  module <name>                   bring back in with   use <name>
+    implicit none                 good for error detection
+    <declarations>                can have private and public and interface
+  end module <name>
+
+  subroutine <name>               use:  call <name>   to execute
+    implicit none                 good for error detection
+    <declarations>
+    <executable statements>
+  end subroutine <name>
+
+
+  subroutine <name>(par1, par2, ...) 
+                                  use:  call <name>(arg1, arg2,... ) to execute
+    implicit none                 optional, good for error detection
+    <declarations>                par1, par2, ... are defined in declarations 
+                                  and can be specified in, inout, pointer, etc.
+    <executable statements>
+    return                        optional, end causes automatic return
+    entry <name> (par...)         old, optional other entries
+  end subroutine <name>
+
+
+  function <name>(par1, par2, ...) result(<rslt>)
+                                  use: <name>(arg1, arg2, ... argn) as variable
+    implicit none                 optional, good for error detection
+    <declarations>                rslt, par1, ... are defined in declarations
+    <executable statements>
+    <rslt> = <expression>         required somewhere in execution
+    [return]                      optional, end causes automatic return
+  end function <name>
+
+                                  old
+  <type> function(...) <name>     use: <name>(arg1, arg2, ... argn) as variable
+    <declarations>
+    <executable statements>
+    <name> = <expression>         required somewhere in execution
+    [return]                      optional, end causes automatic return
+  end function <name>
+
+Executable Statements and Constructs
+
+  <statement> will mean exactly one statement in this section
+
+  a construct is multiple lines
+
+  <label> : <statement>      any statement can have a label (a name)
+
+  <variable> = <expression>  assignment statement
+
+  <pointer>  >= <variable>   the pointer is now an alias for the variable
+  <pointer1> >= <pointer2>    pointer1 now points same place as pointer2
+
+  stop                       can be in any executable statement group,
+  stop <integer>             terminates execution of the program,
+  stop <string>              can have optional integer or string
+
+  return                     exit from subroutine or function
+
+  do <variable>=<from>,<to> [,<increment>]   optional:  <label> : do ...
+     <statements>
+
+     exit                                   \_optional   or exit <label>
+     if (<boolean expression>) exit         /
+                                            exit the loop
+     cycle                                  \_optional   or cycle <label>
+     if (<boolean expression>) cycle        /
+                                            continue with next loop iteration
+  end do                                    optional:    end do <name>
+
+
+  do while (<boolean expression>)
+     ...                                   optional exit and cycle allowed
+  end do
+
+
+  do
+     ...                                   exit required to end the loop
+                                           optional  cycle  can be used
+  end do
+
+
+
+  if ( <boolean expression> ) <statement>  execute the statement if the
+                                           boolean expression is true
+
+  if ( <boolean expression1> ) then
+    ...                                    execute if expression1 is true
+  else if ( <boolean expression2> ) then
+    ...                                    execute if expression2 is true
+  else if ( <boolean expression3> ) then
+    ...                                    execute if expression3 is true
+  else
+    ...                                    execute if none above are true
+  end if
+
+
+  select case (<expression>)            optional <name> : select case ...
+     case (<value>)
+        <statements>                    execute if expression == value
+     case (<value1>:<value2>)           
+        <statements>                    execute if value1 ≤ expression ≤ value2
+     ...
+     case default
+        <statements>                    execute if no values above match
+  end select                            optional  end select <name>
+
+
+  real, dimension(10,12) :: A, R     a sample declaration for use with "where"
+    ...
+  where (A /= 0.0)                   conditional assignment, only assignment allowed
+     R = 1.0/A
+  elsewhere
+     R = 1.0                         elements of R set to 1.0 where A == 0.0
+  end where
+
+    go to <statement number>          old
+
+    go to (<statement number list>), <expression>   old
+
+    for I/O statements, see:  section 10.0  Input/Output Statements
+
+    many old forms of statements are not listed
+Declarations
+
+  There are five (5) basic types: integer, real, complex, character and logical.
+  There may be any number of user derived types.  A modern (not old) declaration
+  starts with a type, has attributes, then ::, then variable(s) names
+
+  integer i, pivot, query                             old
+
+  integer, intent (inout) :: arg1
+
+  integer (selected_int_kind (5)) :: i1, i2
+
+  integer, parameter :: m = 7
+
+  integer, dimension(0:4, -5:5, 10:100) :: A3D
+
+  double precision x                                 old
+
+  real  (selected_real_kind(15,300) :: x
+
+  complex :: z
+
+  logical, parameter :: what_if = .true.
+
+  character, parameter :: me = "Jon Squire"
+
+  type <name>       a new user type, derived type
+    declarations
+  end type <name>
+
+  type (<name>) :: stuff    declaring stuff to be of derived type <name>
+
+  real, dimension(:,:), allocatable, target :: A
+
+  real, dimension(:,:), pointer :: P
+
+  Attributes may be:
+
+    allocatable  no memory used here, allocate later
+    dimension    vector or multi dimensional array
+    external     will be defined outside this compilation
+    intent       argument may be  in, inout or out
+    intrinsic    declaring function to be an intrinsic
+    optional     argument is optional
+    parameter    declaring a constant, can not be changed later
+    pointer      declaring a pointer
+    private      in a module, a private declaration
+    public       in a module, a public declaration
+    save         keep value from one call to the next, static
+    target       can be pointed to by a pointer
+    Note:        not all combinations of attributes are legal
+Key words (other than I/O)
+
+  note: "statement" means key word that starts a statement, one line
+                    unless there is a continuation "&"
+        "construct" means multiple lines, usually ending with "end ..."
+        "attribute" means it is used in a statement to further define
+        "old"       means it should not be used in new code
+
+  allocatable          attribute, no space allocated here, later allocate
+  allocate             statement, allocate memory space now for variable
+  assign               statement, old, assigned go to
+  assignment           attribute, means subroutine is assignment (=)
+  block data           construct, old, compilation unit, replaced by module
+  call                 statement, call a subroutine
+  case                 statement, used in  select case structure
+  character            statement, basic type, intrinsic data type
+  common               statement, old, allowed overlaying of storage
+  complex              statement, basic type, intrinsic data type
+  contains             statement, internal subroutines and functions follow
+  continue             statement, old, a place to put a statement number
+  cycle                statement, continue the next iteration of a do loop
+  data                 statement, old, initialized variables and arrays
+  deallocate           statement, free up storage used by specified variable
+  default              statement, in a select case structure, all others
+  do                   construct, start a do loop
+  double precision     statement, old, replaced by selected_real_kind(15,300)
+  else                 construct, part of if   else if   else   end if
+  else if              construct, part of if   else if   else   end if
+  elsewhere            construct, part of where  elsewhere  end where
+  end block data       construct, old, ends block data
+  end do               construct, ends do
+  end function         construct, ends function
+  end if               construct, ends if
+  end interface        construct, ends interface
+  end module           construct, ends module
+  end program          construct, ends program
+  end select           construct, ends select case
+  end subroutine       construct, ends subroutine
+  end type             construct, ends type
+  end where            construct, ends where
+  entry                statement, old, another entry point in a procedure
+  equivalence          statement, old, overlaid storage
+  exit                 statement, continue execution outside of a do loop
+  external             attribute, old statement, means defines else where
+  function             construct, starts the definition of a function
+  go to                statement, old, requires fixed form statement number
+  if                   statement and construct, if(...) statement
+  implicit             statement, "none" is preferred to help find errors
+  in                   a keyword for intent, the argument is read only
+  inout                a keyword for intent, the argument is read/write
+  integer              statement, basic type, intrinsic data type
+  intent               attribute, intent(in) or intent(out) or intent(inout)
+  interface            construct, begins an interface definition
+  intrinsic            statement, says that following names are intrinsic
+  kind                 attribute, sets the kind of the following variables
+  len                  attribute, sets the length of a character string
+  logical              statement, basic type, intrinsic data type
+  module               construct, beginning of a module definition
+  namelist             statement, defines a namelist of input/output
+  nullify              statement, nullify(some_pointer) now points nowhere
+  only                 attribute, restrict what comes from a module
+  operator             attribute, indicates function is an operator, like +
+  optional             attribute, a parameter or argument is optional
+  out                  a keyword for intent, the argument will be written
+  parameter            attribute, old statement, makes variable real only
+  pause                old, replaced by stop
+  pointer              attribute, defined the variable as a pointer alias
+  private              statement and attribute, in a module, visible inside
+  program              construct, start of a main program
+  public               statement and attribute, in a module, visible outside
+  real                 statement, basic type, intrinsic data type
+  recursive            attribute, allows functions and derived type recursion
+  result               attribute, allows naming of function result  result(Y)
+  return               statement, returns from, exits, subroutine or function
+  save                 attribute, old statement, keep value between calls
+  select case          construct, start of a case construct
+  stop                 statement, terminate execution of the main procedure
+  subroutine           construct, start of a subroutine definition
+  target               attribute, allows a variable to take a pointer alias
+  then                 part of if construct
+  type                 construct, start of user defined type
+  type ( )             statement, declaration of a variable for a users type
+  use                  statement, brings in a module
+  where                construct, conditional assignment
+  while                construct, a while form of a do loop
+Key words related to I/O
+
+  backspace            statement, back up one record
+  close                statement, close a file
+  endfile              statement, mark the end of a file
+  format               statement, old, defines a format
+  inquire              statement, get the status of a unit
+  open                 statement, open or create a file
+  print                statement, performs output to screen
+  read                 statement, performs input
+  rewind               statement, move read or write position to beginning
+  write                statement, performs output
+
+Operators
+
+  **    exponentiation
+  *     multiplication
+  /     division
+  +     addition
+  -     subtraction
+  //    concatenation
+  ==    .eq.  equality
+  /=    .ne.  not equal
+  <     .lt.  less than
+  >     .gt.  greater than
+  <=    .le.  less than or equal
+  >=    .ge.  greater than or equal
+  .not.       complement, negation
+  .and.       logical and
+  .or.        logical or
+  .eqv.       logical equivalence
+  .neqv.      logical not equivalence, exclusive or
+
+  .eq.  ==    equality, old
+  .ne.  /=    not equal. old
+  .lt.  <     less than, old
+  .gt.  >     greater than, old
+  .le.  <=    less than or equal, old
+  .ge.  >=    greater than or equal, old
+
+
+  Other punctuation:
+
+   /  ...  /  used in data, common, namelist and other statements
+   (/ ... /)  array constructor, data is separated by commas
+   6*1.0      in some contexts, 6 copies of 1.0
+   (i:j:k)    in some contexts, a list  i, i+k, i+2k, i+3k, ... i+nk≤j
+   (:j)       j and all below
+   (i:)       i and all above
+   (:)        undefined or all in range
+
+Constants
+
+  Logical constants:
+
+    .true.      True
+    .false.     False
+
+  Integer constants:
+
+     0    1     -1     123456789
+
+  Real constants:
+
+     0.0   1.0   -1.0    123.456   7.1E+10   -52.715E-30
+
+  Complex constants:
+
+     (0.0, 0.0)    (-123.456E+30, 987.654E-29)
+
+  Character constants:
+
+      "ABC"   "a"  "123'abc$%#@!"    " a quote "" "
+      'ABC'   'a'  '123"abc$%#@!'    ' a apostrophe '' '
+
+  Derived type values:
+
+      type name
+        character (len=30) :: last
+        character (len=30) :: first
+        character (len=30) :: middle
+      end type name
+
+      type address
+        character (len=40) :: street
+        character (len=40) :: more
+        character (len=20) :: city
+        character (len=2)  :: state
+        integer (selected_int_kind(5)) :: zip_code
+        integer (selected_int_kind(4)) :: route_code
+      end type address
+
+      type person
+        type (name) lfm
+        type (address) snail_mail
+      end type person
+
+      type (person) :: a_person = person( name("Squire","Jon","S."), &
+          address("106 Regency Circle", "", "Linthicum", "MD", 21090, 1936))
+
+      a_person%snail_mail%route_code == 1936
+
+Input/Output Statements
+
+    open (<unit number>)
+    open (unit=<unit number>, file=<file name>, iostat=<variable>)
+    open (unit=<unit number>, ... many more, see below )
+
+    close (<unit number>)
+    close (unit=<unit number>, iostat=<variable>,
+           err=<statement number>, status="KEEP")
+
+    read (<unit number>) <input list>
+    read (unit=<unit number>, fmt=<format>, iostat=<variable>,
+          end=<statement number>, err=<statement number>) <input list>
+    read (unit=<unit number>, rec=<record number>) <input list>
+
+    write (<unit number>) <output list>
+    write (unit=<unit number>, fmt=<format>, iostat=<variable>,
+           err=<statement number>) <output list>
+    write (unit=<unit number>, rec=<record number>) <output list>
+
+    print *, <output list>
+
+    print "(<your format here, use apostrophe, not quote>)", <output list>
+
+    rewind <unit number>
+    rewind (<unit number>, err=<statement number>)
+
+    backspace <unit number>
+    backspace (<unit number>, iostat=<variable>)
+
+    endfile <unit number>
+    endfile (<unit number>, err=<statement number>, iostat=<variable>)
+
+    inquire ( <unit number>, exists = <variable>)
+    inquire ( file=<"name">, opened = <variable1>, access = <variable2> )
+    inquire ( iolength = <variable> ) x, y, A   ! gives "recl" for "open"
+
+    namelist /<name>/ <variable list>      defines a name list
+    read(*,nml=<name>)                     reads some/all variables in namelist
+    write(*,nml=<name>)                    writes all variables in namelist
+    &<name> <variable>=<value> ... <variable=value> /  data for namelist read
+
+  Input / Output specifiers
+
+    access   one of  "sequential"  "direct"  "undefined"
+    action   one of  "read"  "write"  "readwrite"
+    advance  one of  "yes"  "no"  
+    blank    one of  "null"  "zero"
+    delim    one of  "apostrophe"  "quote"  "none"
+    end      =       <integer statement number>  old
+    eor      =       <integer statement number>  old
+    err      =       <integer statement number>  old
+    exist    =       <logical variable>
+    file     =       <"file name">
+    fmt      =       <"(format)"> or <character variable> format
+    form     one of  "formatted"  "unformatted"  "undefined"
+    iolength =       <integer variable, size of unformatted record>
+    iostat   =       <integer variable> 0==good, negative==eof, positive==bad
+    name     =       <character variable for file name>
+    named    =       <logical variable>
+    nml      =       <namelist name>
+    nextrec  =       <integer variable>    one greater than written
+    number   =       <integer variable unit number>
+    opened   =       <logical variable>
+    pad      one of  "yes"  "no"
+    position one of  "asis"  "rewind"  "append"
+    rec      =       <integer record number>
+    recl     =       <integer unformatted record size>
+    size     =       <integer variable>  number of characters read before eor
+    status   one of  "old"  "new"  "unknown"  "replace"  "scratch"  "keep"
+    unit     =       <integer unit number>
+
+  Individual questions
+    direct      =    <character variable>  "yes"  "no"  "unknown"
+    formatted   =    <character variable>  "yes"  "no"  "unknown"
+    read        =    <character variable>  "yes"  "no"  "unknown"
+    readwrite   =    <character variable>  "yes"  "no"  "unknown"
+    sequential  =    <character variable>  "yes"  "no"  "unknown"
+    unformatted =    <character variable>  "yes"  "no"  "unknown"
+    write       =    <character variable>  "yes"  "no"  "unknown"
+
+Formats
+
+    format                    an explicit format can replace * in any
+                              I/O statement. Include the format in
+                              apostrophes or quotes and keep the parenthesis.
+
+    examples:
+         print "(3I5,/(2X,3F7.2/))", <output list>
+         write(6, '(a,E15.6E3/a,G15.2)' ) <output list>
+         read(unit=11, fmt="(i4, 4(f3.0,TR1))" ) <input list>
+                             
+    A format includes the opening and closing parenthesis.
+    A format consists of format items and format control items separated by comma.
+    A format may contain grouping parenthesis with an optional repeat count.
+
+  Format Items, data edit descriptors:
+
+    key:  w  is the total width of the field   (filled with *** if overflow)
+          m  is the least number of digits in the (sub)field (optional)
+          d  is the number of decimal digits in the field
+          e  is the number of decimal digits in the exponent subfield
+          c  is the repeat count for the format item
+          n  is number of columns
+
+    cAw     data of type character (w is optional)
+    cBw.m   data of type integer with binary base
+    cDw.d   data of type real -- same as E,  old double precision
+    cEw.d   or Ew.dEe  data of type real
+    cENw.d  or ENw.dEe  data of type real  -- exponent a multiple of 3
+    cESw.d  or ESw.dEe  data of type real  -- first digit non zero
+    cFw.d   data of type real  -- no exponent printed
+    cGw.d   or Gw.dEe  data of type real  -- auto format to F or E
+    nH      n characters follow the H,  no list item
+    cIw.m   data of type integer
+    cLw     data of type logical  --  .true.  or  .false.
+    cOw.m   data of type integer with octal base
+    cZw.m   data of type integer with hexadecimal base
+    "<string>"  literal characters to output, no list item
+    '<string>'  literal characters to output, no list item
+
+  Format Control Items, control edit descriptors:
+
+    BN      ignore non leading blanks in numeric fields
+    BZ      treat nonleading blanks in numeric fields as zeros
+    nP      apply scale factor to real format items   old
+    S       printing of optional plus signs is processor dependent
+    SP      print optional plus signs
+    SS      do not print optional plus signs
+    Tn      tab to specified column
+    TLn     tab left n columns
+    TRn     tab right n columns
+    nX      tab right n columns
+    /       end of record (implied / at end of all format statements)
+    :       stop format processing if no more list items
+
+  <input list> can be:
+    a variable
+    an array name
+    an implied do   ((A(i,j),j=1,n) ,i=1,m)    parenthesis and commas as shown
+
+    note: when there are more items in the input list than format items, the
+          repeat rules for formats applies.
+
+  <output list> can be:
+    a constant
+    a variable
+    an expression
+    an array name
+    an implied do   ((A(i,j),j=1,n) ,i=1,m)    parenthesis and commas as shown
+
+    note: when there are more items in the output list than format items, the
+          repeat rules for formats applies.
+
+  Repeat Rules for Formats:
+
+    Each format item is used with a list item.  They are used in order.
+    When there are more list items than format items, then the following
+    rule applies:  There is an implied end of record, /, at the closing
+    parenthesis of the format, this is processed.  Scan the format backwards
+    to the first left parenthesis.  Use the repeat count, if any, in front
+    of this parenthesis, continue to process format items and list items.
+
+    Note: an infinite loop is possible
+          print "(3I5/(1X/))", I, J, K, L    may never stop
+
+Intrinsic Functions
+
+  Intrinsic Functions are presented in alphabetical order and then grouped
+  by topic.  The function name appears first. The argument(s) and result
+  give an indication of the type(s) of argument(s) and results.
+  [,dim=] indicates an optional argument  "dim".
+  "mask" must be logical and usually conformable.
+  "character" and "string" are used interchangeably.
+  A brief description or additional information may appear.
+
+
+  Intrinsic Functions (alphabetical):
+
+    abs(integer_real_complex) result(integer_real_complex)
+    achar(integer) result(character)  integer to character
+    acos(real) result(real)  arccosine  |real| ≤ 1.0   0≤result≤Pi
+    adjustl(character)  result(character) left adjust, blanks go to back
+    adjustr(character)  result(character) right adjust, blanks to front
+    aimag(complex) result(real)  imaginary part
+    aint(real [,kind=]) result(real)  truncate to integer toward zero
+    all(mask [,dim]) result(logical)  true if all elements of mask are true
+    allocated(array) result(logical)  true if array is allocated in memory
+    anint(real [,kind=]) result(real)  round to nearest integer
+    any(mask [,dim=}) result(logical)  true if any elements of mask are true
+    asin(real) result(real)  arcsine  |real| ≤ 1.0   -Pi/2≤result≤Pi/2
+    associated(pointer [,target=]) result(logical)  true if pointing
+    atan(real) result(real)  arctangent  -Pi/2≤result≤Pi/2 
+    atan2(y=real,x=real) result(real)  arctangent  -Pi≤result≤Pi
+    bit_size(integer) result(integer)  size in bits in model of argument
+    btest(i=integer,pos=integer) result(logical)  true if pos has a 1, pos=0..
+    ceiling(real) result(real)  truncate to integer toward infinity
+    char(integer [,kind=]) result(character)  integer to character [of kind]
+    cmplx(x=real [,y=real] [kind=]) result(complex)  x+iy
+    conjg(complex) result(complex)  reverse the sign of the imaginary part
+    cos(real_complex) result(real_complex)  cosine
+    cosh(real) result(real)  hyperbolic cosine
+    count(mask [,dim=]) result(integer)  count of true entries in mask
+    cshift(array,shift [,dim=]) circular shift elements of array, + is right
+    date_and_time([date=] [,time=] [,zone=] [,values=])  y,m,d,utc,h,m,s,milli
+    dble(integer_real_complex) result(real_kind_double)  convert to double
+    digits(integer_real) result(integer)  number of bits to represent model
+    dim(x=integer_real,y=integer_real) result(integer_real) proper subtraction
+    dot_product(vector_a,vector_b) result(integer_real_complex) inner product
+    dprod(x=real,y=real) result(x_times_y_double)  double precision product
+    eoshift(array,shift [,boundary=] [,dim=])  end-off shift using boundary
+    epsilon(real) result(real)  smallest positive number added to 1.0 /= 1.0
+    exp(real_complex) result(real_complex)  e raised to a power
+    exponent(real) result(integer)  the model exponent of the argument
+    floor(real) result(real)  truncate to integer towards negative infinity
+    fraction(real) result(real)  the model fractional part of the argument
+    huge(integer_real) result(integer_real)  the largest model number
+    iachar(character) result(integer)  position of character in ASCII sequence
+    iand(integer,integer) result(integer)  bit by bit logical and
+    ibclr(integer,pos) result(integer)  argument with pos bit cleared to zero
+    ibits(integer,pos,len) result(integer)  extract len bits starting at pos
+    ibset(integer,pos) result(integer)  argument with pos bit set to one
+    ichar(character) result(integer)  pos in collating sequence of character
+    ieor(integer,integer) result(integer)  bit by bit logical exclusive or
+    index(string,substring [,back=])  result(integer)  pos of substring
+    int(integer_real_complex) result(integer)  convert to integer
+    ior(integer,integer) result(integer)  bit by bit logical or
+    ishft(integer,shift) result(integer)  shift bits in argument by shift
+    ishftc(integer, shift) result(integer)  shift circular bits in argument
+    kind(any_intrinsic_type) result(integer)  value of the kind
+    lbound(array,dim) result(integer)  smallest subscript of dim in array
+    len(character) result(integer)  number of characters that can be in argument
+    len_trim(character) result(integer)  length without trailing blanks
+    lge(string_a,string_b) result(logical)  string_a ≥ string_b
+    lgt(string_a,string_b) result(logical)  string_a > string_b
+    lle(string_a,string_b) result(logical)  string_a ≤ string_b
+    llt(string_a,string_b) result(logical)  string_a < string_b
+    log(real_complex) result(real_complex)  natural logarithm
+    log10(real) result(real)  logarithm base 10
+    logical(logical [,kind=])  convert to logical
+    matmul(matrix,matrix) result(vector_matrix)  on integer_real_complex_logical
+    max(a1,a2,a3,...) result(integer_real)  maximum of list of values
+    maxexponent(real) result(integer)  maximum exponent of model type
+    maxloc(array [,mask=]) result(integer_vector)  indices in array of maximum
+    maxval(array [,dim=] [,mask=])  result(array_element)  maximum value
+    merge(true_source,false_source,mask) result(source_type)  choose by mask
+    min(a1,a2,a3,...) result(integer-real)  minimum of list of values
+    minexponent(real) result(integer)  minimum(negative) exponent of model type
+    minloc(array [,mask=]) result(integer_vector)  indices in array of minimum
+    minval(array [,dim=] [,mask=])  result(array_element)  minimum value
+    mod(a=integer_real,p) result(integer_real)  a modulo p
+    modulo(a=integer_real,p) result(integer_real)  a modulo p
+    mvbits(from,frompos,len,to,topos) result(integer)  move bits
+    nearest(real,direction) result(real)  nearest value toward direction
+    nint(real [,kind=]) result(real)  round to nearest integer value
+    not(integer) result(integer)  bit by bit logical complement
+    pack(array,mask [,vector=]) result(vector)  vector of elements from array
+    present(argument) result(logical)  true if optional argument is supplied
+    product(array [,dim=] [,mask=]) result(integer_real_complex)  product
+    radix(integer_real) result(integer)  radix of integer or real model, 2
+    random_number(harvest=real_out)  subroutine, uniform random number 0 to 1
+    random_seed([size=] [,put=] [,get=])  subroutine to set random number seed
+    range(integer_real_complex) result(integer_real)  decimal exponent of model
+    real(integer_real_complex [,kind=]) result(real)  convert to real
+    repeat(string,ncopies) result(string)  concatenate n copies of string
+    reshape(source,shape,pad,order) result(array)  reshape source to array
+    rrspacing(real) result(real)  reciprocal of relative spacing of model
+    scale(real,integer) result(real)  multiply by  2**integer
+    scan(string,set [,back]) result(integer)  position of first of set in string
+    selected_int_kind(integer) result(integer)  kind number to represent digits
+    selected_real_kind(integer,integer) result(integer)  kind of digits, exp
+    set_exponent(real,integer) result(real)  put integer as exponent of real
+    shape(array) result(integer_vector)  vector of dimension sizes
+    sign(integer_real,integer_real) result(integer_real) sign of second on first
+    sin(real_complex) result(real_complex)  sine of angle in radians
+    sinh(real) result(real)  hyperbolic sine of argument
+    size(array [,dim=]) result(integer)  number of elements in dimension
+    spacing(real) result(real)  spacing of model numbers near argument
+    spread(source,dim,ncopies) result(array)  expand dimension of source by 1
+    sqrt(real_complex) result(real_complex)  square root of argument
+    sum(array [,dim=] [,mask=]) result(integer_real_complex)  sum of elements
+    system_clock([count=] [,count_rate=] [,count_max=])  subroutine, all out
+    tan(real) result(real)  tangent of angle in radians
+    tanh(real) result(real)  hyperbolic tangent of angle in radians
+    tiny(real) result(real)  smallest positive model representation
+    transfer(source,mold [,size]) result(mold_type)  same bits, new type
+    transpose(matrix) result(matrix)  the transpose of a matrix
+    trim(string) result(string)  trailing blanks are removed
+    ubound(array,dim) result(integer)  largest subscript of dim in array
+    unpack(vector,mask,field) result(v_type,mask_shape)  field when not mask
+    verify(string,set [,back]) result(integer)  pos in string not in set
+
+
+
+  Intrinsic Functions (grouped by topic):
+
+  Intrinsic Functions (Numeric)
+    abs(integer_real_complex) result(integer_real_complex)
+    acos(real) result(real)  arccosine  |real| ≤ 1.0   0≤result≤Pi
+    aimag(complex) result(real)  imaginary part
+    aint(real [,kind=]) result(real)  truncate to integer toward zero
+    anint(real [,kind=]) result(real)  round to nearest integer
+    asin(real) result(real)  arcsine  |real| ≤ 1.0   -Pi/2≤result≤Pi/2
+    atan(real) result(real)  arctangent  -Pi/2≤result≤Pi/2 
+    atan2(y=real,x=real) result(real)  arctangent  -Pi≤result≤Pi
+    ceiling(real) result(real)  truncate to integer toward infinity
+    cmplx(x=real [,y=real] [kind=]) result(complex)  x+iy
+    conjg(complex) result(complex)  reverse the sign of the imaginary part
+    cos(real_complex) result(real_complex)  cosine
+    cosh(real) result(real)  hyperbolic cosine
+    dble(integer_real_complex) result(real_kind_double)  convert to double
+    digits(integer_real) result(integer)  number of bits to represent model
+    dim(x=integer_real,y=integer_real) result(integer_real) proper subtraction
+    dot_product(vector_a,vector_b) result(integer_real_complex) inner product
+    dprod(x=real,y=real) result(x_times_y_double)  double precision product
+    epsilon(real) result(real)  smallest positive number added to 1.0 /= 1.0
+    exp(real_complex) result(real_complex)  e raised to a power
+    exponent(real) result(integer)  the model exponent of the argument
+    floor(real) result(real)  truncate to integer towards negative infinity
+    fraction(real) result(real)  the model fractional part of the argument
+    huge(integer_real) result(integer_real)  the largest model number
+    int(integer_real_complex) result(integer)  convert to integer
+    log(real_complex) result(real_complex)  natural logarithm
+    log10(real) result(real)  logarithm base 10
+    matmul(matrix,matrix) result(vector_matrix)  on integer_real_complex_logical
+    max(a1,a2,a3,...) result(integer_real)  maximum of list of values
+    maxexponent(real) result(integer)  maximum exponent of model type
+    maxloc(array [,mask=]) result(integer_vector)  indices in array of maximum
+    maxval(array [,dim=] [,mask=])  result(array_element)  maximum value
+    min(a1,a2,a3,...) result(integer-real)  minimum of list of values
+    minexponent(real) result(integer)  minimum(negative) exponent of model type
+    minloc(array [,mask=]) result(integer_vector)  indices in array of minimum
+    minval(array [,dim=] [,mask=])  result(array_element)  minimum value
+    mod(a=integer_real,p) result(integer_real)  a modulo p
+    modulo(a=integer_real,p) result(integer_real)  a modulo p
+    nearest(real,direction) result(real)  nearest value toward direction
+    nint(real [,kind=]) result(real)  round to nearest integer value
+    product(array [,dim=] [,mask=]) result(integer_real_complex)  product
+    radix(integer_real) result(integer)  radix of integer or real model, 2
+    random_number(harvest=real_out)  subroutine, uniform random number 0 to 1
+    random_seed([size=] [,put=] [,get=])  subroutine to set random number seed
+    range(integer_real_complex) result(integer_real)  decimal exponent of model
+    real(integer_real_complex [,kind=]) result(real)  convert to real
+    rrspacing(real) result(real)  reciprocal of relative spacing of model
+    scale(real,integer) result(real)  multiply by  2**integer
+    set_exponent(real,integer) result(real)  put integer as exponent of real
+    sign(integer_real,integer_real) result(integer_real) sign of second on first
+    sin(real_complex) result(real_complex)  sine of angle in radians
+    sinh(real) result(real)  hyperbolic sine of argument
+    spacing(real) result(real)  spacing of model numbers near argument
+    sqrt(real_complex) result(real_complex)  square root of argument
+    sum(array [,dim=] [,mask=]) result(integer_real_complex)  sum of elements
+    tan(real) result(real)  tangent of angle in radians
+    tanh(real) result(real)  hyperbolic tangent of angle in radians
+    tiny(real) result(real)  smallest positive model representation
+    transpose(matrix) result(matrix)  the transpose of a matrix
+
+
+  Intrinsic Functions (Logical and bit)
+
+    all(mask [,dim]) result(logical)  true if all elements of mask are true
+    any(mask [,dim=}) result(logical)  true if any elements of mask are true
+    bit_size(integer) result(integer)  size in bits in model of argument
+    btest(i=integer,pos=integer) result(logical)  true if pos has a 1, pos=0..
+    count(mask [,dim=]) result(integer)  count of true entries in mask
+    iand(integer,integer) result(integer)  bit by bit logical and
+    ibclr(integer,pos) result(integer)  argument with pos bit cleared to zero
+    ibits(integer,pos,len) result(integer)  extract len bits starting at pos
+    ibset(integer,pos) result(integer)  argument with pos bit set to one
+    ieor(integer,integer) result(integer)  bit by bit logical exclusive or
+    ior(integer,integer) result(integer)  bit by bit logical or
+    ishft(integer,shift) result(integer)  shift bits in argument by shift
+    ishftc(integer, shift) result(integer)  shift circular bits in argument
+    logical(logical [,kind=])  convert to logical
+    matmul(matrix,matrix) result(vector_matrix)  on integer_real_complex_logical
+    merge(true_source,false_source,mask) result(source_type)  choose by mask
+    mvbits(from,frompos,len,to,topos) result(integer)  move bits
+    not(integer) result(integer)  bit by bit logical complement
+    transfer(source,mold [,size]) result(mold_type)  same bits, new type
+
+
+
+  intrinsic Functions (Character or string)
+
+    achar(integer) result(character)  integer to character
+    adjustl(character)  result(character) left adjust, blanks go to back
+    adjustr(character)  result(character) right adjust, blanks to front
+    char(integer [,kind=]) result(character)  integer to character [of kind]
+    iachar(character) result(integer)  position of character in ASCII sequence
+    ichar(character) result(integer)  pos in collating sequence of character
+    index(string,substring [,back=])  result(integer)  pos of substring
+    len(character) result(integer)  number of characters that can be in argument
+    len_trim(character) result(integer)  length without trailing blanks
+    lge(string_a,string_b) result(logical)  string_a ≥ string_b
+    lgt(string_a,string_b) result(logical)  string_a > string_b
+    lle(string_a,string_b) result(logical)  string_a ≤ string_b
+    llt(string_a,string_b) result(logical)  string_a < string_b
+    repeat(string,ncopies) result(string)  concatenate n copies of string
+    scan(string,set [,back]) result(integer)  position of first of set in string
+    trim(string) result(string)  trailing blanks are removed
+    verify(string,set [,back]) result(integer)  pos in string not in set
+

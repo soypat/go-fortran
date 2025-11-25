@@ -414,7 +414,20 @@ The transpiler test suite includes workarounds for known issues:
 - Generated code compiles and runs ✅
 - Output matches gfortran exactly ✅
 
-**LEVEL05-12**: Not yet implemented in transpiler
+**LEVEL05 (Arrays and Multi-dimensional Arrays)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- 1D array declarations: `INTEGER, DIMENSION(5) :: arr` → `make([]int32, 5)` ✅
+- 2D array declarations with automatic inner slice initialization ✅
+- Array element assignment: `arr(1) = 10` → `arr[0] = 10` ✅
+- Array element references in expressions work correctly ✅
+- **1-based to 0-based indexing conversion**: `arr(1)` → `arr[1-1]` ✅
+- Multi-dimensional array access: `matrix(1,1)` → `matrix[0][0]` ✅
+- **Parser ambiguity workaround**: Distinguishes array refs from function calls ✅
+- Generated code compiles and runs ✅
+- Output matches gfortran exactly ✅
+
+**LEVEL06-12**: Not yet implemented in transpiler
 
 ---
 
@@ -461,6 +474,15 @@ go test -run Transpile
 
 ## Changelog
 
+- **2025-11-25** (Session 3 cont.): LEVEL05 implementation - Arrays and multi-dimensional arrays
+  - Implemented array declarations with `transformArrayDeclaration()`
+  - Added 1-based to 0-based indexing conversion: Fortran `arr(1)` → Go `arr[1-1]`
+  - Implemented `transformArrayRef()` for array element access
+  - Added parser ambiguity workaround: FunctionCall nodes checked if they're actually arrays
+  - Implemented automatic 2D array inner slice initialization with range loops
+  - Multi-dimensional array support: `matrix(i,j)` → `matrix[i-1][j-1]`
+  - Array tracking system to distinguish arrays from functions during transpilation
+  - LEVEL05 tests pass with byte-for-byte matching to gfortran output ✅
 - **2025-11-25** (Session 3): LEVEL04 implementation - IF statements and relational operators
   - Implemented CHARACTER(LEN=n) padding in transpiler (space-initialized declarations, padded assignments)
   - Implemented IF statement transformation (`transformIfStmt()`)
