@@ -173,10 +173,21 @@ func TestTranspileGolden(t *testing.T) {
 		t.Fatal("no newline terminating level string", maxLvl)
 	}
 	expected := expectedFull[:idx+nlIdx+1] // +1 to include the newline
-	if !bytes.Equal(expected, output) {
-		t.Errorf("output mismatch:\nExpected: %q\nGot:      %q", expected, string(output))
-		os.WriteFile("testdata/bad.out", output, 0777)
+	for {
+		expectLine, remaining, okLine := bytes.Cut(expected, []byte{'\n'})
+		expected = remaining
+		gotLine, remaining, okGot := bytes.Cut(output, []byte{'\n'})
+		output = remaining
+		if !bytes.Equal(expectLine, gotLine) {
+			t.Errorf("output mismatch:\nExpected: %q\nGot:      %q", expectLine, gotLine)
+		} else if !okLine || !okGot {
+			break
+		}
 	}
+	// if !bytes.Equal(expected, output) {
+	// 	t.Errorf("output mismatch:\nExpected: %q\nGot:      %q", expected, string(output))
+	// 	os.WriteFile("testdata/bad.out", output, 0777)
+	// }
 }
 
 func helperGetGoldenLevel(t *testing.T, lvl int, pus []f90.ProgramUnit) *f90.Subroutine {
