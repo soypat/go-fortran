@@ -87,7 +87,7 @@ func TestTranspileGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("got errors collecting symbols in golden.f90: %v", err)
 	}
-	const maxLvl = 5 // Currently testing up to LEVEL05
+	const maxLvl = 6 // Currently testing up to LEVEL06
 	// TODO: Fix type resolver to skip format specifiers
 	// For now, skip type resolution as it's not needed for basic transpilation
 	// resolver := symbol.NewTypeResolver(syms)
@@ -108,11 +108,15 @@ func TestTranspileGolden(t *testing.T) {
 		if routine == nil {
 			t.Fatal("failed to get routine")
 		}
-		gofunc, err := tp.TransformSubroutine(routine)
-		if err != nil {
-			t.Error(err)
-		}
-		helperWriteGoFunc(t, &funcsrc, gofunc)
+		var gofunc *ast.FuncDecl
+		t.Run(routine.Name, func(t *testing.T) {
+			// Measure time for transpile AST and write to file.
+			gofunc, err = tp.TransformSubroutine(routine)
+			if err != nil {
+				t.Fatal(err)
+			}
+			helperWriteGoFunc(t, &funcsrc, gofunc)
+		})
 	}
 	var outsrc bytes.Buffer
 	outsrc.WriteString("package main\n\nimport(\n")

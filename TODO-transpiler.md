@@ -1991,71 +1991,179 @@ func (p *Parser90) parseImplicit() ast.Statement {
 
 ## Phase 5: Code Generation - Detailed Implementation Plan
 
+### Current Status (Updated 2025-11-25)
+
+**Completed Work**:
+- ✅ **LEVEL01-05 Implementation**: Basic I/O, variables, arithmetic, conditionals, and arrays
+- ✅ **Array Wrapper (`intrinsic.Array[T]`)**: Full implementation with:
+  - Slab allocation (single contiguous memory block)
+  - Column-major layout per F77/F95 standards
+  - Variadic constructor supporting 1D to 7D arrays
+  - Custom bounds support (including negative indices)
+  - 1-based Fortran indexing preserved
+  - Complete test coverage (11/11 tests passing)
+- ✅ **Transpiler Integration**:
+  - `transformArrayDeclaration()` generates `*intrinsic.Array[T]` types
+  - `transformArrayRef()` generates `.At(indices...)` method calls
+  - `transformArrayAssignment()` generates `.Set(value, indices...)` method calls
+  - Removed ~80 lines of dead initialization code
+  - Clean, readable generated Go code
+- ✅ **Type Mapping**: INTEGER→int32, REAL→float32, LOGICAL→bool implemented
+
+**Next Steps**:
+- 🔄 **LEVEL06**: DO loop implementation (2-3 days)
+- **LEVEL07**: Subroutine calls with INTENT parameter passing (2-3 days)
+- **LEVEL08-12**: Functions, DO WHILE, expressions, strings, intrinsics
+
+**Estimated Completion**: 2-4 weeks for remaining LEVEL06-12
+
+---
+
 ### Architectural Decisions
 
 Based on analysis of `testdata/golden.f90` (LEVEL01-12) and mapping challenges, the following architectural decisions have been confirmed:
 
-| Decision Area | Approach | Rationale |
-|--------------|----------|-----------|
-| **Array Indexing** | Runtime wrapper (Option B) - ALL cases | Use `intrinsic.Array[T]` for all array access. Handles 1-based indexing, arbitrary lower bounds, and variable indices correctly. Prioritize correctness over generated code verbosity. |
-| **INTENT Parameters** | Pointer-based translation | INTENT(IN) → pass by value, INTENT(OUT/INOUT) → pass by pointer (*T). Clear semantics, matches Fortran reference behavior. |
-| **GOTO Statements** | Direct label translation (Approach A) | Use Go's `goto` and labels directly. Keep implementation simple. Advanced control flow reconstruction can be added later if needed. |
-| **Type Mapping** | Conservative sizing | INTEGER → int32, REAL → float32, DOUBLE PRECISION → float64, LOGICAL → bool, CHARACTER(LEN=n) → string (variable length for now) |
+| Decision Area | Approach | Rationale | Status |
+|--------------|----------|-----------|--------|
+| **Array Indexing** | Runtime wrapper (Option B) - ALL cases | Use `intrinsic.Array[T]` for all array access. Handles 1-based indexing, arbitrary lower bounds, and variable indices correctly. Prioritize correctness over generated code verbosity. | ✅ IMPLEMENTED |
+| **INTENT Parameters** | Pointer-based translation | INTENT(IN) → pass by value, INTENT(OUT/INOUT) → pass by pointer (*T). Clear semantics, matches Fortran reference behavior. | Planned |
+| **GOTO Statements** | Direct label translation (Approach A) | Use Go's `goto` and labels directly. Keep implementation simple. Advanced control flow reconstruction can be added later if needed. | Planned |
+| **Type Mapping** | Conservative sizing | INTEGER → int32, REAL → float32, DOUBLE PRECISION → float64, LOGICAL → bool, CHARACTER(LEN=n) → string (variable length for now) | ✅ IMPLEMENTED |
 
-### Array Wrapper Implementation
+### Array Wrapper Implementation ✅ COMPLETED (2025-11-25)
 
-**Location**: `intrinsic/array.go` (already exists with basic structure)
+**Location**: `intrinsic/array.go`
 
-**Current Implementation**:
+**Status**: Fully implemented with standards-compliant Fortran array semantics
+
+**Implementation Details**:
+
 ```go
+// Array represents a multi-dimensional Fortran array with column-major layout.
+// Uses slab allocation (single contiguous memory block) for efficiency.
 type Array[T any] struct {
-    data  []T
-    lower int
+    data   []T   // Single contiguous allocation
+    shape  []int // Size of each dimension
+    lower  []int // Lower bounds (default 1, can be negative)
+    upper  []int // Upper bounds
+    stride []int // Column-major strides
 }
 
-func (a *Array[T]) Set(i int, v T) {
-    a.data[i-a.lower] = v
+// Variadic constructor - handles 1D to 7D arrays uniformly
+func NewArray[T any](dims ...int) *Array[T] {
+    if len(dims) > 7 {
+        panic("array dimension too large")
+    } else if len(dims) == 0 {
+        panic("zero dimension array")
+    }
+    parambuf := make([]int, len(dims)*3)
+    shape := parambuf[:len(dims)]
+    lower := parambuf[len(dims) : len(dims)*2]
+    upper := parambuf[len(dims)*2:]
+    for i, d := range dims {
+        shape[i], lower[i], upper[i] = d, 1, d
+    }
+    return NewArrayWithBounds[T](shape, lower, upper)
 }
-```
 
-**Required Additions**:
-```go
-// Constructor
-func NewArray[T any](size int, lower int) *Array[T] {
+// Custom bounds support for arrays like DIMENSION(-5:5)
+func NewArrayWithBounds[T any](shape, lower, upper []int) *Array[T] {
+    // Calculate column-major strides per F77 Table 1 / F95 Table 6.1
+    stride := make([]int, len(shape))
+    if len(shape) > 0 {
+        stride[0] = 1  // First index varies fastest (column-major)
+        for i := 1; i < len(shape); i++ {
+            stride[i] = stride[i-1] * shape[i-1]
+        }
+    }
+
+    totalSize := 1
+    for _, dim := range shape {
+        totalSize *= dim
+    }
+
     return &Array[T]{
-        data:  make([]T, size),
-        lower: lower,
+        data:   make([]T, totalSize), // Slab allocation
+        shape:  append([]int(nil), shape...),
+        lower:  append([]int(nil), lower...),
+        upper:  append([]int(nil), upper...),
+        stride: stride,
     }
 }
 
-// Get method
-func (a *Array[T]) Get(i int) T {
-    return a.data[i-a.lower]
+// At returns element at Fortran indices (1-based by default)
+func (a *Array[T]) At(indices ...int) T {
+    offset := a.offset(indices)
+    return a.data[offset]
 }
 
-// Size method
-func (a *Array[T]) Len() int {
-    return len(a.data)
+// Set sets element at Fortran indices
+func (a *Array[T]) Set(value T, indices ...int) {
+    offset := a.offset(indices)
+    a.data[offset] = value
 }
+
+// offset calculates flat index using column-major layout
+func (a *Array[T]) offset(indices []int) int {
+    offset := 0
+    for i, idx := range indices {
+        if idx < a.lower[i] || idx > a.upper[i] {
+            panic("array: index out of bounds")
+        }
+        offset += (idx - a.lower[i]) * a.stride[i]
+    }
+    return offset
+}
+
+// Intrinsic function equivalents
+func (a *Array[T]) Len() int { return a.shape[0] }
+func (a *Array[T]) Shape() []int { return append([]int(nil), a.shape...) }
+func (a *Array[T]) Lower() []int { return append([]int(nil), a.lower...) }
+func (a *Array[T]) Upper() []int { return append([]int(nil), a.upper...) }
 ```
 
-**Multi-dimensional arrays** (needed for LEVEL05):
-- Use nested Array types: `Array[Array[T]]` for 2D
-- OR create Array2D, Array3D specialized types
-- Decision: Start with nested approach, optimize later if needed
+**Key Features**:
+- ✅ **Slab Allocation**: Single `make([]T, totalSize)` for entire array (not N allocations for nested slices)
+- ✅ **Column-Major Layout**: First index varies fastest per F77 Table 1 / F95 Table 6.1
+- ✅ **Arbitrary Dimensions**: Variadic `NewArray(dims...)` handles 1D to 7D uniformly
+- ✅ **Custom Bounds**: Support for negative/zero lower bounds via `NewArrayWithBounds`
+- ✅ **Fortran Indexing**: 1-based by default, handles custom bounds transparently
+- ✅ **Bounds Checking**: Runtime validation with panic on out-of-bounds access
+- ✅ **Intrinsics**: `Len()`, `Shape()`, `Lower()`, `Upper()` map to Fortran intrinsic functions
+
+**Standards Compliance**:
+- F77 Section 5.1.1: Arrays have 1-7 dimensions
+- F77 Section 5.1.1.2: Bounds can be negative, zero, or positive
+- F77 Table 1: Subscript value formula (column-major layout)
+- F95 Table 6.1: Same subscript order formula
+
+**Test Coverage**: 11/11 tests passing (`intrinsic/array_test.go`)
+- 1D, 2D, 3D arrays with default bounds
+- Custom bounds (including negative)
+- Column-major memory layout validation
+- Subscript value formula verification
+- Stride calculation correctness
+- Bounds checking
+- Intrinsic function equivalents
+
+**Transpiler Integration**: ✅ COMPLETED (see transpile.go updates)
 
 **Transpiler Usage Pattern**:
 ```fortran
 ! Fortran
 INTEGER, DIMENSION(5) :: arr1
+REAL, DIMENSION(3, 3) :: matrix
 arr1(1) = 10
 x = arr1(3)
+matrix(2, 2) = 5.0
 ```
 ```go
 // Generated Go
-arr1 := intrinsic.NewArray[int32](5, 1)  // size=5, lower=1
-arr1.Set(1, 10)
-x := arr1.Get(3)
+var arr1 = intrinsic.NewArray[int32](5)        // 1D: size=5, lower=1
+var matrix = intrinsic.NewArray[float32](3, 3) // 2D: 3x3, column-major
+arr1.Set(10, 1)                                 // Fortran indexing preserved
+x := arr1.At(3)
+matrix.Set(5.0, 2, 2)
 ```
 
 ### LEVEL-by-LEVEL Implementation Roadmap
@@ -2231,10 +2339,10 @@ if x < 3.0 {
 
 ---
 
-#### LEVEL05: Arrays ⚠️ CRITICAL (2-3 days)
+#### LEVEL05: Arrays ✅ COMPLETED (2025-11-25)
 
-**Status**: Not implemented
-**Dependencies**: LEVEL02 (variables), `intrinsic.Array[T]` complete
+**Status**: Fully implemented and tested
+**Dependencies**: LEVEL02 (variables) ✅, `intrinsic.Array[T]` ✅
 
 **Fortran Constructs**:
 ```fortran
@@ -2252,44 +2360,84 @@ PRINT *, 'LEVEL 5: matrix(1,1) = ', matrix(1,1)
 PRINT *, 'LEVEL 5: matrix(2,2) = ', matrix(2,2)
 ```
 
-**New Transpiler Functions Needed**:
-- `transformArrayDeclaration()` - DIMENSION(...) → NewArray[T](...)
-- `transformArrayRef()` - arr(i) → arr.Get(i) or arr.Set(i, v)
-- Handle 2D arrays (nested Array or specialized Array2D)
+**Transpiler Functions Implemented**:
+- ✅ `transformArrayDeclaration()` (lines 242-310) - Generates `*intrinsic.Array[T]` type and `NewArray[T](dims...)` constructor
+- ✅ `transformArrayRef()` (lines 496-518) - Generates `.At(indices...)` method calls
+- ✅ `transformArrayAssignment()` (lines 478-494) - Generates `.Set(value, indices...)` method calls
+- ✅ Removed `insertArrayInits()` and `generateArrayInit()` - No longer needed with slab allocation
 
-**AST Nodes to Handle**:
-- `*f90.TypeDeclaration` with `ArraySpec != nil`
-- `*f90.ArrayRef` (in expressions and assignments)
+**AST Nodes Handled**:
+- ✅ `*f90.TypeDeclaration` with `ArraySpec != nil`
+- ✅ `*f90.ArrayRef` (in expressions and assignments)
+- ✅ Disambiguation: `*f90.FunctionCall` that's actually an array reference
 
-**Go Code Pattern**:
+**Generated Go Code**:
 ```go
-arr1 := intrinsic.NewArray[int32](5, 1)  // DIMENSION(5) → size=5, lower=1
-matrix := intrinsic.NewArray2D[float32](3, 3, 1, 1)  // 2D: rows=3, cols=3
+// From testdata/golden.go LEVEL05 function
+var arr1 = intrinsic.NewArray[int32](5)        // Variadic: handles 1D
+var matrix = intrinsic.NewArray[float32](3, 3) // Variadic: handles 2D
 
-arr1.Set(1, 10)
-arr1.Set(3, 30)
-arr1.Set(5, 50)
-matrix.Set(1, 1, 1.0)
-matrix.Set(2, 2, 1.0)
+arr1.Set(10, 1)     // Assignment to arr1(1)
+arr1.Set(30, 3)     // Assignment to arr1(3)
+arr1.Set(50, 5)     // Assignment to arr1(5)
+matrix.Set(1.0, 1, 1)  // Assignment to matrix(1,1)
+matrix.Set(1.0, 2, 2)  // Assignment to matrix(2,2)
 
-fmt.Println(" LEVEL 5: arr1(1) = ", arr1.Get(1))
-fmt.Println(" LEVEL 5: arr1(3) = ", arr1.Get(3))
-fmt.Println(" LEVEL 5: arr1(5) = ", arr1.Get(5))
-fmt.Println(" LEVEL 5: matrix(1,1) = ", matrix.Get(1, 1))
-fmt.Println(" LEVEL 5: matrix(2,2) = ", matrix.Get(2, 2))
+intrinsic.Print("LEVEL 5: arr1(1) =", arr1.At(1))     // Array reference
+intrinsic.Print("LEVEL 5: arr1(3) =", arr1.At(3))
+intrinsic.Print("LEVEL 5: arr1(5) =", arr1.At(5))
+intrinsic.Print("LEVEL 5: matrix(1,1) =", matrix.At(1, 1))  // 2D reference
+intrinsic.Print("LEVEL 5: matrix(2,2) =", matrix.At(2, 2))
 ```
 
-**Implementation Notes**:
-- ALL array access uses wrapper methods (user decision)
-- 1-based indexing handled by Array.Set/Get internally
-- ArrayRef in assignment LHS → Set(), in RHS → Get()
-- Must distinguish array reference from function call (both use parentheses)
+**Implementation Details**:
+- **Opaque Array Type**: ALL arrays use `*intrinsic.Array[T]` (no nested slices)
+- **Slab Allocation**: Single `make([]T, totalSize)` in Array constructor
+- **Variadic Constructor**: `NewArray[T](dims...)` handles 1D, 2D, 3D+ uniformly
+- **Fortran Indexing**: 1-based indexing preserved, handled internally by `.At()` and `.Set()`
+- **Column-Major Layout**: Memory layout matches Fortran per F77 Table 1
+- **Assignment Detection**: LHS ArrayRef → generates `.Set()`, RHS ArrayRef → generates `.At()`
+- **Parser Ambiguity**: Handles `arr(i)` parsed as FunctionCall but actually array reference
 
-**Success Criteria**:
-- 1D arrays work with Get/Set
-- 2D arrays work (implement Array2D or nested Array)
-- 1-based indexing transparent to generated code
-- Test: maxLvl = 5, lines 1-14 match
+**Code Changes in transpile.go**:
+1. **transformArrayDeclaration** (lines 242-310):
+   - Generates `*intrinsic.Array[elemType]` type
+   - Builds `intrinsic.NewArray[elemType](dim1, dim2, ...)` constructor call
+   - Extracts dimensions from `ArraySpec.Bounds`
+
+2. **transformArrayRef** (lines 496-518):
+   - Transforms subscripts to Go expressions
+   - Generates `arrayName.At(i, j, k)` method call
+   - Preserves Fortran indexing (no manual `-1` arithmetic)
+
+3. **transformAssignment** (lines 406-477):
+   - Detects array assignments (LHS is ArrayRef or FunctionCall to array)
+   - Calls `transformArrayAssignment()` for array element assignments
+   - Regular assignments handled as before
+
+4. **transformArrayAssignment** (lines 478-494):
+   - Transforms RHS value expression
+   - Transforms all subscript expressions
+   - Generates `arrayName.Set(value, i, j, k)` method call
+
+5. **Removed Dead Code**:
+   - Deleted `insertArrayInits()` (lines 313-338) - no longer needed
+   - Deleted `generateArrayInit()` (lines 340-392) - no longer needed
+   - Removed call to `insertArrayInits()` in `TransformSubroutine` (line 44)
+
+**Test Results**:
+- ✅ `go test -v -run TestTranspileGolden` passes
+- ✅ Generated code in `testdata/golden.go` compiles without errors
+- ✅ All array operations work correctly (1D and 2D)
+- ✅ Output matches gfortran for LEVEL05
+
+**Success Criteria** (ALL MET):
+- ✅ 1D arrays work with `.At()` and `.Set()`
+- ✅ 2D arrays work (via variadic `NewArray[T](3, 3)`)
+- ✅ 1-based indexing transparent to generated code
+- ✅ No manual index arithmetic in generated code
+- ✅ Clean, readable generated code
+- ✅ Test: All tests passing
 
 ---
 
@@ -2836,36 +2984,51 @@ label100:
 
 ### Updated Phase 5 Timeline
 
-| Level | Constructs | Days | Cumulative | Complexity |
-|-------|-----------|------|------------|------------|
-| LEVEL02 | Variables, assignments | 1-2 | 1-2 | Low |
-| LEVEL03 | Arithmetic, type conversion | 1 | 2-3 | Low |
-| LEVEL04 | IF/THEN/ELSE | 1-2 | 3-5 | Low |
-| LEVEL05 | Arrays (intrinsic.Array wrapper) | 2-3 | 5-8 | **HIGH** |
-| LEVEL06 | DO loops | 2-3 | 7-11 | **HIGH** |
-| LEVEL07 | CALL, INTENT parameters | 2-3 | 9-14 | **HIGH** |
-| LEVEL08 | Functions, RETURN | 2 | 11-16 | Medium |
-| LEVEL09 | DO WHILE | 1 | 12-17 | Low |
-| LEVEL10 | Complex expressions | 1 | 13-18 | Low |
-| LEVEL11 | String concat (//) | 1-2 | 14-20 | Medium |
-| LEVEL12 | Intrinsics (needs type resolution) | 2-3 | 16-23 | **HIGH** |
+| Level | Constructs | Days | Cumulative | Complexity | Status |
+|-------|-----------|------|------------|------------|--------|
+| LEVEL01 | Simple PRINT statements | - | - | Low | ✅ DONE |
+| LEVEL02 | Variables, assignments | 1-2 | 1-2 | Low | ✅ DONE |
+| LEVEL03 | Arithmetic, type conversion | 1 | 2-3 | Low | ✅ DONE |
+| LEVEL04 | IF/THEN/ELSE | 1-2 | 3-5 | Low | ✅ DONE |
+| LEVEL05 | Arrays (intrinsic.Array wrapper) | **COMPLETED** | - | **HIGH** | ✅ DONE |
+| LEVEL06 | DO loops | 2-3 | 5-8 | **HIGH** | 🔄 Next |
+| LEVEL07 | CALL, INTENT parameters | 2-3 | 7-11 | **HIGH** | Planned |
+| LEVEL08 | Functions, RETURN | 2 | 9-13 | Medium | Planned |
+| LEVEL09 | DO WHILE | 1 | 10-14 | Low | Planned |
+| LEVEL10 | Complex expressions | 1 | 11-15 | Low | Planned |
+| LEVEL11 | String concat (//) | 1-2 | 12-17 | Medium | Planned |
+| LEVEL12 | Intrinsics (needs type resolution) | 2-3 | 14-20 | **HIGH** | Planned |
 
-**Total Estimated Time**: 3-5 weeks for complete LEVEL01-12 implementation
+**Total Estimated Time**: 2-4 weeks for remaining LEVEL06-12 implementation
 
-**Critical Path**: LEVEL05 (arrays) → LEVEL06 (loops) → LEVEL07 (parameters) → LEVEL12 (intrinsics)
+**Completed Work** (2025-11-25):
+- ✅ LEVEL01-05: Basic I/O, variables, arithmetic, conditionals, arrays
+- ✅ `intrinsic.Array[T]` with slab allocation and column-major layout
+- ✅ Transpiler integration with `.At()` and `.Set()` methods
+- ✅ All tests passing
+
+**Critical Path**: ~~LEVEL05 (arrays)~~ ✅ → LEVEL06 (loops) → LEVEL07 (parameters) → LEVEL12 (intrinsics)
 
 ---
 
 ### Success Criteria for Phase 5
 
-- ✅ Each LEVEL's output matches corresponding lines in `testdata/golden.out` exactly
+**Completed (2025-11-25)**:
+- ✅ LEVEL01-05 output matches corresponding lines in `testdata/golden.out` exactly
 - ✅ Generated Go code compiles without errors
 - ✅ Generated Go code runs and produces correct output
-- ✅ Increment `maxLvl` progressively (2, 3, ..., 12) as each level is completed
-- ✅ All transpiler unit tests pass
-- ✅ `intrinsic` package contains complete Array wrapper and intrinsic functions
-- ✅ Type resolution integrated for LEVEL12 (type-dependent intrinsics)
-- ✅ Complete golden test suite: `go test -run TestTranspileGolden` passes with maxLvl=12
+- ✅ Incremented `maxLvl` progressively through LEVEL01-05
+- ✅ All transpiler unit tests pass for LEVEL01-05
+- ✅ `intrinsic` package contains complete Array wrapper with slab allocation
+- ✅ Array implementation: 11/11 tests passing, F77/F95 standards-compliant
+- ✅ Transpiler generates clean `.At()` and `.Set()` method calls for arrays
+- ✅ No manual index arithmetic in generated code
+
+**Remaining**:
+- ⏳ LEVEL06-12 implementation
+- ⏳ Type resolution integrated for LEVEL12 (type-dependent intrinsics)
+- ⏳ Complete golden test suite: `go test -run TestTranspileGolden` passes with maxLvl=12
+- ⏳ All intrinsic functions mapped (MAX, MIN, SIN, COS, etc.)
 
 ---
 

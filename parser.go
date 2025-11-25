@@ -357,13 +357,6 @@ func (p *Parser90) expect2IfFirst(current, next token.Token, reason string) {
 	}
 }
 
-// consume2lax consumes current if present. If current present also tries to consume next. Use consumeIf and consumeIf2 if you need result value.
-func (p *Parser90) consume2lax(current, next token.Token) {
-	if p.consumeIf(current) {
-		p.consumeIf(next)
-	}
-}
-
 // expectEndConstruct handles END <keyword> for control flow constructs (IF, DO).
 // The keyword is REQUIRED. If END is found without the keyword, reports error
 // and does NOT consume END (it likely belongs to parent construct).
@@ -415,18 +408,6 @@ func (p *Parser90) skipUnexpectedEndConstructs(msg string) (skipped bool) {
 		p.addErrorFatal(msg, 1)
 		p.skipNewlinesAndComments()
 	}
-}
-
-// expectEndProgramUnit handles END [keyword] [name] for program units.
-// END is required, but keyword and name after END are optional.
-// Returns true if END was successfully consumed.
-func (p *Parser90) expectEndProgramUnit(keyword token.Token, context string, expectedIdentifier string) bool {
-	if !p.expect(token.END, context) {
-		return false
-	}
-	p.consumeIf(keyword)          // optional keyword
-	p.consumeIf(token.Identifier) // optional name
-	return true
 }
 
 func (p *Parser90) skipNewlinesAndComments() {

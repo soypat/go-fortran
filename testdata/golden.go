@@ -10,6 +10,7 @@ func main() {
 	LEVEL03()
 	LEVEL04()
 	LEVEL05()
+	LEVEL06()
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
@@ -73,23 +74,48 @@ func LEVEL04() {
 func LEVEL05() {
 	var arr1 = intrinsic.NewArray[int32](5)
 	var matrix = intrinsic.NewArray[float32](3, 3)
-	arr1.Set(10, 1)
-	arr1.Set(20, 2)
-	arr1.Set(30, 3)
-	arr1.Set(40, 4)
-	arr1.Set(50, 5)
-	intrinsic.Print("LEVEL 5: arr1(1) =", arr1.At(1))
-	intrinsic.Print("LEVEL 5: arr1(3) =", arr1.At(3))
-	intrinsic.Print("LEVEL 5: arr1(5) =", arr1.At(5))
-	matrix.Set(1.0, 1, 1)
-	matrix.Set(0.0, 1, 2)
-	matrix.Set(0.0, 1, 3)
-	matrix.Set(0.0, 2, 1)
-	matrix.Set(1.0, 2, 2)
-	matrix.Set(0.0, 2, 3)
-	matrix.Set(0.0, 3, 1)
-	matrix.Set(0.0, 3, 2)
-	matrix.Set(1.0, 3, 3)
-	intrinsic.Print("LEVEL 5: matrix(1,1) =", matrix.At(1, 1))
-	intrinsic.Print("LEVEL 5: matrix(2,2) =", matrix.At(2, 2))
+	arr1.Set(10, int(1))
+	arr1.Set(20, int(2))
+	arr1.Set(30, int(3))
+	arr1.Set(40, int(4))
+	arr1.Set(50, int(5))
+	intrinsic.Print("LEVEL 5: arr1(1) =", arr1.At(int(1)))
+	intrinsic.Print("LEVEL 5: arr1(3) =", arr1.At(int(3)))
+	intrinsic.Print("LEVEL 5: arr1(5) =", arr1.At(int(5)))
+	matrix.Set(1.0, int(1), int(1))
+	matrix.Set(0.0, int(1), int(2))
+	matrix.Set(0.0, int(1), int(3))
+	matrix.Set(0.0, int(2), int(1))
+	matrix.Set(1.0, int(2), int(2))
+	matrix.Set(0.0, int(2), int(3))
+	matrix.Set(0.0, int(3), int(1))
+	matrix.Set(0.0, int(3), int(2))
+	matrix.Set(1.0, int(3), int(3))
+	intrinsic.Print("LEVEL 5: matrix(1,1) =", matrix.At(int(1), int(1)))
+	intrinsic.Print("LEVEL 5: matrix(2,2) =", matrix.At(int(2), int(2)))
+}
+func LEVEL06() {
+	var (
+		i	int32
+		j	int32
+	)
+	var arr1 = intrinsic.NewArray[int32](5)
+	var sum_val int32
+	arr1.Set(10, int(1))
+	arr1.Set(20, int(2))
+	arr1.Set(30, int(3))
+	arr1.Set(40, int(4))
+	arr1.Set(50, int(5))
+	sum_val = 0
+	for i = 1; i <= 5; i += 1 {
+		sum_val = sum_val + arr1.At(int(i))
+	}
+	intrinsic.Print("LEVEL 6: sum of arr1 =", sum_val)
+	sum_val = 0
+	for i = 1; i <= 3; i += 1 {
+		for j = 1; j <= 3; j += 1 {
+			sum_val = sum_val + 1
+		}
+	}
+	intrinsic.Print("LEVEL 6: nested loop count =", sum_val)
 }

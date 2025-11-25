@@ -79,6 +79,8 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 		return tg.transformPrint(s)
 	case *f90.IfStmt:
 		return tg.transformIfStmt(s)
+	case *f90.DoLoop:
+		return tg.transformDoLoop(s)
 	default:
 		// For now, unsupported statements are skipped
 		return nil
@@ -157,6 +159,66 @@ func (tg *TranspileToGo) transformIfStmt(ifStmt *f90.IfStmt) ast.Stmt {
 	}
 
 	return goIfStmt
+}
+
+// transformDoLoop transforms a Fortran DO loop to Go for loop
+// Fortran: DO var = start, end [, step]
+// Go:      for var = start; var <= end; var += step { }
+//
+// CRITICAL: Fortran DO loops have INCLUSIVE upper bounds, so we use <= not <
+// Example: DO i = 1, 5 iterates over i = 1, 2, 3, 4, 5 (includes 5)
+//
+// IMPORTANT: In Fortran, loop variables are typically declared before the loop
+// (e.g., INTEGER :: i), so we use assignment (=) not declaration (:=) in the
+// for loop init to avoid redeclaration errors.
+func (tg *TranspileToGo) transformDoLoop(loop *f90.DoLoop) ast.Stmt {
+	// Transform start, end expressions
+	start := tg.transformExpression(loop.Start)
+	if start == nil {
+		return nil
+	}
+
+	end := tg.transformExpression(loop.End)
+	if end == nil {
+		return nil
+	}
+
+	// Step defaults to 1 if not specified
+	var step ast.Expr
+	if loop.Step != nil {
+		step = tg.transformExpression(loop.Step)
+	} else {
+		step = &ast.BasicLit{
+			Kind:  token.INT,
+			Value: "1",
+		}
+	}
+
+	// Transform loop body
+	body := tg.transformStatements(loop.Body)
+
+	// Create Go for loop: for var = start; var <= end; var += step { }
+	// Use assignment (=) not declaration (:=) since loop vars are pre-declared in Fortran
+	return &ast.ForStmt{
+		Init: &ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(loop.Var)},
+			Tok: token.ASSIGN, // = (not :=)
+			Rhs: []ast.Expr{start},
+		},
+		Cond: &ast.BinaryExpr{
+			X:  ast.NewIdent(loop.Var),
+			Op: token.LEQ, // <= for inclusive upper bound (Fortran semantics)
+			Y:  end,
+		},
+		Post: &ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(loop.Var)},
+			Tok: token.ADD_ASSIGN, // +=
+			Rhs: []ast.Expr{step},
+		},
+		Body: &ast.BlockStmt{
+			List: body,
+		},
+	}
 }
 
 // transformExpressions transforms a slice of Fortran expressions to Go expressions
@@ -356,10 +418,15 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 		if index == nil {
 			return nil
 		}
-		indices = append(indices, index)
+		// Cast to int for Array.Set() which expects int indices
+		// (Fortran INTEGER constants/variables map to int32, but array indices are int)
+		indices = append(indices, &ast.CallExpr{
+			Fun:  ast.NewIdent("int"),
+			Args: []ast.Expr{index},
+		})
 	}
 
-	// Generate: arrayName.Set(value, i, j, k)
+	// Generate: arrayName.Set(value, int(i), int(j), int(k))
 	// Note: Fortran indexing preserved - Array.Set() handles it internally
 	setCall := &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
@@ -449,10 +516,15 @@ func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
 		if index == nil {
 			return nil
 		}
-		indices = append(indices, index)
+		// Cast to int for Array.At() which expects int indices
+		// (Fortran INTEGER loop variables map to int32, but array indices are int)
+		indices = append(indices, &ast.CallExpr{
+			Fun:  ast.NewIdent("int"),
+			Args: []ast.Expr{index},
+		})
 	}
 
-	// Generate: arrayName.At(i, j, k)
+	// Generate: arrayName.At(int(i), int(j), int(k))
 	// Note: No index adjustment needed - Array.At() handles Fortran indexing
 	return &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
