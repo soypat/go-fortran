@@ -19,6 +19,9 @@ import (
 	"github.com/soypat/go-fortran/symbol"
 )
 
+//go:generate gfortran -o testdata/golden testdata/golden.f90
+//go:generate sh -c "./testdata/golden > testdata/golden.out"
+
 //go:embed testdata/golden.f90
 var goldensrc string
 
@@ -141,6 +144,7 @@ func TestTranspileGolden(t *testing.T) {
 	expected := expectedFull[:idx+nlIdx]
 	if !bytes.Equal(expected, output) {
 		t.Errorf("output mismatch:\nExpected: %q\nGot:      %q", expected, string(output))
+		os.WriteFile("testdata/bad.out", output, 0777)
 	}
 }
 

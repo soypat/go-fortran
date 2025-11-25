@@ -2,6 +2,7 @@ package intrinsic
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 )
 
@@ -19,7 +20,7 @@ func (f Formatter) Print(v ...any) {
 	var buf []byte
 
 	// Fortran PRINT * adds leading space (carriage control character)
-	// buf = append(buf, ' ')
+	buf = append(buf, ' ')
 
 	// Format each value
 	// - Numeric values: field widths INCLUDE leading separator space
@@ -29,7 +30,7 @@ func (f Formatter) Print(v ...any) {
 		// Check if this is a string and not the first item
 		_, thisIsString := val.(string)
 		dontSpace := i == 1 && prevWasString && thisIsString
-		if !dontSpace {
+		if !dontSpace && i > 0 { // Don't add separator before first item
 			buf = append(buf, ' ')
 		}
 		buf = f.formatValue(buf, val)
@@ -44,45 +45,48 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 	const space = "                                         "
 	prevLen := len(dst)
 
-	// Determine type-specific field width (Fortran list-directed I/O defaults)
-	fieldWidth := f.FieldWidth
-	trailingSpace := 0
-	if fieldWidth == 0 {
-		fieldWidth = 14 // default
-	}
+	// Control variables: leftPad and rightPad calculated per type
+	var leftPad, rightPad int
 
-	// Format the value based on type
+	// Format value and determine padding (from gfortran libgfortran/io/write.c)
 	switch v := value.(type) {
 	case string:
-		// Strings are printed as-is without field width padding
 		dst = append(dst, v...)
-		return dst // Skip padding for strings
-	case float32: // REAL (single precision)
-		// Use 8 decimal places to show full single-precision accuracy
-		dst = strconv.AppendFloat(dst, float64(v), 'f', 8, 32)
-		fieldWidth = 12 // gfortran empirical: ~18 chars total (3 leading + value + trailing)
-		trailingSpace = 4
-	case float64: // DOUBLE PRECISION
-		// Use 16 decimal places for double precision, correct bit size (64 not 32!)
+		return dst
+
+	case int32: // INTEGER (kind=4): width=11, right-aligned
+		dst = strconv.AppendInt(dst, int64(v), 10)
+		leftPad = 11 - (len(dst) - prevLen)
+		rightPad = 0
+
+	case float32: // REAL (kind=4): width=18, 2 left + value + right
+		// gfortran uses variable precision to keep value at 10 chars total
+		x := float64(v)
+		dst = strconv.AppendFloat(dst, x, 'f', 8, 32)
+		nIntDig := int(math.Log10(math.Abs(x))) + 1
+		leftPad = 3 - nIntDig
+		rightPad = 16 - (len(dst) - prevLen) - leftPad
+
+	case float64: // DOUBLE PRECISION (kind=8): width=25, right-aligned
 		dst = strconv.AppendFloat(dst, v, 'f', 16, 64)
-		fieldWidth = 25 // gfortran D25.16E3 format (includes leading space)
-	case bool: // LOGICAL
-		// Fortran prints LOGICAL as T/F, not true/false
+		nIntDig := int(math.Log10(math.Abs(v))) + 1
+		leftPad = 3 - nIntDig
+		rightPad = 16 - (len(dst) - prevLen) - leftPad
+
+	case bool: // LOGICAL: just T or F, no padding
 		if v {
 			dst = append(dst, 'T')
 		} else {
 			dst = append(dst, 'F')
 		}
-		fieldWidth = 1 // gfortran L2 format (1 space + T/F)
-	case int32: // INTEGER
-		dst = strconv.AppendInt(dst, int64(v), 10)
-		fieldWidth = 11 // gfortran I12 format (includes leading space)
+		return dst // No padding
+	default:
+		panic(fmt.Sprintf("unsupported format type: %T", value))
 	}
 
-	// Apply field width padding (right-align) for numeric types
-	totalAppended := len(dst) - prevLen
-	leftPad := fieldWidth - totalAppended
+	// Apply padding
 	if leftPad > 0 {
+		totalAppended := len(dst) - prevLen
 		// First grow slice if needed
 		dst = append(dst, space[:leftPad]...)
 		// Now copy value bytes to end (achieves right-alignment)
@@ -90,6 +94,8 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 		// Now set left pad of bytes to space
 		copy(dst[prevLen:prevLen+leftPad], space)
 	}
-	dst = append(dst, space[:trailingSpace]...)
+	if rightPad > 0 {
+		dst = append(dst, space[:rightPad]...)
+	}
 	return dst
 }

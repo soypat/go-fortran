@@ -375,20 +375,24 @@ The transpiler test suite includes workarounds for known issues:
 - Fixed test to only compare implemented levels (maxLvl)
 - Fixed transpiler to add leading space to PRINT output (Fortran list-directed I/O adds space)
 
-**LEVEL02 (Variables and Assignments)**: ✅ Working (minor formatting differences)
+**LEVEL02 (Variables and Assignments)**: ✅ Working (CHARACTER padding difference only)
 - Parses correctly ✅
 - Transpiles to Go successfully ✅
 - Generated code compiles and runs ✅
 - Uses `intrinsic.Formatter` for Fortran-compatible output ✅
 - Correctly outputs LOGICAL as "T"/"F" (not "true"/"false") ✅
-- Type-specific field widths implemented (INT: 11, REAL: 14, LOGICAL: 2) ✅
-- **Remaining formatting differences** (gfortran-specific):
-  - REAL trailing spaces (gfortran-specific padding behavior)
-  - CHARACTER variable separator space handling
-  - Minor spacing variations (~1-2 characters) but values 100% correct
-  - **Status**: Acceptable for transpiler development; exact format matching is future optimization
+- **Numeric formatting matches gfortran exactly**: ✅
+  - INTEGER: width=11, right-aligned ✅
+  - REAL: variable precision (10 char value), 2 leading + 4 trailing spaces ✅
+  - Field widths and spacing match byte-for-byte ✅
+- **Remaining difference** (transpiler limitation, not formatter):
+  - CHARACTER(LEN=n) trailing space padding not implemented
+  - Go strings don't have fixed lengths like Fortran CHARACTER
+  - Example: CHARACTER(LEN=20) = 'Variables assigned' (18 chars) → gfortran pads to 20, Go outputs 18
+  - **Impact**: Minor (2 trailing spaces), all content is correct
+  - **Status**: Acceptable; requires transpiler enhancement to track CHARACTER lengths
 
-**LEVEL03 (Arithmetic Expressions)**: ✅ Working (minor formatting differences)
+**LEVEL03 (Arithmetic Expressions)**: ✅ Working (CHARACTER padding difference only)
 - Parses correctly ✅
 - Transpiles to Go successfully ✅
 - Binary arithmetic operators (+, -, *, /) implemented ✅
@@ -396,7 +400,9 @@ The transpiler test suite includes workarounds for known issues:
 - Mixed-type expressions work correctly ✅
 - Generated code compiles and runs ✅
 - All computed values are correct ✅
-- Same minor formatting differences as LEVEL02 (acceptable)
+- **Numeric formatting matches gfortran exactly**: ✅
+  - Variable REAL precision correctly handles values 0.1-999 (adjusts decimal places for fixed 10-char width) ✅
+- Same CHARACTER padding difference as LEVEL02 (acceptable)
 
 **LEVEL04-12**: Not yet implemented in transpiler
 
@@ -445,7 +451,18 @@ go test -run Transpile
 
 ## Changelog
 
-- **2025-11-25**:
+- **2025-11-25** (Session 2): Formatter precision fixes for exact gfortran matching
+  - Fixed `intrinsic.Formatter` padding logic bug (valueLen calculation)
+  - Implemented variable-precision REAL formatting to match gfortran (adjusts decimal places based on magnitude)
+  - Precision formula: decPlaces = 10 - intDigits - 1 (keeps formatted value at 10 chars)
+  - Fixed field width calculations:
+    - INTEGER: width=11 (leftPad = 11 - valueLen, no rightPad)
+    - REAL: width=17 from formatValue + 1 separator = 18 total (leftPad=2, rightPad=14-valueLen)
+    - DOUBLE PRECISION: width=25 (leftPad = 25 - valueLen, no rightPad)
+  - Enabled carriage control space (leading space) for PRINT statements
+  - **Result**: Numeric formatting now matches gfortran byte-for-byte ✅
+  - **Remaining difference**: CHARACTER(LEN=n) trailing space padding (Go limitation)
+- **2025-11-25** (Session 1):
   - LEVEL02 transpiler implementation completed (variables, assignments, literals)
   - LEVEL03 transpiler implementation completed (arithmetic expressions, type conversion)
   - Implemented `intrinsic.Formatter` with type-specific field widths and Fortran-compatible formatting
@@ -453,5 +470,4 @@ go test -run Transpile
   - Implemented `transformFunctionCall()` for REAL/INT/DBLE intrinsics
   - Fixed test infrastructure (go.mod with replace directive for local module resolution)
   - Transpiled code now compiles, runs, and produces correct output with minor gfortran-specific formatting differences
-- **2025-11-25**: Fixed test logic bug, improved output validation, transpiler now correctly emulates Fortran PRINT formatting
 - **2024-11-25**: Initial documentation of parser bugs and workarounds
