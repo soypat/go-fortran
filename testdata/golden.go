@@ -1,8 +1,7 @@
 package main
 
-import(
+import (
 	"github.com/soypat/go-fortran/intrinsic"
-	"math"
 )
 
 func main() {
@@ -14,6 +13,10 @@ func main() {
 	LEVEL06()
 	LEVEL07()
 	LEVEL08()
+	LEVEL09()
+	LEVEL10()
+	LEVEL11()
+	LEVEL12()
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
@@ -33,14 +36,14 @@ func LEVEL02() {
 }
 func LEVEL03() {
 	var (
-		i	int32
-		j	int32
-		k	int32
+		i int32
+		j int32
+		k int32
 	)
 	var (
-		x	float32
-		y	float32
-		z	float32
+		x float32
+		y float32
+		z float32
 	)
 	i = 42
 	x = 3.14159
@@ -99,8 +102,8 @@ func LEVEL05() {
 }
 func LEVEL06() {
 	var (
-		i	int32
-		j	int32
+		i int32
+		j int32
 	)
 	var arr1 = intrinsic.NewArray[int32](5)
 	var sum_val int32
@@ -144,6 +147,96 @@ func LEVEL08() {
 	sqrt_result = SQUARE_ROOT(16.0)
 	intrinsic.Print("LEVEL 8: SQUARE_ROOT(16.0) =", sqrt_result)
 }
+func LEVEL09() {
+	var (
+		i          int32
+		n          int32
+		fib_result int32
+		sum_val    int32
+	)
+	n = 7
+	fib_result = FIBONACCI(n)
+	intrinsic.Print("LEVEL 9: FIBONACCI(7) =", fib_result)
+	i = 1
+	sum_val = 0
+	for i <= 10 {
+		sum_val = sum_val + i
+		i = i + 1
+	}
+	intrinsic.Print("LEVEL 9: sum 1 to 10 =", sum_val)
+}
+func LEVEL10() {
+	var (
+		i int32
+		j int32
+		k int32
+	)
+	var (
+		x           float32
+		y           float32
+		z           float32
+		expr_result float32
+	)
+	var (
+		flag  bool
+		cond1 bool
+		cond2 bool
+		cond3 bool
+	)
+	i = 11
+	j = 52
+	k = 84
+	x = 3.14159
+	y = 6.28318
+	z = 45.14159
+	flag = true
+	expr_result = (x+y)*z - float32(k)/2.0
+	intrinsic.Print("LEVEL 10: complex expr =", expr_result)
+	cond1 = i > 5 && j < 100
+	cond2 = x >= 3.0 || y <= 1.0
+	cond3 = !flag
+	intrinsic.Print("LEVEL 10: cond1 =", cond1, ", cond2 =", cond2)
+	intrinsic.Print("LEVEL 10: cond3 =", cond3)
+}
+func LEVEL11() {
+	var (
+		str1 string = "          "
+		str2 string = "          "
+	)
+	var str3 string = "                    "
+	str1 = "Hello     "
+	str2 = "World     "
+	str3 = str1 + " " + str2
+	intrinsic.Print("LEVEL 11: concatenation:", str3)
+}
+func LEVEL12() {
+	var (
+		angle   float32
+		sin_val float32
+		cos_val float32
+		abs_val float32
+	)
+	var (
+		i       int32
+		j       int32
+		k       int32
+		max_val int32
+		min_val int32
+	)
+	i = 11
+	j = 52
+	k = 84
+	angle = 0.5
+	sin_val = intrinsic.SIN[float32](angle)
+	cos_val = intrinsic.COS[float32](angle)
+	abs_val = intrinsic.ABS[float32](-5.5)
+	max_val = intrinsic.MAX[int32](i, j, k)
+	min_val = intrinsic.MIN[int32](10, 20, 5)
+	intrinsic.Print("LEVEL 12: SIN(0.5) =", sin_val)
+	intrinsic.Print("LEVEL 12: COS(0.5) =", cos_val)
+	intrinsic.Print("LEVEL 12: ABS(-5.5) =", abs_val)
+	intrinsic.Print("LEVEL 12: MAX =", max_val, ", MIN =", min_val)
+}
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
 }
@@ -160,8 +253,8 @@ func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 }
 func FACTORIAL(n int32) int32 {
 	var (
-		i	int32
-		result	int32
+		i      int32
+		result int32
 	)
 	result = 1
 	for i = 1; i <= n; i += 1 {
@@ -170,14 +263,14 @@ func FACTORIAL(n int32) int32 {
 	return result
 }
 func SQUARE_ROOT(x float32) float32 {
-	return float32(math.Sqrt(float64(x)))
+	return intrinsic.SQRT[float32](x)
 }
 func FIBONACCI(n int32) int32 {
 	var (
-		a	int32
-		b	int32
-		temp	int32
-		i	int32
+		a    int32
+		b    int32
+		temp int32
+		i    int32
 	)
 	if n <= 1 {
 		return n

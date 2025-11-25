@@ -87,7 +87,7 @@ func TestTranspileGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("got errors collecting symbols in golden.f90: %v", err)
 	}
-	const maxLvl = 8 // Currently testing up to LEVEL08
+	const maxLvl = 12 // Currently testing up to LEVEL12
 	// TODO: Fix type resolver to skip format specifiers
 	// For now, skip type resolution as it's not needed for basic transpilation
 	// resolver := symbol.NewTypeResolver(syms)
@@ -153,8 +153,10 @@ func TestTranspileGolden(t *testing.T) {
 	}
 	outsrc.WriteString("}\n")
 	funcsrc.WriteTo(&outsrc)
-	os.WriteFile("testdata/golden.go", outsrc.Bytes(), 0777)
-	output := helperRunGo(t, &outsrc)
+	var formattedSrc bytes.Buffer
+	helperFormatGoSrc(t, &outsrc, &formattedSrc)
+	os.WriteFile("testdata/golden.go", formattedSrc.Bytes(), 0777)
+	output := helperRunGo(t, &formattedSrc)
 
 	// Read expected output and extract only the lines for implemented levels
 	expectedFull, err := os.ReadFile("testdata/golden.out")
@@ -268,4 +270,14 @@ func mustGetwd(t *testing.T) string {
 		t.Fatalf("failed to get working directory: %v", err)
 	}
 	return wd
+}
+
+func helperFormatGoSrc(t *testing.T, r io.Reader, w io.Writer) {
+	cmd := exec.Command("gofmt")
+	cmd.Stdin = r
+	cmd.Stdout = w
+	err := cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
 }

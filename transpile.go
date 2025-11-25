@@ -400,8 +400,15 @@ func (tg *TranspileToGo) transformIfStmt(ifStmt *f90.IfStmt) ast.Stmt {
 }
 
 // transformDoLoop transforms a Fortran DO loop to Go for loop
+// Handles both counter-controlled and DO WHILE loops:
+//
+// Counter-controlled:
 // Fortran: DO var = start, end [, step]
 // Go:      for var = start; var <= end; var += step { }
+//
+// DO WHILE:
+// Fortran: DO WHILE (condition)
+// Go:      for condition { }
 //
 // CRITICAL: Fortran DO loops have INCLUSIVE upper bounds, so we use <= not <
 // Example: DO i = 1, 5 iterates over i = 1, 2, 3, 4, 5 (includes 5)
@@ -410,7 +417,25 @@ func (tg *TranspileToGo) transformIfStmt(ifStmt *f90.IfStmt) ast.Stmt {
 // (e.g., INTEGER :: i), so we use assignment (=) not declaration (:=) in the
 // for loop init to avoid redeclaration errors.
 func (tg *TranspileToGo) transformDoLoop(loop *f90.DoLoop) ast.Stmt {
-	// Transform start, end expressions
+	// Transform loop body (common to both types)
+	body := tg.transformStatements(loop.Body)
+
+	// Check if this is DO WHILE (Var is empty, Start contains condition)
+	if loop.Var == "" {
+		// DO WHILE loop: for condition { }
+		condition := tg.transformExpression(loop.Start)
+		if condition == nil {
+			return nil
+		}
+		return &ast.ForStmt{
+			Cond: condition,
+			Body: &ast.BlockStmt{
+				List: body,
+			},
+		}
+	}
+
+	// Counter-controlled DO loop
 	start := tg.transformExpression(loop.Start)
 	if start == nil {
 		return nil
@@ -431,9 +456,6 @@ func (tg *TranspileToGo) transformDoLoop(loop *f90.DoLoop) ast.Stmt {
 			Value: "1",
 		}
 	}
-
-	// Transform loop body
-	body := tg.transformStatements(loop.Body)
 
 	// Create Go for loop: for var = start; var <= end; var += step { }
 	// Use assignment (=) not declaration (:=) since loop vars are pre-declared in Fortran
@@ -804,6 +826,12 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 		return tg.transformArrayRef(e)
 	case *f90.BinaryExpr:
 		return tg.transformBinaryExpr(e)
+	case *f90.UnaryExpr:
+		return tg.transformUnaryExpr(e)
+	case *f90.ParenExpr:
+		// Parentheses for grouping - just transform the inner expression
+		// Go will preserve the necessary parentheses based on operator precedence
+		return tg.transformExpression(e.Expr)
 	case *f90.FunctionCall:
 		// Check if this is actually an array reference (parser ambiguity)
 		if _, isArray := tg.arrays[e.Name]; isArray {
@@ -882,6 +910,12 @@ func (tg *TranspileToGo) transformBinaryExpr(expr *f90.BinaryExpr) ast.Expr {
 		goOp = token.EQL
 	case f90token.NE:
 		goOp = token.NEQ
+	case f90token.AND:
+		goOp = token.LAND // .AND. → &&
+	case f90token.OR:
+		goOp = token.LOR // .OR. → ||
+	case f90token.StringConcat:
+		goOp = token.ADD // // → + (string concatenation)
 	default:
 		// Unsupported operator
 		return nil
@@ -891,6 +925,34 @@ func (tg *TranspileToGo) transformBinaryExpr(expr *f90.BinaryExpr) ast.Expr {
 		X:  left,
 		Op: goOp,
 		Y:  right,
+	}
+}
+
+// transformUnaryExpr transforms a Fortran unary expression to Go unary expression
+// Handles .NOT. (logical negation) and unary +/- operators
+func (tg *TranspileToGo) transformUnaryExpr(expr *f90.UnaryExpr) ast.Expr {
+	operand := tg.transformExpression(expr.Operand)
+	if operand == nil {
+		return nil
+	}
+
+	// Map Fortran unary operator to Go operator
+	var goOp token.Token
+	switch expr.Op {
+	case f90token.NOT:
+		goOp = token.NOT // .NOT. → !
+	case f90token.Plus:
+		goOp = token.ADD // Unary +
+	case f90token.Minus:
+		goOp = token.SUB // Unary -
+	default:
+		// Unsupported unary operator
+		return nil
+	}
+
+	return &ast.UnaryExpr{
+		Op: goOp,
+		X:  operand,
 	}
 }
 
@@ -938,9 +1000,9 @@ func (tg *TranspileToGo) transformFunctionCall(call *f90.FunctionCall) ast.Expr 
 			Fun:  ast.NewIdent("float64"),
 			Args: []ast.Expr{arg},
 		}
-	case "SQRT":
-		// SQRT(x) → float32(math.Sqrt(float64(x)))
-		// math.Sqrt takes and returns float64, so need conversions
+	case "SQRT", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN",
+		"EXP", "LOG", "LOG10", "SINH", "COSH", "TANH":
+		// Math intrinsics: SQRT(x) → intrinsic.SQRT[float32](x)
 		if len(call.Args) != 1 {
 			return nil
 		}
@@ -948,24 +1010,56 @@ func (tg *TranspileToGo) transformFunctionCall(call *f90.FunctionCall) ast.Expr 
 		if arg == nil {
 			return nil
 		}
-		tg.useImport("math")
-		// Wrap: float32(math.Sqrt(float64(arg)))
+		tg.useImport("github.com/soypat/go-fortran/intrinsic")
+		// Call: intrinsic.SQRT[float32](arg)
 		return &ast.CallExpr{
-			Fun: ast.NewIdent("float32"),
-			Args: []ast.Expr{
-				&ast.CallExpr{
-					Fun: &ast.SelectorExpr{
-						X:   ast.NewIdent("math"),
-						Sel: ast.NewIdent("Sqrt"),
-					},
-					Args: []ast.Expr{
-						&ast.CallExpr{
-							Fun:  ast.NewIdent("float64"),
-							Args: []ast.Expr{arg},
-						},
-					},
+			Fun: &ast.IndexListExpr{
+				X: &ast.SelectorExpr{
+					X:   ast.NewIdent("intrinsic"),
+					Sel: ast.NewIdent(funcName),
 				},
+				Indices: []ast.Expr{ast.NewIdent("float32")},
 			},
+			Args: []ast.Expr{arg},
+		}
+	case "ABS":
+		// ABS can work with signed integers or floats
+		// For now, use float32 variant
+		if len(call.Args) != 1 {
+			return nil
+		}
+		arg := tg.transformExpression(call.Args[0])
+		if arg == nil {
+			return nil
+		}
+		tg.useImport("github.com/soypat/go-fortran/intrinsic")
+		return &ast.CallExpr{
+			Fun: &ast.IndexListExpr{
+				X: &ast.SelectorExpr{
+					X:   ast.NewIdent("intrinsic"),
+					Sel: ast.NewIdent("ABS"),
+				},
+				Indices: []ast.Expr{ast.NewIdent("float32")},
+			},
+			Args: []ast.Expr{arg},
+		}
+	case "MAX", "MIN":
+		// MAX/MIN are variadic: MAX(a, b, c, ...) → intrinsic.MAX[int32](a, b, c, ...)
+		if len(call.Args) < 2 {
+			return nil
+		}
+		args := tg.transformExpressions(call.Args)
+		tg.useImport("github.com/soypat/go-fortran/intrinsic")
+		// Assume int32 for now (would need type resolution for better handling)
+		return &ast.CallExpr{
+			Fun: &ast.IndexListExpr{
+				X: &ast.SelectorExpr{
+					X:   ast.NewIdent("intrinsic"),
+					Sel: ast.NewIdent(funcName),
+				},
+				Indices: []ast.Expr{ast.NewIdent("int32")},
+			},
+			Args: args,
 		}
 	default:
 		// For other functions, assume they're user-defined and call directly
