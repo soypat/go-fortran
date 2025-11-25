@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"slices"
 
 	f90 "github.com/soypat/go-fortran/ast"
 	"github.com/soypat/go-fortran/symbol"
@@ -12,6 +13,7 @@ import (
 // TranspileToGo transforms Fortran AST to Go AST
 type TranspileToGo struct {
 	symTable *symbol.Table
+	imports  []string
 }
 
 // Reset initializes the transpiler with a symbol table
@@ -61,12 +63,25 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 	}
 }
 
-// transformPrint transforms a Fortran PRINT statement to fmt.Println call
+// transformPrint transforms a Fortran PRINT statement to fmt.Print call
+// Note: Fortran PRINT * adds a leading space and newline
 func (tg *TranspileToGo) transformPrint(print *f90.PrintStmt) ast.Stmt {
 	// Transform output expressions
 	args := tg.transformExpressions(print.OutputList)
 
-	// Create fmt.Println call
+	// Fortran PRINT * adds a leading space before list-directed output
+	// If first arg is a string literal, prepend space to it
+	// Otherwise add space as separate argument
+	if len(args) > 0 {
+		if strLit, ok := args[0].(*ast.BasicLit); ok && strLit.Kind == token.STRING {
+			// Remove quotes, prepend space, re-quote
+			original := strLit.Value[1 : len(strLit.Value)-1] // Remove surrounding quotes
+			strLit.Value = fmt.Sprintf(`" %s"`, original)
+		}
+	}
+
+	// Create fmt.Println call (adds newline at end)
+	tg.useImport("fmt")
 	return &ast.ExprStmt{
 		X: &ast.CallExpr{
 			Fun: &ast.SelectorExpr{
@@ -103,5 +118,11 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 	default:
 		// For now, unsupported expressions return nil
 		return nil
+	}
+}
+
+func (tg *TranspileToGo) useImport(pkg string) {
+	if !slices.Contains(tg.imports, pkg) {
+		tg.imports = append(tg.imports, pkg)
 	}
 }

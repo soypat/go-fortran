@@ -99,12 +99,7 @@ func TestTranspileGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var outsrc bytes.Buffer
-	outsrc.WriteString("package main\n\nfunc main() {\n")
-	for lvl := 1; lvl <= maxLvl; lvl++ {
-		fmt.Fprintf(&outsrc, "\tLEVEL%02d()\n", lvl)
-	}
-	outsrc.WriteString("}\n")
+	var funcsrc bytes.Buffer
 	for lvl := 1; lvl <= maxLvl; lvl++ {
 		routine := helperGetGoldenLevel(t, lvl, progUnits)
 		if routine == nil {
@@ -114,12 +109,37 @@ func TestTranspileGolden(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		helperWriteGoFunc(t, &outsrc, gofunc)
+		helperWriteGoFunc(t, &funcsrc, gofunc)
 	}
+	var outsrc bytes.Buffer
+	outsrc.WriteString("package main\n\nimport(\n")
+	for _, imp := range tp.imports {
+		fmt.Fprintf(&outsrc, "\t\"%s\"\n", imp)
+	}
+	outsrc.WriteString(")\n\nfunc main() {\n")
+	for lvl := 1; lvl <= maxLvl; lvl++ {
+		fmt.Fprintf(&outsrc, "\tLEVEL%02d()\n", lvl)
+	}
+	outsrc.WriteString("}\n")
+	funcsrc.WriteTo(&outsrc)
 	output := helperRunGo(t, &outsrc)
-	expected, _ := os.ReadFile("testdata/golden.out")
-	if bytes.Equal(expected, output) {
-		t.Errorf("data mismatch")
+
+	// Read expected output and extract only the lines for implemented levels
+	expectedFull, err := os.ReadFile("testdata/golden.out")
+	if err != nil {
+		t.Fatalf("failed to read golden.out: %v", err)
+	}
+
+	// Extract only the first maxLvl lines from expected output
+	expectedLines := bytes.Split(expectedFull, []byte("\n"))
+	var expected bytes.Buffer
+	for i := 0; i < maxLvl && i < len(expectedLines); i++ {
+		expected.Write(expectedLines[i])
+		expected.WriteByte('\n')
+	}
+
+	if !bytes.Equal(expected.Bytes(), output) {
+		t.Errorf("output mismatch:\nExpected: %q\nGot: %q", expected.String(), string(output))
 	}
 }
 
@@ -162,14 +182,9 @@ func helperRunGo(t *testing.T, gosrc io.Reader) (output []byte) {
 		t.Fatalf("failed to read Go source: %v", err)
 	}
 
-	// Add fmt import after package declaration
-	fullSrc := string(srcBytes)
-	// Insert import after "package main\n\n"
-	fullSrc = strings.Replace(fullSrc, "package main\n\n", "package main\n\nimport \"fmt\"\n\n", 1)
-
 	// Write source to temp file
 	srcFile := filepath.Join(tmpDir, "main.go")
-	if err := os.WriteFile(srcFile, []byte(fullSrc), 0644); err != nil {
+	if err := os.WriteFile(srcFile, []byte(srcBytes), 0644); err != nil {
 		t.Fatalf("failed to write Go source: %v", err)
 	}
 
