@@ -392,7 +392,7 @@ The transpiler test suite includes workarounds for known issues:
   - **Impact**: Minor (2 trailing spaces), all content is correct
   - **Status**: Acceptable; requires transpiler enhancement to track CHARACTER lengths
 
-**LEVEL03 (Arithmetic Expressions)**: ✅ Working (CHARACTER padding difference only)
+**LEVEL03 (Arithmetic Expressions)**: ✅ Working
 - Parses correctly ✅
 - Transpiles to Go successfully ✅
 - Binary arithmetic operators (+, -, *, /) implemented ✅
@@ -402,9 +402,19 @@ The transpiler test suite includes workarounds for known issues:
 - All computed values are correct ✅
 - **Numeric formatting matches gfortran exactly**: ✅
   - Variable REAL precision correctly handles values 0.1-999 (adjusts decimal places for fixed 10-char width) ✅
-- Same CHARACTER padding difference as LEVEL02 (acceptable)
 
-**LEVEL04-12**: Not yet implemented in transpiler
+**LEVEL04 (IF Statements and Relational Operators)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- IF...THEN...END IF statements implemented ✅
+- IF...THEN...ELSE...END IF statements implemented ✅
+- IF...THEN...ELSE IF...THEN...ELSE...END IF chains implemented ✅
+- Relational operators (.GT., .LT., .GE., .LE., .EQ., .NE.) implemented ✅
+- Boolean expressions as conditions work correctly ✅
+- Generated code compiles and runs ✅
+- Output matches gfortran exactly ✅
+
+**LEVEL05-12**: Not yet implemented in transpiler
 
 ---
 
@@ -451,6 +461,13 @@ go test -run Transpile
 
 ## Changelog
 
+- **2025-11-25** (Session 3): LEVEL04 implementation - IF statements and relational operators
+  - Implemented CHARACTER(LEN=n) padding in transpiler (space-initialized declarations, padded assignments)
+  - Implemented IF statement transformation (`transformIfStmt()`)
+  - Added support for IF...THEN...END IF, IF...ELSE, and IF...ELSE IF chains
+  - Extended `transformBinaryExpr()` to handle relational operators (.GT., .LT., .GE., .LE., .EQ., .NE.)
+  - All relational operators correctly map to Go equivalents (>, <, >=, <=, ==, !=)
+  - LEVEL04 tests pass with byte-for-byte matching to gfortran output ✅
 - **2025-11-25** (Session 2): Formatter precision fixes for exact gfortran matching
   - Fixed `intrinsic.Formatter` padding logic bug (valueLen calculation)
   - Implemented variable-precision REAL formatting to match gfortran (adjusts decimal places based on magnitude)

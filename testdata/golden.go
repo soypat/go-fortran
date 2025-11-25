@@ -1,6 +1,6 @@
 package main
 
-import (
+import(
 	"github.com/soypat/go-fortran/intrinsic"
 )
 
@@ -8,6 +8,7 @@ func main() {
 	LEVEL01()
 	LEVEL02()
 	LEVEL03()
+	LEVEL04()
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
@@ -27,14 +28,14 @@ func LEVEL02() {
 }
 func LEVEL03() {
 	var (
-		i int32
-		j int32
-		k int32
+		i	int32
+		j	int32
+		k	int32
 	)
 	var (
-		x float32
-		y float32
-		z float32
+		x	float32
+		y	float32
+		z	float32
 	)
 	i = 42
 	x = 3.14159
@@ -44,4 +45,27 @@ func LEVEL03() {
 	z = float32(i) + x
 	intrinsic.Print("LEVEL 3: j =", j, ", k =", k)
 	intrinsic.Print("LEVEL 3: y =", y, ", z =", z)
+}
+func LEVEL04() {
+	var i int32
+	var x float32
+	var flag bool
+	i = 42
+	x = 3.14159
+	flag = true
+	if i > 40 {
+		intrinsic.Print("LEVEL 4: i is greater than 40")
+	}
+	if flag {
+		intrinsic.Print("LEVEL 4: flag is true")
+	} else {
+		intrinsic.Print("LEVEL 4: flag is false")
+	}
+	if x < 3.0 {
+		intrinsic.Print("LEVEL 4: x < 3.0")
+	} else if x < 4.0 {
+		intrinsic.Print("LEVEL 4: 3.0 <= x < 4.0")
+	} else {
+		intrinsic.Print("LEVEL 4: x >= 4.0")
+	}
 }

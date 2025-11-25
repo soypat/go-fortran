@@ -66,6 +66,8 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 		return tg.transformAssignment(s)
 	case *f90.PrintStmt:
 		return tg.transformPrint(s)
+	case *f90.IfStmt:
+		return tg.transformIfStmt(s)
 	default:
 		// For now, unsupported statements are skipped
 		return nil
@@ -78,7 +80,7 @@ func (tg *TranspileToGo) transformPrint(print *f90.PrintStmt) ast.Stmt {
 	// Transform output expressions
 	args := tg.transformExpressions(print.OutputList)
 
-	// Use intrinsic.NewFormatter().Print() for Fortran-compatible formatting
+	// Use intrinsic.Print() for Fortran-compatible formatting
 	// This handles: leading space, T/F for LOGICAL, field widths, spacing between items
 	tg.useImport("github.com/soypat/go-fortran/intrinsic")
 
@@ -91,6 +93,60 @@ func (tg *TranspileToGo) transformPrint(print *f90.PrintStmt) ast.Stmt {
 			Args: args,
 		},
 	}
+}
+
+// transformIfStmt transforms a Fortran IF statement to Go if/else statement
+func (tg *TranspileToGo) transformIfStmt(ifStmt *f90.IfStmt) ast.Stmt {
+	// Transform the condition
+	condition := tg.transformExpression(ifStmt.Condition)
+	if condition == nil {
+		return nil
+	}
+
+	// Create the Go if statement
+	goIfStmt := &ast.IfStmt{
+		Cond: condition,
+		Body: &ast.BlockStmt{
+			List: tg.transformStatements(ifStmt.ThenPart),
+		},
+	}
+
+	// Handle ELSE IF clauses
+	if len(ifStmt.ElseIfParts) > 0 {
+		// Build nested if/else chain
+		currentElse := goIfStmt
+		for _, elseIfClause := range ifStmt.ElseIfParts {
+			elseIfCond := tg.transformExpression(elseIfClause.Condition)
+			if elseIfCond == nil {
+				continue
+			}
+
+			elseIfStmt := &ast.IfStmt{
+				Cond: elseIfCond,
+				Body: &ast.BlockStmt{
+					List: tg.transformStatements(elseIfClause.ThenPart),
+				},
+			}
+
+			// Link as else clause
+			currentElse.Else = elseIfStmt
+			currentElse = elseIfStmt
+		}
+
+		// Handle final ELSE clause if present
+		if len(ifStmt.ElsePart) > 0 {
+			currentElse.Else = &ast.BlockStmt{
+				List: tg.transformStatements(ifStmt.ElsePart),
+			}
+		}
+	} else if len(ifStmt.ElsePart) > 0 {
+		// No ELSE IF, just ELSE
+		goIfStmt.Else = &ast.BlockStmt{
+			List: tg.transformStatements(ifStmt.ElsePart),
+		}
+	}
+
+	return goIfStmt
 }
 
 // transformExpressions transforms a slice of Fortran expressions to Go expressions
@@ -272,6 +328,18 @@ func (tg *TranspileToGo) transformBinaryExpr(expr *f90.BinaryExpr) ast.Expr {
 		goOp = token.MUL
 	case f90token.Slash:
 		goOp = token.QUO
+	case f90token.GT:
+		goOp = token.GTR
+	case f90token.LT:
+		goOp = token.LSS
+	case f90token.GE:
+		goOp = token.GEQ
+	case f90token.LE:
+		goOp = token.LEQ
+	case f90token.EQ:
+		goOp = token.EQL
+	case f90token.NE:
+		goOp = token.NEQ
 	default:
 		// Unsupported operator
 		return nil
