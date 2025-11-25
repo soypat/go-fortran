@@ -40,9 +40,6 @@ func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl
 	// Transform body statements
 	bodyStmts := tg.transformStatements(sub.Body)
 
-	// Add array initialization for multi-dimensional arrays
-	bodyStmts = tg.insertArrayInits(bodyStmts)
-
 	// Create function declaration
 	funcDecl := &ast.FuncDecl{
 		Name: ast.NewIdent(sub.Name),
@@ -242,129 +239,55 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 	}
 }
 
-// transformArrayDeclaration creates a Go slice declaration with make() initialization
+// transformArrayDeclaration creates an intrinsic.Array[T] declaration with constructor call
+// Generates: var arr *intrinsic.Array[int32] = intrinsic.NewArray[int32](3, 4)
 func (tg *TranspileToGo) transformArrayDeclaration(name string, elemType ast.Expr, arraySpec *f90.ArraySpec) *ast.ValueSpec {
-	// Track this array for later initialization if multi-dimensional
+	// Track this array for disambiguation (FunctionCall vs ArrayRef)
 	tg.arrays[name] = arraySpec
 	tg.arrayTypes[name] = elemType
 
-	// Build nested slice type for multi-dimensional arrays
-	// For DIMENSION(5) → []int32
-	// For DIMENSION(3,3) → [][]int32
-	sliceType := elemType
-	for range arraySpec.Bounds {
-		sliceType = &ast.ArrayType{
-			Elt: sliceType,
-		}
+	// Build type: *intrinsic.Array[elemType]
+	arrayType := &ast.StarExpr{
+		X: &ast.IndexExpr{
+			X: &ast.SelectorExpr{
+				X:   ast.NewIdent("intrinsic"),
+				Sel: ast.NewIdent("Array"),
+			},
+			Index: elemType, // Type parameter
+		},
 	}
 
-	// Get the size of the first (outermost) dimension
-	firstBound := arraySpec.Bounds[0]
-	firstSize := tg.transformExpression(firstBound.Upper)
-	if firstSize == nil {
-		// If we can't determine size, return uninitialized
-		return &ast.ValueSpec{
-			Names: []*ast.Ident{ast.NewIdent(name)},
-			Type:  sliceType,
+	// Get dimensions (sizes) from array bounds
+	var dims []ast.Expr
+	for _, bound := range arraySpec.Bounds {
+		size := tg.transformExpression(bound.Upper)
+		if size == nil {
+			// If we can't determine size, return uninitialized
+			return &ast.ValueSpec{
+				Names: []*ast.Ident{ast.NewIdent(name)},
+				Type:  arrayType,
+			}
 		}
+		dims = append(dims, size)
 	}
 
-	// Create make() call for the outermost dimension
-	// For 1D: make([]int32, 5)
-	// For 2D: make([][]int32, 3) - we'll need to init inner slices later
-	makeCall := &ast.CallExpr{
-		Fun:  ast.NewIdent("make"),
-		Args: []ast.Expr{sliceType, firstSize},
+	// Create constructor call: intrinsic.NewArray[elemType](dim1, dim2, ...)
+	// Uses the variadic NewArray function that handles any number of dimensions
+	constructorCall := &ast.CallExpr{
+		Fun: &ast.IndexExpr{
+			X: &ast.SelectorExpr{
+				X:   ast.NewIdent("intrinsic"),
+				Sel: ast.NewIdent("NewArray"),
+			},
+			Index: elemType, // Type parameter
+		},
+		Args: dims,
 	}
 
 	return &ast.ValueSpec{
 		Names:  []*ast.Ident{ast.NewIdent(name)},
-		Values: []ast.Expr{makeCall},
+		Values: []ast.Expr{constructorCall},
 	}
-}
-
-// insertArrayInits adds initialization code for multi-dimensional arrays
-// Must be called after transformStatements to insert init loops after declarations
-func (tg *TranspileToGo) insertArrayInits(stmts []ast.Stmt) []ast.Stmt {
-	var initStmts []ast.Stmt
-	var declStmts []ast.Stmt
-	var otherStmts []ast.Stmt
-
-	// Separate declarations from other statements
-	for _, stmt := range stmts {
-		if declStmt, ok := stmt.(*ast.DeclStmt); ok {
-			declStmts = append(declStmts, declStmt)
-		} else {
-			otherStmts = append(otherStmts, stmt)
-		}
-	}
-
-	// Generate init code for multi-dimensional arrays
-	for name, arraySpec := range tg.arrays {
-		if len(arraySpec.Bounds) > 1 {
-			// Multi-dimensional - need to initialize inner slices
-			initStmts = append(initStmts, tg.generateArrayInit(name, arraySpec)...)
-		}
-	}
-
-	// Recombine: declarations, then init code, then other statements
-	result := append(declStmts, initStmts...)
-	result = append(result, otherStmts...)
-	return result
-}
-
-// generateArrayInit generates initialization code for multi-dimensional arrays
-func (tg *TranspileToGo) generateArrayInit(name string, arraySpec *f90.ArraySpec) []ast.Stmt {
-	// For DIMENSION(3,3): need to initialize matrix[i] for each i
-	// Generate: for i := range matrix { matrix[i] = make([]float32, 3) }
-
-	// Currently only handle 2D arrays
-	if len(arraySpec.Bounds) != 2 {
-		return nil
-	}
-
-	innerSize := tg.transformExpression(arraySpec.Bounds[1].Upper)
-	if innerSize == nil {
-		return nil
-	}
-
-	// Get element type from tracked array types
-	elemType, ok := tg.arrayTypes[name]
-	if !ok {
-		return nil
-	}
-
-	// Build inner slice type: []elemType
-	innerSliceType := &ast.ArrayType{Elt: elemType}
-
-	// Create: for i := range name { name[i] = make([]T, size) }
-	loopVar := ast.NewIdent("i")
-	rangeStmt := &ast.RangeStmt{
-		Key: loopVar,
-		Tok: token.DEFINE,
-		X:   ast.NewIdent(name),
-		Body: &ast.BlockStmt{
-			List: []ast.Stmt{
-				&ast.AssignStmt{
-					Lhs: []ast.Expr{
-						&ast.IndexExpr{
-							X:     ast.NewIdent(name),
-							Index: loopVar,
-						},
-					},
-					Tok: token.ASSIGN,
-					Rhs: []ast.Expr{
-						&ast.CallExpr{
-							Fun:  ast.NewIdent("make"),
-							Args: []ast.Expr{innerSliceType, innerSize},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	return []ast.Stmt{rangeStmt}
 }
 
 // extractIntLiteral extracts an integer value from a simple expression
@@ -377,7 +300,26 @@ func (tg *TranspileToGo) extractIntLiteral(expr f90.Expression) int {
 }
 
 // transformAssignment transforms a Fortran assignment to Go assignment
+// For array assignments, generates array.Set(value, indices...) calls
 func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stmt {
+	// Check if LHS is an array reference - need to generate .Set() call
+	if arrayRef, ok := assign.Target.(*f90.ArrayRef); ok {
+		return tg.transformArrayAssignment(arrayRef, assign.Value)
+	}
+
+	// Check for FunctionCall that's actually an array reference (parser ambiguity)
+	if funcCall, ok := assign.Target.(*f90.FunctionCall); ok {
+		if _, isArray := tg.arrays[funcCall.Name]; isArray {
+			// Convert to ArrayRef and generate .Set() call
+			arrayRef := &f90.ArrayRef{
+				Name:       funcCall.Name,
+				Subscripts: funcCall.Args,
+			}
+			return tg.transformArrayAssignment(arrayRef, assign.Value)
+		}
+	}
+
+	// Regular assignment (not to array element)
 	lhs := tg.transformExpression(assign.Target)
 	rhs := tg.transformExpression(assign.Value)
 
@@ -397,6 +339,37 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 		Tok: token.ASSIGN,
 		Rhs: []ast.Expr{rhs},
 	}
+}
+
+// transformArrayAssignment generates array.Set(value, indices...) call
+func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.Expression) ast.Stmt {
+	// Transform RHS value
+	rhs := tg.transformExpression(value)
+	if rhs == nil {
+		return nil
+	}
+
+	// Transform all indices
+	var indices []ast.Expr
+	for _, subscript := range ref.Subscripts {
+		index := tg.transformExpression(subscript)
+		if index == nil {
+			return nil
+		}
+		indices = append(indices, index)
+	}
+
+	// Generate: arrayName.Set(value, i, j, k)
+	// Note: Fortran indexing preserved - Array.Set() handles it internally
+	setCall := &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   ast.NewIdent(ref.Name),
+			Sel: ast.NewIdent("Set"),
+		},
+		Args: append([]ast.Expr{rhs}, indices...),
+	}
+
+	return &ast.ExprStmt{X: setCall}
 }
 
 // padStringLiteral pads a string literal to the specified length with trailing spaces
@@ -466,37 +439,28 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 	}
 }
 
-// transformArrayRef transforms a Fortran array reference to Go array/slice indexing
-// Converts 1-based Fortran indexing to 0-based Go indexing
+// transformArrayRef transforms a Fortran array reference to intrinsic.Array.At() call
+// Fortran indexing is preserved (1-based) since Array.At() handles it internally
 func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
-	// Start with the array name
-	result := ast.Expr(ast.NewIdent(ref.Name))
-
-	// Apply each subscript (convert 1-based to 0-based)
+	// Transform all subscripts to expressions
+	var indices []ast.Expr
 	for _, subscript := range ref.Subscripts {
 		index := tg.transformExpression(subscript)
 		if index == nil {
 			return nil
 		}
-
-		// Convert from Fortran 1-based to Go 0-based indexing
-		// Fortran: arr(1) → Go: arr[0]
-		adjustedIndex := &ast.BinaryExpr{
-			X:  index,
-			Op: token.SUB,
-			Y: &ast.BasicLit{
-				Kind:  token.INT,
-				Value: "1",
-			},
-		}
-
-		result = &ast.IndexExpr{
-			X:     result,
-			Index: adjustedIndex,
-		}
+		indices = append(indices, index)
 	}
 
-	return result
+	// Generate: arrayName.At(i, j, k)
+	// Note: No index adjustment needed - Array.At() handles Fortran indexing
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   ast.NewIdent(ref.Name),
+			Sel: ast.NewIdent("At"),
+		},
+		Args: indices,
+	}
 }
 
 // transformBinaryExpr transforms a Fortran binary expression to Go binary expression

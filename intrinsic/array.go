@@ -12,10 +12,10 @@ package intrinsic
 // - Section 5.1.1.2: Bounds can be negative, zero, or positive (line 2120-2121)
 // - Section 5.2.4-5.2.5: Array element ordering and storage sequence (line 2264-2302)
 // - Table 1 (line 2425-2463): Subscript value formula defines column-major layout
-//   * 1D: subscript_value = 1 + (s1 - j1)
-//   * 2D: subscript_value = 1 + (s1 - j1) + (s2 - j2)*d1
-//   * 3D: subscript_value = 1 + (s1 - j1) + (s2 - j2)*d1 + (s3 - j3)*d2*d1
-//   * Where di = ki - ji + 1 (size of dimension i)
+//   - 1D: subscript_value = 1 + (s1 - j1)
+//   - 2D: subscript_value = 1 + (s1 - j1) + (s2 - j2)*d1
+//   - 3D: subscript_value = 1 + (s1 - j1) + (s2 - j2)*d1 + (s3 - j3)*d2*d1
+//   - Where di = ki - ji + 1 (size of dimension i)
 //
 // Fortran 95 (ISO/IEC 1539:1991):
 // - Section 6.2.2.3: Array element order (line 7246-7250)
@@ -34,28 +34,20 @@ type Array[T any] struct {
 	stride []int // Column-major strides: stride[0]=1, stride[i]=stride[i-1]*shape[i-1]
 }
 
-// NewArray1D creates a 1-dimensional array with bounds [1:size]
-// Corresponds to Fortran: DIMENSION(size) or REAL :: arr(size)
-func NewArray1D[T any](size int) *Array[T] {
-	return NewArrayWithBounds[T]([]int{size}, []int{1}, []int{size})
-}
-
-// NewArray2D creates a 2-dimensional array with bounds [1:rows, 1:cols]
-// Uses column-major layout (first index varies fastest)
-// Corresponds to Fortran: DIMENSION(rows, cols) or REAL :: matrix(rows, cols)
-func NewArray2D[T any](rows, cols int) *Array[T] {
-	return NewArrayWithBounds[T]([]int{rows, cols}, []int{1, 1}, []int{rows, cols})
-}
-
-// NewArray3D creates a 3-dimensional array with bounds [1:dim1, 1:dim2, 1:dim3]
-// Uses column-major layout (first index varies fastest)
-// Corresponds to Fortran: DIMENSION(dim1, dim2, dim3)
-func NewArray3D[T any](dim1, dim2, dim3 int) *Array[T] {
-	return NewArrayWithBounds[T](
-		[]int{dim1, dim2, dim3},
-		[]int{1, 1, 1},
-		[]int{dim1, dim2, dim3},
-	)
+func NewArray[T any](dims ...int) *Array[T] {
+	if len(dims) > 7 {
+		panic("array dimension too large")
+	} else if len(dims) == 0 {
+		panic("zero dimension array")
+	}
+	parambuf := make([]int, len(dims)*3)
+	shape := parambuf[:len(dims)]
+	lower := parambuf[len(dims) : len(dims)*2]
+	upper := parambuf[len(dims)*2:]
+	for i, d := range dims {
+		shape[i], lower[i], upper[i] = d, 1, d
+	}
+	return NewArrayWithBounds[T](shape, lower, upper)
 }
 
 // NewArrayWithBounds creates an array with custom bounds for each dimension.
@@ -108,12 +100,14 @@ func NewArrayWithBounds[T any](shape, lower, upper []int) *Array[T] {
 // Implements the subscript value formula from F77 Table 1 / F95 Table 6.1.
 //
 // Example for 2D array with bounds (1:3, 1:4):
-//   arr.At(2, 3) accesses element at row 2, column 3
-//   offset = (2 - 1)*1 + (3 - 1)*3 = 1 + 6 = 7
+//
+//	arr.At(2, 3) accesses element at row 2, column 3
+//	offset = (2 - 1)*1 + (3 - 1)*3 = 1 + 6 = 7
 //
 // Example for array with custom bounds (-5:5, 0:9):
-//   arr.At(0, 5) accesses element at indices (0, 5)
-//   offset = (0 - (-5))*1 + (5 - 0)*11 = 5 + 55 = 60
+//
+//	arr.At(0, 5) accesses element at indices (0, 5)
+//	offset = (0 - (-5))*1 + (5 - 0)*11 = 5 + 55 = 60
 func (a *Array[T]) At(indices ...int) T {
 	offset := a.offset(indices)
 	return a.data[offset]
@@ -161,11 +155,13 @@ func (a *Array[T]) Upper() []int {
 // Formula: offset = sum((indices[i] - lower[i]) * stride[i]) for i = 0 to n-1
 //
 // This corresponds to the Fortran subscript value - 1 (converting from 1-based to 0-based):
-//   F77: subscript_value = 1 + (s1 - j1) + (s2 - j2)*d1 + (s3 - j3)*d2*d1 + ...
-//   Go:  offset          = 0 + (s1 - j1) + (s2 - j2)*d1 + (s3 - j3)*d2*d1 + ...
+//
+//	F77: subscript_value = 1 + (s1 - j1) + (s2 - j2)*d1 + (s3 - j3)*d2*d1 + ...
+//	Go:  offset          = 0 + (s1 - j1) + (s2 - j2)*d1 + (s3 - j3)*d2*d1 + ...
 //
 // The column-major layout means the first index varies fastest in memory:
-//   For array A(3, 4), memory order is: A(1,1), A(2,1), A(3,1), A(1,2), A(2,2), ...
+//
+//	For array A(3, 4), memory order is: A(1,1), A(2,1), A(3,1), A(1,2), A(2,2), ...
 func (a *Array[T]) offset(indices []int) int {
 	if len(indices) != len(a.shape) {
 		panic("array: wrong number of indices")

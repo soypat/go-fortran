@@ -8,8 +8,8 @@ import (
 
 // Example of 1D array with default bounds [1:size]
 // Corresponds to Fortran: INTEGER :: arr(5)
-func ExampleNewArray1D() {
-	arr := intrinsic.NewArray1D[int32](5)
+func ExampleNewArray_oneDimensional() {
+	arr := intrinsic.NewArray[int32](5)
 
 	// Set elements using Fortran 1-based indexing
 	arr.Set(10, 1)
@@ -29,8 +29,8 @@ func ExampleNewArray1D() {
 
 // Example of 2D array with column-major layout
 // Corresponds to Fortran: REAL :: matrix(3, 4)
-func ExampleNewArray2D() {
-	matrix := intrinsic.NewArray2D[float32](3, 4)
+func ExampleNewArray_twoDimensional() {
+	matrix := intrinsic.NewArray[float32](3, 4)
 
 	// Create identity-like matrix
 	matrix.Set(1.0, 1, 1)
@@ -53,9 +53,9 @@ func ExampleNewArray2D() {
 func ExampleNewArrayWithBounds() {
 	// Array with bounds from -5 to 5 (11 elements)
 	arr := intrinsic.NewArrayWithBounds[int32](
-		[]int{11},  // shape: 11 elements
-		[]int{-5},  // lower bound: -5
-		[]int{5},   // upper bound: 5
+		[]int{11}, // shape: 11 elements
+		[]int{-5}, // lower bound: -5
+		[]int{5},  // upper bound: 5
 	)
 
 	// Set elements using custom bounds
@@ -78,14 +78,14 @@ func ExampleNewArrayWithBounds() {
 func ExampleNewArrayWithBounds_twoDimensional() {
 	// 2D array with custom bounds: (0:2, 10:12)
 	matrix := intrinsic.NewArrayWithBounds[int32](
-		[]int{3, 3},   // shape: 3x3
-		[]int{0, 10},  // lower bounds: 0, 10
-		[]int{2, 12},  // upper bounds: 2, 12
+		[]int{3, 3},  // shape: 3x3
+		[]int{0, 10}, // lower bounds: 0, 10
+		[]int{2, 12}, // upper bounds: 2, 12
 	)
 
 	// Set corner elements
-	matrix.Set(1, 0, 10)  // Bottom-left
-	matrix.Set(2, 2, 12)  // Top-right
+	matrix.Set(1, 0, 10) // Bottom-left
+	matrix.Set(2, 2, 12) // Top-right
 
 	fmt.Printf("matrix(0,10) = %d\n", matrix.At(0, 10))
 	fmt.Printf("matrix(2,12) = %d\n", matrix.At(2, 12))
@@ -99,7 +99,7 @@ func ExampleNewArrayWithBounds_twoDimensional() {
 // In Fortran, the first index varies fastest
 func ExampleArray_columnMajor() {
 	// Create a 2x3 matrix
-	matrix := intrinsic.NewArray2D[int32](2, 3)
+	matrix := intrinsic.NewArray[int32](2, 3)
 
 	// Fill with unique values
 	matrix.Set(11, 1, 1)
@@ -131,7 +131,7 @@ func ExampleArray_columnMajor() {
 
 // Example of intrinsic function equivalents
 func ExampleArray_intrinsics() {
-	matrix := intrinsic.NewArray2D[int32](3, 4)
+	matrix := intrinsic.NewArray[int32](3, 4)
 
 	// SIZE(array, 1) - size of first dimension
 	fmt.Printf("SIZE = %d\n", matrix.Len())

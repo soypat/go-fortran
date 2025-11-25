@@ -7,7 +7,7 @@ import (
 // Test 1D array with default bounds [1:size]
 // Corresponds to Fortran: REAL :: arr(5)
 func TestArray1D_DefaultBounds(t *testing.T) {
-	arr := NewArray1D[int32](5)
+	arr := NewArray[int32](5)
 
 	// Verify bounds
 	if arr.Len() != 5 {
@@ -45,7 +45,7 @@ func TestArray1D_DefaultBounds(t *testing.T) {
 // Verify column-major layout as per F77 Table 1
 func TestArray2D_DefaultBounds_ColumnMajor(t *testing.T) {
 	// Create 3x4 matrix (3 rows, 4 columns)
-	matrix := NewArray2D[float32](3, 4)
+	matrix := NewArray[float32](3, 4)
 
 	// Verify shape
 	shape := matrix.Shape()
@@ -100,7 +100,7 @@ func TestArray2D_DefaultBounds_ColumnMajor(t *testing.T) {
 // Test 3D array with default bounds [1:dim1, 1:dim2, 1:dim3]
 // Corresponds to Fortran: REAL :: cube(2, 3, 4)
 func TestArray3D_DefaultBounds(t *testing.T) {
-	cube := NewArray3D[int32](2, 3, 4)
+	cube := NewArray[int32](2, 3, 4)
 
 	// Verify shape
 	shape := cube.Shape()
@@ -151,9 +151,9 @@ func TestArrayCustomBounds(t *testing.T) {
 
 	// Test 2D array with custom bounds: DIMENSION(-5:5, 0:9)
 	arr2d := NewArrayWithBounds[float32](
-		[]int{11, 10},  // shape: (5-(-5)+1=11, 9-0+1=10)
-		[]int{-5, 0},   // lower bounds
-		[]int{5, 9},    // upper bounds
+		[]int{11, 10}, // shape: (5-(-5)+1=11, 9-0+1=10)
+		[]int{-5, 0},  // lower bounds
+		[]int{5, 9},   // upper bounds
 	)
 
 	arr2d.Set(3.14, 0, 5)
@@ -206,7 +206,7 @@ func TestStrideCalculation(t *testing.T) {
 	// stride[0] = 1
 	// stride[1] = stride[0] * shape[0] = 1 * 2 = 2
 	// stride[2] = stride[1] * shape[1] = 2 * 3 = 6
-	arr := NewArray3D[int32](2, 3, 4)
+	arr := NewArray[int32](2, 3, 4)
 
 	expectedStrides := []int{1, 2, 6}
 	for i, expected := range expectedStrides {
@@ -225,7 +225,7 @@ func TestStrideCalculation(t *testing.T) {
 
 // Test bounds checking
 func TestBoundsChecking(t *testing.T) {
-	arr := NewArray1D[int32](5) // Bounds [1:5]
+	arr := NewArray[int32](5) // Bounds [1:5]
 
 	// Test lower bound violation
 	defer func() {
@@ -237,7 +237,7 @@ func TestBoundsChecking(t *testing.T) {
 }
 
 func TestBoundsChecking_UpperBound(t *testing.T) {
-	arr := NewArray1D[int32](5) // Bounds [1:5]
+	arr := NewArray[int32](5) // Bounds [1:5]
 
 	// Test upper bound violation
 	defer func() {
@@ -249,7 +249,7 @@ func TestBoundsChecking_UpperBound(t *testing.T) {
 }
 
 func TestBoundsChecking_WrongDimensions(t *testing.T) {
-	arr := NewArray2D[int32](3, 4)
+	arr := NewArray[int32](3, 4)
 
 	// Test wrong number of indices
 	defer func() {
@@ -263,7 +263,7 @@ func TestBoundsChecking_WrongDimensions(t *testing.T) {
 // Test that column-major layout produces correct memory sequence
 // For array A(3, 4), memory should be: A(1,1), A(2,1), A(3,1), A(1,2), ...
 func TestColumnMajorMemorySequence(t *testing.T) {
-	arr := NewArray2D[int32](3, 4)
+	arr := NewArray[int32](3, 4)
 
 	// Fill array with unique values: element (i, j) gets value i*10 + j
 	for i := 1; i <= 3; i++ {
@@ -292,7 +292,7 @@ func TestColumnMajorMemorySequence(t *testing.T) {
 
 // Test intrinsic function equivalents
 func TestIntrinsicFunctions(t *testing.T) {
-	arr := NewArray2D[int32](3, 4)
+	arr := NewArray[int32](3, 4)
 
 	// SIZE(array, 1) - first dimension size
 	if arr.Len() != 3 {
@@ -320,7 +320,7 @@ func TestIntrinsicFunctions(t *testing.T) {
 
 // Benchmark array access vs native Go slices
 func BenchmarkArray2D_Access(b *testing.B) {
-	arr := NewArray2D[int32](100, 100)
+	arr := NewArray[int32](100, 100)
 	for i := 0; i < b.N; i++ {
 		arr.Set(42, 50, 50)
 		_ = arr.At(50, 50)

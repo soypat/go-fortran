@@ -71,28 +71,25 @@ func LEVEL04() {
 	}
 }
 func LEVEL05() {
-	var arr1 = make([]int32, 5)
-	var matrix = make([][]float32, 3)
-	for i := range matrix {
-		matrix[i] = make([]float32, 3)
-	}
-	arr1[1-1] = 10
-	arr1[2-1] = 20
-	arr1[3-1] = 30
-	arr1[4-1] = 40
-	arr1[5-1] = 50
-	intrinsic.Print("LEVEL 5: arr1(1) =", arr1[1-1])
-	intrinsic.Print("LEVEL 5: arr1(3) =", arr1[3-1])
-	intrinsic.Print("LEVEL 5: arr1(5) =", arr1[5-1])
-	matrix[1-1][1-1] = 1.0
-	matrix[1-1][2-1] = 0.0
-	matrix[1-1][3-1] = 0.0
-	matrix[2-1][1-1] = 0.0
-	matrix[2-1][2-1] = 1.0
-	matrix[2-1][3-1] = 0.0
-	matrix[3-1][1-1] = 0.0
-	matrix[3-1][2-1] = 0.0
-	matrix[3-1][3-1] = 1.0
-	intrinsic.Print("LEVEL 5: matrix(1,1) =", matrix[1-1][1-1])
-	intrinsic.Print("LEVEL 5: matrix(2,2) =", matrix[2-1][2-1])
+	var arr1 = intrinsic.NewArray[int32](5)
+	var matrix = intrinsic.NewArray[float32](3, 3)
+	arr1.Set(10, 1)
+	arr1.Set(20, 2)
+	arr1.Set(30, 3)
+	arr1.Set(40, 4)
+	arr1.Set(50, 5)
+	intrinsic.Print("LEVEL 5: arr1(1) =", arr1.At(1))
+	intrinsic.Print("LEVEL 5: arr1(3) =", arr1.At(3))
+	intrinsic.Print("LEVEL 5: arr1(5) =", arr1.At(5))
+	matrix.Set(1.0, 1, 1)
+	matrix.Set(0.0, 1, 2)
+	matrix.Set(0.0, 1, 3)
+	matrix.Set(0.0, 2, 1)
+	matrix.Set(1.0, 2, 2)
+	matrix.Set(0.0, 2, 3)
+	matrix.Set(0.0, 3, 1)
+	matrix.Set(0.0, 3, 2)
+	matrix.Set(1.0, 3, 3)
+	intrinsic.Print("LEVEL 5: matrix(1,1) =", matrix.At(1, 1))
+	intrinsic.Print("LEVEL 5: matrix(2,2) =", matrix.At(2, 2))
 }
