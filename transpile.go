@@ -319,6 +319,20 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 		// RETURN statement in functions will be handled by convertFunctionResultToReturn
 		// For now, just generate empty return (will be filled with result value later)
 		return &ast.ReturnStmt{}
+	case *f90.CycleStmt:
+		// CYCLE → continue
+		return &ast.BranchStmt{
+			Tok: token.CONTINUE,
+		}
+	case *f90.ExitStmt:
+		// EXIT → break
+		return &ast.BranchStmt{
+			Tok: token.BREAK,
+		}
+	case *f90.ContinueStmt:
+		// CONTINUE → empty statement (no-op in Go)
+		// If there's a label, it will be handled by label processing later
+		return &ast.EmptyStmt{}
 	default:
 		// For now, unsupported statements are skipped
 		return nil

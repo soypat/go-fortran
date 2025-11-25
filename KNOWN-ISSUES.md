@@ -427,7 +427,86 @@ The transpiler test suite includes workarounds for known issues:
 - Generated code compiles and runs ✅
 - Output matches gfortran exactly ✅
 
-**LEVEL06-12**: Not yet implemented in transpiler
+**LEVEL06 (DO Loops)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- DO loop with counter: `DO i = 1, 10` → `for i := int32(1); i <= 10; i++` ✅
+- Inclusive upper bound handled correctly (<=, not <) ✅
+- Loop variable type conversion handled ✅
+- Nested loops work correctly ✅
+- Array access within loops works ✅
+- Generated code compiles and runs ✅
+- Output matches gfortran exactly ✅
+
+**LEVEL07 (Subroutine Calls and Parameters)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- CALL statements implemented ✅
+- INTENT(IN) → pass by value ✅
+- INTENT(OUT) → pass by pointer (*T) ✅
+- INTENT(INOUT) → pass by pointer (*T) ✅
+- Parameter declarations transpiled correctly ✅
+- Array parameters work with intrinsic.Array wrapper ✅
+- Generated code compiles and runs ✅
+- Output matches gfortran exactly ✅
+
+**LEVEL08 (Functions and Return Values)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- Function declarations with return types ✅
+- Function result assignment (FACTORIAL = result) → return result ✅
+- RETURN statements handled ✅
+- Intrinsic function calls (SQRT) ✅
+- Generated code compiles and runs ✅
+- Output matches gfortran exactly ✅
+
+**LEVEL09 (DO WHILE Loops and Recursion)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- DO WHILE loops: `DO WHILE (cond)` → `for cond { }` ✅
+- Early RETURN in functions ✅
+- Recursive function calls ✅
+- Generated code compiles and runs ✅
+- Output matches gfortran exactly ✅
+
+**LEVEL10 (Complex Expressions and Logical Operators)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- Complex arithmetic expressions with mixed types ✅
+- Logical operators (.AND., .OR., .NOT.) → (&&, ||, !) ✅
+- Combined relational and logical expressions ✅
+- Operator precedence preserved correctly ✅
+- Generated code compiles and runs ✅
+- Output matches gfortran exactly ✅
+
+**LEVEL11 (String Concatenation)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- String concatenation operator: `//` → `+` ✅
+- CHARACTER(LEN=n) declarations ✅
+- Generated code compiles and runs ✅
+- **Minor difference**: Trailing space padding (Go limitation)
+
+**LEVEL12 (Intrinsic Functions)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- Math intrinsics: SIN, COS, ABS ✅
+- Variadic intrinsics: MAX, MIN (using intrinsic.MaxInt32, etc.) ✅
+- Type conversion intrinsics: REAL, INT, DBLE ✅
+- Generated code compiles and runs ✅
+- **Minor difference**: Float precision in output formatting
+
+**LEVEL13 (Loop Control: CYCLE, EXIT, CONTINUE)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- CYCLE statement → `continue` ✅
+- EXIT statement → `break` ✅
+- CONTINUE statement → empty statement (no-op, label target) ✅
+- Loop control within conditional statements ✅
+- Generated code compiles and runs ✅
+- Output matches expected results exactly ✅
+
+**LEVEL14-22**: Not yet implemented (planned in mellow-strolling-lovelace.md)
 
 ---
 
@@ -474,6 +553,19 @@ go test -run Transpile
 
 ## Changelog
 
+- **2025-11-25** (Session 4): LEVEL13 implementation - Loop control (CYCLE, EXIT, CONTINUE)
+  - Added LEVEL13 test case to `golden.f90` with CYCLE, EXIT, and labeled CONTINUE
+  - Implemented `transformStatement()` cases for:
+    - CycleStmt → Go `continue` statement
+    - ExitStmt → Go `break` statement
+    - ContinueStmt → Go empty statement (no-op, serves as label target)
+  - Updated `transpile_test.go` maxLvl from 12 to 13
+  - Added expected output to `golden.out`
+  - LEVEL13 tests pass with exact output matching ✅
+  - Verified transpiled code:
+    - `if arr.At(int(i)) < 0 { continue }` ✅
+    - `if arr.At(int(i)) > 7 { break }` ✅
+  - All loop control statements working correctly within DO loops
 - **2025-11-25** (Session 3 cont.): LEVEL05 implementation - Arrays and multi-dimensional arrays
   - Implemented array declarations with `transformArrayDeclaration()`
   - Added 1-based to 0-based indexing conversion: Fortran `arr(1)` → Go `arr[1-1]`

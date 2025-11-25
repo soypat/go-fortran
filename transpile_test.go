@@ -87,7 +87,7 @@ func TestTranspileGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("got errors collecting symbols in golden.f90: %v", err)
 	}
-	const maxLvl = 12 // Currently testing up to LEVEL12
+	const maxLvl = 13 // Currently testing up to LEVEL13
 	// TODO: Fix type resolver to skip format specifiers
 	// For now, skip type resolution as it's not needed for basic transpilation
 	// resolver := symbol.NewTypeResolver(syms)

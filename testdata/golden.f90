@@ -16,6 +16,7 @@
       CALL LEVEL10()
       CALL LEVEL11()
       CALL LEVEL12()
+      CALL LEVEL13()
 
       PRINT *, '============================================='
       PRINT *, 'GOLDEN TEST COMPLETE: All levels executed!'
@@ -285,6 +286,49 @@
           PRINT *, 'LEVEL 12: ABS(-5.5) =', abs_val
           PRINT *, 'LEVEL 12: MAX =', max_val, ', MIN =', min_val
       END SUBROUTINE LEVEL12
+
+! ==============================================================================
+! LEVEL 13: Loop control (CYCLE, EXIT, CONTINUE)
+! ==============================================================================
+      SUBROUTINE LEVEL13()
+          INTEGER :: i, sum_val, count
+          INTEGER, DIMENSION(10) :: arr
+
+          ! Initialize array with some negative values
+          arr(1) = 5
+          arr(2) = -3
+          arr(3) = 7
+          arr(4) = -1
+          arr(5) = 9
+          arr(6) = 2
+          arr(7) = -4
+          arr(8) = 6
+          arr(9) = 8
+          arr(10) = 1
+
+          ! Test CYCLE - skip negative values
+          sum_val = 0
+          DO i = 1, 10
+              IF (arr(i) .LT. 0) CYCLE
+              sum_val = sum_val + arr(i)
+          END DO
+          PRINT *, 'LEVEL 13: sum of positive =', sum_val
+
+          ! Test EXIT - break when value > 7
+          count = 0
+          DO i = 1, 10
+              IF (arr(i) .GT. 7) EXIT
+              count = count + 1
+          END DO
+          PRINT *, 'LEVEL 13: count before >7 =', count
+
+          ! Test CONTINUE - simple labeled statement
+          DO i = 1, 3
+100           CONTINUE
+              count = i
+          END DO
+          PRINT *, 'LEVEL 13: last count =', count
+      END SUBROUTINE LEVEL13
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

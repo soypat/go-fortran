@@ -17,6 +17,7 @@ func main() {
 	LEVEL10()
 	LEVEL11()
 	LEVEL12()
+	LEVEL13()
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
@@ -236,6 +237,44 @@ func LEVEL12() {
 	intrinsic.Print("LEVEL 12: COS(0.5) =", cos_val)
 	intrinsic.Print("LEVEL 12: ABS(-5.5) =", abs_val)
 	intrinsic.Print("LEVEL 12: MAX =", max_val, ", MIN =", min_val)
+}
+func LEVEL13() {
+	var (
+		i       int32
+		sum_val int32
+		count   int32
+	)
+	var arr = intrinsic.NewArray[int32](10)
+	arr.Set(5, int(1))
+	arr.Set(-3, int(2))
+	arr.Set(7, int(3))
+	arr.Set(-1, int(4))
+	arr.Set(9, int(5))
+	arr.Set(2, int(6))
+	arr.Set(-4, int(7))
+	arr.Set(6, int(8))
+	arr.Set(8, int(9))
+	arr.Set(1, int(10))
+	sum_val = 0
+	for i = 1; i <= 10; i += 1 {
+		if arr.At(int(i)) < 0 {
+			continue
+		}
+		sum_val = sum_val + arr.At(int(i))
+	}
+	intrinsic.Print("LEVEL 13: sum of positive =", sum_val)
+	count = 0
+	for i = 1; i <= 10; i += 1 {
+		if arr.At(int(i)) > 7 {
+			break
+		}
+		count = count + 1
+	}
+	intrinsic.Print("LEVEL 13: count before >7 =", count)
+	for i = 1; i <= 3; i += 1 {
+		count = i
+	}
+	intrinsic.Print("LEVEL 13: last count =", count)
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
