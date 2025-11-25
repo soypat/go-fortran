@@ -8,6 +8,7 @@ import (
 
 	f90 "github.com/soypat/go-fortran/ast"
 	"github.com/soypat/go-fortran/symbol"
+	f90token "github.com/soypat/go-fortran/token"
 )
 
 // TranspileToGo transforms Fortran AST to Go AST
@@ -67,30 +68,26 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 	}
 }
 
-// transformPrint transforms a Fortran PRINT statement to fmt.Print call
-// Note: Fortran PRINT * adds a leading space and newline
+// transformPrint transforms a Fortran PRINT statement to intrinsic.Formatter.Print call
+// Note: Fortran PRINT * uses list-directed I/O formatting
 func (tg *TranspileToGo) transformPrint(print *f90.PrintStmt) ast.Stmt {
 	// Transform output expressions
 	args := tg.transformExpressions(print.OutputList)
 
-	// Fortran PRINT * adds a leading space before list-directed output
-	// If first arg is a string literal, prepend space to it
-	// Otherwise add space as separate argument
-	if len(args) > 0 {
-		if strLit, ok := args[0].(*ast.BasicLit); ok && strLit.Kind == token.STRING {
-			// Remove quotes, prepend space, re-quote
-			original := strLit.Value[1 : len(strLit.Value)-1] // Remove surrounding quotes
-			strLit.Value = fmt.Sprintf(`" %s"`, original)
-		}
-	}
+	// Use intrinsic.NewFormatter().Print() for Fortran-compatible formatting
+	// This handles: leading space, T/F for LOGICAL, field widths, spacing between items
+	tg.useImport("github.com/soypat/go-fortran/intrinsic")
 
-	// Create fmt.Println call (adds newline at end)
-	tg.useImport("fmt")
 	return &ast.ExprStmt{
 		X: &ast.CallExpr{
 			Fun: &ast.SelectorExpr{
-				X:   ast.NewIdent("fmt"),
-				Sel: ast.NewIdent("Println"),
+				X: &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent("intrinsic"),
+						Sel: ast.NewIdent("NewFormatter"),
+					},
+				},
+				Sel: ast.NewIdent("Print"),
 			},
 			Args: args,
 		},
@@ -191,8 +188,94 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 		return ast.NewIdent("false")
 	case *f90.Identifier:
 		return ast.NewIdent(e.Value)
+	case *f90.BinaryExpr:
+		return tg.transformBinaryExpr(e)
+	case *f90.FunctionCall:
+		return tg.transformFunctionCall(e)
 	default:
 		// For now, unsupported expressions return nil
+		return nil
+	}
+}
+
+// transformBinaryExpr transforms a Fortran binary expression to Go binary expression
+func (tg *TranspileToGo) transformBinaryExpr(expr *f90.BinaryExpr) ast.Expr {
+	left := tg.transformExpression(expr.Left)
+	right := tg.transformExpression(expr.Right)
+
+	if left == nil || right == nil {
+		return nil
+	}
+
+	// Map Fortran operator to Go operator
+	var goOp token.Token
+	switch expr.Op {
+	case f90token.Plus:
+		goOp = token.ADD
+	case f90token.Minus:
+		goOp = token.SUB
+	case f90token.Asterisk:
+		goOp = token.MUL
+	case f90token.Slash:
+		goOp = token.QUO
+	default:
+		// Unsupported operator
+		return nil
+	}
+
+	return &ast.BinaryExpr{
+		X:  left,
+		Op: goOp,
+		Y:  right,
+	}
+}
+
+// transformFunctionCall transforms a Fortran function call to Go expression
+func (tg *TranspileToGo) transformFunctionCall(call *f90.FunctionCall) ast.Expr {
+	// Check if it's a type conversion intrinsic
+	funcName := call.Name
+	switch funcName {
+	case "REAL":
+		// REAL(x) → float32(x)
+		if len(call.Args) != 1 {
+			return nil
+		}
+		arg := tg.transformExpression(call.Args[0])
+		if arg == nil {
+			return nil
+		}
+		return &ast.CallExpr{
+			Fun:  ast.NewIdent("float32"),
+			Args: []ast.Expr{arg},
+		}
+	case "INT", "INT32":
+		// INT(x) → int32(x)
+		if len(call.Args) != 1 {
+			return nil
+		}
+		arg := tg.transformExpression(call.Args[0])
+		if arg == nil {
+			return nil
+		}
+		return &ast.CallExpr{
+			Fun:  ast.NewIdent("int32"),
+			Args: []ast.Expr{arg},
+		}
+	case "DBLE":
+		// DBLE(x) → float64(x)
+		if len(call.Args) != 1 {
+			return nil
+		}
+		arg := tg.transformExpression(call.Args[0])
+		if arg == nil {
+			return nil
+		}
+		return &ast.CallExpr{
+			Fun:  ast.NewIdent("float64"),
+			Args: []ast.Expr{arg},
+		}
+	default:
+		// For now, unsupported functions return nil
 		return nil
 	}
 }
