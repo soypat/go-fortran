@@ -207,7 +207,19 @@ func (dc *DeclarationCollector) handleTypeDeclaration(decl *ast.TypeDeclaration)
 			resolvedType.CharLen = 0 // Placeholder
 		}
 
-		// Create symbol
+		// Check if symbol already exists (e.g., as a parameter from parameter list)
+		existingSym := currentScope.Lookup(entity.Name)
+		if existingSym != nil {
+			// Update existing symbol with more detailed type information
+			existingSym.SetType(resolvedType)
+			existingSym.SetAttributes(decl.Attributes)
+			existingSym.SetArraySpec(entity.ArraySpec)
+			existingSym.SetDeclNode(decl)
+			existingSym.setImplicit(false)
+			continue
+		}
+
+		// Create new symbol
 		kind := SymVariable
 		if isParameter {
 			kind = SymParameter
