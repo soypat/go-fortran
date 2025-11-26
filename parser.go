@@ -243,10 +243,10 @@ func (p *Parser90) registerTopLevelParsers() {
 
 // parseTopLevelUnit dispatches to the appropriate registered statement parser
 func (p *Parser90) parseTopLevelUnit() ast.ProgramUnit {
+	p.skipNewlinesAndComments()
 	if p.IsDone() {
 		return nil
 	}
-	p.skipNewlinesAndComments()
 	// Special case: BLOCK DATA (BLOCK is an identifier, DATA is a keyword)
 	if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "BLOCK" && p.peekTokenIs(token.DATA) {
 		return p.parseBlockData()
@@ -299,11 +299,9 @@ func (p *Parser90) parseProgramBlock() ast.Statement {
 		block.Contains = p.parseAppendProgramUnits(block.Contains[:0])
 	}
 
-	block.Position = ast.Pos(start.Pos, p.current.start)
-	if !p.consumeIf(token.ENDPROGRAM) && !p.consumeIf2(token.END, token.PROGRAM) {
-		p.addErrorMismatchedEnd(start, token.PROGRAM)
-	}
+	p.expectEndProgramUnit(token.PROGRAM, token.ENDPROGRAM, start)
 	p.consumeIf(token.Identifier)
+	block.Position = ast.Pos(start.Pos, p.current.start)
 	return block
 }
 
@@ -333,11 +331,9 @@ func (p *Parser90) parseModule() ast.Statement {
 		mod.Contains = p.parseAppendProgramUnits(mod.Contains[:0])
 	}
 
-	mod.Position = ast.Pos(start.Pos, p.current.start)
-	if !p.consumeIf(token.ENDMODULE) && !p.consumeIf2(token.END, token.MODULE) {
-		p.addErrorMismatchedEnd(start, token.MODULE)
-	}
+	p.expectEndProgramUnit(token.MODULE, token.ENDMODULE, start)
 	p.consumeIf(token.Identifier)
+	mod.Position = ast.Pos(start.Pos, p.current.start)
 	return mod
 }
 
@@ -356,7 +352,7 @@ func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramU
 // parseSubroutine parses a SUBROUTINE...END SUBROUTINE block
 // Precondition: current token is SUBROUTINE
 func (p *Parser90) parseSubroutine() ast.Statement {
-	start := p.current.start
+	start := p.sourcePos()
 	sub := &ast.Subroutine{}
 
 	p.expect(token.SUBROUTINE, "")
@@ -379,20 +375,16 @@ func (p *Parser90) parseSubroutine() ast.Statement {
 	// Parse body statements
 	sub.Body = p.parseBody(sub.Parameters)
 
-	sub.Position = ast.Pos(start, p.current.start)
-	p.expect(token.END, "subroutine end")
-
-	// Consume optional SUBROUTINE keyword and/or subroutine name after END
-	p.consumeIf(token.SUBROUTINE)
+	p.expectEndProgramUnit(token.SUBROUTINE, token.ENDSUBROUTINE, start)
 	p.consumeIf(token.Identifier)
-
+	sub.Position = ast.Pos(start.Pos, p.current.start)
 	return sub
 }
 
 // parseFunction parses a FUNCTION...END FUNCTION block
 // Precondition: current token is FUNCTION
 func (p *Parser90) parseFunction() ast.Statement {
-	start := p.current.start
+	start := p.sourcePos()
 	fn := &ast.Function{}
 
 	p.expect(token.FUNCTION, "")
@@ -424,12 +416,9 @@ func (p *Parser90) parseFunction() ast.Statement {
 	// Parse body statements
 	fn.Body = p.parseBody(fn.Parameters)
 
-	fn.Position = ast.Pos(start, p.current.start)
-	p.expect(token.END, "FUNCTION end")
-
-	// Consume optional FUNCTION keyword and/or function name after END
-	p.consumeIf(token.FUNCTION)
+	p.expectEndProgramUnit(token.FUNCTION, token.ENDFUNCTION, start)
 	p.consumeIf(token.Identifier)
+	fn.Position = ast.Pos(start.Pos, p.current.start)
 
 	return fn
 }
@@ -566,18 +555,11 @@ func (p *Parser90) expect2IfFirst(current, next token.Token, reason string) {
 // Accepts both F77 style (ENDIF, ENDDO) and F90 style (END IF, END DO) forms.
 // Returns true if END <keyword> was successfully consumed.
 func (p *Parser90) expectEndConstruct(keyword, singleEndForm token.Token, start sourcePos) bool {
-	// Check for F77 single-token form (e.g., ENDIF, ENDDO)
-	if p.currentTokenIs(singleEndForm) {
-		p.nextToken()
-		return true // Consume single-token END for. i.e: ENDIF, ENDDO
-	}
-
-	// Check for F90 two-token form (e.g., END IF, END DO)
-	if p.currentTokenIs(token.END) && p.peekTokenIs(keyword) {
-		p.nextToken() // consume END
-		p.nextToken() // consume keyword
+	// Check for F77 single-token form (e.g., ENDIF, ENDDO) or F90 two-token form (e.g., END IF, END DO)
+	if p.consumeIf(singleEndForm) || p.consumeIf2(token.END, keyword) {
 		return true
-	} else if p.currentTokenIs(token.END) {
+	}
+	if p.currentTokenIs(token.END) {
 		// END without expected keyword - belongs to parent
 		p.addErrorMismatchedEnd(start, keyword)
 		return false
@@ -585,6 +567,18 @@ func (p *Parser90) expectEndConstruct(keyword, singleEndForm token.Token, start 
 		p.addError("expected END " + keyword.String())
 		return false
 	}
+}
+
+func (p *Parser90) expectEndProgramUnit(keyword, singleEndForm token.Token, start sourcePos) bool {
+	// Check for F77 single-token form e.g: ENDPROGRAM or F90 two-token form e.g: END PROGRAM
+	if p.consumeIf(singleEndForm) || p.consumeIf2(token.END, keyword) {
+		return true
+	} else if p.consumeIf(token.END) {
+		// Program units do not need keyword specifier, can be single END form.
+		return true
+	}
+	p.addErrorMismatchedEnd(start, keyword)
+	return false
 }
 
 func (p *Parser90) addErrorMismatchedEnd(start sourcePos, keyword token.Token) {
