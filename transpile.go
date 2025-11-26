@@ -400,6 +400,12 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 		return tg.transformCommonStmt(s)
 	case *f90.DataStmt:
 		return tg.transformDataStmt(s)
+	case *f90.ArithmeticIfStmt:
+		return tg.transformArithmeticIfStmt(s)
+	case *f90.ComputedGotoStmt:
+		return tg.transformComputedGotoStmt(s)
+	case *f90.StopStmt:
+		return tg.transformStopStmt(s)
 	default:
 		// For now, unsupported statements are skipped
 		panic(fmt.Sprintf("unsupported statement: %T", s))
@@ -1781,6 +1787,134 @@ func (tg *TranspileToGo) transformDataStmt(stmt *f90.DataStmt) ast.Stmt {
 	}
 
 	return nil
+}
+
+// transformArithmeticIfStmt transforms a Fortran arithmetic IF statement to Go if-else chain
+// Fortran: IF (expr) neg_label, zero_label, pos_label
+// Go:      if expr < 0 { goto neg_label } else if expr == 0 { goto zero_label } else { goto pos_label }
+func (tg *TranspileToGo) transformArithmeticIfStmt(stmt *f90.ArithmeticIfStmt) ast.Stmt {
+	// Transform the condition expression
+	condition := tg.transformExpression(stmt.Condition)
+	if condition == nil {
+		return nil
+	}
+
+	// Generate: if condition < 0 { goto neg_label }
+	negCondition := &ast.BinaryExpr{
+		X:  condition,
+		Op: token.LSS, // <
+		Y:  &ast.BasicLit{Kind: token.INT, Value: "0"},
+	}
+
+	negBranch := &ast.BranchStmt{
+		Tok:   token.GOTO,
+		Label: ast.NewIdent("label" + stmt.NegativeLabel),
+	}
+
+	// Generate: else if condition == 0 { goto zero_label }
+	zeroCondition := &ast.BinaryExpr{
+		X:  condition,
+		Op: token.EQL, // ==
+		Y:  &ast.BasicLit{Kind: token.INT, Value: "0"},
+	}
+
+	zeroBranch := &ast.BranchStmt{
+		Tok:   token.GOTO,
+		Label: ast.NewIdent("label" + stmt.ZeroLabel),
+	}
+
+	// Generate: else { goto pos_label }
+	posBranch := &ast.BranchStmt{
+		Tok:   token.GOTO,
+		Label: ast.NewIdent("label" + stmt.PositiveLabel),
+	}
+
+	// Build if-else chain
+	return &ast.IfStmt{
+		Cond: negCondition,
+		Body: &ast.BlockStmt{
+			List: []ast.Stmt{negBranch},
+		},
+		Else: &ast.IfStmt{
+			Cond: zeroCondition,
+			Body: &ast.BlockStmt{
+				List: []ast.Stmt{zeroBranch},
+			},
+			Else: &ast.BlockStmt{
+				List: []ast.Stmt{posBranch},
+			},
+		},
+	}
+}
+
+// transformComputedGotoStmt transforms a Fortran computed GOTO to Go switch statement
+// Fortran: GO TO (10, 20, 30) choice
+// Go:      switch choice { case 1: goto label10; case 2: goto label20; case 3: goto label30 }
+func (tg *TranspileToGo) transformComputedGotoStmt(stmt *f90.ComputedGotoStmt) ast.Stmt {
+	// Transform the index expression
+	indexExpr := tg.transformExpression(stmt.Expression)
+	if indexExpr == nil {
+		return nil
+	}
+
+	// Generate switch cases
+	var cases []ast.Stmt
+	for i, label := range stmt.Labels {
+		// case i+1: goto labelN
+		caseClause := &ast.CaseClause{
+			List: []ast.Expr{
+				&ast.BasicLit{
+					Kind:  token.INT,
+					Value: fmt.Sprintf("%d", i+1), // Fortran uses 1-based indexing
+				},
+			},
+			Body: []ast.Stmt{
+				&ast.BranchStmt{
+					Tok:   token.GOTO,
+					Label: ast.NewIdent("label" + label),
+				},
+			},
+		}
+		cases = append(cases, caseClause)
+	}
+
+	return &ast.SwitchStmt{
+		Tag: indexExpr,
+		Body: &ast.BlockStmt{
+			List: cases,
+		},
+	}
+}
+
+// transformStopStmt transforms a Fortran STOP statement to Go os.Exit call
+// Fortran: STOP [code]
+// Go:      os.Exit(code) or os.Exit(0) if no code
+func (tg *TranspileToGo) transformStopStmt(stmt *f90.StopStmt) ast.Stmt {
+	// Default exit code is 0
+	var exitCode ast.Expr = &ast.BasicLit{
+		Kind:  token.INT,
+		Value: "0",
+	}
+
+	// If a code is specified, use it
+	if stmt.Code != nil {
+		code := tg.transformExpression(stmt.Code)
+		if code != nil {
+			// If it's a string, we can't use it directly with os.Exit
+			// For now, just use 1 for any non-integer code
+			// TODO: Could print the string message before exiting
+			exitCode = code
+		}
+	}
+	return &ast.ExprStmt{
+		X: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent("intrinsic"),
+				Sel: ast.NewIdent("Exit"),
+			},
+			Args: []ast.Expr{exitCode},
+		},
+	}
 }
 
 // preScanCommonBlocks scans statements for COMMON blocks before processing type declarations.

@@ -24,10 +24,8 @@
       CALL LEVEL18()
       CALL LEVEL19()
       CALL LEVEL20()
-
-      PRINT *, '============================================='
-      PRINT *, 'GOLDEN TEST COMPLETE: All levels executed!'
-      PRINT *, '============================================='
+      CALL LEVEL21()
+      CALL LEVEL22()
 
       CONTAINS
 
@@ -545,6 +543,38 @@
           PRINT *, 'LEVEL 20: x =', x
           PRINT *, 'LEVEL 20: y =', y
       END SUBROUTINE LEVEL20
+
+      ! LEVEL 21: Advanced GOTO (Arithmetic IF and Computed GOTO)
+      SUBROUTINE LEVEL21()
+          INTEGER :: x, choice
+
+          ! Test Arithmetic IF: IF (expr) neg, zero, pos
+          x = -5
+          IF (x) 10, 20, 30
+10        PRINT *, 'LEVEL 21: x is negative'
+          GOTO 40
+20        PRINT *, 'LEVEL 21: x is zero'
+          GOTO 40
+30        PRINT *, 'LEVEL 21: x is positive'
+
+          ! Test Computed GOTO: GO TO (labels) index
+40        choice = 2
+          GO TO (100, 200, 300), choice
+100       PRINT *, 'LEVEL 21: Choice was 1'
+          GOTO 400
+200       PRINT *, 'LEVEL 21: Choice was 2'
+          GOTO 400
+300       PRINT *, 'LEVEL 21: Choice was 3'
+
+400       CONTINUE
+      END SUBROUTINE LEVEL21
+
+      ! LEVEL 22: STOP Statement
+      SUBROUTINE LEVEL22()
+          PRINT *, 'LEVEL 22: About to STOP'
+          PRINT *, 'LEVEL 22: STOP with code 0'
+          STOP 0
+      END SUBROUTINE LEVEL22
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

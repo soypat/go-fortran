@@ -31,6 +31,8 @@ func main() {
 	LEVEL18()
 	LEVEL19()
 	LEVEL20()
+	LEVEL21()
+	LEVEL22()
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
@@ -474,6 +476,54 @@ func LEVEL20() {
 	intrinsic.Print("LEVEL 20: c =", c)
 	intrinsic.Print("LEVEL 20: x =", x)
 	intrinsic.Print("LEVEL 20: y =", y)
+}
+
+func LEVEL21() {
+	var (
+		x      int32
+		choice int32
+	)
+	x = -5
+	if x < 0 {
+		goto label10
+	} else if x == 0 {
+		goto label20
+	} else {
+		goto label30
+	}
+label10:
+	intrinsic.Print("LEVEL 21: x is negative")
+	goto label40
+label20:
+	intrinsic.Print("LEVEL 21: x is zero")
+	goto label40
+label30:
+	intrinsic.Print("LEVEL 21: x is positive")
+label40:
+	choice = 2
+	switch choice {
+	case 1:
+		goto label100
+	case 2:
+		goto label200
+	case 3:
+		goto label300
+	}
+label100:
+	intrinsic.Print("LEVEL 21: Choice was 1")
+	goto label400
+label200:
+	intrinsic.Print("LEVEL 21: Choice was 2")
+	goto label400
+label300:
+	intrinsic.Print("LEVEL 21: Choice was 3")
+label400:
+}
+
+func LEVEL22() {
+	intrinsic.Print("LEVEL 22: About to STOP")
+	intrinsic.Print("LEVEL 22: STOP with code 0")
+	intrinsic.Exit(0)
 }
 
 func SET_COMMON_VALUES() {
