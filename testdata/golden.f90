@@ -22,6 +22,7 @@
       CALL LEVEL16()
       CALL LEVEL17()
       CALL LEVEL18()
+      CALL LEVEL19()
 
       PRINT *, '============================================='
       PRINT *, 'GOLDEN TEST COMPLETE: All levels executed!'
@@ -502,6 +503,33 @@
           DEALLOCATE(mat)
           PRINT *, 'LEVEL 18: Arrays deallocated'
       END SUBROUTINE LEVEL18
+
+      ! LEVEL 19: COMMON Blocks
+      SUBROUTINE LEVEL19()
+          CALL SET_COMMON_VALUES()
+          CALL PRINT_COMMON_VALUES()
+      END SUBROUTINE LEVEL19
+
+      ! Helper subroutines for LEVEL19
+      SUBROUTINE SET_COMMON_VALUES()
+          INTEGER :: x, y
+          REAL :: z
+          COMMON /SHARED/ x, y, z
+
+          x = 42
+          y = 99
+          z = 3.14159
+      END SUBROUTINE SET_COMMON_VALUES
+
+      SUBROUTINE PRINT_COMMON_VALUES()
+          INTEGER :: x, y
+          REAL :: z
+          COMMON /SHARED/ x, y, z
+
+          PRINT *, 'LEVEL 19: x =', x
+          PRINT *, 'LEVEL 19: y =', y
+          PRINT *, 'LEVEL 19: z =', z
+      END SUBROUTINE PRINT_COMMON_VALUES
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

@@ -4,6 +4,12 @@ import (
 	"github.com/soypat/go-fortran/intrinsic"
 )
 
+var common_shared struct {
+	x float32
+	y int32
+	z float32
+}
+
 func main() {
 	LEVEL01()
 	LEVEL02()
@@ -23,10 +29,12 @@ func main() {
 	LEVEL16()
 	LEVEL17()
 	LEVEL18()
+	LEVEL19()
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
 }
+
 func LEVEL02() {
 	var i int32
 	var x float32
@@ -40,6 +48,7 @@ func LEVEL02() {
 	intrinsic.Print("LEVEL 2: flag =", flag)
 	intrinsic.Print("LEVEL 2:", message)
 }
+
 func LEVEL03() {
 	var (
 		i int32
@@ -60,6 +69,7 @@ func LEVEL03() {
 	intrinsic.Print("LEVEL 3: j =", j, ", k =", k)
 	intrinsic.Print("LEVEL 3: y =", y, ", z =", z)
 }
+
 func LEVEL04() {
 	var i int32
 	var x float32
@@ -83,6 +93,7 @@ func LEVEL04() {
 		intrinsic.Print("LEVEL 4: x >= 4.0")
 	}
 }
+
 func LEVEL05() {
 	var arr1 = intrinsic.NewArray[int32](5)
 	var matrix = intrinsic.NewArray[float32](3, 3)
@@ -106,6 +117,7 @@ func LEVEL05() {
 	intrinsic.Print("LEVEL 5: matrix(1,1) =", matrix.At(int(1), int(1)))
 	intrinsic.Print("LEVEL 5: matrix(2,2) =", matrix.At(int(2), int(2)))
 }
+
 func LEVEL06() {
 	var (
 		i int32
@@ -131,6 +143,7 @@ func LEVEL06() {
 	}
 	intrinsic.Print("LEVEL 6: nested loop count =", sum_val)
 }
+
 func LEVEL07() {
 	var arr1 = intrinsic.NewArray[int32](5)
 	var result int32
@@ -145,6 +158,7 @@ func LEVEL07() {
 	MODIFY_ARRAY(arr1, 5)
 	intrinsic.Print("LEVEL 7: arr1 after modify:", arr1.At(int(1)), arr1.At(int(2)), arr1.At(int(3)))
 }
+
 func LEVEL08() {
 	var fact_result int32
 	var sqrt_result float32
@@ -153,6 +167,7 @@ func LEVEL08() {
 	sqrt_result = SQUARE_ROOT(16.0)
 	intrinsic.Print("LEVEL 8: SQUARE_ROOT(16.0) =", sqrt_result)
 }
+
 func LEVEL09() {
 	var (
 		i          int32
@@ -171,6 +186,7 @@ func LEVEL09() {
 	}
 	intrinsic.Print("LEVEL 9: sum 1 to 10 =", sum_val)
 }
+
 func LEVEL10() {
 	var (
 		i int32
@@ -204,6 +220,7 @@ func LEVEL10() {
 	intrinsic.Print("LEVEL 10: cond1 =", cond1, ", cond2 =", cond2)
 	intrinsic.Print("LEVEL 10: cond3 =", cond3)
 }
+
 func LEVEL11() {
 	var (
 		str1 intrinsic.CharacterArray = intrinsic.NewCharacterArray(10)
@@ -215,6 +232,7 @@ func LEVEL11() {
 	str3.SetFromString(str1.String() + " " + str2.String())
 	intrinsic.Print("LEVEL 11: concatenation:", str3)
 }
+
 func LEVEL12() {
 	var (
 		angle   float32
@@ -243,6 +261,7 @@ func LEVEL12() {
 	intrinsic.Print("LEVEL 12: ABS(-5.5) =", abs_val)
 	intrinsic.Print("LEVEL 12: MAX =", max_val, ", MIN =", min_val)
 }
+
 func LEVEL13() {
 	var (
 		i       int32
@@ -281,6 +300,7 @@ func LEVEL13() {
 	}
 	intrinsic.Print("LEVEL 13: last count =", count)
 }
+
 func LEVEL14() {
 	var (
 		x int32
@@ -300,6 +320,7 @@ label200:
 	;
 	intrinsic.Print("LEVEL 14: x =", x, ", y =", y)
 }
+
 func LEVEL15() {
 	var (
 		choice int32
@@ -338,6 +359,7 @@ func LEVEL15() {
 	}
 	intrinsic.Print("LEVEL 15: choice =", choice, ", result =", result)
 }
+
 func LEVEL16() {
 	var (
 		str1 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
@@ -370,6 +392,7 @@ func LEVEL16() {
 	str1.SetRange(int(2), int(3), "z")
 	intrinsic.Print("LEVEL 16: str3 =", str3)
 }
+
 func LEVEL17() {
 	var matrix = intrinsic.NewArray[int32](3, 4)
 	var vector = intrinsic.NewArray[int32](5)
@@ -399,6 +422,7 @@ func LEVEL17() {
 	ub = int32(matrix.UpperDim(int(2)))
 	intrinsic.Print("LEVEL 17: UBOUND(matrix,2) =", ub)
 }
+
 func LEVEL18() {
 	var vec *intrinsic.Array[int32]
 	var mat *intrinsic.Array[int32]
@@ -419,13 +443,33 @@ func LEVEL18() {
 	mat = nil
 	intrinsic.Print("LEVEL 18: Arrays deallocated")
 }
+
+func LEVEL19() {
+	SET_COMMON_VALUES()
+	PRINT_COMMON_VALUES()
+}
+
+func SET_COMMON_VALUES() {
+	common_shared.x = 42
+	common_shared.y = 99
+	common_shared.z = 3.14159
+}
+
+func PRINT_COMMON_VALUES() {
+	intrinsic.Print("LEVEL 19: x =", common_shared.x)
+	intrinsic.Print("LEVEL 19: y =", common_shared.y)
+	intrinsic.Print("LEVEL 19: z =", common_shared.z)
+}
+
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
 }
+
 func ADD_VALUES(a int32, b int32, result *int32) {
 	*result = a + b
 	intrinsic.Print("LEVEL 7: Inside ADD_VALUES")
 }
+
 func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 	var i int32
 	for i = 1; i <= n; i += 1 {
@@ -433,6 +477,7 @@ func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 	}
 	intrinsic.Print("LEVEL 7: Inside MODIFY_ARRAY")
 }
+
 func FACTORIAL(n int32) int32 {
 	var (
 		i      int32
@@ -444,9 +489,11 @@ func FACTORIAL(n int32) int32 {
 	}
 	return result
 }
+
 func SQUARE_ROOT(x float32) float32 {
-	return intrinsic.SQRT[float32](x)
+	return intrinsic.SQRT[float32](common_shared.x)
 }
+
 func FIBONACCI(n int32) int32 {
 	var (
 		a    int32

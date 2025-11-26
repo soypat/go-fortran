@@ -123,8 +123,8 @@ func TestTranspileGolden(t *testing.T) {
 		})
 
 	}
-	if lvl < 18 {
-		t.Fatalf("expected at least 18 levels, got %d", lvl)
+	if lvl < 19 {
+		t.Fatalf("expected at least 19 levels, got %d", lvl)
 	}
 	maxLvl := lvl
 	// write helper subroutines:
@@ -154,7 +154,22 @@ func TestTranspileGolden(t *testing.T) {
 	for _, imp := range tp.imports {
 		fmt.Fprintf(&outsrc, "\t\"%s\"\n", imp)
 	}
-	outsrc.WriteString(")\n\nfunc main() {\n")
+	outsrc.WriteString(")\n\n")
+
+	// Generate COMMON block declarations
+	var commonDecls []ast.Decl
+	commonDecls = tp.AppendCommonDecls(commonDecls)
+	if len(commonDecls) > 0 {
+		fset := token.NewFileSet()
+		for _, decl := range commonDecls {
+			if err := printer.Fprint(&outsrc, fset, decl); err != nil {
+				t.Fatalf("failed to write COMMON declaration: %v", err)
+			}
+			outsrc.WriteString("\n\n")
+		}
+	}
+
+	outsrc.WriteString("func main() {\n")
 	for lvl := 1; lvl <= maxLvl; lvl++ {
 		fmt.Fprintf(&outsrc, "\tLEVEL%02d()\n", lvl)
 	}
@@ -214,7 +229,7 @@ func helperWriteGoFunc(t *testing.T, w *bytes.Buffer, f *ast.FuncDecl) {
 	if err := printer.Fprint(w, fset, f); err != nil {
 		t.Fatalf("failed to write Go function: %v", err)
 	}
-	w.WriteString("\n")
+	w.WriteString("\n\n")
 }
 
 func helperRunFortran(t *testing.T, fsrc io.Reader) (output []byte) {

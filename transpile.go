@@ -13,16 +13,24 @@ import (
 	f90token "github.com/soypat/go-fortran/token"
 )
 
+// CommonBlockInfo tracks variables in a COMMON block
+type CommonBlockInfo struct {
+	Name   string // COMMON block name (empty for blank COMMON)
+	Fields []*ast.Field
+}
+
 // TranspileToGo transforms Fortran AST to Go AST
 type TranspileToGo struct {
 	symTable      *symbol.Table
 	imports       []string
-	charLengths   map[string]int            // Track CHARACTER(LEN=n) for padding assignments
-	arrays        map[string]*f90.ArraySpec // Track array dimensions for initialization
-	arrayTypes    map[string]ast.Expr       // Track element types for arrays
-	allocatables  map[string]bool           // Track ALLOCATABLE arrays (don't initialize)
-	parameters    map[string]bool           // Track parameter names to avoid redeclaration
-	pointerParams map[string]bool           // Track OUT/INOUT scalar parameters (need dereference in assignments)
+	charLengths   map[string]int              // Track CHARACTER(LEN=n) for padding assignments
+	arrays        map[string]*f90.ArraySpec   // Track array dimensions for initialization
+	arrayTypes    map[string]ast.Expr         // Track element types for arrays
+	allocatables  map[string]bool             // Track ALLOCATABLE arrays (don't initialize)
+	parameters    map[string]bool             // Track parameter names to avoid redeclaration
+	pointerParams map[string]bool             // Track OUT/INOUT scalar parameters (need dereference in assignments)
+	commonBlocks  map[string]*CommonBlockInfo // COMMON block name -> info
+	commonVars    map[string]string           // Variable name -> COMMON block name (for lookups)
 }
 
 // Reset initializes the transpiler with a symbol table
@@ -31,6 +39,8 @@ func (tg *TranspileToGo) Reset(symTable *symbol.Table) error {
 	tg.useImport("github.com/soypat/go-fortran/intrinsic")
 	tg.symTable = symTable
 	tg.charLengths = make(map[string]int)
+	tg.commonBlocks = make(map[string]*CommonBlockInfo)
+	tg.commonVars = make(map[string]string)
 	return nil
 }
 
@@ -55,7 +65,11 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 		if param.ArraySpec != nil {
 			tg.arrays[param.Name] = param.ArraySpec
 			// Array element type will be set from parameter type
-			tg.arrayTypes[param.Name] = tg.fortranTypeToGoType(param.Type)
+			tp := tg.fortranTypeToGo(param.Type)
+			if tp == nil {
+				panic(fmt.Sprintf("unknown parameter type: %s", param.Type))
+			}
+			tg.arrayTypes[param.Name] = tp
 		}
 		// Scalar OUT/INOUT parameters are pointers, need dereference in assignments
 		if param.ArraySpec == nil && (param.Intent == f90.IntentOut || param.Intent == f90.IntentInOut) {
@@ -69,10 +83,39 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 	}
 }
 
+func (tg *TranspileToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
+	for blockName, block := range tg.commonBlocks {
+		// Generate: var common_<blockname> struct { ... }
+		structType := &ast.StructType{
+			Fields: &ast.FieldList{
+				List: block.Fields,
+			},
+		}
+
+		commonVarName := "common_" + strings.ToLower(blockName)
+		decl := &ast.GenDecl{
+			Tok: token.VAR,
+			Specs: []ast.Spec{
+				&ast.ValueSpec{
+					Names: []*ast.Ident{ast.NewIdent(commonVarName)},
+					Type:  structType,
+				},
+			},
+		}
+
+		dst = append(dst, decl)
+	}
+
+	return dst
+}
+
 // TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration
 func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl, error) {
 	// Initialize procedure tracking
 	tg.enterProcedure(sub.Parameters)
+
+	// Pre-scan for COMMON blocks to know which variables to skip in type declarations
+	tg.preScanCommonBlocks(sub.Body)
 
 	// Transform parameters
 	paramFields := tg.transformParameters(sub.Parameters)
@@ -103,6 +146,9 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 	// Mark function name as additional parameter (Fortran uses it as result variable)
 	tg.enterProcedure(fn.Parameters, fn.Name)
 
+	// Pre-scan for COMMON blocks to know which variables to skip in type declarations
+	tg.preScanCommonBlocks(fn.Body)
+
 	// Transform parameters
 	paramFields := tg.transformParameters(fn.Parameters)
 
@@ -115,7 +161,10 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 	bodyStmts = tg.convertFunctionResultToReturn(fn.Name, bodyStmts)
 
 	// Map Fortran result type to Go type
-	resultType := tg.fortranTypeToGoType(fn.ResultType)
+	resultType := tg.fortranTypeToGo(fn.ResultType)
+	if resultType == nil {
+		return nil, fmt.Errorf("unknown fortran result type: %s", fn.ResultType)
+	}
 
 	// Create function declaration
 	funcDecl := &ast.FuncDecl{
@@ -235,17 +284,16 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 
 	for _, param := range params {
 		// Get the Go type for this parameter
-		goType := tg.fortranTypeToGoType(param.Type)
-
+		goType := tg.fortranTypeToGo(param.Type)
+		if goType == nil {
+			panic(fmt.Sprintf("unhandled type %s", param.Type))
+		}
 		// Handle arrays - always use intrinsic.Array[T]
 		if param.ArraySpec != nil {
 			// Array parameters: *intrinsic.Array[T]
 			goType = &ast.StarExpr{
 				X: &ast.IndexExpr{
-					X: &ast.SelectorExpr{
-						X:   ast.NewIdent("intrinsic"),
-						Sel: ast.NewIdent("Array"),
-					},
+					X:     _astTypeArray,
 					Index: goType,
 				},
 			}
@@ -267,29 +315,6 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 	}
 
 	return fields
-}
-
-// fortranTypeToGoType maps a Fortran type name to a Go type expression
-func (tg *TranspileToGo) fortranTypeToGoType(fortranType string) ast.Expr {
-	switch fortranType {
-	case "INTEGER":
-		return ast.NewIdent("int32")
-	case "REAL":
-		return ast.NewIdent("float32")
-	case "DOUBLE PRECISION":
-		return ast.NewIdent("float64")
-	case "LOGICAL":
-		return ast.NewIdent("bool")
-	case "CHARACTER":
-		// CHARACTER(LEN=n) maps to intrinsic.CharacterArray
-		return &ast.SelectorExpr{
-			X:   ast.NewIdent("intrinsic"),
-			Sel: ast.NewIdent("CharacterArray"),
-		}
-	default:
-		// Unknown type, default to interface{}
-		return ast.NewIdent("interface{}")
-	}
 }
 
 // transformStatements transforms a slice of Fortran statements to Go statements
@@ -360,6 +385,8 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 		return tg.transformDeallocateStmt(s)
 	case *f90.SelectCaseStmt:
 		return tg.transformSelectCaseStmt(s)
+	case *f90.CommonStmt:
+		return tg.transformCommonStmt(s)
 	default:
 		// For now, unsupported statements are skipped
 		panic(fmt.Sprintf("unsupported statement: %T", s))
@@ -762,12 +789,10 @@ func (tg *TranspileToGo) transformExpressions(exprs []f90.Expression) []ast.Expr
 	return goExprs
 }
 
-// transformTypeDeclaration transforms a Fortran type declaration to Go var declaration
-func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast.Stmt {
-	// Map Fortran type to Go type
-	var goType ast.Expr
-
-	switch decl.TypeSpec {
+func (tg *TranspileToGo) fortranTypeToGo(ft string) (goType ast.Expr) {
+	switch ft {
+	default:
+		return nil //
 	case "INTEGER":
 		goType = ast.NewIdent("int32")
 	case "REAL":
@@ -778,17 +803,20 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		goType = ast.NewIdent("bool")
 	case "CHARACTER":
 		// CHARACTER(LEN=n) maps to intrinsic.CharacterArray
-		goType = &ast.SelectorExpr{
-			X:   ast.NewIdent("intrinsic"),
-			Sel: ast.NewIdent("CharacterArray"),
-		}
+		goType = _astTypeCharArray
 		// CHARACTER(LEN=n) length is specified per-entity in entity.CharLen
 		// We'll handle initialization per-entity below
-	default:
-		// Unknown type, skip
+	}
+	return goType
+}
+
+// transformTypeDeclaration transforms a Fortran type declaration to Go var declaration
+func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast.Stmt {
+	// Map Fortran type to Go type
+	goType := tg.fortranTypeToGo(decl.TypeSpec)
+	if goType == nil {
 		return nil
 	}
-
 	// Check if this declaration has ALLOCATABLE attribute
 	isAllocatable := false
 	for _, attr := range decl.Attributes {
@@ -802,6 +830,24 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 	specs := make([]ast.Spec, 0, len(decl.Entities))
 	for i := range decl.Entities {
 		entity := &decl.Entities[i]
+
+		// If this variable is in a COMMON block, record its type
+		if blockName, inCommon := tg.commonVars[entity.Name]; inCommon {
+			if block, exists := tg.commonBlocks[blockName]; exists {
+				// Convert goType to string for storage
+				var typeStr string
+				if ident, ok := goType.(*ast.Ident); ok {
+					typeStr = ident.Name
+				} else {
+					// For complex types like intrinsic.CharacterArray, use type name
+					typeStr = "intrinsic.CharacterArray"
+				}
+				block.Variables[entity.Name] = typeStr
+			}
+			// Variables in COMMON blocks will be accessed via the global struct
+			// Don't generate local declarations for them
+			continue
+		}
 
 		// Skip parameters - they're already declared in function signature
 		if tg.parameters[strings.ToUpper(entity.Name)] {
@@ -836,10 +882,7 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 				// Initialize with intrinsic.NewCharacterArray(length)
 				spec.Values = []ast.Expr{
 					&ast.CallExpr{
-						Fun: &ast.SelectorExpr{
-							X:   ast.NewIdent("intrinsic"),
-							Sel: ast.NewIdent("NewCharacterArray"),
-						},
+						Fun: _astFnNewCharArray,
 						Args: []ast.Expr{&ast.BasicLit{
 							Kind:  token.INT,
 							Value: strconv.Itoa(length),
@@ -875,10 +918,7 @@ func (tg *TranspileToGo) transformArrayDeclaration(name string, elemType ast.Exp
 	// Build type: *intrinsic.Array[elemType]
 	arrayType := &ast.StarExpr{
 		X: &ast.IndexExpr{
-			X: &ast.SelectorExpr{
-				X:   ast.NewIdent("intrinsic"),
-				Sel: ast.NewIdent("Array"),
-			},
+			X:     _astTypeArray,
 			Index: elemType, // Type parameter
 		},
 	}
@@ -926,10 +966,7 @@ func (tg *TranspileToGo) transformAllocatableArrayDeclaration(name string, elemT
 	// Build type: *intrinsic.Array[elemType]
 	arrayType := &ast.StarExpr{
 		X: &ast.IndexExpr{
-			X: &ast.SelectorExpr{
-				X:   ast.NewIdent("intrinsic"),
-				Sel: ast.NewIdent("Array"),
-			},
+			X:     _astTypeArray,
 			Index: elemType, // Type parameter
 		},
 	}
@@ -1118,6 +1155,15 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 		}
 		return ast.NewIdent("false")
 	case *f90.Identifier:
+		// Check if this identifier is in a COMMON block
+		if blockName, inCommon := tg.commonVars[e.Value]; inCommon {
+			// Generate: common_<blockname>.<varname>
+			commonStructName := "common_" + strings.ToLower(blockName)
+			return &ast.SelectorExpr{
+				X:   ast.NewIdent(commonStructName),
+				Sel: ast.NewIdent(e.Value),
+			}
+		}
 		return ast.NewIdent(e.Value)
 	case *f90.ArrayRef:
 		return tg.transformArrayRef(e)
@@ -1666,3 +1712,84 @@ func (tg *TranspileToGo) useImport(pkg string) {
 		tg.imports = append(tg.imports, pkg)
 	}
 }
+
+// transformCommonStmt processes a COMMON statement and records the block information.
+// COMMON blocks will be generated as global structs separately, not as statements within functions.
+func (tg *TranspileToGo) transformCommonStmt(stmt *f90.CommonStmt) ast.Stmt {
+	blockName := stmt.BlockName
+	if blockName == "" {
+		blockName = "__blank__" // Internal name for blank COMMON
+	}
+
+	// Get or create COMMON block info
+	block, exists := tg.commonBlocks[blockName]
+	if !exists {
+		block = &CommonBlockInfo{
+			Name: blockName,
+		}
+		tg.commonBlocks[blockName] = block
+	}
+
+	// Record each variable in the COMMON block
+	for _, varName := range stmt.Variables {
+		// Track that this variable belongs to this COMMON block
+		tg.commonVars[varName] = blockName
+
+		// TODO: Need to get the variable's type from type declarations
+		// For now, we'll need to look up the type when we see the variable's type declaration
+		// The type will be filled in later when we process TypeDeclaration statements
+		if _, exists := block.Variables[varName]; !exists {
+			block.Variables[varName] = "" // Type will be set later
+		}
+	}
+
+	// COMMON statement doesn't generate code in the function body
+	// The global structs will be generated separately
+	return nil
+}
+
+// preScanCommonBlocks scans statements for COMMON blocks before processing type declarations.
+// This allows us to know which variables are in COMMON blocks before we generate declarations.
+func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
+	for _, stmt := range stmts {
+		if commonStmt, ok := stmt.(*f90.CommonStmt); ok {
+			blockName := commonStmt.BlockName
+			if blockName == "" {
+				blockName = "__blank__"
+			}
+
+			// Get or create COMMON block info
+			block, exists := tg.commonBlocks[blockName]
+			if !exists {
+				block = &CommonBlockInfo{
+					Name: blockName,
+				}
+				tg.commonBlocks[blockName] = block
+			}
+
+			// Record each variable in the COMMON block
+			for _, varName := range commonStmt.Variables {
+				tg.commonVars[varName] = blockName
+				if _, exists := block.Variables[varName]; !exists {
+					block.Variables[varName] = "" // Type will be set when we see the type declaration
+				}
+			}
+		}
+	}
+}
+
+// Common intrinsic identifiers.
+var (
+	_astFnNewCharArray = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewCharacterArray"),
+	}
+	_astTypeCharArray = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("CharacterArray"),
+	}
+	_astTypeArray = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("Array"),
+	}
+)
