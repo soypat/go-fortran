@@ -2527,6 +2527,7 @@ func (p *Parser90) parseDerivedTypeStmt() *ast.DerivedTypeStmt {
 			}
 		} else {
 			p.addError("expected component declaration, got " + p.current.tok.String())
+			p.nextToken() // Consume the bad token to avoid infinite loop
 		}
 		p.skipNewlinesAndComments()
 	}
@@ -2555,10 +2556,7 @@ func (p *Parser90) parseDerivedTypeStmt() *ast.DerivedTypeStmt {
 func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	startPos := p.current.start
 	ts := p.expectTypeSpec()
-	if ts.KindOrLen != nil {
-		p.addError("did not expect kind in component declaration")
-		return nil
-	}
+	// KIND and LEN are allowed in component declarations (e.g., CHARACTER(LEN=50), REAL(KIND=8))
 	// Parse optional attributes
 	var attributes []token.Token
 	for p.loopUntil(token.DoubleColon) && p.consumeIf(token.Comma) {
@@ -2580,13 +2578,12 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 			entity.ArraySpec = p.parseArraySpec() // Found array spec.
 		}
 		components = append(components, entity)
-		if !p.consumeIf(token.Comma) && !p.consumeIf(token.NewLine) {
-			// Skip k = kind(0.0) type component declarations.
-			for p.loopUntil(token.NewLine, token.Comma) {
-				p.nextToken()
-			}
-			p.consumeIf(token.Comma)
+		if !p.consumeIf(token.Comma) {
+			// No comma, so we're done with the entity list
+			// Don't consume newline here - let the outer loop handle it
+			break
 		}
+		// Continue loop if there was a comma (more entities)
 	}
 
 	return &ast.ComponentDecl{
