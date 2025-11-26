@@ -13,12 +13,6 @@ import (
 	f90token "github.com/soypat/go-fortran/token"
 )
 
-// CommonBlockInfo tracks variables in a COMMON block
-type CommonBlockInfo struct {
-	Name   string // COMMON block name (empty for blank COMMON)
-	Fields []*ast.Field
-}
-
 // TranspileToGo transforms Fortran AST to Go AST
 type TranspileToGo struct {
 	symTable      *symbol.Table
@@ -29,7 +23,7 @@ type TranspileToGo struct {
 	allocatables  map[string]bool             // Track ALLOCATABLE arrays (don't initialize)
 	parameters    map[string]bool             // Track parameter names to avoid redeclaration
 	pointerParams map[string]bool             // Track OUT/INOUT scalar parameters (need dereference in assignments)
-	commonBlocks  map[string]*CommonBlockInfo // COMMON block name -> info
+	commonBlocks  map[string]*commonBlockInfo // COMMON block name -> info
 	commonVars    map[string]string           // Variable name -> COMMON block name (for lookups)
 }
 
@@ -39,9 +33,15 @@ func (tg *TranspileToGo) Reset(symTable *symbol.Table) error {
 	tg.useImport("github.com/soypat/go-fortran/intrinsic")
 	tg.symTable = symTable
 	tg.charLengths = make(map[string]int)
-	tg.commonBlocks = make(map[string]*CommonBlockInfo)
+	tg.commonBlocks = make(map[string]*commonBlockInfo)
 	tg.commonVars = make(map[string]string)
 	return nil
+}
+
+// commonBlockInfo tracks variables in a COMMON block
+type commonBlockInfo struct {
+	Name   string // COMMON block name (empty for blank COMMON)
+	Fields []*ast.Field
 }
 
 // enterProcedure initializes tracking maps for a function or subroutine
@@ -114,6 +114,9 @@ func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl
 	// Initialize procedure tracking
 	tg.enterProcedure(sub.Parameters)
 
+	// Clear COMMON variable tracking for this subroutine
+	// (variables are only COMMON if they appear in a COMMON statement in THIS subroutine)
+
 	// Pre-scan for COMMON blocks to know which variables to skip in type declarations
 	tg.preScanCommonBlocks(sub.Body)
 
@@ -145,6 +148,10 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 	// Initialize procedure tracking
 	// Mark function name as additional parameter (Fortran uses it as result variable)
 	tg.enterProcedure(fn.Parameters, fn.Name)
+
+	// Clear COMMON variable tracking for this function
+	// (variables are only COMMON if they appear in a COMMON statement in THIS function)
+	tg.commonVars = make(map[string]string)
 
 	// Pre-scan for COMMON blocks to know which variables to skip in type declarations
 	tg.preScanCommonBlocks(fn.Body)
@@ -834,15 +841,13 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		// If this variable is in a COMMON block, record its type
 		if blockName, inCommon := tg.commonVars[entity.Name]; inCommon {
 			if block, exists := tg.commonBlocks[blockName]; exists {
-				// Convert goType to string for storage
-				var typeStr string
-				if ident, ok := goType.(*ast.Ident); ok {
-					typeStr = ident.Name
-				} else {
-					// For complex types like intrinsic.CharacterArray, use type name
-					typeStr = "intrinsic.CharacterArray"
+				// Find the field for this variable and set its type
+				for _, field := range block.Fields {
+					if len(field.Names) > 0 && field.Names[0].Name == entity.Name {
+						field.Type = goType
+						break
+					}
 				}
-				block.Variables[entity.Name] = typeStr
 			}
 			// Variables in COMMON blocks will be accessed via the global struct
 			// Don't generate local declarations for them
@@ -1716,41 +1721,16 @@ func (tg *TranspileToGo) useImport(pkg string) {
 // transformCommonStmt processes a COMMON statement and records the block information.
 // COMMON blocks will be generated as global structs separately, not as statements within functions.
 func (tg *TranspileToGo) transformCommonStmt(stmt *f90.CommonStmt) ast.Stmt {
-	blockName := stmt.BlockName
-	if blockName == "" {
-		blockName = "__blank__" // Internal name for blank COMMON
-	}
-
-	// Get or create COMMON block info
-	block, exists := tg.commonBlocks[blockName]
-	if !exists {
-		block = &CommonBlockInfo{
-			Name: blockName,
-		}
-		tg.commonBlocks[blockName] = block
-	}
-
-	// Record each variable in the COMMON block
-	for _, varName := range stmt.Variables {
-		// Track that this variable belongs to this COMMON block
-		tg.commonVars[varName] = blockName
-
-		// TODO: Need to get the variable's type from type declarations
-		// For now, we'll need to look up the type when we see the variable's type declaration
-		// The type will be filled in later when we process TypeDeclaration statements
-		if _, exists := block.Variables[varName]; !exists {
-			block.Variables[varName] = "" // Type will be set later
-		}
-	}
-
-	// COMMON statement doesn't generate code in the function body
-	// The global structs will be generated separately
+	// COMMON blocks are already processed during preScanCommonBlocks
+	// This statement doesn't generate code in the function body
+	// The global structs will be generated separately via AppendCommonDecls
 	return nil
 }
 
 // preScanCommonBlocks scans statements for COMMON blocks before processing type declarations.
 // This allows us to know which variables are in COMMON blocks before we generate declarations.
 func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
+	tg.commonVars = make(map[string]string)
 	for _, stmt := range stmts {
 		if commonStmt, ok := stmt.(*f90.CommonStmt); ok {
 			blockName := commonStmt.BlockName
@@ -1759,10 +1739,19 @@ func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
 			}
 
 			// Get or create COMMON block info
-			block, exists := tg.commonBlocks[blockName]
+			_, exists := tg.commonBlocks[blockName]
 			if !exists {
-				block = &CommonBlockInfo{
-					Name: blockName,
+				// Create fields for each variable (types will be set later)
+				var fields []*ast.Field
+				for _, varName := range commonStmt.Variables {
+					fields = append(fields, &ast.Field{
+						Names: []*ast.Ident{ast.NewIdent(varName)},
+						Type:  nil, // Will be set when we see the type declaration
+					})
+				}
+				block := &commonBlockInfo{
+					Name:   blockName,
+					Fields: fields,
 				}
 				tg.commonBlocks[blockName] = block
 			}
@@ -1770,9 +1759,6 @@ func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
 			// Record each variable in the COMMON block
 			for _, varName := range commonStmt.Variables {
 				tg.commonVars[varName] = blockName
-				if _, exists := block.Variables[varName]; !exists {
-					block.Variables[varName] = "" // Type will be set when we see the type declaration
-				}
 			}
 		}
 	}

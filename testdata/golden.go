@@ -5,7 +5,7 @@ import (
 )
 
 var common_shared struct {
-	x float32
+	x int32
 	y int32
 	z float32
 }
@@ -491,7 +491,7 @@ func FACTORIAL(n int32) int32 {
 }
 
 func SQUARE_ROOT(x float32) float32 {
-	return intrinsic.SQRT[float32](common_shared.x)
+	return intrinsic.SQRT[float32](x)
 }
 
 func FIBONACCI(n int32) int32 {
