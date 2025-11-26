@@ -30,6 +30,9 @@ func Walk(v Visitor, node Node) {
 		for _, stmt := range n.Body {
 			Walk(v, stmt)
 		}
+		for _, unit := range n.Contains {
+			Walk(v, unit)
+		}
 
 	case *Subroutine:
 		for _, stmt := range n.Body {

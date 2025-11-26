@@ -132,9 +132,10 @@ func (p *Program) SourcePos() Position {
 //	  PRINT *, 'Hello, World!'
 //	END PROGRAM hello
 type ProgramBlock struct {
-	Name  string
-	Body  []Statement // Specification and executable statements
-	Label string
+	Name     string
+	Body     []Statement   // Specification and executable statements
+	Contains []ProgramUnit // Internal procedures (CONTAINS section)
+	Label    string
 	Position
 }
 

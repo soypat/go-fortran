@@ -209,14 +209,9 @@ func (p *Parser90) ParseNextProgramUnit() (unit ast.ProgramUnit) {
 
 	for !p.IsDone() && unit == nil {
 		// Skip leading newlines and comments
-		p.skipNewlinesAndComments()
-
 		// Parse one program unit
 		puStart = p.sourcePos()
 		unit = p.parseTopLevelUnit()
-
-		// Skip trailing newlines after this unit
-		p.skipNewlinesAndComments()
 	}
 	// If parsing succeeded, return the unit, nil or otherwise.
 	panicked = false
@@ -251,6 +246,7 @@ func (p *Parser90) parseTopLevelUnit() ast.ProgramUnit {
 	if p.IsDone() {
 		return nil
 	}
+	p.skipNewlinesAndComments()
 	// Special case: BLOCK DATA (BLOCK is an identifier, DATA is a keyword)
 	if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "BLOCK" && p.peekTokenIs(token.DATA) {
 		return p.parseBlockData()
@@ -273,6 +269,205 @@ func (p *Parser90) parseTopLevelUnit() ast.ProgramUnit {
 		p.addError("statement is not a program unit")
 	}
 	return nil
+}
+
+// Semantic parsing functions for top-level constructs
+
+// parseProgramBlock parses a PROGRAM...END PROGRAM block
+// Precondition: current token is PROGRAM
+func (p *Parser90) parseProgramBlock() ast.Statement {
+	start := p.sourcePos()
+	block := &ast.ProgramBlock{}
+
+	p.expect(token.PROGRAM, "")
+
+	// Parse program name (keywords can be used as program names)
+	if !p.canUseAsIdentifier() {
+		p.addError("expected program name, got " + p.current.tok.String())
+		return nil
+	}
+	block.Name = string(p.current.lit)
+	p.nextToken() // consume program name
+
+	p.skipNewlinesAndComments()
+
+	// Parse body statements
+	block.Body = p.parseBody(nil)
+
+	// Handle CONTAINS section (internal procedures)
+	if p.consumeIf(token.CONTAINS) {
+		block.Contains = p.parseAppendProgramUnits(block.Contains[:0])
+	}
+
+	block.Position = ast.Pos(start.Pos, p.current.start)
+	if !p.consumeIf(token.ENDPROGRAM) && !p.consumeIf2(token.END, token.PROGRAM) {
+		p.addErrorMismatchedEnd(start, token.PROGRAM)
+	}
+	p.consumeIf(token.Identifier)
+	return block
+}
+
+// parseModule parses a MODULE...END MODULE block
+// Precondition: current token is MODULE
+func (p *Parser90) parseModule() ast.Statement {
+	start := p.sourcePos()
+	mod := &ast.Module{}
+
+	p.expect(token.MODULE, "")
+
+	// Parse module name (keywords can be used as module names)
+	if !p.canUseAsIdentifier() {
+		p.addError("expected module name, got " + p.current.tok.String())
+		return nil
+	}
+	mod.Name = string(p.current.lit)
+	p.nextToken() // consume module name
+
+	p.skipNewlinesAndComments()
+
+	// Parse body statements
+	mod.Body = p.parseBody(nil)
+
+	// Handle CONTAINS section with recursive parsing
+	if p.consumeIf(token.CONTAINS) {
+		mod.Contains = p.parseAppendProgramUnits(mod.Contains[:0])
+	}
+
+	mod.Position = ast.Pos(start.Pos, p.current.start)
+	if !p.consumeIf(token.ENDMODULE) && !p.consumeIf2(token.END, token.MODULE) {
+		p.addErrorMismatchedEnd(start, token.MODULE)
+	}
+	p.consumeIf(token.Identifier)
+	return mod
+}
+
+func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramUnit {
+	for p.loopUntil(token.END, token.ENDMODULE, token.ENDPROGRAM) {
+		unit := p.parseTopLevelUnit()
+		if unit != nil {
+			dst = append(dst, unit)
+		} else {
+			p.addError("failure while parsing program units")
+		}
+	}
+	return dst
+}
+
+// parseSubroutine parses a SUBROUTINE...END SUBROUTINE block
+// Precondition: current token is SUBROUTINE
+func (p *Parser90) parseSubroutine() ast.Statement {
+	start := p.current.start
+	sub := &ast.Subroutine{}
+
+	p.expect(token.SUBROUTINE, "")
+
+	// Parse subroutine name (keywords can be used as subroutine names)
+	if !p.canUseAsIdentifier() {
+		p.addError("expected subroutine name, got " + p.current.tok.String())
+		return nil
+	}
+	sub.Name = string(p.current.lit)
+	p.nextToken() // consume subroutine name
+
+	// Parse parameter list if present
+	if p.currentTokenIs(token.LParen) {
+		sub.Parameters = p.parseParameterList()
+	}
+
+	p.skipNewlinesAndComments()
+
+	// Parse body statements
+	sub.Body = p.parseBody(sub.Parameters)
+
+	sub.Position = ast.Pos(start, p.current.start)
+	p.expect(token.END, "subroutine end")
+
+	// Consume optional SUBROUTINE keyword and/or subroutine name after END
+	p.consumeIf(token.SUBROUTINE)
+	p.consumeIf(token.Identifier)
+
+	return sub
+}
+
+// parseFunction parses a FUNCTION...END FUNCTION block
+// Precondition: current token is FUNCTION
+func (p *Parser90) parseFunction() ast.Statement {
+	start := p.current.start
+	fn := &ast.Function{}
+
+	p.expect(token.FUNCTION, "")
+
+	// Parse function name (can be Identifier, FormatSpec, or keyword used as identifier)
+	if !p.canUseAsIdentifier() {
+		p.addError("expected function name, got " + p.current.tok.String())
+		return nil
+	}
+	fn.Name = string(p.current.lit)
+	p.nextToken() // consume function name
+
+	// Parse parameter list
+	if p.currentTokenIs(token.LParen) {
+		fn.Parameters = p.parseParameterList()
+	}
+
+	// Check for RESULT clause
+	if p.consumeIf(token.RESULT) {
+		if p.expect(token.LParen, "RESULT open") {
+			if p.expectCurrent(token.Identifier) {
+				fn.ResultVariable = string(p.current.lit)
+				p.nextToken() // consume result variable name
+			}
+			p.expect(token.RParen, "RESULT close")
+		}
+	}
+
+	// Parse body statements
+	fn.Body = p.parseBody(fn.Parameters)
+
+	fn.Position = ast.Pos(start, p.current.start)
+	p.expect(token.END, "FUNCTION end")
+
+	// Consume optional FUNCTION keyword and/or function name after END
+	p.consumeIf(token.FUNCTION)
+	p.consumeIf(token.Identifier)
+
+	return fn
+}
+
+// parseBlockData parses a BLOCK DATA...END [BLOCK DATA] block
+func (p *Parser90) parseBlockData() ast.ProgramUnit {
+	start := p.current.start
+	bd := &ast.BlockData{}
+	// Consume BLOCK identifier
+	p.nextToken()
+
+	// Expect and consume DATA keyword
+	if !p.expect(token.DATA, "DATA BLOCK expected") {
+		return nil
+	}
+
+	// Parse optional block data name
+	if p.currentTokenIs(token.Identifier) {
+		bd.Name = string(p.current.lit)
+		p.nextToken()
+	}
+
+	p.skipNewlinesAndComments()
+
+	// Parse body statements
+	bd.Body = p.parseBody(nil)
+
+	bd.Position = ast.Pos(start, p.current.start)
+	p.expect(token.END, "expected END after DATA BLOCK body")
+
+	// Consume optional BLOCK DATA after END
+	if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "BLOCK" {
+		p.nextToken()
+		p.consumeIf(token.DATA)
+	}
+	p.consumeIf(token.Identifier) // Optional name after END BLOCK DATA
+
+	return bd
 }
 
 // Helper methods
@@ -384,13 +579,17 @@ func (p *Parser90) expectEndConstruct(keyword, singleEndForm token.Token, start 
 		return true
 	} else if p.currentTokenIs(token.END) {
 		// END without expected keyword - belongs to parent
-		p.addErrorWithPos(start, keyword.String()+" missing missing END with keyword")
-		p.addError("expected 'END " + keyword.String() + "'; got END without keyword (may belong to enclosing program unit or construct)")
+		p.addErrorMismatchedEnd(start, keyword)
 		return false
 	} else {
 		p.addError("expected END " + keyword.String())
 		return false
 	}
+}
+
+func (p *Parser90) addErrorMismatchedEnd(start sourcePos, keyword token.Token) {
+	p.addErrorWithPos(start, keyword.String()+" missing missing END with keyword")
+	p.addError("expected 'END " + keyword.String() + "'; got END without keyword (may belong to enclosing program unit or construct)")
 }
 
 func (p *Parser90) skipUnexpectedEndConstructs(msg string) (skipped bool) {
@@ -538,16 +737,14 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 	var stmts []ast.Statement
 	var sawImplicit, sawDecl bool
-
 	// Create a map for quick parameter lookup
 	paramMap := make(map[string]*ast.Parameter)
 	for i := range parameters {
 		paramMap[parameters[i].Name] = &parameters[i]
 	}
-
+	p.skipNewlinesAndComments()
 	// Phase 2: Parse specification statements
 	for p.loopUntil(token.CONTAINS, token.END) {
-		p.skipNewlinesAndComments()
 		if p.currentTokenIs(token.CONTAINS) || p.currentTokenIs(token.EOF) {
 			break
 		}
@@ -566,6 +763,7 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 			// Not a parseable spec statement - skip the construct
 			p.skipToNextStatement()
 		}
+		p.skipNewlinesAndComments()
 	}
 	p.nStatements += len(stmts) // Add specification statements.
 
@@ -2908,6 +3106,32 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 			if p.currentTokenIs(token.LParen) {
 				arraySpec = p.parseArraySpec()
 			}
+		case p.consumeIf(token.ALLOCATABLE):
+			// Just consume token, already in attributes slice
+		case p.consumeIf(token.POINTER):
+			// Just consume token
+		case p.consumeIf(token.TARGET):
+			// Just consume token
+		case p.consumeIf(token.OPTIONAL):
+			// Just consume token
+		case p.consumeIf(token.PARAMETER):
+			// Just consume token
+		case p.consumeIf(token.SAVE):
+			// Just consume token
+		case p.consumeIf(token.EXTERNAL):
+			// Just consume token
+		case p.consumeIf(token.INTRINSIC):
+			// Just consume token
+		case p.consumeIf(token.PUBLIC):
+			// Just consume token
+		case p.consumeIf(token.PRIVATE):
+			// Just consume token
+		case p.consumeIf(token.RECURSIVE):
+			// Just consume token
+		case p.consumeIf(token.ELEMENTAL):
+			// Just consume token
+		case p.consumeIf(token.PURE):
+			// Just consume token
 		default:
 			p.addError("unexpected attribute: " + p.current.String())
 			p.nextToken() // Skip uknown tokens.
@@ -3015,215 +3239,6 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		Position:   ast.Pos(start.Pos, p.current.start),
 	}
 	return stmt
-}
-
-// Semantic parsing functions for top-level constructs
-
-// parseProgramBlock parses a PROGRAM...END PROGRAM block
-// Precondition: current token is PROGRAM
-func (p *Parser90) parseProgramBlock() ast.Statement {
-	start := p.current.start
-	block := &ast.ProgramBlock{}
-
-	p.expect(token.PROGRAM, "")
-
-	// Parse program name (keywords can be used as program names)
-	if !p.canUseAsIdentifier() {
-		p.addError("expected program name, got " + p.current.tok.String())
-		return nil
-	}
-	block.Name = string(p.current.lit)
-	p.nextToken() // consume program name
-
-	p.skipNewlinesAndComments()
-
-	// Parse body statements
-	block.Body = p.parseBody(nil)
-
-	block.Position = ast.Pos(start, p.current.start)
-	p.expect(token.END, "PROGRAM end")
-
-	// Consume optional PROGRAM keyword and/or program name after END
-	p.consumeIf(token.PROGRAM)
-	p.consumeIf(token.Identifier)
-
-	return block
-}
-
-// parseSubroutine parses a SUBROUTINE...END SUBROUTINE block
-// Precondition: current token is SUBROUTINE
-func (p *Parser90) parseSubroutine() ast.Statement {
-	start := p.current.start
-	sub := &ast.Subroutine{}
-
-	p.expect(token.SUBROUTINE, "")
-
-	// Parse subroutine name (keywords can be used as subroutine names)
-	if !p.canUseAsIdentifier() {
-		p.addError("expected subroutine name, got " + p.current.tok.String())
-		return nil
-	}
-	sub.Name = string(p.current.lit)
-	p.nextToken() // consume subroutine name
-
-	// Parse parameter list if present
-	if p.currentTokenIs(token.LParen) {
-		sub.Parameters = p.parseParameterList()
-	}
-
-	p.skipNewlinesAndComments()
-
-	// Parse body statements
-	sub.Body = p.parseBody(sub.Parameters)
-
-	sub.Position = ast.Pos(start, p.current.start)
-	p.expect(token.END, "subroutine end")
-
-	// Consume optional SUBROUTINE keyword and/or subroutine name after END
-	p.consumeIf(token.SUBROUTINE)
-	p.consumeIf(token.Identifier)
-
-	return sub
-}
-
-// parseFunction parses a FUNCTION...END FUNCTION block
-// Precondition: current token is FUNCTION
-func (p *Parser90) parseFunction() ast.Statement {
-	start := p.current.start
-	fn := &ast.Function{}
-
-	p.expect(token.FUNCTION, "")
-
-	// Parse function name (can be Identifier, FormatSpec, or keyword used as identifier)
-	if !p.canUseAsIdentifier() {
-		p.addError("expected function name, got " + p.current.tok.String())
-		return nil
-	}
-	fn.Name = string(p.current.lit)
-	p.nextToken() // consume function name
-
-	// Parse parameter list
-	if p.currentTokenIs(token.LParen) {
-		fn.Parameters = p.parseParameterList()
-	}
-
-	// Check for RESULT clause
-	if p.consumeIf(token.RESULT) {
-		if p.expect(token.LParen, "RESULT open") {
-			if p.expectCurrent(token.Identifier) {
-				fn.ResultVariable = string(p.current.lit)
-				p.nextToken() // consume result variable name
-			}
-			p.expect(token.RParen, "RESULT close")
-		}
-	}
-
-	p.skipNewlinesAndComments()
-
-	// Parse body statements
-	fn.Body = p.parseBody(fn.Parameters)
-
-	fn.Position = ast.Pos(start, p.current.start)
-	p.expect(token.END, "FUNCTION end")
-
-	// Consume optional FUNCTION keyword and/or function name after END
-	p.consumeIf(token.FUNCTION)
-	p.consumeIf(token.Identifier)
-
-	return fn
-}
-
-// parseModule parses a MODULE...END MODULE block
-// Precondition: current token is MODULE
-func (p *Parser90) parseModule() ast.Statement {
-	start := p.current.start
-	mod := &ast.Module{}
-
-	p.expect(token.MODULE, "")
-
-	// Parse module name (keywords can be used as module names)
-	if !p.canUseAsIdentifier() {
-		p.addError("expected module name, got " + p.current.tok.String())
-		return nil
-	}
-	mod.Name = string(p.current.lit)
-	p.nextToken() // consume module name
-
-	p.skipNewlinesAndComments()
-
-	// Parse body statements
-	mod.Body = p.parseBody(nil)
-
-	// Handle CONTAINS section with recursive parsing
-	if p.consumeIf(token.CONTAINS) {
-		p.skipNewlinesAndComments()
-
-		// Recursively parse contained procedures
-		for p.loopUntil(token.END) {
-
-			// Check if this is a procedure keyword
-			if p.currentTokenIs(token.SUBROUTINE) ||
-				p.currentTokenIs(token.FUNCTION) ||
-				p.current.tok.IsAttributeKeyword() ||
-				p.current.tok.IsTypeDeclaration() {
-
-				unit := p.parseTopLevelUnit()
-				if unit != nil {
-					mod.Contains = append(mod.Contains, unit)
-				}
-			} else {
-				p.nextToken() // skip unrecognized token
-			}
-
-			p.skipNewlinesAndComments()
-		}
-	}
-
-	mod.Position = ast.Pos(start, p.current.start)
-	p.expect(token.END, "MODULE end")
-
-	// Consume optional MODULE keyword and/or module name after END
-	p.consumeIf(token.MODULE)
-	p.consumeIf(token.Identifier)
-
-	return mod
-}
-
-// parseBlockData parses a BLOCK DATA...END [BLOCK DATA] block
-func (p *Parser90) parseBlockData() ast.ProgramUnit {
-	start := p.current.start
-	bd := &ast.BlockData{}
-
-	// Consume BLOCK identifier
-	p.nextToken()
-
-	// Expect and consume DATA keyword
-	if !p.expect(token.DATA, "DATA BLOCK expected") {
-		return nil
-	}
-
-	// Parse optional block data name
-	if p.currentTokenIs(token.Identifier) {
-		bd.Name = string(p.current.lit)
-		p.nextToken()
-	}
-
-	p.skipNewlinesAndComments()
-
-	// Parse body statements
-	bd.Body = p.parseBody(nil)
-
-	bd.Position = ast.Pos(start, p.current.start)
-	p.expect(token.END, "expected END after DATA BLOCK body")
-
-	// Consume optional BLOCK DATA after END
-	if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "BLOCK" {
-		p.nextToken()
-		p.consumeIf(token.DATA)
-	}
-	p.consumeIf(token.Identifier) // Optional name after END BLOCK DATA
-
-	return bd
 }
 
 // parseArraySpec parses array dimension specification from DIMENSION(...) or entity declarator
