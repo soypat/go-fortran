@@ -2247,6 +2247,7 @@ type DerivedTypeStmt struct {
 	Name       string
 	Components []ComponentDecl
 	Label      string
+	Attributes []token.Token
 	Position
 }
 
@@ -2275,7 +2276,7 @@ func (dts *DerivedTypeStmt) AppendString(dst []byte) []byte {
 //	REAL, DIMENSION(3) :: velocity
 //	TYPE(Date), POINTER :: birth_date
 type ComponentDecl struct {
-	Type       TypeSpec      // Type with optional KIND/LEN
+	Type       TypeSpec // Type with optional KIND/LEN
 	Attributes []token.Token
 	Components []DeclEntity
 	Label      string

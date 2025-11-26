@@ -1,3 +1,8 @@
+PROGRAM blocky
+  INTEGER A, B, C
+  COMMON /BLOCK1/ A, B, C
+END PROGRAM blocky
+
 BLOCK DATA constants
 	COMMON /data/ x, y
 	REAL :: x, y
@@ -6,3 +11,4 @@ BLOCK DATA constants
 
 BLOCK DATA init
 	END BLOCK DATA
+

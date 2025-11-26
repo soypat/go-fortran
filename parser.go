@@ -2502,6 +2502,10 @@ func (p *Parser90) skipToNextStatement() {
 func (p *Parser90) parseDerivedTypeStmt() *ast.DerivedTypeStmt {
 	startPos := p.sourcePos()
 	p.expect(token.TYPE, "parse derived type")
+	attrs, spec, intent := p.parseTypeAttributes()
+	if intent != 0 || spec != nil {
+		p.addError("derived type statement should not have array spec nor intent attribute")
+	}
 	p.consumeIf(token.DoubleColon)                                // Optional :: after TYPE
 	if !p.canUseAsIdentifier() || !p.peekTokenIs(token.NewLine) { // Type name
 		p.addError("expected type name after TYPE and newline")
@@ -2535,6 +2539,7 @@ func (p *Parser90) parseDerivedTypeStmt() *ast.DerivedTypeStmt {
 	}
 	stmt := &ast.DerivedTypeStmt{
 		Name:       typeName,
+		Attributes: attrs,
 		Components: components,
 		Position:   ast.Pos(startPos.Pos, p.current.start),
 	}
@@ -3070,65 +3075,8 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 	ts := p.expectTypeSpec()
 
 	// Parse attributes (PARAMETER, INTENT, etc.)
-	var attributes []token.Token
-	var intentType ast.IntentType
-	var arraySpec *ast.ArraySpec
-	for p.loopWhile(token.Comma) {
-		p.nextToken() // consume Comma.
-		if !p.current.tok.IsAttribute() {
-			p.addError("parsing type decl attributes: " + p.current.String())
-			break
-		}
-		attributes = append(attributes, p.current.tok)
-		switch {
-		case p.consumeIf(token.INTENT):
-			p.expect(token.LParen, "INTENT attribute")
-			switch p.current.tok {
-			case token.IN:
-				intentType = ast.IntentIn
-			case token.OUT:
-				intentType = ast.IntentOut
-			case token.INOUT:
-				intentType = ast.IntentInOut
-			}
-			p.nextToken() // consume intent.
-			p.expect(token.RParen, "INTENT attribute")
-		case p.consumeIf(token.DIMENSION):
-			if p.currentTokenIs(token.LParen) {
-				arraySpec = p.parseArraySpec()
-			}
-		case p.consumeIf(token.ALLOCATABLE):
-			// Just consume token, already in attributes slice
-		case p.consumeIf(token.POINTER):
-			// Just consume token
-		case p.consumeIf(token.TARGET):
-			// Just consume token
-		case p.consumeIf(token.OPTIONAL):
-			// Just consume token
-		case p.consumeIf(token.PARAMETER):
-			// Just consume token
-		case p.consumeIf(token.SAVE):
-			// Just consume token
-		case p.consumeIf(token.EXTERNAL):
-			// Just consume token
-		case p.consumeIf(token.INTRINSIC):
-			// Just consume token
-		case p.consumeIf(token.PUBLIC):
-			// Just consume token
-		case p.consumeIf(token.PRIVATE):
-			// Just consume token
-		case p.consumeIf(token.RECURSIVE):
-			// Just consume token
-		case p.consumeIf(token.ELEMENTAL):
-			// Just consume token
-		case p.consumeIf(token.PURE):
-			// Just consume token
-		default:
-			p.addError("unexpected attribute: " + p.current.String())
-			p.nextToken() // Skip uknown tokens.
+	attributes, arraySpec, intentType := p.parseTypeAttributes()
 
-		}
-	}
 	p.expect(token.DoubleColon, "on type declaration")
 
 	// Parse entity list
@@ -3230,6 +3178,65 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		Position:   ast.Pos(start.Pos, p.current.start),
 	}
 	return stmt
+}
+
+func (p *Parser90) parseTypeAttributes() (attrs []token.Token, spec *ast.ArraySpec, intent ast.IntentType) {
+	for p.loopWhile(token.Comma) {
+		p.nextToken() // consume Comma.
+		if !p.current.tok.IsAttribute() {
+			p.addError("parsing type decl attributes: " + p.current.String())
+			break
+		}
+		attrs = append(attrs, p.current.tok)
+		switch {
+		case p.consumeIf(token.INTENT):
+			p.expect(token.LParen, "INTENT attribute")
+			switch p.current.tok {
+			case token.IN:
+				intent = ast.IntentIn
+			case token.OUT:
+				intent = ast.IntentOut
+			case token.INOUT:
+				intent = ast.IntentInOut
+			}
+			p.nextToken() // consume intent.
+			p.expect(token.RParen, "INTENT attribute")
+		case p.consumeIf(token.DIMENSION):
+			if p.currentTokenIs(token.LParen) {
+				spec = p.parseArraySpec()
+			}
+		case p.consumeIf(token.ALLOCATABLE):
+			// Just consume token, already in attributes slice
+		case p.consumeIf(token.POINTER):
+			// Just consume token
+		case p.consumeIf(token.TARGET):
+			// Just consume token
+		case p.consumeIf(token.OPTIONAL):
+			// Just consume token
+		case p.consumeIf(token.PARAMETER):
+			// Just consume token
+		case p.consumeIf(token.SAVE):
+			// Just consume token
+		case p.consumeIf(token.EXTERNAL):
+			// Just consume token
+		case p.consumeIf(token.INTRINSIC):
+			// Just consume token
+		case p.consumeIf(token.PUBLIC):
+			// Just consume token
+		case p.consumeIf(token.PRIVATE):
+			// Just consume token
+		case p.consumeIf(token.RECURSIVE):
+			// Just consume token
+		case p.consumeIf(token.ELEMENTAL):
+			// Just consume token
+		case p.consumeIf(token.PURE):
+			// Just consume token
+		default:
+			p.addError("unexpected attribute: " + p.current.String())
+			p.nextToken() // Skip uknown tokens.
+		}
+	}
+	return attrs, spec, intent
 }
 
 // parseArraySpec parses array dimension specification from DIMENSION(...) or entity declarator
