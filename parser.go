@@ -2406,6 +2406,7 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 // Precondition: current token is DATA
 // Syntax: DATA var1, var2, ... / value1, value2, ... /
 func (p *Parser90) parseDataStmt() ast.Statement {
+	//TODO: this could be simplified and modularized a lot...
 	start := p.current.start
 	p.expect(token.DATA, "")
 
@@ -2414,15 +2415,29 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 	}
 
 	// Parse variable list (before the slash)
+	// Can be: simple vars, array elements, or implied DO loops like (arr(i),i=1,n)
 	for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.NewLine) && !p.IsDone() {
-		if p.canUseAsIdentifier() {
+		if p.currentTokenIs(token.LParen) {
+			// Implied DO loop: (arr(i), i=1,n) - skip entire construct
+			depth := 1
+			p.nextToken() // consume (
+			for depth > 0 && !p.IsDone() {
+				if p.currentTokenIs(token.LParen) {
+					depth++
+				} else if p.currentTokenIs(token.RParen) {
+					depth--
+				}
+				if depth > 0 {
+					p.nextToken()
+				}
+			}
+			p.nextToken() // consume final )
+		} else if p.canUseAsIdentifier() {
 			varName := string(p.current.lit)
 			p.nextToken()
 
-			// Check if this is an array reference
+			// Array reference like arr(1)
 			if p.currentTokenIs(token.LParen) {
-				// For now, just parse as identifier and skip the subscripts
-				// Full array element support can be added later
 				depth := 1
 				p.nextToken() // consume (
 				for depth > 0 && !p.IsDone() {
@@ -2439,11 +2454,12 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 			}
 
 			stmt.Variables = append(stmt.Variables, &ast.Identifier{Value: varName})
+		} else {
+			// Unknown token - must be end of variable list (likely the /)
+			break
 		}
 
-		if p.currentTokenIs(token.Comma) {
-			p.nextToken() // consume comma
-		}
+		p.consumeIf(token.Comma)
 	}
 
 	// Expect opening slash
@@ -2452,14 +2468,39 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 	}
 
 	// Parse value list (between the slashes)
+	// Values are restricted: literals or N*literal (repetition count)
+	// Cannot use parseExpression because / is both division operator and delimiter
 	for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.NewLine) && !p.IsDone() {
-		value := p.parseExpression(0)
-		if value != nil {
-			stmt.Values = append(stmt.Values, value)
+		var value ast.Expression
+
+		// Check for repetition count: N*literal (e.g., 55*0.0)
+		if p.currentTokenIs(token.IntLit) && p.peekTokenIs(token.Asterisk) {
+			// Parse N*literal without using full expression parser
+			count := p.parsePrimaryExpr() // Parse the integer
+			if count != nil && p.currentTokenIs(token.Asterisk) {
+				p.nextToken()               // consume *
+				val := p.parsePrimaryExpr() // Parse the literal value
+				if val != nil {
+					value = &ast.BinaryExpr{
+						Left:  count,
+						Op:    token.Asterisk,
+						Right: val,
+					}
+				}
+			}
+		} else {
+			// Simple literal or identifier (named constant)
+			value = p.parsePrimaryExpr()
 		}
 
-		if p.currentTokenIs(token.Comma) {
-			p.nextToken() // consume comma
+		if value != nil {
+			stmt.Values = append(stmt.Values, value)
+		} else {
+			break // Failed to parse value
+		}
+
+		if !p.consumeIf(token.Comma) {
+			break // No more values
 		}
 	}
 
@@ -2781,7 +2822,8 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 	}
 
 	// Parse entity list
-	for p.canUseAsIdentifier() {
+	// Note: DATA can be used as a variable name here, even though tok.CanBeUsedAsIdentifier() returns false for it
+	for p.canUseAsIdentifier() || p.currentTokenIs(token.DATA) {
 		entityName := string(p.current.lit)
 		entity := ast.DeclEntity{Name: entityName}
 
