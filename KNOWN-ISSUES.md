@@ -526,20 +526,41 @@ The transpiler test suite includes workarounds for known issues:
 - Generated code compiles and runs ✅
 - Output matches expected results exactly ✅
 
-**LEVEL16 (String Intrinsics)**: ✅ Working
+**LEVEL16 (String Intrinsics and Substrings)**: ✅ Working
 - Parses correctly ✅
 - Transpiles to Go successfully ✅
-- LEN(str) → `int32(str.Len())` ✅
-- LEN_TRIM(str) → `int32(str.LenTrim())` ✅
-- TRIM(str) → `str.Trim().String()` ✅
-- INDEX(str, substr) → `int32(str.Index(substr))` ✅
-- ADJUSTL(str) → `str.AdjustL().String()` ✅
-- ADJUSTR(str) → `str.AdjustR().String()` ✅
-- All intrinsics implemented as CharacterArray methods ✅
+- **String Intrinsics**:
+  - LEN(str) → `int32(str.Len())` ✅
+  - LEN_TRIM(str) → `int32(str.LenTrim())` ✅
+  - TRIM(str) → `str.Trim().String()` ✅
+  - INDEX(str, substr) → `int32(str.Index(substr))` ✅
+  - ADJUSTL(str) → `str.AdjustL().String()` ✅
+  - ADJUSTR(str) → `str.AdjustR().String()` ✅
+- **Substring Operations**:
+  - Substring read: `str3 = str1(2:4)` → `str3.SetFromString(str1.View(2, 4).String())` ✅
+  - Substring write: `str1(2:3) = 'z'` → `str1.SetRange(2, 3, "z")` ✅
+  - CharacterArray.View() uses 3-index slicing to limit capacity ✅
+  - CharacterArray.SetRange() for substring assignment ✅
+- All intrinsics implemented as CharacterArray methods (per user request) ✅
 - Generated code compiles and runs ✅
 - Output matches expected results exactly ✅
 
-**LEVEL17-22**: Not yet implemented (planned in mellow-strolling-lovelace.md)
+**LEVEL17 (Array Intrinsics)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- **SIZE Intrinsic**:
+  - `SIZE(arr)` → `int32(arr.Size())` - total elements ✅
+  - `SIZE(arr, dim)` → `int32(arr.SizeDim(int(dim)))` - dimension-specific size ✅
+- **Array Methods**:
+  - `Array.Size() int` - returns total number of elements (product of all dimensions) ✅
+  - `Array.SizeDim(dim int) int` - returns size of specific dimension (1-based) ✅
+- Test cases:
+  - 3x4 matrix: SIZE = 12, SIZE(,1) = 3, SIZE(,2) = 4 ✅
+  - 1D vector: SIZE = 5 ✅
+- Generated code compiles and runs ✅
+- Output matches expected results exactly ✅
+
+**LEVEL18-22**: Not yet implemented (planned)
 
 ---
 
@@ -639,6 +660,41 @@ go test -run Transpile
   - Updated `transpile_test.go` maxLvl from 15 to 16
   - All tests pass with exact output matching ✅
   - All intrinsics implemented as CharacterArray methods (cleaner than package-level functions)
+- **2025-11-25** (Session 6 cont.): LEVEL16 Substring Operations
+  - Added substring operations to `golden.f90` LEVEL16:
+    - Substring read: `str3 = str1(2:4)` (extract characters 2-4)
+    - Substring write: `str1(2:3) = 'z'` (assign to substring range)
+  - Implemented substring support in transpiler:
+    - Modified `transformArrayRef()` to detect CharacterArray with RangeExpr subscript
+    - Substring read: `str1(2:4)` → `str1.View(2, 4).String()`
+    - Modified `transformArrayAssignment()` to handle substring assignment
+    - Substring write: `str1(2:3) = 'z'` → `str1.SetRange(2, 3, "z")`
+    - Updated `transformExpression()` FunctionCall case to check `charLengths` map
+    - Updated `transformAssignment()` FunctionCall case to check `charLengths` map
+  - Added `CharacterArray` methods in `intrinsic/char.go`:
+    - `SetRange(start, end int, value string)` - Set substring range (1-based indices)
+    - Modified `View()` to use 3-index slicing for correct capacity: `data[start-1:end:end]`
+    - Fixed `SetFromString()` to maintain full capacity after padding
+  - Updated `golden.out` with expected substring output (1 line)
+  - All tests pass with exact output matching ✅
+  - Verified transpiled code:
+    - Substring extraction correctly uses View() with limited capacity
+    - Substring assignment correctly uses SetRange() with space padding
+    - 3-index slicing prevents String() from returning excess data
+- **2025-11-26** (Session 7): LEVEL17 implementation - Array Intrinsics
+  - Added LEVEL17 test case to `golden.f90` with SIZE intrinsic tests
+  - Implemented array intrinsic methods in `intrinsic/array.go`:
+    - `Size() int` - returns total number of elements (product of all dimensions)
+    - `SizeDim(dim int) int` - returns size of specific dimension (1-based index)
+  - Implemented array intrinsic transpilation in `transformFunctionCall()`:
+    - `SIZE(arr)` → `int32(arr.Size())` (total elements)
+    - `SIZE(arr, dim)` → `int32(arr.SizeDim(int(dim)))` (dimension-specific)
+  - Test cases:
+    - 3x4 matrix: SIZE = 12, SIZE(,1) = 3, SIZE(,2) = 4
+    - 1D vector (size 5): SIZE = 5
+  - Updated `golden.out` with expected output (4 lines)
+  - Updated `transpile_test.go` maxLvl from 16 to 17
+  - All tests pass with exact output matching ✅
 - **2025-11-25** (Session 4): LEVEL13 implementation - Loop control (CYCLE, EXIT, CONTINUE)
   - Added LEVEL13 test case to `golden.f90` with CYCLE, EXIT, and labeled CONTINUE
   - Implemented `transformStatement()` cases for:

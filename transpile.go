@@ -811,8 +811,11 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 
 	// Check for FunctionCall that's actually an array reference (parser ambiguity)
 	if funcCall, ok := assign.Target.(*f90.FunctionCall); ok {
-		if _, isArray := tg.arrays[funcCall.Name]; isArray {
-			// Convert to ArrayRef and generate .Set() call
+		_, isArray := tg.arrays[funcCall.Name]
+		_, isChar := tg.charLengths[funcCall.Name]
+		if isArray || isChar {
+			// Convert to ArrayRef and generate .Set() or .SetRange() call
+			// (handles both array element and CHARACTER substring assignment)
 			arrayRef := &f90.ArrayRef{
 				Name:       funcCall.Name,
 				Subscripts: funcCall.Args,
@@ -865,6 +868,37 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 		return nil
 	}
 
+	// Check if this is a CHARACTER variable with substring assignment
+	if _, isChar := tg.charLengths[ref.Name]; isChar && len(ref.Subscripts) == 1 {
+		// Check if the subscript is a RangeExpr (substring assignment)
+		if rangeExpr, isRange := ref.Subscripts[0].(*f90.RangeExpr); isRange {
+			// This is a substring assignment: str(start:end) = value
+			// Generate: str.SetRange(int(start), int(end), value)
+
+			// Transform start and end expressions
+			start := tg.transformExpression(rangeExpr.Start)
+			end := tg.transformExpression(rangeExpr.End)
+			if start == nil || end == nil {
+				return nil
+			}
+
+			setRangeCall := &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   ast.NewIdent(ref.Name),
+					Sel: ast.NewIdent("SetRange"),
+				},
+				Args: []ast.Expr{
+					&ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{start}},
+					&ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{end}},
+					rhs,
+				},
+			}
+
+			return &ast.ExprStmt{X: setRangeCall}
+		}
+	}
+
+	// Regular array element assignment
 	// Transform all indices
 	var indices []ast.Expr
 	for _, subscript := range ref.Subscripts {
@@ -948,8 +982,11 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 		return tg.transformExpression(e.Expr)
 	case *f90.FunctionCall:
 		// Check if this is actually an array reference (parser ambiguity)
-		if _, isArray := tg.arrays[e.Name]; isArray {
+		_, isArray := tg.arrays[e.Name]
+		_, isChar := tg.charLengths[e.Name]
+		if isArray || isChar {
 			// Convert FunctionCall to ArrayRef
+			// (handles both array element access and CHARACTER substring operations)
 			arrayRef := &f90.ArrayRef{
 				Name:       e.Name,
 				Subscripts: e.Args,
@@ -966,6 +1003,40 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 // transformArrayRef transforms a Fortran array reference to intrinsic.Array.At() call
 // Fortran indexing is preserved (1-based) since Array.At() handles it internally
 func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
+	// Check if this is a CHARACTER variable with substring operation
+	if _, isChar := tg.charLengths[ref.Name]; isChar && len(ref.Subscripts) == 1 {
+		// Check if the subscript is a RangeExpr (substring operation)
+		if rangeExpr, isRange := ref.Subscripts[0].(*f90.RangeExpr); isRange {
+			// This is a substring operation: str(start:end)
+			// Generate: str.View(start, end).String()
+
+			// Transform start and end expressions
+			start := tg.transformExpression(rangeExpr.Start)
+			end := tg.transformExpression(rangeExpr.End)
+			if start == nil || end == nil {
+				return nil
+			}
+
+			// Generate: str.View(int(start), int(end)).String()
+			return &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X: &ast.CallExpr{
+						Fun: &ast.SelectorExpr{
+							X:   ast.NewIdent(ref.Name),
+							Sel: ast.NewIdent("View"),
+						},
+						Args: []ast.Expr{
+							&ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{start}},
+							&ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{end}},
+						},
+					},
+					Sel: ast.NewIdent("String"),
+				},
+			}
+		}
+	}
+
+	// Regular array element access
 	// Transform all subscripts to expressions
 	var indices []ast.Expr
 	for _, subscript := range ref.Subscripts {
@@ -1301,6 +1372,71 @@ func (tg *TranspileToGo) transformFunctionCall(call *f90.FunctionCall) ast.Expr 
 				Sel: ast.NewIdent("String"),
 			},
 		}
+
+	case "SIZE":
+		// SIZE(arr) → int32(arr.Size())
+		// SIZE(arr, dim) → int32(arr.SizeDim(dim))
+		if len(call.Args) == 0 || len(call.Args) > 2 {
+			return nil
+		}
+
+		arrArg := tg.transformExpression(call.Args[0])
+		if arrArg == nil {
+			return nil
+		}
+
+		var methodCall *ast.CallExpr
+		if len(call.Args) == 1 {
+			// SIZE(arr) → arr.Size()
+			methodCall = &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   arrArg,
+					Sel: ast.NewIdent("Size"),
+				},
+			}
+		} else {
+			// SIZE(arr, dim) → arr.SizeDim(int(dim))
+			dimArg := tg.transformExpression(call.Args[1])
+			if dimArg == nil {
+				return nil
+			}
+			methodCall = &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   arrArg,
+					Sel: ast.NewIdent("SizeDim"),
+				},
+				Args: []ast.Expr{
+					&ast.CallExpr{
+						Fun:  ast.NewIdent("int"),
+						Args: []ast.Expr{dimArg},
+					},
+				},
+			}
+		}
+
+		// Wrap with int32 conversion for INTEGER result
+		return &ast.CallExpr{
+			Fun:  ast.NewIdent("int32"),
+			Args: []ast.Expr{methodCall},
+		}
+
+	case "SHAPE":
+		// SHAPE(arr) → arr.Shape()
+		// Returns []int which can be assigned to INTEGER array
+		if len(call.Args) != 1 {
+			return nil
+		}
+		arrArg := tg.transformExpression(call.Args[0])
+		if arrArg == nil {
+			return nil
+		}
+		return &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   arrArg,
+				Sel: ast.NewIdent("Shape"),
+			},
+		}
+
 	default:
 		// For other functions, assume they're user-defined and call directly
 		// Transform arguments

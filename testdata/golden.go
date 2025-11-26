@@ -21,6 +21,7 @@ func main() {
 	LEVEL14()
 	LEVEL15()
 	LEVEL16()
+	LEVEL17()
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
@@ -364,9 +365,26 @@ func LEVEL16() {
 	str3.SetFromString(str1.AdjustR().String())
 	intrinsic.Print("LEVEL 16: ADJUSTR =", str3)
 	str1.SetFromString("abcdef")
-	str3.SetFromString(str1())
-	str1() = "z"
+	str3.SetFromString(str1.View(int(2), int(4)).String())
+	str1.SetRange(int(2), int(3), "z")
 	intrinsic.Print("LEVEL 16: str3 =", str3)
+}
+func LEVEL17() {
+	var matrix = intrinsic.NewArray[int32](3, 4)
+	var vector = intrinsic.NewArray[int32](5)
+	var (
+		size_total int32
+		size_dim1  int32
+		size_dim2  int32
+	)
+	size_total = int32(matrix.Size())
+	intrinsic.Print("LEVEL 17: SIZE(matrix) =", size_total)
+	size_dim1 = int32(matrix.SizeDim(int(1)))
+	intrinsic.Print("LEVEL 17: SIZE(matrix,1) =", size_dim1)
+	size_dim2 = int32(matrix.SizeDim(int(2)))
+	intrinsic.Print("LEVEL 17: SIZE(matrix,2) =", size_dim2)
+	size_total = int32(vector.Size())
+	intrinsic.Print("LEVEL 17: SIZE(vector) =", size_total)
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")

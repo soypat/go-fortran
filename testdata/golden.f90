@@ -20,6 +20,7 @@
       CALL LEVEL14()
       CALL LEVEL15()
       CALL LEVEL16()
+      CALL LEVEL17()
 
       PRINT *, '============================================='
       PRINT *, 'GOLDEN TEST COMPLETE: All levels executed!'
@@ -435,6 +436,28 @@
           str1(2:3) = 'z'
           PRINT *, 'LEVEL 16: str3 =', str3
       END SUBROUTINE LEVEL16
+
+! LEVEL 17: Array Intrinsics
+      SUBROUTINE LEVEL17()
+          INTEGER, DIMENSION(3, 4) :: matrix
+          INTEGER, DIMENSION(5) :: vector
+          INTEGER :: size_total, size_dim1, size_dim2
+
+          ! Test SIZE intrinsic (total elements)
+          size_total = SIZE(matrix)
+          PRINT *, 'LEVEL 17: SIZE(matrix) =', size_total
+
+          ! Test SIZE intrinsic with dimension
+          size_dim1 = SIZE(matrix, 1)
+          PRINT *, 'LEVEL 17: SIZE(matrix,1) =', size_dim1
+
+          size_dim2 = SIZE(matrix, 2)
+          PRINT *, 'LEVEL 17: SIZE(matrix,2) =', size_dim2
+
+          ! Test SIZE on 1D array
+          size_total = SIZE(vector)
+          PRINT *, 'LEVEL 17: SIZE(vector) =', size_total
+      END SUBROUTINE LEVEL17
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

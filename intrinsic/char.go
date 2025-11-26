@@ -49,9 +49,13 @@ func (ch CharacterArray) String() string {
 }
 
 func (ch *CharacterArray) SetFromString(data string) {
-	n := copy(ch.data[:cap(ch.data)], data)
-	ch.data = ch.data[:n]
-	ch.setUnusedToSpace()
+	ch.data = ch.data[:cap(ch.data)]  // Ensure full capacity for modification
+	n := copy(ch.data, data)
+	// Pad the rest with spaces
+	for i := n; i < cap(ch.data); i++ {
+		ch.data[i] = ' '
+	}
+	// Keep data at full capacity (Fortran semantics)
 }
 
 func (ch *CharacterArray) SetConcat(toJoin ...CharacterArray) {
@@ -65,6 +69,37 @@ func (ch *CharacterArray) SetConcat(toJoin ...CharacterArray) {
 	}
 	ch.data = ch.data[:off]
 	ch.setUnusedToSpace()
+}
+
+// SetRange sets a substring range (1-based indices) to the given value
+// Corresponds to Fortran: str(start:end) = value
+func (ch *CharacterArray) SetRange(start, end int, value string) {
+	// Ensure data slice is at full capacity for in-place modification
+	ch.data = ch.data[:cap(ch.data)]
+
+	// Convert 1-based Fortran indices to 0-based Go indices
+	startIdx := start - 1
+	endIdx := end
+
+	// Bounds checking
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if endIdx > cap(ch.data) {
+		endIdx = cap(ch.data)
+	}
+	if startIdx >= endIdx {
+		return
+	}
+
+	// Copy value into the range
+	rangeLen := endIdx - startIdx
+	n := copy(ch.data[startIdx:endIdx], value)
+
+	// Pad with spaces if value is shorter than range
+	for i := n; i < rangeLen; i++ {
+		ch.data[startIdx+i] = ' '
+	}
 }
 
 func (ch *CharacterArray) setUnusedToSpace() {
@@ -151,7 +186,7 @@ func (ch CharacterArray) Substring(start, end int) string {
 	return ch.View(start, end).String()
 }
 
-// Substring returns a view into the substring from start to end (1-based, inclusive)
+// View returns a view into the substring from start to end (1-based, inclusive)
 func (ch CharacterArray) View(start, end int) CharacterArray {
 	if end > cap(ch.data) {
 		end = cap(ch.data)
@@ -160,7 +195,8 @@ func (ch CharacterArray) View(start, end int) CharacterArray {
 		return CharacterArray{}
 	}
 	return CharacterArray{
-		// Convert start to 0-based indexing
-		data: ch.data[start-1 : end],
+		// Convert start to 0-based indexing and limit capacity to match length
+		// Using 3-index slice: data[low:high:max] where max sets the capacity
+		data: ch.data[start-1 : end : end],
 	}
 }

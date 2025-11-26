@@ -131,6 +131,28 @@ func (a *Array[T]) Len() int {
 	return a.shape[0]
 }
 
+// Size returns the total number of elements in the array
+// Corresponds to Fortran SIZE(array) intrinsic (no dimension argument)
+func (a *Array[T]) Size() int {
+	if len(a.shape) == 0 {
+		return 0
+	}
+	total := 1
+	for _, dim := range a.shape {
+		total *= dim
+	}
+	return total
+}
+
+// SizeDim returns the size of a specific dimension (1-based dimension index)
+// Corresponds to Fortran SIZE(array, dim) intrinsic
+func (a *Array[T]) SizeDim(dim int) int {
+	if dim < 1 || dim > len(a.shape) {
+		return 0
+	}
+	return a.shape[dim-1]
+}
+
 // Shape returns a copy of the shape slice (size of each dimension)
 // Corresponds to Fortran SHAPE(array) intrinsic
 func (a *Array[T]) Shape() []int {
