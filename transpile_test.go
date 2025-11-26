@@ -31,15 +31,8 @@ func TestTranspileGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var progUnits []f90.ProgramUnit
-	for {
-		pu := parser.ParseNextProgramUnit()
-		if pu != nil {
-			progUnits = append(progUnits, pu)
-		} else {
-			break
-		}
-	}
+	program := parser.ParseNextProgramUnit().(*f90.ProgramBlock)
+	progUnits := program.Contains
 	// Check for parser errors
 	helperPrintErrors(t, &parser)
 
@@ -81,11 +74,11 @@ func TestTranspileGolden(t *testing.T) {
 	}
 	progUnits = uniqueUnits
 
-	// Create program with unique units
-	program := &f90.Program{Units: progUnits}
-
 	// Collect symbols
-	syms, err := symbol.CollectFromProgram(program)
+	syms, err := symbol.CollectFromProgram(&f90.Program{
+		Units: progUnits,
+		Label: program.Name,
+	})
 	if err != nil {
 		t.Fatalf("got errors collecting symbols in golden.f90: %v", err)
 	}

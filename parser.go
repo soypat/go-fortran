@@ -2568,8 +2568,9 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 		return nil
 	}
 	// Parse component names (similar to entity list)
+	// Note: DATA can be used as component name, even though tok.CanBeUsedAsIdentifier() returns false for it
 	var components []ast.DeclEntity
-	for p.canUseAsIdentifier() {
+	for p.canUseAsIdentifier() || p.currentTokenIs(token.DATA) {
 		entity := ast.DeclEntity{
 			Name: string(p.current.lit),
 		}

@@ -1546,8 +1546,8 @@ func TestStatementParsing(t *testing.T) {
 
 				// First rule: DOUBLE PRECISION (A-H, O-Z)
 				rule1 := implStmt.Rules[0]
-				if rule1.Type.Token.String() != "DOUBLE PRECISION" {
-					t.Errorf("Rule 0: expected type 'DOUBLE PRECISION', got %q", rule1.Type.Token.String())
+				if rule1.Type.Token != token.DOUBLEPRECISION {
+					t.Errorf("Rule 0: expected type 'DOUBLEPRECISION', got %q", rule1.Type.Token.String())
 				}
 				if rule1.Type.KindOrLen != nil {
 					t.Errorf("Rule 0: expected no KIND parameter, got %v", rule1.Type.KindOrLen)
