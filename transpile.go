@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -42,6 +43,10 @@ func (tg *TranspileToGo) Reset(symTable *symbol.Table) error {
 type commonBlockInfo struct {
 	Name   string // COMMON block name (empty for blank COMMON)
 	Fields []*ast.Field
+}
+
+func (cbi commonBlockInfo) goVarname() string {
+	return cbi.Name
 }
 
 // enterProcedure initializes tracking maps for a function or subroutine
@@ -84,7 +89,11 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 }
 
 func (tg *TranspileToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
-	for blockName, block := range tg.commonBlocks {
+	// Ensure output is ordered and repeatable, we do not want to generate diffs on every transpile.
+	names := slices.AppendSeq([]string{}, maps.Keys(tg.commonBlocks))
+	slices.Sort(names)
+	for _, blockName := range names {
+		block := tg.commonBlocks[blockName]
 		// Generate: var common_<blockname> struct { ... }
 		structType := &ast.StructType{
 			Fields: &ast.FieldList{
@@ -92,12 +101,11 @@ func (tg *TranspileToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 			},
 		}
 
-		commonVarName := "common_" + strings.ToLower(blockName)
 		decl := &ast.GenDecl{
 			Tok: token.VAR,
 			Specs: []ast.Spec{
 				&ast.ValueSpec{
-					Names: []*ast.Ident{ast.NewIdent(commonVarName)},
+					Names: []*ast.Ident{ast.NewIdent(block.goVarname())},
 					Type:  structType,
 				},
 			},
@@ -1162,10 +1170,9 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 	case *f90.Identifier:
 		// Check if this identifier is in a COMMON block
 		if blockName, inCommon := tg.commonVars[e.Value]; inCommon {
-			// Generate: common_<blockname>.<varname>
-			commonStructName := "common_" + strings.ToLower(blockName)
+			block := tg.commonBlocks[blockName]
 			return &ast.SelectorExpr{
-				X:   ast.NewIdent(commonStructName),
+				X:   ast.NewIdent(block.goVarname()),
 				Sel: ast.NewIdent(e.Value),
 			}
 		}

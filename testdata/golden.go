@@ -4,7 +4,7 @@ import (
 	"github.com/soypat/go-fortran/intrinsic"
 )
 
-var common_shared struct {
+var SHARED struct {
 	x int32
 	y int32
 	z float32
@@ -450,15 +450,15 @@ func LEVEL19() {
 }
 
 func SET_COMMON_VALUES() {
-	common_shared.x = 42
-	common_shared.y = 99
-	common_shared.z = 3.14159
+	SHARED.x = 42
+	SHARED.y = 99
+	SHARED.z = 3.14159
 }
 
 func PRINT_COMMON_VALUES() {
-	intrinsic.Print("LEVEL 19: x =", common_shared.x)
-	intrinsic.Print("LEVEL 19: y =", common_shared.y)
-	intrinsic.Print("LEVEL 19: z =", common_shared.z)
+	intrinsic.Print("LEVEL 19: x =", SHARED.x)
+	intrinsic.Print("LEVEL 19: y =", SHARED.y)
+	intrinsic.Print("LEVEL 19: z =", SHARED.z)
 }
 
 func SIMPLE_SUB() {
