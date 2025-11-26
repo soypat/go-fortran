@@ -17,6 +17,8 @@ _old*
 *.so
 *.dylib
 *.hex
+*.mod
+!/go.mod
 testdata/golden
 testdata/golden.out
 

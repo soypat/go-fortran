@@ -2293,25 +2293,102 @@ func (p *Parser90) skipToNextStatement() {
 	p.consumeIf(token.NewLine)
 }
 
-// skipTypeDefinition skips from TYPE to END TYPE
-func (p *Parser90) skipTypeDefinition() {
-	p.expect(token.TYPE, "skip") // Skip TYPE
-	depth := 1
-	for depth > 0 && !p.IsDone() {
-		if p.currentTokenIs(token.TYPE) && !p.peekTokenIs(token.LParen) {
-			depth++
-			p.nextToken()
-		} else if p.currentTokenIs(token.END) && p.peekTokenIs(token.TYPE) {
-			p.nextToken() // consume END
-			p.nextToken() // consume TYPE
-			depth--
-			if depth == 0 {
-				// Consume optional type name after END TYPE
-				p.consumeIf(token.Identifier)
+// parseDerivedTypeStmt parses a derived type definition: TYPE :: name ... END TYPE
+// Example: TYPE :: person
+//
+//	  INTEGER :: age
+//	  REAL :: height
+//	END TYPE person
+func (p *Parser90) parseDerivedTypeStmt() *ast.DerivedTypeStmt {
+	startPos := p.sourcePos()
+	p.expect(token.TYPE, "parse derived type")
+	p.consumeIf(token.DoubleColon)                                // Optional :: after TYPE
+	if !p.canUseAsIdentifier() || !p.peekTokenIs(token.NewLine) { // Type name
+		p.addError("expected type name after TYPE and newline")
+		return nil
+	}
+	typeName := string(p.current.lit)
+	p.nextToken() // consume identifier.
+	p.skipNewlinesAndComments()
+	// Parse component declarations until END TYPE
+	var components []ast.ComponentDecl
+	for p.loopUntil(token.END, token.ENDTYPE) {
+		// Parse component declaration (check for type tokens)
+		if p.current.tok.IsTypeDeclaration() {
+			comp := p.parseComponentDecl()
+			if comp != nil {
+				components = append(components, *comp)
 			}
 		} else {
-			p.nextToken()
+			p.addError("expected component declaration, got " + p.current.tok.String())
 		}
+		p.skipNewlinesAndComments()
+	}
+	p.expectEndConstruct(token.TYPE, token.ENDTYPE, startPos)
+	if p.canUseAsIdentifier() {
+		if string(p.current.lit) != typeName {
+			p.addErrorWithPos(startPos, "name not matched with end label")
+			p.addError("mismatched type name")
+		}
+		p.nextToken()
+	}
+	stmt := &ast.DerivedTypeStmt{
+		Name:       typeName,
+		Components: components,
+		Position:   ast.Pos(startPos.Pos, p.current.start),
+	}
+	return stmt
+}
+
+// parseComponentDecl parses a component declaration within a derived type
+// Example: INTEGER :: age
+//
+//	REAL, DIMENSION(3) :: velocity
+//	integer, len :: rows, cols
+//	integer, kind :: k = kind(0.0)
+func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
+	startPos := p.current.start
+	if !p.current.tok.IsTypeDeclaration() {
+		p.addError("expected type declaration, got " + p.current.tok.String())
+	}
+	typeSpec := string(p.current.lit)
+	p.nextToken()
+
+	// Parse optional attributes
+	var attributes []token.Token
+	for p.loopUntil(token.DoubleColon) && p.consumeIf(token.Comma) {
+		attributes = append(attributes, p.current.tok) // Collect attribute tokens
+		p.nextToken()
+	}
+	// Expect ::
+	if !p.expect(token.DoubleColon, "in component declaration") {
+		return nil
+	}
+	// Parse component names (similar to entity list)
+	var components []ast.DeclEntity
+	for p.canUseAsIdentifier() {
+		entity := ast.DeclEntity{
+			Name: string(p.current.lit),
+		}
+		p.nextToken() // consume identifier.
+		if p.currentTokenIs(token.LParen) {
+			entity.ArraySpec = p.parseArraySpec() // Found array spec.
+		}
+		components = append(components, entity)
+		if !p.consumeIf(token.Comma) && !p.consumeIf(token.NewLine) {
+			// Skip k = kind(0.0) type component declarations.
+			for p.loopUntil(token.NewLine, token.Comma) {
+				p.nextToken()
+			}
+			p.consumeIf(token.Comma)
+		}
+	}
+
+	return &ast.ComponentDecl{
+		Type:       typeSpec,
+		Attributes: attributes,
+		Components: components,
+		Position:   ast.Pos(startPos, p.current.start),
 	}
 }
 
@@ -2380,9 +2457,8 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 			*sawDecl = true
 			return p.parseTypeDecl(paramMap)
 		} else {
-			// TYPE :: name ... END TYPE - skip entire block
-			p.skipTypeDefinition()
-			return &ast.TypeDeclaration{} // Return non-nil to indicate success
+			// TYPE :: name ... END TYPE - parse derived type definition
+			return p.parseDerivedTypeStmt()
 		}
 	case token.INTERFACE:
 		// INTERFACE block - skip entire block
@@ -3201,7 +3277,7 @@ func (p *Parser90) parseArraySpec() *ast.ArraySpec {
 	}
 
 	// Consume closing paren
-	p.consumeIf(token.RParen)
+	p.expect(token.RParen, "closing array spec")
 
 	// Determine the kind based on what we saw
 	if hasAssumedSize {
