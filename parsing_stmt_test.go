@@ -1546,11 +1546,11 @@ func TestStatementParsing(t *testing.T) {
 
 				// First rule: DOUBLE PRECISION (A-H, O-Z)
 				rule1 := implStmt.Rules[0]
-				if rule1.Type != "DOUBLE PRECISION" {
-					t.Errorf("Rule 0: expected type 'DOUBLE PRECISION', got %q", rule1.Type)
+				if rule1.Type.Token.String() != "DOUBLE PRECISION" {
+					t.Errorf("Rule 0: expected type 'DOUBLE PRECISION', got %q", rule1.Type.Token.String())
 				}
-				if rule1.Kind != nil {
-					t.Errorf("Rule 0: expected no KIND parameter, got %v", rule1.Kind)
+				if rule1.Type.KindOrLen != nil {
+					t.Errorf("Rule 0: expected no KIND parameter, got %v", rule1.Type.KindOrLen)
 				}
 				if len(rule1.LetterRanges) != 2 {
 					t.Fatalf("Rule 0: expected 2 letter ranges, got %d", len(rule1.LetterRanges))
@@ -1568,11 +1568,11 @@ func TestStatementParsing(t *testing.T) {
 
 				// Second rule: LOGICAL (L)
 				rule2 := implStmt.Rules[1]
-				if rule2.Type != "LOGICAL" {
-					t.Errorf("Rule 1: expected type 'LOGICAL', got %q", rule2.Type)
+				if rule2.Type.Token.String() != "LOGICAL" {
+					t.Errorf("Rule 1: expected type 'LOGICAL', got %q", rule2.Type.Token.String())
 				}
-				if rule2.Kind != nil {
-					t.Errorf("Rule 1: expected no KIND parameter, got %v", rule2.Kind)
+				if rule2.Type.KindOrLen != nil {
+					t.Errorf("Rule 1: expected no KIND parameter, got %v", rule2.Type.KindOrLen)
 				}
 				if len(rule2.LetterRanges) != 1 {
 					t.Fatalf("Rule 1: expected 1 letter range, got %d", len(rule2.LetterRanges))

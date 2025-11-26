@@ -280,7 +280,7 @@ END MODULE math_utils
 					fmt.Printf("  %d: IMPLICIT NONE\n", i)
 				}
 			case *ast.TypeDeclaration:
-				fmt.Printf("  %d: %s declaration with %d entities\n", i, s.Type.String(), len(s.Entities))
+				fmt.Printf("  %d: %s declaration with %d entities\n", i, s.Type.Token.String(), len(s.Entities))
 			default:
 				fmt.Printf("  %d: %T\n", i, stmt)
 			}

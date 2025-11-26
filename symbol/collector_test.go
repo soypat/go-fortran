@@ -16,14 +16,14 @@ func TestCollectSimpleTypeDeclarations(t *testing.T) {
 				Name: "test",
 				Body: []ast.Statement{
 					&ast.TypeDeclaration{
-						Type: token.INTEGER,
+						Type: ast.TypeSpec{Token: token.INTEGER},
 						Entities: []ast.DeclEntity{
 							{Name: "i"},
 							{Name: "j"},
 						},
 					},
 					&ast.TypeDeclaration{
-						Type: token.REAL,
+						Type: ast.TypeSpec{Token: token.REAL},
 						Entities: []ast.DeclEntity{
 							{Name: "x"},
 						},
@@ -124,13 +124,13 @@ func TestCollectImplicitRules(t *testing.T) {
 						IsNone: false,
 						Rules: []ast.ImplicitRule{
 							{
-								Type: "REAL",
+								Type: ast.TypeSpec{Token: token.REAL},
 								LetterRanges: []ast.LetterRange{
 									{Start: 'A', End: 'H'},
 								},
 							},
 							{
-								Type: "INTEGER",
+								Type: ast.TypeSpec{Token: token.INTEGER},
 								LetterRanges: []ast.LetterRange{
 									{Start: 'I', End: 'N'},
 								},
@@ -172,14 +172,14 @@ func TestCollectFunction(t *testing.T) {
 		Units: []ast.ProgramUnit{
 			&ast.Function{
 				Name:       "compute",
-				ResultType: token.REAL,
+				Type: ast.TypeSpec{Token: token.REAL},
 				Parameters: []ast.Parameter{
-					{Name: "x", Type: token.REAL},
-					{Name: "n", Type: token.INTEGER},
+					{Name: "x", Type: ast.TypeSpec{Token: token.REAL}},
+					{Name: "n", Type: ast.TypeSpec{Token: token.INTEGER}},
 				},
 				Body: []ast.Statement{
 					&ast.TypeDeclaration{
-						Type: token.REAL,
+						Type: ast.TypeSpec{Token: token.REAL},
 						Entities: []ast.DeclEntity{
 							{Name: "result"},
 						},
@@ -254,8 +254,8 @@ func TestCollectSubroutine(t *testing.T) {
 			&ast.Subroutine{
 				Name: "process",
 				Parameters: []ast.Parameter{
-					{Name: "data", Type: token.REAL},
-					{Name: "size", Type: token.INTEGER},
+					{Name: "data", Type: ast.TypeSpec{Token: token.REAL}},
+					{Name: "size", Type: ast.TypeSpec{Token: token.INTEGER}},
 				},
 				Body: []ast.Statement{},
 			},
@@ -438,7 +438,7 @@ func TestCollectNestedScopes(t *testing.T) {
 				Name: "mymod",
 				Body: []ast.Statement{
 					&ast.TypeDeclaration{
-						Type: token.INTEGER,
+						Type: ast.TypeSpec{Token: token.INTEGER},
 						Entities: []ast.DeclEntity{
 							{Name: "module_var"},
 						},
@@ -447,7 +447,7 @@ func TestCollectNestedScopes(t *testing.T) {
 				Contains: []ast.ProgramUnit{
 					&ast.Subroutine{
 						Name:       "modsub",
-						Parameters: []ast.Parameter{{Name: "x", Type: token.REAL}},
+						Parameters: []ast.Parameter{{Name: "x", Type: ast.TypeSpec{Token: token.REAL}}},
 						Body:       []ast.Statement{},
 					},
 				},
@@ -505,7 +505,7 @@ func TestCollectParameterAttribute(t *testing.T) {
 				Name: "test",
 				Body: []ast.Statement{
 					&ast.TypeDeclaration{
-						Type:       token.REAL,
+						Type:       ast.TypeSpec{Token: token.REAL},
 						Attributes: []token.Token{token.PARAMETER},
 						Entities: []ast.DeclEntity{
 							{Name: "PI", Initializer: "3.14159"},

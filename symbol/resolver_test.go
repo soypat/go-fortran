@@ -80,7 +80,7 @@ func TestResolveWithIMPLICITNONE(t *testing.T) {
 				Body: []ast.Statement{
 					&ast.ImplicitStatement{IsNone: true},
 					&ast.TypeDeclaration{
-						Type: token.INTEGER,
+						Type: ast.TypeSpec{Token: token.INTEGER},
 						Entities: []ast.DeclEntity{{Name: "i"}},
 					},
 					// x is used but not declared - should error with IMPLICIT NONE
@@ -133,7 +133,7 @@ func TestResolveWithCustomIMPLICIT(t *testing.T) {
 						IsNone: false,
 						Rules: []ast.ImplicitRule{
 							{
-								Type: "REAL",
+								Type: ast.TypeSpec{Token: token.REAL},
 								LetterRanges: []ast.LetterRange{
 									{Start: 'A', End: 'Z'},
 								},
@@ -391,7 +391,7 @@ func TestResolveArrayRef(t *testing.T) {
 				Name: "test",
 				Body: []ast.Statement{
 					&ast.TypeDeclaration{
-						Type: token.REAL,
+						Type: ast.TypeSpec{Token: token.REAL},
 						Entities: []ast.DeclEntity{
 							{
 								Name: "arr",
@@ -456,11 +456,11 @@ func TestResolveCompleteProgram(t *testing.T) {
 				Body: []ast.Statement{
 					// Explicit declarations
 					&ast.TypeDeclaration{
-						Type: token.INTEGER,
+						Type: ast.TypeSpec{Token: token.INTEGER},
 						Entities: []ast.DeclEntity{{Name: "n"}},
 					},
 					&ast.TypeDeclaration{
-						Type: token.REAL,
+						Type: ast.TypeSpec{Token: token.REAL},
 						Entities: []ast.DeclEntity{
 							{
 								Name: "data",

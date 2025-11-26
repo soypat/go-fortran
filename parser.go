@@ -2782,16 +2782,47 @@ func (p *Parser90) parseUse() ast.Statement {
 	return stmt
 }
 
+// expectTypeSpecIntrinsic parses an intrinsic type specification and returns a TypeSpec.
+//
+// Fortran Spec: intrinsic-type-spec (F90 R502, F77 Table 5)
+//
+// Syntax:
+//   - INTEGER [ kind-selector ]
+//   - REAL [ kind-selector ]
+//   - DOUBLE PRECISION
+//   - COMPLEX [ kind-selector ]
+//   - LOGICAL [ kind-selector ]
+//   - CHARACTER [ char-selector ]
+//
+// Kind selectors:
+//   - ( KIND = scalar-int-expr )
+//   - ( scalar-int-expr )
+//   - * digit-string   (F77 syntax)
+//
+// Character selectors:
+//   - ( LEN = char-length )
+//   - ( char-length )
+//   - * char-length   (F77 syntax)
+//
+// Examples:
+//   - INTEGER(KIND=8)   → TypeSpec{Token: INTEGER, KindOrLen: 8}
+//   - REAL*8            → TypeSpec{Token: REAL, KindOrLen: 8}
+//   - CHARACTER(LEN=20) → TypeSpec{Token: CHARACTER, KindOrLen: 20}
+//   - DOUBLE PRECISION  → TypeSpec{Token: DOUBLEPRECISION}
 func (p *Parser90) expectTypeSpecIntrinsic() (ts ast.TypeSpec) {
 	if !p.current.tok.IsTypeIntrinsic() {
 		p.addError("expected type instrinsic, got " + p.current.String())
 		return ast.TypeSpec{}
 	}
-	// typename contained in token, no need to return string representation, consume it.
+	ts.Token = p.current.tok
 	p.nextToken()
+
+	// Handle DOUBLE PRECISION as two tokens → DOUBLEPRECISION
 	if ts.Token == token.DOUBLE && p.consumeIf(token.PRECISION) {
 		ts.Token = token.DOUBLEPRECISION
 	}
+
+	// Parse optional KIND selector or CHARACTER length
 	if p.currentTokenIs(token.LParen) || p.currentTokenIs(token.Asterisk) {
 		switch ts.Token {
 		case token.CHARACTER:
@@ -2806,9 +2837,29 @@ func (p *Parser90) expectTypeSpecIntrinsic() (ts ast.TypeSpec) {
 	return ts
 }
 
+// expectTypeSpec parses a type specification and returns a TypeSpec.
+//
+// Fortran Spec: type-spec (F90 R501)
+//
+// Syntax:
+//   - intrinsic-type-spec  → handled by expectTypeSpecIntrinsic()
+//   - TYPE ( type-name )   → derived type
+//
+// The type-spec appears in:
+//   - Type declaration statements: INTEGER :: x, REAL :: y
+//   - FUNCTION result types: REAL FUNCTION foo()
+//   - IMPLICIT statements: IMPLICIT REAL (A-H)
+//   - Component declarations: TYPE person; INTEGER :: age; END TYPE
+//
+// Examples:
+//   - INTEGER           → TypeSpec{Token: INTEGER}
+//   - REAL(KIND=8)      → TypeSpec{Token: REAL, KindOrLen: 8}
+//   - TYPE(person)      → TypeSpec{Token: TYPE, Name: "person"}
+//   - CHARACTER(LEN=20) → TypeSpec{Token: CHARACTER, KindOrLen: 20}
 func (p *Parser90) expectTypeSpec() (ts ast.TypeSpec) {
 	ts.Token = p.current.tok
 	if ts.Token == token.TYPE {
+		// Derived type: TYPE(typename)
 		p.nextToken()
 		if !p.consumeIf(token.LParen) || !p.canUseAsIdentifier() || !p.peekTokenIs(token.RParen) {
 			p.addError("expected TYPE(<typename>)")
@@ -2819,6 +2870,7 @@ func (p *Parser90) expectTypeSpec() (ts ast.TypeSpec) {
 		p.nextToken() // consume )
 		return ts     // tok=TYPE
 	}
+	// Intrinsic type
 	return p.expectTypeSpecIntrinsic()
 }
 

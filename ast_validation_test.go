@@ -147,8 +147,8 @@ END SUBROUTINE old_style
 					t.Errorf("Parameter %d: expected name %q, got %q", i, exp.name, param.Name)
 				}
 
-				if param.Type.String() != exp.typ {
-					t.Errorf("Parameter %d (%s): expected type %q, got %q", i, param.Name, exp.typ, param.Type.String())
+				if param.Type.Token.String() != exp.typ {
+					t.Errorf("Parameter %d (%s): expected type %q, got %q", i, param.Name, exp.typ, param.Type.Token.String())
 				}
 
 				if param.Intent != exp.intent {
@@ -368,8 +368,8 @@ END PROGRAM test
 				for _, param := range params {
 					if param.Name == exp.name {
 						found = true
-						actualType = param.Type.String()
-						actualCharLenExpr = param.CharLen
+						actualType = param.Type.Token.String()
+						actualCharLenExpr = param.Type.KindOrLen
 						// Convert Expression to string for comparison if present
 						if actualCharLenExpr != nil {
 							actualCharLen = exprToString(actualCharLenExpr)
@@ -398,7 +398,7 @@ END PROGRAM test
 									if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
 										for _, e := range typeDecl.Entities {
 											if e.Name == entity.Name {
-												actualType = typeDecl.Type.String()
+												actualType = typeDecl.Type.Token.String()
 												break
 											}
 										}
@@ -409,7 +409,7 @@ END PROGRAM test
 									if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
 										for _, e := range typeDecl.Entities {
 											if e.Name == entity.Name {
-												actualType = typeDecl.Type.String()
+												actualType = typeDecl.Type.Token.String()
 												break
 											}
 										}
@@ -1044,15 +1044,15 @@ END PROGRAM`,
 
 			// Check KIND parameter
 			if tt.expectKind {
-				if typeDecl.KindParam == nil {
+				if typeDecl.Type.KindOrLen == nil {
 					t.Errorf("Expected KindParam to be non-nil")
 					return
 				}
 
 				if tt.kindIsLiteral {
-					lit, ok := typeDecl.KindParam.(*ast.IntegerLiteral)
+					lit, ok := typeDecl.Type.KindOrLen.(*ast.IntegerLiteral)
 					if !ok {
-						t.Errorf("Expected KIND to be IntegerLiteral, got %T", typeDecl.KindParam)
+						t.Errorf("Expected KIND to be IntegerLiteral, got %T", typeDecl.Type.KindOrLen)
 						return
 					}
 					if lit.Value != tt.kindValue {
@@ -1060,8 +1060,8 @@ END PROGRAM`,
 					}
 				}
 			} else {
-				if typeDecl.KindParam != nil {
-					t.Errorf("Expected KindParam to be nil for default kind, got %T", typeDecl.KindParam)
+				if typeDecl.Type.KindOrLen != nil {
+					t.Errorf("Expected KindOrLen to be nil for default kind, got %T", typeDecl.Type.KindOrLen)
 				}
 			}
 		})
@@ -1191,23 +1191,23 @@ END FUNCTION`
 		t.Fatalf("Expected Function, got %T", unit)
 	}
 
-	if fn.ResultType.String() != "REAL" {
-		t.Errorf("Expected ResultType 'REAL', got '%s'", fn.ResultType)
+	if fn.Type.Token.String() != "REAL" {
+		t.Errorf("Expected Type 'REAL', got '%s'", fn.Type.Token)
 	}
 
-	if fn.ResultKind == nil {
-		t.Errorf("Expected ResultKind to be non-nil")
+	if fn.Type.KindOrLen == nil {
+		t.Errorf("Expected KindOrLen to be non-nil")
 		return
 	}
 
-	lit, ok := fn.ResultKind.(*ast.IntegerLiteral)
+	lit, ok := fn.Type.KindOrLen.(*ast.IntegerLiteral)
 	if !ok {
-		t.Errorf("Expected ResultKind to be IntegerLiteral, got %T", fn.ResultKind)
+		t.Errorf("Expected KindOrLen to be IntegerLiteral, got %T", fn.Type.KindOrLen)
 		return
 	}
 
 	if lit.Value != 8 {
-		t.Errorf("Expected ResultKind value 8, got %d", lit.Value)
+		t.Errorf("Expected KindOrLen value 8, got %d", lit.Value)
 	}
 }
 
@@ -1247,17 +1247,17 @@ END SUBROUTINE`
 	if param0.Name != "n" {
 		t.Errorf("Expected parameter 0 name 'n', got '%s'", param0.Name)
 	}
-	if param0.Type.String() != "INTEGER" {
-		t.Errorf("Expected parameter 0 type 'INTEGER', got '%s'", param0.Type)
+	if param0.Type.Token.String() != "INTEGER" {
+		t.Errorf("Expected parameter 0 type 'INTEGER', got '%s'", param0.Type.Token)
 	}
-	if param0.TypeKind == nil {
-		t.Errorf("Expected parameter 0 TypeKind to be non-nil")
+	if param0.Type.KindOrLen == nil {
+		t.Errorf("Expected parameter 0 KindOrLen to be non-nil")
 	} else {
-		lit, ok := param0.TypeKind.(*ast.IntegerLiteral)
+		lit, ok := param0.Type.KindOrLen.(*ast.IntegerLiteral)
 		if !ok {
-			t.Errorf("Expected parameter 0 TypeKind to be IntegerLiteral, got %T", param0.TypeKind)
+			t.Errorf("Expected parameter 0 KindOrLen to be IntegerLiteral, got %T", param0.Type.KindOrLen)
 		} else if lit.Value != 4 {
-			t.Errorf("Expected parameter 0 TypeKind value 4, got %d", lit.Value)
+			t.Errorf("Expected parameter 0 KindOrLen value 4, got %d", lit.Value)
 		}
 	}
 
@@ -1266,17 +1266,17 @@ END SUBROUTINE`
 	if param1.Name != "arr" {
 		t.Errorf("Expected parameter 1 name 'arr', got '%s'", param1.Name)
 	}
-	if param1.Type.String() != "REAL" {
-		t.Errorf("Expected parameter 1 type 'REAL', got '%s'", param1.Type)
+	if param1.Type.Token.String() != "REAL" {
+		t.Errorf("Expected parameter 1 type 'REAL', got '%s'", param1.Type.Token)
 	}
-	if param1.TypeKind == nil {
-		t.Errorf("Expected parameter 1 TypeKind to be non-nil")
+	if param1.Type.KindOrLen == nil {
+		t.Errorf("Expected parameter 1 KindOrLen to be non-nil")
 	} else {
-		lit, ok := param1.TypeKind.(*ast.IntegerLiteral)
+		lit, ok := param1.Type.KindOrLen.(*ast.IntegerLiteral)
 		if !ok {
-			t.Errorf("Expected parameter 1 TypeKind to be IntegerLiteral, got %T", param1.TypeKind)
+			t.Errorf("Expected parameter 1 KindOrLen to be IntegerLiteral, got %T", param1.Type.KindOrLen)
 		} else if lit.Value != 8 {
-			t.Errorf("Expected parameter 1 TypeKind value 8, got %d", lit.Value)
+			t.Errorf("Expected parameter 1 KindOrLen value 8, got %d", lit.Value)
 		}
 	}
 }
@@ -1708,8 +1708,8 @@ END PROGRAM
 					}
 					rule := implicitStmt.Rules[i]
 
-					if rule.Type != expectedRule.typ {
-						t.Errorf("Rule %d: expected type '%s', got '%s'", i, expectedRule.typ, rule.Type)
+					if rule.Type.Token.String() != expectedRule.typ {
+						t.Errorf("Rule %d: expected type '%s', got '%s'", i, expectedRule.typ, rule.Type.Token.String())
 					}
 
 					if len(rule.LetterRanges) != len(expectedRule.ranges) {

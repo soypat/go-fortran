@@ -70,9 +70,9 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 		if param.ArraySpec != nil {
 			tg.arrays[param.Name] = param.ArraySpec
 			// Array element type will be set from parameter type
-			tp := tg.fortranTypeToGoWithKind(param.Type, param.TypeKind)
+			tp := tg.fortranTypeToGoWithKind(param.Type.Token, param.Type.KindOrLen)
 			if tp == nil {
-				panic(fmt.Sprintf("unknown parameter type: %s", param.Type))
+				panic(fmt.Sprintf("unknown parameter type: %s", param.Type.Token))
 			}
 			tg.arrayTypes[param.Name] = tp
 		}
@@ -172,9 +172,9 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 	bodyStmts = tg.convertFunctionResultToReturn(fn.Name, bodyStmts)
 
 	// Map Fortran result type to Go type, considering KIND parameter
-	resultType := tg.fortranTypeToGoWithKind(fn.ResultType, fn.ResultKind)
+	resultType := tg.fortranTypeToGoWithKind(fn.Type.Token, fn.Type.KindOrLen)
 	if resultType == nil {
-		return nil, fmt.Errorf("unknown fortran result type: %s", fn.ResultType)
+		return nil, fmt.Errorf("unknown fortran result type: %s", fn.Type.Token)
 	}
 
 	// Create function declaration
@@ -295,9 +295,9 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 
 	for _, param := range params {
 		// Get the Go type for this parameter, considering KIND
-		goType := tg.fortranTypeToGoWithKind(param.Type, param.TypeKind)
+		goType := tg.fortranTypeToGoWithKind(param.Type.Token, param.Type.KindOrLen)
 		if goType == nil {
-			panic(fmt.Sprintf("unhandled type %s", param.Type))
+			panic(fmt.Sprintf("unhandled type %s", param.Type.Token))
 		}
 		// Handle arrays - always use intrinsic.Array[T]
 		if param.ArraySpec != nil {
@@ -957,7 +957,7 @@ func (tg *TranspileToGo) fortranConstantToGoExpr(fortranExpr string) ast.Expr {
 // transformTypeDeclaration transforms a Fortran type declaration to Go var declaration
 func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast.Stmt {
 	// Map Fortran type to Go type, considering KIND parameter
-	goType := tg.fortranTypeToGoWithKind(decl.Type, decl.KindParam)
+	goType := tg.fortranTypeToGoWithKind(decl.Type.Token, decl.Type.KindOrLen)
 	if goType == nil {
 		return nil
 	}
@@ -1033,7 +1033,7 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 				// Convert Fortran constant expression to Go expression
 				spec.Values = []ast.Expr{tg.fortranConstantToGoExpr(initStr)}
 			}
-		} else if decl.Type == f90token.CHARACTER && entity.CharLen != nil {
+		} else if decl.Type.Token == f90token.CHARACTER && entity.CharLen != nil {
 			// For CHARACTER variables (not constants), initialize with CharacterArray
 			if length := tg.extractIntLiteral(entity.CharLen); length > 0 {
 				// Track CHARACTER length for later use in assignments
