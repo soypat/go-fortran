@@ -244,9 +244,10 @@ func (p *Parser90) registerTopLevelParsers() {
 // parseTopLevelUnit dispatches to the appropriate registered statement parser
 func (p *Parser90) parseTopLevelUnit() ast.ProgramUnit {
 	p.skipNewlinesAndComments()
-	if p.IsDone() {
+	if p.IsDone() || p.current.tok.IsEnd() {
 		return nil
 	}
+
 	// Special case: BLOCK DATA (BLOCK is an identifier, DATA is a keyword)
 	if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "BLOCK" && p.peekTokenIs(token.DATA) {
 		return p.parseBlockData()
@@ -343,7 +344,8 @@ func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramU
 		if unit != nil {
 			dst = append(dst, unit)
 		} else {
-			p.addError("failure while parsing program units")
+			// parseTopLevelUnit returns nil when it encounters END tokens
+			break
 		}
 	}
 	return dst
@@ -3077,7 +3079,9 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 	// Parse attributes (PARAMETER, INTENT, etc.)
 	attributes, arraySpec, intentType := p.parseTypeAttributes()
 
-	p.expect(token.DoubleColon, "on type declaration")
+	// F77: INTEGER A, B, C (no ::)
+	// F90: INTEGER :: A, B, C (with ::)
+	p.consumeIf(token.DoubleColon)
 
 	// Parse entity list
 	// Note: DATA can be used as a variable name here, even though tok.CanBeUsedAsIdentifier() returns false for it
