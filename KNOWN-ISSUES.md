@@ -551,16 +551,43 @@ The transpiler test suite includes workarounds for known issues:
 - **SIZE Intrinsic**:
   - `SIZE(arr)` → `int32(arr.Size())` - total elements ✅
   - `SIZE(arr, dim)` → `int32(arr.SizeDim(int(dim)))` - dimension-specific size ✅
+- **LBOUND Intrinsic**:
+  - `LBOUND(arr, dim)` → `int32(arr.LowerDim(int(dim)))` - lower bound of dimension ✅
+- **UBOUND Intrinsic**:
+  - `UBOUND(arr, dim)` → `int32(arr.UpperDim(int(dim)))` - upper bound of dimension ✅
 - **Array Methods**:
   - `Array.Size() int` - returns total number of elements (product of all dimensions) ✅
   - `Array.SizeDim(dim int) int` - returns size of specific dimension (1-based) ✅
+  - `Array.LowerDim(dim int) int` - returns lower bound of specific dimension ✅
+  - `Array.UpperDim(dim int) int` - returns upper bound of specific dimension ✅
 - Test cases:
   - 3x4 matrix: SIZE = 12, SIZE(,1) = 3, SIZE(,2) = 4 ✅
   - 1D vector: SIZE = 5 ✅
+  - Bounds: LBOUND = 1, UBOUND = 3 (dim 1) and 4 (dim 2) ✅
 - Generated code compiles and runs ✅
 - Output matches expected results exactly ✅
 
-**LEVEL18-22**: Not yet implemented (planned)
+**LEVEL18 (ALLOCATE and DEALLOCATE)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- **ALLOCATABLE Attribute**:
+  - `INTEGER, ALLOCATABLE, DIMENSION(:) :: vec` → `var vec *intrinsic.Array[int32]` (uninitialized pointer) ✅
+  - Arrays tracked in `allocatables` map to skip initialization ✅
+- **ALLOCATE Statement**:
+  - `ALLOCATE(vec(5))` → `vec = intrinsic.NewArray[int32](5)` ✅
+  - `ALLOCATE(mat(2,3))` → `mat = intrinsic.NewArray[int32](2, 3)` ✅
+  - Parser creates FunctionCall nodes, not ArrayRef, handled in transpiler ✅
+- **DEALLOCATE Statement**:
+  - `DEALLOCATE(vec)` → `vec = nil` ✅
+  - Multiple deallocations in one statement supported ✅
+- Test cases:
+  - 1D array: ALLOCATE(vec(5)), use elements, DEALLOCATE ✅
+  - 2D array: ALLOCATE(mat(2,3)), use elements, DEALLOCATE ✅
+  - SIZE() intrinsic works on allocated arrays ✅
+- Generated code compiles and runs ✅
+- Output matches expected results exactly ✅
+
+**LEVEL19-22**: Not yet implemented (planned)
 
 ---
 
@@ -694,6 +721,41 @@ go test -run Transpile
     - 1D vector (size 5): SIZE = 5
   - Updated `golden.out` with expected output (4 lines)
   - Updated `transpile_test.go` maxLvl from 16 to 17
+  - All tests pass with exact output matching ✅
+- **2025-11-26** (Session 7 cont.): LEVEL17 expansion - LBOUND/UBOUND intrinsics
+  - Expanded LEVEL17 test case with LBOUND and UBOUND tests
+  - Implemented additional array intrinsic methods in `intrinsic/array.go`:
+    - `LowerDim(dim int) int` - returns lower bound of specific dimension (1-based)
+    - `UpperDim(dim int) int` - returns upper bound of specific dimension (1-based)
+  - Implemented LBOUND/UBOUND transpilation in `transformFunctionCall()`:
+    - `LBOUND(arr, dim)` → `int32(arr.LowerDim(int(dim)))`
+    - `UBOUND(arr, dim)` → `int32(arr.UpperDim(int(dim)))`
+  - Test cases:
+    - 3x4 matrix: LBOUND(,1) = 1, LBOUND(,2) = 1
+    - 3x4 matrix: UBOUND(,1) = 3, UBOUND(,2) = 4
+  - Updated `golden.out` with expected output (4 additional lines, 8 total for LEVEL17)
+  - All tests pass with exact output matching ✅
+- **2025-11-26** (Session 7 cont.): LEVEL18 implementation - ALLOCATE and DEALLOCATE
+  - Added LEVEL18 test case to `golden.f90` with ALLOCATABLE arrays and ALLOCATE/DEALLOCATE
+  - Added `allocatables` map to `TranspileToGo` struct to track ALLOCATABLE arrays
+  - Modified `transformTypeDeclaration()` to detect ALLOCATABLE attribute:
+    - Creates `transformAllocatableArrayDeclaration()` for uninitialized pointer declarations
+    - `INTEGER, ALLOCATABLE, DIMENSION(:) :: vec` → `var vec *intrinsic.Array[int32]`
+  - Implemented `transformAllocateStmt()` function:
+    - Handles parser ambiguity: ALLOCATE objects parsed as FunctionCall, not ArrayRef
+    - Transforms both FunctionCall and ArrayRef cases
+    - `ALLOCATE(vec(5))` → `vec = intrinsic.NewArray[int32](5)`
+    - `ALLOCATE(mat(2,3))` → `mat = intrinsic.NewArray[int32](2, 3)`
+  - Implemented `transformDeallocateStmt()` function:
+    - Handles Identifier, ArrayRef, and FunctionCall cases
+    - `DEALLOCATE(vec)` → `vec = nil`
+  - Added statement cases in `transformStatement()` for AllocateStmt and DeallocateStmt
+  - Test cases:
+    - 1D array: ALLOCATE(5), assign values, verify with SIZE, DEALLOCATE
+    - 2D array: ALLOCATE(2,3), assign values, verify with SIZE, DEALLOCATE
+  - Updated `golden.out` with expected output (8 lines)
+  - Updated `transpile_test.go` maxLvl from 17 to 18
+  - **Debugging**: Fixed parser ambiguity where ALLOCATE(arr(dims)) creates FunctionCall not ArrayRef
   - All tests pass with exact output matching ✅
 - **2025-11-25** (Session 4): LEVEL13 implementation - Loop control (CYCLE, EXIT, CONTINUE)
   - Added LEVEL13 test case to `golden.f90` with CYCLE, EXIT, and labeled CONTINUE

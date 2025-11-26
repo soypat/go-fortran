@@ -21,6 +21,7 @@
       CALL LEVEL15()
       CALL LEVEL16()
       CALL LEVEL17()
+      CALL LEVEL18()
 
       PRINT *, '============================================='
       PRINT *, 'GOLDEN TEST COMPLETE: All levels executed!'
@@ -442,6 +443,7 @@
           INTEGER, DIMENSION(3, 4) :: matrix
           INTEGER, DIMENSION(5) :: vector
           INTEGER :: size_total, size_dim1, size_dim2
+          INTEGER :: lb, ub
 
           ! Test SIZE intrinsic (total elements)
           size_total = SIZE(matrix)
@@ -457,7 +459,49 @@
           ! Test SIZE on 1D array
           size_total = SIZE(vector)
           PRINT *, 'LEVEL 17: SIZE(vector) =', size_total
+
+          ! Test LBOUND intrinsic
+          lb = LBOUND(matrix, 1)
+          PRINT *, 'LEVEL 17: LBOUND(matrix,1) =', lb
+
+          lb = LBOUND(matrix, 2)
+          PRINT *, 'LEVEL 17: LBOUND(matrix,2) =', lb
+
+          ! Test UBOUND intrinsic
+          ub = UBOUND(matrix, 1)
+          PRINT *, 'LEVEL 17: UBOUND(matrix,1) =', ub
+
+          ub = UBOUND(matrix, 2)
+          PRINT *, 'LEVEL 17: UBOUND(matrix,2) =', ub
       END SUBROUTINE LEVEL17
+
+! LEVEL 18: ALLOCATE and DEALLOCATE
+      SUBROUTINE LEVEL18()
+          INTEGER, ALLOCATABLE, DIMENSION(:) :: vec
+          INTEGER, ALLOCATABLE, DIMENSION(:,:) :: mat
+
+          ! Allocate 1D array
+          ALLOCATE(vec(5))
+          vec(1) = 10
+          vec(2) = 20
+          vec(3) = 30
+          PRINT *, 'LEVEL 18: vec(1) =', vec(1)
+          PRINT *, 'LEVEL 18: vec(3) =', vec(3)
+          PRINT *, 'LEVEL 18: SIZE(vec) =', SIZE(vec)
+
+          ! Allocate 2D array
+          ALLOCATE(mat(2, 3))
+          mat(1, 1) = 100
+          mat(2, 3) = 200
+          PRINT *, 'LEVEL 18: mat(1,1) =', mat(1, 1)
+          PRINT *, 'LEVEL 18: mat(2,3) =', mat(2, 3)
+          PRINT *, 'LEVEL 18: SIZE(mat) =', SIZE(mat)
+
+          ! Deallocate
+          DEALLOCATE(vec)
+          DEALLOCATE(mat)
+          PRINT *, 'LEVEL 18: Arrays deallocated'
+      END SUBROUTINE LEVEL18
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

@@ -87,7 +87,6 @@ func TestTranspileGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("got errors collecting symbols in golden.f90: %v", err)
 	}
-	const maxLvl = 17 // Currently testing up to LEVEL17
 	// TODO: Fix type resolver to skip format specifiers
 	// For now, skip type resolution as it's not needed for basic transpilation
 	// resolver := symbol.NewTypeResolver(syms)
@@ -105,10 +104,13 @@ func TestTranspileGolden(t *testing.T) {
 	var funcsrc bytes.Buffer
 
 	// Transpile LEVEL subroutines
-	for lvl := 1; lvl <= maxLvl; lvl++ {
+	lvl := 0
+	for {
+		lvl++
 		routine := helperGetGoldenLevel(t, lvl, progUnits)
 		if routine == nil {
-			t.Fatal("failed to get routine")
+			lvl--
+			break
 		}
 		var gofunc *ast.FuncDecl
 		t.Run(routine.Name, func(t *testing.T) {
@@ -119,7 +121,12 @@ func TestTranspileGolden(t *testing.T) {
 			}
 			helperWriteGoFunc(t, &funcsrc, gofunc)
 		})
+
 	}
+	if lvl < 18 {
+		t.Fatalf("expected at least 18 levels, got %d", lvl)
+	}
+	maxLvl := lvl
 	// write helper subroutines:
 	for _, pu := range progUnits {
 		if sub, ok := pu.(*f90.Subroutine); ok && !strings.HasPrefix(sub.Name, "LEVEL") {

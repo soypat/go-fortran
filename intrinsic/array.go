@@ -160,15 +160,33 @@ func (a *Array[T]) Shape() []int {
 }
 
 // Lower returns a copy of the lower bounds slice
-// Corresponds to Fortran LBOUND(array) intrinsic
+// Corresponds to Fortran LBOUND(array) intrinsic (no dimension argument)
 func (a *Array[T]) Lower() []int {
 	return append([]int(nil), a.lower...)
 }
 
+// LowerDim returns the lower bound of a specific dimension (1-based dimension index)
+// Corresponds to Fortran LBOUND(array, dim) intrinsic
+func (a *Array[T]) LowerDim(dim int) int {
+	if dim < 1 || dim > len(a.lower) {
+		return 0
+	}
+	return a.lower[dim-1]
+}
+
 // Upper returns a copy of the upper bounds slice
-// Corresponds to Fortran UBOUND(array) intrinsic
+// Corresponds to Fortran UBOUND(array) intrinsic (no dimension argument)
 func (a *Array[T]) Upper() []int {
 	return append([]int(nil), a.upper...)
+}
+
+// UpperDim returns the upper bound of a specific dimension (1-based dimension index)
+// Corresponds to Fortran UBOUND(array, dim) intrinsic
+func (a *Array[T]) UpperDim(dim int) int {
+	if dim < 1 || dim > len(a.upper) {
+		return 0
+	}
+	return a.upper[dim-1]
 }
 
 // offset calculates the flat index for multi-dimensional access using column-major layout

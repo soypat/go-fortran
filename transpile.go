@@ -20,6 +20,7 @@ type TranspileToGo struct {
 	charLengths   map[string]int            // Track CHARACTER(LEN=n) for padding assignments
 	arrays        map[string]*f90.ArraySpec // Track array dimensions for initialization
 	arrayTypes    map[string]ast.Expr       // Track element types for arrays
+	allocatables  map[string]bool           // Track ALLOCATABLE arrays (don't initialize)
 	parameters    map[string]bool           // Track parameter names to avoid redeclaration
 	pointerParams map[string]bool           // Track OUT/INOUT scalar parameters (need dereference in assignments)
 }
@@ -41,6 +42,7 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 	// Reset tracking maps
 	tg.arrays = make(map[string]*f90.ArraySpec)
 	tg.arrayTypes = make(map[string]ast.Expr)
+	tg.allocatables = make(map[string]bool)
 	tg.parameters = make(map[string]bool)
 	tg.pointerParams = make(map[string]bool)
 
@@ -352,6 +354,10 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 			Tok:   token.GOTO,
 			Label: ast.NewIdent("label" + s.Target),
 		}
+	case *f90.AllocateStmt:
+		return tg.transformAllocateStmt(s)
+	case *f90.DeallocateStmt:
+		return tg.transformDeallocateStmt(s)
 	case *f90.SelectCaseStmt:
 		return tg.transformSelectCaseStmt(s)
 	default:
@@ -501,6 +507,108 @@ func (tg *TranspileToGo) transformSelectCaseStmt(selectStmt *f90.SelectCaseStmt)
 //
 // Counter-controlled:
 // Fortran: DO var = start, end [, step]
+// transformAllocateStmt transforms ALLOCATE(arr(dims)) to arr = intrinsic.NewArray[T](dims...)
+func (tg *TranspileToGo) transformAllocateStmt(stmt *f90.AllocateStmt) ast.Stmt {
+	// For now, handle simple case: single object allocation
+	if len(stmt.Objects) == 0 {
+		return nil
+	}
+
+	// Process each allocation
+	var stmts []ast.Stmt
+	for _, obj := range stmt.Objects {
+		var name string
+		var dimExprs []f90.Expression
+
+		// The parser may create either ArrayRef or FunctionCall for ALLOCATE(arr(dims))
+		// because it doesn't have type information yet
+		switch o := obj.(type) {
+		case *f90.ArrayRef:
+			name = o.Name
+			dimExprs = o.Subscripts
+		case *f90.FunctionCall:
+			// Parser treats arr(5) as a function call
+			name = o.Name
+			dimExprs = o.Args
+		default:
+			continue
+		}
+
+		elemType := tg.arrayTypes[name]
+		if elemType == nil {
+			continue
+		}
+
+		// Transform dimensions from subscripts/args
+		var dims []ast.Expr
+		for _, dimExpr := range dimExprs {
+			dim := tg.transformExpression(dimExpr)
+			if dim == nil {
+				continue
+			}
+			dims = append(dims, dim)
+		}
+
+		// Generate: name = intrinsic.NewArray[elemType](dims...)
+		assignment := &ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(name)},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{
+				&ast.CallExpr{
+					Fun: &ast.IndexExpr{
+						X: &ast.SelectorExpr{
+							X:   ast.NewIdent("intrinsic"),
+							Sel: ast.NewIdent("NewArray"),
+						},
+						Index: elemType,
+					},
+					Args: dims,
+				},
+			},
+		}
+		stmts = append(stmts, assignment)
+	}
+
+	if len(stmts) == 1 {
+		return stmts[0]
+	}
+	return &ast.BlockStmt{List: stmts}
+}
+
+// transformDeallocateStmt transforms DEALLOCATE(arr) to arr = nil
+func (tg *TranspileToGo) transformDeallocateStmt(stmt *f90.DeallocateStmt) ast.Stmt {
+	// Process each deallocation
+	var stmts []ast.Stmt
+	for _, obj := range stmt.Objects {
+		// The object should be an identifier, ArrayRef, or FunctionCall
+		var name string
+		switch o := obj.(type) {
+		case *f90.Identifier:
+			name = o.Value
+		case *f90.ArrayRef:
+			name = o.Name
+		case *f90.FunctionCall:
+			// Parser may treat arr as a function call
+			name = o.Name
+		default:
+			continue
+		}
+
+		// Generate: name = nil
+		assignment := &ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(name)},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{ast.NewIdent("nil")},
+		}
+		stmts = append(stmts, assignment)
+	}
+
+	if len(stmts) == 1 {
+		return stmts[0]
+	}
+	return &ast.BlockStmt{List: stmts}
+}
+
 // Go:      for var = start; var <= end; var += step { }
 //
 // DO WHILE:
@@ -681,6 +789,15 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		return nil
 	}
 
+	// Check if this declaration has ALLOCATABLE attribute
+	isAllocatable := false
+	for _, attr := range decl.Attributes {
+		if attr == f90token.ALLOCATABLE {
+			isAllocatable = true
+			break
+		}
+	}
+
 	// Create var declarations for each entity
 	specs := make([]ast.Spec, 0, len(decl.Entities))
 	for i := range decl.Entities {
@@ -693,9 +810,16 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 
 		// Check if this is an array
 		if entity.ArraySpec != nil {
-			// Handle array declarations
-			spec := tg.transformArrayDeclaration(entity.Name, goType, entity.ArraySpec)
-			specs = append(specs, spec)
+			if isAllocatable {
+				// Mark as allocatable and generate uninitialized pointer declaration
+				tg.allocatables[entity.Name] = true
+				spec := tg.transformAllocatableArrayDeclaration(entity.Name, goType)
+				specs = append(specs, spec)
+			} else {
+				// Handle regular array declarations
+				spec := tg.transformArrayDeclaration(entity.Name, goType, entity.ArraySpec)
+				specs = append(specs, spec)
+			}
 			continue
 		}
 
@@ -789,6 +913,31 @@ func (tg *TranspileToGo) transformArrayDeclaration(name string, elemType ast.Exp
 	return &ast.ValueSpec{
 		Names:  []*ast.Ident{ast.NewIdent(name)},
 		Values: []ast.Expr{constructorCall},
+	}
+}
+
+// transformAllocatableArrayDeclaration generates an uninitialized pointer declaration for ALLOCATABLE arrays
+// These will be initialized later by ALLOCATE statements
+func (tg *TranspileToGo) transformAllocatableArrayDeclaration(name string, elemType ast.Expr) *ast.ValueSpec {
+	// Track this array for disambiguation (FunctionCall vs ArrayRef)
+	tg.arrays[name] = nil // ArraySpec not needed for allocatable
+	tg.arrayTypes[name] = elemType
+
+	// Build type: *intrinsic.Array[elemType]
+	arrayType := &ast.StarExpr{
+		X: &ast.IndexExpr{
+			X: &ast.SelectorExpr{
+				X:   ast.NewIdent("intrinsic"),
+				Sel: ast.NewIdent("Array"),
+			},
+			Index: elemType, // Type parameter
+		},
+	}
+
+	// Return uninitialized pointer (will be set by ALLOCATE statement)
+	return &ast.ValueSpec{
+		Names: []*ast.Ident{ast.NewIdent(name)},
+		Type:  arrayType,
 	}
 }
 
@@ -1435,6 +1584,70 @@ func (tg *TranspileToGo) transformFunctionCall(call *f90.FunctionCall) ast.Expr 
 				X:   arrArg,
 				Sel: ast.NewIdent("Shape"),
 			},
+		}
+
+	case "LBOUND":
+		// LBOUND(arr, dim) → int32(arr.LowerDim(int(dim)))
+		// Note: LBOUND without dim returns array, which we don't support yet
+		if len(call.Args) != 2 {
+			return nil
+		}
+
+		arrArg := tg.transformExpression(call.Args[0])
+		dimArg := tg.transformExpression(call.Args[1])
+		if arrArg == nil || dimArg == nil {
+			return nil
+		}
+
+		methodCall := &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   arrArg,
+				Sel: ast.NewIdent("LowerDim"),
+			},
+			Args: []ast.Expr{
+				&ast.CallExpr{
+					Fun:  ast.NewIdent("int"),
+					Args: []ast.Expr{dimArg},
+				},
+			},
+		}
+
+		// Wrap with int32 conversion for INTEGER result
+		return &ast.CallExpr{
+			Fun:  ast.NewIdent("int32"),
+			Args: []ast.Expr{methodCall},
+		}
+
+	case "UBOUND":
+		// UBOUND(arr, dim) → int32(arr.UpperDim(int(dim)))
+		// Note: UBOUND without dim returns array, which we don't support yet
+		if len(call.Args) != 2 {
+			return nil
+		}
+
+		arrArg := tg.transformExpression(call.Args[0])
+		dimArg := tg.transformExpression(call.Args[1])
+		if arrArg == nil || dimArg == nil {
+			return nil
+		}
+
+		methodCall := &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   arrArg,
+				Sel: ast.NewIdent("UpperDim"),
+			},
+			Args: []ast.Expr{
+				&ast.CallExpr{
+					Fun:  ast.NewIdent("int"),
+					Args: []ast.Expr{dimArg},
+				},
+			},
+		}
+
+		// Wrap with int32 conversion for INTEGER result
+		return &ast.CallExpr{
+			Fun:  ast.NewIdent("int32"),
+			Args: []ast.Expr{methodCall},
 		}
 
 	default:

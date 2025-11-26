@@ -22,6 +22,7 @@ func main() {
 	LEVEL15()
 	LEVEL16()
 	LEVEL17()
+	LEVEL18()
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
@@ -377,6 +378,10 @@ func LEVEL17() {
 		size_dim1  int32
 		size_dim2  int32
 	)
+	var (
+		lb int32
+		ub int32
+	)
 	size_total = int32(matrix.Size())
 	intrinsic.Print("LEVEL 17: SIZE(matrix) =", size_total)
 	size_dim1 = int32(matrix.SizeDim(int(1)))
@@ -385,6 +390,34 @@ func LEVEL17() {
 	intrinsic.Print("LEVEL 17: SIZE(matrix,2) =", size_dim2)
 	size_total = int32(vector.Size())
 	intrinsic.Print("LEVEL 17: SIZE(vector) =", size_total)
+	lb = int32(matrix.LowerDim(int(1)))
+	intrinsic.Print("LEVEL 17: LBOUND(matrix,1) =", lb)
+	lb = int32(matrix.LowerDim(int(2)))
+	intrinsic.Print("LEVEL 17: LBOUND(matrix,2) =", lb)
+	ub = int32(matrix.UpperDim(int(1)))
+	intrinsic.Print("LEVEL 17: UBOUND(matrix,1) =", ub)
+	ub = int32(matrix.UpperDim(int(2)))
+	intrinsic.Print("LEVEL 17: UBOUND(matrix,2) =", ub)
+}
+func LEVEL18() {
+	var vec *intrinsic.Array[int32]
+	var mat *intrinsic.Array[int32]
+	vec = intrinsic.NewArray[int32](5)
+	vec.Set(10, int(1))
+	vec.Set(20, int(2))
+	vec.Set(30, int(3))
+	intrinsic.Print("LEVEL 18: vec(1) =", vec.At(int(1)))
+	intrinsic.Print("LEVEL 18: vec(3) =", vec.At(int(3)))
+	intrinsic.Print("LEVEL 18: SIZE(vec) =", int32(vec.Size()))
+	mat = intrinsic.NewArray[int32](2, 3)
+	mat.Set(100, int(1), int(1))
+	mat.Set(200, int(2), int(3))
+	intrinsic.Print("LEVEL 18: mat(1,1) =", mat.At(int(1), int(1)))
+	intrinsic.Print("LEVEL 18: mat(2,3) =", mat.At(int(2), int(3)))
+	intrinsic.Print("LEVEL 18: SIZE(mat) =", int32(mat.Size()))
+	vec = nil
+	mat = nil
+	intrinsic.Print("LEVEL 18: Arrays deallocated")
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
