@@ -4,7 +4,6 @@
 PROGRAM specification_test
   ! USE statements
   USE iso_fortran_env, ONLY: real64, int32
-  USE my_module
 
   ! IMPLICIT statements
   IMPLICIT NONE

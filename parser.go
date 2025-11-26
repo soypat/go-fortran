@@ -331,7 +331,6 @@ func (p *Parser90) parseModule() ast.Statement {
 	if p.consumeIf(token.CONTAINS) {
 		mod.Contains = p.parseAppendProgramUnits(mod.Contains[:0])
 	}
-
 	p.expectEndProgramUnit(token.MODULE, token.ENDMODULE, start)
 	p.consumeIf(token.Identifier)
 	mod.Position = ast.Pos(start.Pos, p.current.start)
@@ -339,7 +338,7 @@ func (p *Parser90) parseModule() ast.Statement {
 }
 
 func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramUnit {
-	for p.loopUntil(token.END, token.ENDMODULE, token.ENDPROGRAM) {
+	for p.loopUntil(token.END, token.ENDMODULE, token.ENDPROGRAM, token.ENDFUNCTION, token.ENDSUBROUTINE) {
 		unit := p.parseTopLevelUnit()
 		if unit != nil {
 			dst = append(dst, unit)
