@@ -17,6 +17,9 @@
       CALL LEVEL11()
       CALL LEVEL12()
       CALL LEVEL13()
+      CALL LEVEL14()
+      CALL LEVEL15()
+      CALL LEVEL16()
 
       PRINT *, '============================================='
       PRINT *, 'GOLDEN TEST COMPLETE: All levels executed!'
@@ -322,13 +325,116 @@
           END DO
           PRINT *, 'LEVEL 13: count before >7 =', count
 
-          ! Test CONTINUE - simple labeled statement
+          ! Test CONTINUE - no-op statement
           DO i = 1, 3
-100           CONTINUE
+              CONTINUE
               count = i
           END DO
           PRINT *, 'LEVEL 13: last count =', count
       END SUBROUTINE LEVEL13
+
+! ==============================================================================
+! LEVEL 14: Simple GOTO and Labels
+! ==============================================================================
+      SUBROUTINE LEVEL14()
+          INTEGER :: x, y
+
+          ! Test unconditional GOTO - jump over assignment
+          GOTO 100
+          x = 999  ! This should be skipped
+100       CONTINUE
+          x = 10
+
+          ! Test conditional GOTO - simple control flow
+          y = 5
+          IF (y .EQ. 5) GOTO 200
+          y = 999  ! This should be skipped
+200       CONTINUE
+
+          PRINT *, 'LEVEL 14: x =', x, ', y =', y
+      END SUBROUTINE LEVEL14
+
+! LEVEL 15: SELECT CASE Statements
+      SUBROUTINE LEVEL15()
+          INTEGER :: choice, result
+
+          ! Test simple SELECT CASE with single values
+          choice = 2
+          SELECT CASE (choice)
+          CASE (1)
+              result = 10
+          CASE (2)
+              result = 20
+          CASE (3)
+              result = 30
+          CASE DEFAULT
+              result = 0
+          END SELECT
+          PRINT *, 'LEVEL 15: choice =', choice, ', result =', result
+
+          ! Test SELECT CASE with multiple values in one CASE
+          choice = 5
+          SELECT CASE (choice)
+          CASE (1, 2, 3)
+              result = 100
+          CASE (4, 5, 6)
+              result = 200
+          CASE DEFAULT
+              result = 999
+          END SELECT
+          PRINT *, 'LEVEL 15: choice =', choice, ', result =', result
+
+          ! Test CASE DEFAULT
+          choice = 99
+          SELECT CASE (choice)
+          CASE (1)
+              result = 10
+          CASE (2)
+              result = 20
+          CASE DEFAULT
+              result = 777
+          END SELECT
+          PRINT *, 'LEVEL 15: choice =', choice, ', result =', result
+      END SUBROUTINE LEVEL15
+
+! LEVEL 16: String Intrinsics and Substrings
+      SUBROUTINE LEVEL16()
+          CHARACTER(LEN=20) :: str1, str2, str3
+          INTEGER :: len_val, len_trim_val, index_val
+
+          ! Test LEN intrinsic
+          str1 = 'Hello'
+          len_val = LEN(str1)
+          PRINT *, 'LEVEL 16: LEN =', len_val
+
+          ! Test LEN_TRIM intrinsic
+          len_trim_val = LEN_TRIM(str1)
+          PRINT *, 'LEVEL 16: LEN_TRIM =', len_trim_val
+
+          ! Test TRIM intrinsic
+          str2 = TRIM(str1)
+          PRINT *, 'LEVEL 16: TRIM =', str2
+
+          ! Test INDEX intrinsic
+          str1 = 'Hello World'
+          index_val = INDEX(str1, 'World')
+          PRINT *, 'LEVEL 16: INDEX =', index_val
+
+          ! Test ADJUSTL intrinsic
+          str1 = '   Left'
+          str2 = ADJUSTL(str1)
+          PRINT *, 'LEVEL 16: ADJUSTL =', str2
+
+          ! Test ADJUSTR intrinsic
+          str1 = 'Right   '
+          str3 = ADJUSTR(str1)
+          PRINT *, 'LEVEL 16: ADJUSTR =', str3
+
+          str1 = 'abcdef'
+          str3 = str1(2:4)
+          str1(2:3) = 'z'
+          PRINT *, 'LEVEL 16: str3 =', str3
+      END SUBROUTINE LEVEL16
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

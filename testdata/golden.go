@@ -18,6 +18,9 @@ func main() {
 	LEVEL11()
 	LEVEL12()
 	LEVEL13()
+	LEVEL14()
+	LEVEL15()
+	LEVEL16()
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
@@ -275,6 +278,95 @@ func LEVEL13() {
 		count = i
 	}
 	intrinsic.Print("LEVEL 13: last count =", count)
+}
+func LEVEL14() {
+	var (
+		x int32
+		y int32
+	)
+	goto label100
+	x = 999
+label100:
+	;
+	x = 10
+	y = 5
+	if y == 5 {
+		goto label200
+	}
+	y = 999
+label200:
+	;
+	intrinsic.Print("LEVEL 14: x =", x, ", y =", y)
+}
+func LEVEL15() {
+	var (
+		choice int32
+		result int32
+	)
+	choice = 2
+	switch choice {
+	case 1:
+		result = 10
+	case 2:
+		result = 20
+	case 3:
+		result = 30
+	default:
+		result = 0
+	}
+	intrinsic.Print("LEVEL 15: choice =", choice, ", result =", result)
+	choice = 5
+	switch choice {
+	case 1, 2, 3:
+		result = 100
+	case 4, 5, 6:
+		result = 200
+	default:
+		result = 999
+	}
+	intrinsic.Print("LEVEL 15: choice =", choice, ", result =", result)
+	choice = 99
+	switch choice {
+	case 1:
+		result = 10
+	case 2:
+		result = 20
+	default:
+		result = 777
+	}
+	intrinsic.Print("LEVEL 15: choice =", choice, ", result =", result)
+}
+func LEVEL16() {
+	var (
+		str1 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		str2 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		str3 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+	)
+	var (
+		len_val      int32
+		len_trim_val int32
+		index_val    int32
+	)
+	str1.SetFromString("Hello")
+	len_val = int32(str1.Len())
+	intrinsic.Print("LEVEL 16: LEN =", len_val)
+	len_trim_val = int32(str1.LenTrim())
+	intrinsic.Print("LEVEL 16: LEN_TRIM =", len_trim_val)
+	str2.SetFromString(str1.Trim().String())
+	intrinsic.Print("LEVEL 16: TRIM =", str2)
+	str1.SetFromString("Hello World")
+	index_val = int32(str1.Index("World"))
+	intrinsic.Print("LEVEL 16: INDEX =", index_val)
+	str1.SetFromString("   Left")
+	str2.SetFromString(str1.AdjustL().String())
+	intrinsic.Print("LEVEL 16: ADJUSTL =", str2)
+	str1.SetFromString("Right   ")
+	str3.SetFromString(str1.AdjustR().String())
+	intrinsic.Print("LEVEL 16: ADJUSTR =", str3)
+	str1.SetFromString("abcdef")
+	str3.SetFromString(str1())
+	str1() = "z"
+	intrinsic.Print("LEVEL 16: str3 =", str3)
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")

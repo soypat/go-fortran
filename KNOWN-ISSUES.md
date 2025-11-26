@@ -506,7 +506,40 @@ The transpiler test suite includes workarounds for known issues:
 - Generated code compiles and runs ✅
 - Output matches expected results exactly ✅
 
-**LEVEL14-22**: Not yet implemented (planned in mellow-strolling-lovelace.md)
+**LEVEL14 (Simple GOTO and Labels)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- Unconditional GOTO statement → `goto labelN` ✅
+- Labeled statements → `labelN:` before statement ✅
+- Label transformation: Fortran "100" → Go "label100" ✅
+- GOTO jumping over code works correctly ✅
+- Conditional GOTO (IF...GOTO pattern) ✅
+- Generated code compiles and runs ✅
+- Output matches expected results exactly ✅
+
+**LEVEL15 (SELECT CASE Statements)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- Simple SELECT CASE with single values → `switch { case val: }` ✅
+- Multiple values in one CASE → `case val1, val2, val3:` ✅
+- CASE DEFAULT → `default:` ✅
+- Generated code compiles and runs ✅
+- Output matches expected results exactly ✅
+
+**LEVEL16 (String Intrinsics)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- LEN(str) → `int32(str.Len())` ✅
+- LEN_TRIM(str) → `int32(str.LenTrim())` ✅
+- TRIM(str) → `str.Trim().String()` ✅
+- INDEX(str, substr) → `int32(str.Index(substr))` ✅
+- ADJUSTL(str) → `str.AdjustL().String()` ✅
+- ADJUSTR(str) → `str.AdjustR().String()` ✅
+- All intrinsics implemented as CharacterArray methods ✅
+- Generated code compiles and runs ✅
+- Output matches expected results exactly ✅
+
+**LEVEL17-22**: Not yet implemented (planned in mellow-strolling-lovelace.md)
 
 ---
 
@@ -553,6 +586,59 @@ go test -run Transpile
 
 ## Changelog
 
+- **2025-11-25** (Session 5): LEVEL14 implementation - Simple GOTO and Labels
+  - Added LEVEL14 test case to `golden.f90` with GOTO statements and labeled CONTINUE
+  - Implemented `transformStatement()` case for GotoStmt:
+    - `GOTO 100` → `goto label100` ✅
+  - Implemented labeled statement handling in `transformStatements()`:
+    - Checks each statement's `GetLabel()` method
+    - Wraps statements with labels in `ast.LabeledStmt`
+    - `100 CONTINUE` → `label100:` ✅
+  - Updated `golden.out` with expected output
+  - Updated `transpile_test.go` maxLvl from 13 to 14
+  - Fixed LEVEL13 to remove unused label100 (Go requires all labels be referenced)
+  - All tests pass with exact output matching ✅
+  - Verified transpiled code:
+    - Unconditional GOTO: jumps over unreachable code correctly
+    - Conditional GOTO: IF...GOTO pattern works
+    - Labels properly emitted before statements
+- **2025-11-25** (Session 6): LEVEL15 implementation - SELECT CASE Statements
+  - Added LEVEL15 test case to `golden.f90` with SELECT CASE statements
+  - Implemented `transformSelectCaseStmt()` function:
+    - Transforms Fortran SELECT CASE to Go switch statement
+    - `SELECT CASE (expr)` → `switch expr {`
+    - `CASE (val)` → `case val:`
+    - `CASE (val1, val2, val3)` → `case val1, val2, val3:` (multiple values)
+    - `CASE DEFAULT` → `default:`
+  - Added `transformSelectCaseStmt()` case in `transformStatement()`
+  - Updated `golden.out` with expected output (3 test cases)
+  - Updated `transpile_test.go` maxLvl from 14 to 15
+  - All tests pass with exact output matching ✅
+  - Verified transpiled code:
+    - Simple SELECT CASE with single values works correctly
+    - Multiple values in one CASE clause handled properly
+    - CASE DEFAULT properly transpiles to Go default case
+- **2025-11-25** (Session 6 cont.): LEVEL16 implementation - String Intrinsics
+  - Added string intrinsic methods to `CharacterArray` in `intrinsic/char.go`:
+    - `Len() int` - LEN intrinsic (returns declared length)
+    - `LenTrim() int` - LEN_TRIM intrinsic (length without trailing spaces)
+    - `Trim() CharacterArray` - TRIM intrinsic (remove trailing spaces)
+    - `Index(substring string) int` - INDEX intrinsic (1-based search)
+    - `AdjustL() CharacterArray` - ADJUSTL intrinsic (left-justify)
+    - `AdjustR() CharacterArray` - ADJUSTR intrinsic (right-justify)
+    - `Substring(start, end int) string` - For future substring operations
+  - Added LEVEL16 test case to `golden.f90` with 6 string intrinsic tests
+  - Implemented string intrinsic transpilation in `transformFunctionCall()`:
+    - `LEN(str)` → `int32(str.Len())` (with int32 cast for INTEGER assignment)
+    - `LEN_TRIM(str)` → `int32(str.LenTrim())`
+    - `TRIM(str)` → `str.Trim().String()` (with .String() for SetFromString compatibility)
+    - `INDEX(str, substr)` → `int32(str.Index(substr))`
+    - `ADJUSTL(str)` → `str.AdjustL().String()`
+    - `ADJUSTR(str)` → `str.AdjustR().String()`
+  - Updated `golden.out` with expected output (6 lines)
+  - Updated `transpile_test.go` maxLvl from 15 to 16
+  - All tests pass with exact output matching ✅
+  - All intrinsics implemented as CharacterArray methods (cleaner than package-level functions)
 - **2025-11-25** (Session 4): LEVEL13 implementation - Loop control (CYCLE, EXIT, CONTINUE)
   - Added LEVEL13 test case to `golden.f90` with CYCLE, EXIT, and labeled CONTINUE
   - Implemented `transformStatement()` cases for:

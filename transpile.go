@@ -15,13 +15,13 @@ import (
 
 // TranspileToGo transforms Fortran AST to Go AST
 type TranspileToGo struct {
-	symTable       *symbol.Table
-	imports        []string
-	charLengths    map[string]int            // Track CHARACTER(LEN=n) for padding assignments
-	arrays         map[string]*f90.ArraySpec // Track array dimensions for initialization
-	arrayTypes     map[string]ast.Expr       // Track element types for arrays
-	parameters     map[string]bool           // Track parameter names to avoid redeclaration
-	pointerParams  map[string]bool           // Track OUT/INOUT scalar parameters (need dereference in assignments)
+	symTable      *symbol.Table
+	imports       []string
+	charLengths   map[string]int            // Track CHARACTER(LEN=n) for padding assignments
+	arrays        map[string]*f90.ArraySpec // Track array dimensions for initialization
+	arrayTypes    map[string]ast.Expr       // Track element types for arrays
+	parameters    map[string]bool           // Track parameter names to avoid redeclaration
+	pointerParams map[string]bool           // Track OUT/INOUT scalar parameters (need dereference in assignments)
 }
 
 // Reset initializes the transpiler with a symbol table
@@ -291,12 +291,21 @@ func (tg *TranspileToGo) fortranTypeToGoType(fortranType string) ast.Expr {
 }
 
 // transformStatements transforms a slice of Fortran statements to Go statements
+// Handles labeled statements by wrapping them in LabeledStmt nodes
 func (tg *TranspileToGo) transformStatements(stmts []f90.Statement) []ast.Stmt {
 	var goStmts []ast.Stmt
 
 	for _, stmt := range stmts {
 		goStmt := tg.transformStatement(stmt)
 		if goStmt != nil {
+			// Check if the Fortran statement has a label (e.g., "100" in "100 CONTINUE")
+			if label := stmt.GetLabel(); label != "" {
+				// Wrap the Go statement with a label: labelN:
+				goStmt = &ast.LabeledStmt{
+					Label: ast.NewIdent("label" + label),
+					Stmt:  goStmt,
+				}
+			}
 			goStmts = append(goStmts, goStmt)
 		}
 	}
@@ -337,8 +346,17 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 		// CONTINUE → empty statement (no-op in Go)
 		// If there's a label, it will be handled by label processing later
 		return &ast.EmptyStmt{}
+	case *f90.GotoStmt:
+		// GOTO label → goto labelN
+		return &ast.BranchStmt{
+			Tok:   token.GOTO,
+			Label: ast.NewIdent("label" + s.Target),
+		}
+	case *f90.SelectCaseStmt:
+		return tg.transformSelectCaseStmt(s)
 	default:
 		// For now, unsupported statements are skipped
+		panic(fmt.Sprintf("unsupported statement: %T", s))
 		return nil
 	}
 }
@@ -415,6 +433,67 @@ func (tg *TranspileToGo) transformIfStmt(ifStmt *f90.IfStmt) ast.Stmt {
 	}
 
 	return goIfStmt
+}
+
+// transformSelectCaseStmt transforms a Fortran SELECT CASE statement to Go switch
+//
+// Fortran SELECT CASE:
+//
+//	SELECT CASE (expr)
+//	CASE (val1)
+//	  statements
+//	CASE (val2, val3)
+//	  statements
+//	CASE DEFAULT
+//	  statements
+//	END SELECT
+//
+// Go switch:
+//
+//	switch expr {
+//	case val1:
+//	  statements
+//	case val2, val3:
+//	  statements
+//	default:
+//	  statements
+//	}
+func (tg *TranspileToGo) transformSelectCaseStmt(selectStmt *f90.SelectCaseStmt) ast.Stmt {
+	// Transform the select expression
+	tagExpr := tg.transformExpression(selectStmt.Expression)
+	if tagExpr == nil {
+		return nil
+	}
+
+	// Create Go switch statement
+	switchStmt := &ast.SwitchStmt{
+		Tag:  tagExpr,
+		Body: &ast.BlockStmt{},
+	}
+
+	// Transform each case clause
+	for _, caseClause := range selectStmt.Cases {
+		clause := &ast.CaseClause{
+			Body: tg.transformStatements(caseClause.Body),
+		}
+
+		if caseClause.IsDefault {
+			// CASE DEFAULT → default:
+			clause.List = nil // nil List means default case in Go
+		} else {
+			// CASE (val1, val2, ...) → case val1, val2, ...:
+			for _, val := range caseClause.Values {
+				transformedVal := tg.transformExpression(val)
+				if transformedVal != nil {
+					clause.List = append(clause.List, transformedVal)
+				}
+			}
+		}
+
+		switchStmt.Body.List = append(switchStmt.Body.List, clause)
+	}
+
+	return switchStmt
 }
 
 // transformDoLoop transforms a Fortran DO loop to Go for loop
@@ -814,26 +893,6 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 	return &ast.ExprStmt{X: setCall}
 }
 
-// padStringLiteral pads a string literal to the specified length with trailing spaces
-func (tg *TranspileToGo) padStringLiteral(expr ast.Expr, targetLen int) ast.Expr {
-	if lit, ok := expr.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-		// Properly unquote the string to handle escape sequences
-		str, err := strconv.Unquote(lit.Value)
-		if err != nil {
-			return expr // Return original if unquoting fails
-		}
-		if len(str) < targetLen {
-			// Pad with spaces to target length
-			str = str + strings.Repeat(" ", targetLen-len(str))
-			return &ast.BasicLit{
-				Kind:  token.STRING,
-				Value: strconv.Quote(str), // Re-quote with proper escaping
-			}
-		}
-	}
-	return expr
-}
-
 // wrapCharArrayToString wraps a CharacterArray expression with .String() method call
 // to convert it to a Go string for use in string concatenation expressions.
 func (tg *TranspileToGo) wrapCharArrayToString(expr ast.Expr) ast.Expr {
@@ -1119,6 +1178,128 @@ func (tg *TranspileToGo) transformFunctionCall(call *f90.FunctionCall) ast.Expr 
 				Indices: []ast.Expr{ast.NewIdent("int32")},
 			},
 			Args: args,
+		}
+	case "LEN":
+		// LEN(str) → int32(str.Len())
+		if len(call.Args) != 1 {
+			return nil
+		}
+		arg := tg.transformExpression(call.Args[0])
+		if arg == nil {
+			return nil
+		}
+		return &ast.CallExpr{
+			Fun: ast.NewIdent("int32"),
+			Args: []ast.Expr{
+				&ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   arg,
+						Sel: ast.NewIdent("Len"),
+					},
+				},
+			},
+		}
+	case "LEN_TRIM":
+		// LEN_TRIM(str) → int32(str.LenTrim())
+		if len(call.Args) != 1 {
+			return nil
+		}
+		arg := tg.transformExpression(call.Args[0])
+		if arg == nil {
+			return nil
+		}
+		return &ast.CallExpr{
+			Fun: ast.NewIdent("int32"),
+			Args: []ast.Expr{
+				&ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   arg,
+						Sel: ast.NewIdent("LenTrim"),
+					},
+				},
+			},
+		}
+	case "TRIM":
+		// TRIM(str) → str.Trim().String()
+		if len(call.Args) != 1 {
+			return nil
+		}
+		arg := tg.transformExpression(call.Args[0])
+		if arg == nil {
+			return nil
+		}
+		return &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X: &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   arg,
+						Sel: ast.NewIdent("Trim"),
+					},
+				},
+				Sel: ast.NewIdent("String"),
+			},
+		}
+	case "INDEX":
+		// INDEX(str, substring) → int32(str.Index(substring))
+		if len(call.Args) != 2 {
+			return nil
+		}
+		str := tg.transformExpression(call.Args[0])
+		substr := tg.transformExpression(call.Args[1])
+		if str == nil || substr == nil {
+			return nil
+		}
+		return &ast.CallExpr{
+			Fun: ast.NewIdent("int32"),
+			Args: []ast.Expr{
+				&ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   str,
+						Sel: ast.NewIdent("Index"),
+					},
+					Args: []ast.Expr{substr},
+				},
+			},
+		}
+	case "ADJUSTL":
+		// ADJUSTL(str) → str.AdjustL().String()
+		if len(call.Args) != 1 {
+			return nil
+		}
+		arg := tg.transformExpression(call.Args[0])
+		if arg == nil {
+			return nil
+		}
+		return &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X: &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   arg,
+						Sel: ast.NewIdent("AdjustL"),
+					},
+				},
+				Sel: ast.NewIdent("String"),
+			},
+		}
+	case "ADJUSTR":
+		// ADJUSTR(str) → str.AdjustR().String()
+		if len(call.Args) != 1 {
+			return nil
+		}
+		arg := tg.transformExpression(call.Args[0])
+		if arg == nil {
+			return nil
+		}
+		return &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X: &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   arg,
+						Sel: ast.NewIdent("AdjustR"),
+					},
+				},
+				Sel: ast.NewIdent("String"),
+			},
 		}
 	default:
 		// For other functions, assume they're user-defined and call directly
