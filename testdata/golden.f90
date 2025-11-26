@@ -23,6 +23,7 @@
       CALL LEVEL17()
       CALL LEVEL18()
       CALL LEVEL19()
+      CALL LEVEL20()
 
       PRINT *, '============================================='
       PRINT *, 'GOLDEN TEST COMPLETE: All levels executed!'
@@ -530,6 +531,20 @@
           PRINT *, 'LEVEL 19: y =', y
           PRINT *, 'LEVEL 19: z =', z
       END SUBROUTINE PRINT_COMMON_VALUES
+
+      ! LEVEL 20: DATA Statements
+      SUBROUTINE LEVEL20()
+          INTEGER :: a, b, c
+          REAL :: x, y
+          DATA a, b, c / 10, 20, 30 /
+          DATA x, y / 3.14, 2.71 /
+
+          PRINT *, 'LEVEL 20: a =', a
+          PRINT *, 'LEVEL 20: b =', b
+          PRINT *, 'LEVEL 20: c =', c
+          PRINT *, 'LEVEL 20: x =', x
+          PRINT *, 'LEVEL 20: y =', y
+      END SUBROUTINE LEVEL20
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

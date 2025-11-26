@@ -587,7 +587,42 @@ The transpiler test suite includes workarounds for known issues:
 - Generated code compiles and runs ✅
 - Output matches expected results exactly ✅
 
-**LEVEL19-22**: Not yet implemented (planned)
+**LEVEL19 (COMMON Blocks)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- **COMMON Block Tracking**:
+  - Pre-scan identifies COMMON statements and creates field structures ✅
+  - Type declarations fill in field types for COMMON variables ✅
+  - Variables in COMMON blocks tracked per-procedure (not globally) ✅
+- **Global Struct Generation**:
+  - `COMMON /SHARED/ x, y, z` → `var common_shared struct { x int32; y int32; z float32 }` ✅
+  - `AppendCommonDecls()` generates Go global structs ✅
+- **Variable Access**:
+  - COMMON variables accessed via `common_<blockname>.varname` ✅
+  - Local declarations skipped for COMMON variables ✅
+- Test cases:
+  - Shared variables between subroutines via COMMON block ✅
+  - Type resolution correctly assigns types to COMMON fields ✅
+- Generated code compiles and runs ✅
+- Output matches expected results exactly ✅
+
+**LEVEL20 (DATA Statements)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- **Enhanced AST**:
+  - DataStmt now stores Variables and Values lists ✅
+  - Parser properly parses variable and value lists separated by slashes ✅
+- **Transformation**:
+  - `DATA a, b, c / 10, 20, 30 /` → block with `a = 10; b = 20; c = 30` ✅
+  - Multiple variables handled correctly ✅
+  - Generates assignment statements for each variable/value pair ✅
+- Test cases:
+  - INTEGER variables initialized with DATA ✅
+  - REAL variables initialized with DATA ✅
+- Generated code compiles and runs ✅
+- Output matches expected results exactly ✅
+
+**LEVEL21-22**: Not yet implemented (planned)
 
 ---
 
@@ -756,6 +791,40 @@ go test -run Transpile
   - Updated `golden.out` with expected output (8 lines)
   - Updated `transpile_test.go` maxLvl from 17 to 18
   - **Debugging**: Fixed parser ambiguity where ALLOCATE(arr(dims)) creates FunctionCall not ArrayRef
+  - All tests pass with exact output matching ✅
+- **2025-11-26** (Session 7 cont.): LEVEL19 implementation - COMMON Blocks
+  - Added LEVEL19 test case to `golden.f90` with COMMON blocks shared between subroutines
+  - Enhanced `commonBlockInfo` struct to use `ast.Field` for type-safe ordered fields
+  - Implemented COMMON block infrastructure:
+    - `preScanCommonBlocks()` identifies COMMON statements and creates field structures
+    - `transformTypeDeclaration()` fills in field types for COMMON variables
+    - `AppendCommonDecls()` generates global Go structs for COMMON blocks
+  - Fixed scoping bug: Clear `commonVars` at start of each procedure (not global tracking)
+  - Variable access transformation: `x` → `common_shared.x` for COMMON variables
+  - Local declarations skipped for COMMON variables (accessed via global struct)
+  - Test cases:
+    - SET_COMMON_VALUES sets x, y, z in COMMON block
+    - PRINT_COMMON_VALUES reads same variables from COMMON block
+    - Verified correct type assignment (x=int32, y=int32, z=float32)
+  - Updated `golden.out` with expected output (3 lines)
+  - Updated `transpile_test.go` maxLvl from 18 to 19
+  - All tests pass with exact output matching ✅
+- **2025-11-26** (Session 7 cont.): LEVEL20 implementation - DATA Statements
+  - Added LEVEL20 test case to `golden.f90` with DATA statement initialization
+  - Enhanced `DataStmt` AST node to store Variables and Values lists
+  - Updated parser `parseDataStmt()` to properly parse DATA statements:
+    - Parses variable list before first slash
+    - Parses value list between slashes
+    - Handles array references (subscripts skipped for now)
+  - Implemented `transformDataStmt()` function:
+    - Generates assignment statements for each variable/value pair
+    - `DATA a, b, c / 10, 20, 30 /` → block with `{a = 10; b = 20; c = 30}`
+    - Multiple DATA statements generate separate blocks
+  - Test cases:
+    - INTEGER variables: a, b, c initialized with 10, 20, 30
+    - REAL variables: x, y initialized with 3.14, 2.71
+  - Updated `golden.out` with expected output (5 lines)
+  - Updated `transpile_test.go` maxLvl from 19 to 20
   - All tests pass with exact output matching ✅
 - **2025-11-25** (Session 4): LEVEL13 implementation - Loop control (CYCLE, EXIT, CONTINUE)
   - Added LEVEL13 test case to `golden.f90` with CYCLE, EXIT, and labeled CONTINUE

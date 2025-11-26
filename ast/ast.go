@@ -568,7 +568,9 @@ func (is *IntrinsicStmt) AppendString(dst []byte) []byte {
 //	DATA (arr(i), i=1,10) / 10*0.0 /
 //	DATA a, b, c / 1, 2, 3 /
 type DataStmt struct {
-	Label string
+	Variables []Expression // Variable names (identifiers or array refs)
+	Values    []Expression // Initialization values
+	Label     string
 	Position
 }
 

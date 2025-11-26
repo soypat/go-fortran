@@ -30,6 +30,7 @@ func main() {
 	LEVEL17()
 	LEVEL18()
 	LEVEL19()
+	LEVEL20()
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
@@ -447,6 +448,32 @@ func LEVEL18() {
 func LEVEL19() {
 	SET_COMMON_VALUES()
 	PRINT_COMMON_VALUES()
+}
+
+func LEVEL20() {
+	var (
+		a int32
+		b int32
+		c int32
+	)
+	var (
+		x float32
+		y float32
+	)
+	{
+		a = 10
+		b = 20
+		c = 30
+	}
+	{
+		x = 3.14
+		y = 2.71
+	}
+	intrinsic.Print("LEVEL 20: a =", a)
+	intrinsic.Print("LEVEL 20: b =", b)
+	intrinsic.Print("LEVEL 20: c =", c)
+	intrinsic.Print("LEVEL 20: x =", x)
+	intrinsic.Print("LEVEL 20: y =", y)
 }
 
 func SET_COMMON_VALUES() {

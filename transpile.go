@@ -157,10 +157,6 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 	// Mark function name as additional parameter (Fortran uses it as result variable)
 	tg.enterProcedure(fn.Parameters, fn.Name)
 
-	// Clear COMMON variable tracking for this function
-	// (variables are only COMMON if they appear in a COMMON statement in THIS function)
-	tg.commonVars = make(map[string]string)
-
 	// Pre-scan for COMMON blocks to know which variables to skip in type declarations
 	tg.preScanCommonBlocks(fn.Body)
 
@@ -402,6 +398,8 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 		return tg.transformSelectCaseStmt(s)
 	case *f90.CommonStmt:
 		return tg.transformCommonStmt(s)
+	case *f90.DataStmt:
+		return tg.transformDataStmt(s)
 	default:
 		// For now, unsupported statements are skipped
 		panic(fmt.Sprintf("unsupported statement: %T", s))
@@ -1734,9 +1732,62 @@ func (tg *TranspileToGo) transformCommonStmt(stmt *f90.CommonStmt) ast.Stmt {
 	return nil
 }
 
+// transformDataStmt transforms a Fortran DATA statement to Go assignment statements
+// DATA statements initialize variables with compile-time constant values
+// Fortran: DATA a, b, c / 10, 20, 30 /
+// Go:      a = 10; b = 20; c = 30 (as separate statements)
+func (tg *TranspileToGo) transformDataStmt(stmt *f90.DataStmt) ast.Stmt {
+	// Generate assignment statements for each variable/value pair
+	// If there are multiple pairs, we need to return a block statement
+
+	if len(stmt.Variables) == 0 || len(stmt.Values) == 0 {
+		return nil
+	}
+
+	// Create assignment statements
+	var stmts []ast.Stmt
+	for i := 0; i < len(stmt.Variables) && i < len(stmt.Values); i++ {
+		// Transform the variable (left-hand side)
+		lhs := tg.transformExpression(stmt.Variables[i])
+		if lhs == nil {
+			continue
+		}
+
+		// Transform the value (right-hand side)
+		rhs := tg.transformExpression(stmt.Values[i])
+		if rhs == nil {
+			continue
+		}
+
+		// Create assignment statement: var = value
+		assignStmt := &ast.AssignStmt{
+			Lhs: []ast.Expr{lhs},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{rhs},
+		}
+		stmts = append(stmts, assignStmt)
+	}
+
+	// If only one assignment, return it directly
+	if len(stmts) == 1 {
+		return stmts[0]
+	}
+
+	// If multiple assignments, wrap in a block statement
+	if len(stmts) > 1 {
+		return &ast.BlockStmt{
+			List: stmts,
+		}
+	}
+
+	return nil
+}
+
 // preScanCommonBlocks scans statements for COMMON blocks before processing type declarations.
 // This allows us to know which variables are in COMMON blocks before we generate declarations.
 func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
+	// Clear COMMON variable tracking for this procedure
+	// (variables are only COMMON if they appear in a COMMON statement in THIS procedure)
 	tg.commonVars = make(map[string]string)
 	for _, stmt := range stmts {
 		if commonStmt, ok := stmt.(*f90.CommonStmt); ok {

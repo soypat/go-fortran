@@ -2402,9 +2402,9 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 	}
 }
 
-// parseDataStmt parses a DATA statement (simplified version that skips to end)
+// parseDataStmt parses a DATA statement
 // Precondition: current token is DATA
-// DATA statements have complex syntax with implied DO loops, so for now we just skip to end
+// Syntax: DATA var1, var2, ... / value1, value2, ... /
 func (p *Parser90) parseDataStmt() ast.Statement {
 	start := p.current.start
 	p.expect(token.DATA, "")
@@ -2413,11 +2413,58 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 		Position: ast.Pos(start, p.current.start),
 	}
 
-	// Skip to end of statement (newline or semicolon)
-	// DATA statements can span multiple lines with continuations
-	for !p.currentTokenIs(token.NewLine) && !p.current.tok.IsEnd() && !p.IsDone() {
-		p.nextToken()
+	// Parse variable list (before the slash)
+	for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.NewLine) && !p.IsDone() {
+		if p.canUseAsIdentifier() {
+			varName := string(p.current.lit)
+			p.nextToken()
+
+			// Check if this is an array reference
+			if p.currentTokenIs(token.LParen) {
+				// For now, just parse as identifier and skip the subscripts
+				// Full array element support can be added later
+				depth := 1
+				p.nextToken() // consume (
+				for depth > 0 && !p.IsDone() {
+					if p.currentTokenIs(token.LParen) {
+						depth++
+					} else if p.currentTokenIs(token.RParen) {
+						depth--
+					}
+					if depth > 0 {
+						p.nextToken()
+					}
+				}
+				p.nextToken() // consume final )
+			}
+
+			stmt.Variables = append(stmt.Variables, &ast.Identifier{Value: varName})
+		}
+
+		if p.currentTokenIs(token.Comma) {
+			p.nextToken() // consume comma
+		}
 	}
+
+	// Expect opening slash
+	if !p.expect(token.Slash, "expected / before DATA values") {
+		return stmt
+	}
+
+	// Parse value list (between the slashes)
+	for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.NewLine) && !p.IsDone() {
+		value := p.parseExpression(0)
+		if value != nil {
+			stmt.Values = append(stmt.Values, value)
+		}
+
+		if p.currentTokenIs(token.Comma) {
+			p.nextToken() // consume comma
+		}
+	}
+
+	// Expect closing slash
+	p.expect(token.Slash, "expected / after DATA values")
 
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
