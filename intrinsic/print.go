@@ -50,6 +50,8 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 
 	// Format value and determine padding (from gfortran libgfortran/io/write.c)
 	switch v := value.(type) {
+	case CharacterArray:
+		dst = append(dst, v.data[:cap(v.data)]...)
 	case string:
 		dst = append(dst, v...)
 		return dst
@@ -59,18 +61,31 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 		leftPad = 11 - (len(dst) - prevLen)
 		rightPad = 0
 
-	case float32: // REAL (kind=4): width=18, 2 left + value + right
-		// gfortran uses variable precision to keep value at 10 chars total
+	case float32: // REAL (kind=4): gfortran uses different widths based on magnitude
+		// gfortran uses: 11 chars (9 decimals) for |x| < 1, 10 chars (variable) for |x| >= 1
 		x := float64(v)
-		// Calculate integer digits to determine decimal places
-		nIntDig := int(math.Log10(math.Abs(x))) + 1
-		if x < 1.0 && x > -1.0 {
-			nIntDig = 1 // Values like 0.5 have 1 integer digit
+		var decPlaces int
+		absX := math.Abs(x)
+		if absX < 1.0 {
+			// Values like 0.479... get 11 chars total: 0 + '.' + 9 decimals
+			decPlaces = 9
+		} else {
+			// Values like 3.14... get 10 chars total with variable decimals
+			nIntDig := int(math.Log10(absX)) + 1
+			decPlaces = 10 - nIntDig - 1 // e.g., 10 - 1 - 1 = 8 for single-digit values
 		}
-		decPlaces := 10 - nIntDig - 1 // Keep total at 10 chars: intDigits + '.' + decPlaces
 		dst = strconv.AppendFloat(dst, x, 'f', decPlaces, 32)
-		leftPad = 2
-		rightPad = 14 - (len(dst) - prevLen)
+		valueLen := len(dst) - prevLen
+		// Total field width = 17 (includes 1 separator added by Print)
+		// formatValue adds: leftPad + value + rightPad = 16
+		// Pattern: |x| < 1 → 2 leading (1 sep + 1 pad) + 11-char value + 4 trailing
+		//          |x| >= 1 → 3 leading (1 sep + 2 pad) + 10-char value + 4 trailing
+		if absX < 1.0 {
+			leftPad = 1 // 1 sep (Print) + 1 leftPad = 2 total leading spaces
+		} else {
+			leftPad = 2 // 1 sep (Print) + 2 leftPad = 3 total leading spaces
+		}
+		rightPad = 16 - leftPad - valueLen
 
 	case float64: // DOUBLE PRECISION (kind=8): width=25, right-aligned
 		dst = strconv.AppendFloat(dst, v, 'f', 16, 64)
