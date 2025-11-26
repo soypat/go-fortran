@@ -96,6 +96,27 @@ func NewArrayWithBounds[T any](shape, lower, upper []int) *Array[T] {
 	}
 }
 
+// NewArrayFromValues creates a 1D array initialized with the given values.
+// The array will have bounds (1:len(values)) following Fortran conventions.
+//
+// Example:
+//
+//	arr := NewArrayFromValues([]int32{10, 20, 30})
+//	// Creates array with indices 1, 2, 3
+//	arr.At(1) // returns 10
+//	arr.At(2) // returns 20
+//	arr.At(3) // returns 30
+func NewArrayFromValues[T any](values []T) *Array[T] {
+	n := len(values)
+	if n == 0 {
+		panic("cannot create array from empty values")
+	}
+
+	arr := NewArray[T](n)
+	copy(arr.data, values)
+	return arr
+}
+
 // At returns the element at the given indices (using Fortran indexing with custom bounds)
 // Implements the subscript value formula from F77 Table 1 / F95 Table 6.1.
 //

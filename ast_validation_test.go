@@ -201,7 +201,7 @@ END PROGRAM test
 				charLen     string
 				initializer string
 			}{
-				{name: "vec", typ: "INTEGER", initializer: "1  2  3"}, // TODO: Capture (/ /) delimiters
+				{name: "vec", typ: "INTEGER", initializer: "(/1 , 2 , 3/)"}, // Captures array constructor delimiters and commas
 			},
 		},
 		{
@@ -266,7 +266,7 @@ END PROGRAM test
 				charLen     string
 				initializer string
 			}{
-				{name: "ptr", typ: "INTEGER", initializer: "=>  null"}, // TODO: Capture () after function names
+				{name: "ptr", typ: "INTEGER", initializer: "=>  null()"}, // Captures function call parentheses
 			},
 		},
 		{

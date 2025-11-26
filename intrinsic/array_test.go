@@ -337,3 +337,31 @@ func BenchmarkGoSlice2D_Access(b *testing.B) {
 		_ = slice[49][49]
 	}
 }
+
+func TestNewArrayFromValues(t *testing.T) {
+	// Test 1D array initialization with values
+	arr := NewArrayFromValues([]int32{10, 20, 30})
+
+	if arr.Size() != 3 {
+		t.Errorf("Expected size 3, got %d", arr.Size())
+	}
+
+	// Check values with 1-based indexing
+	if arr.At(1) != 10 {
+		t.Errorf("Expected arr[1]=10, got %d", arr.At(1))
+	}
+	if arr.At(2) != 20 {
+		t.Errorf("Expected arr[2]=20, got %d", arr.At(2))
+	}
+	if arr.At(3) != 30 {
+		t.Errorf("Expected arr[3]=30, got %d", arr.At(3))
+	}
+
+	// Check bounds
+	if arr.LowerDim(1) != 1 {
+		t.Errorf("Expected lower bound 1, got %d", arr.LowerDim(1))
+	}
+	if arr.UpperDim(1) != 3 {
+		t.Errorf("Expected upper bound 3, got %d", arr.UpperDim(1))
+	}
+}

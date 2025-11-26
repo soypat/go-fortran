@@ -34,6 +34,8 @@ func main() {
 	LEVEL21()
 	LEVEL22()
 	LEVEL23()
+	LEVEL24()
+	LEVEL25()
 
 	intrinsic.Exit(0)
 }
@@ -533,6 +535,39 @@ func LEVEL23() {
 	intrinsic.Print("LEVEL 23: MAX_SIZE =", MAX_SIZE)
 	intrinsic.Print("LEVEL 23: PI =", PI)
 	intrinsic.Print("LEVEL 23: TAU =", TAU)
+}
+
+func LEVEL24() {
+	var vec1 = intrinsic.NewArray[int32](3)
+	var vec2 = intrinsic.NewArray[int32](5)
+	vec1 = intrinsic.NewArrayFromValues[int32]([]int32{10, 20, 30})
+	intrinsic.Print("LEVEL 24: vec1(1) =", vec1.At(int(1)))
+	intrinsic.Print("LEVEL 24: vec1(2) =", vec1.At(int(2)))
+	intrinsic.Print("LEVEL 24: vec1(3) =", vec1.At(int(3)))
+	vec2 = intrinsic.NewArrayFromValues[int32]([]int32{100, 200, 300, 400, 500})
+	intrinsic.Print("LEVEL 24: vec2(1) =", vec2.At(int(1)))
+	intrinsic.Print("LEVEL 24: vec2(5) =", vec2.At(int(5)))
+}
+
+func LEVEL25() {
+	var i1 int8
+	var i2 int16
+	var i4 int32
+	var i8 int64
+	var r4 float32
+	var r8 float64
+	i1 = 127
+	i2 = 32767
+	i4 = 2147483647
+	i8 = 9223372036854775807
+	r4 = 3.14159
+	r8 = 3.141592653589793
+	intrinsic.Print("LEVEL 25: i1 =", i1)
+	intrinsic.Print("LEVEL 25: i2 =", i2)
+	intrinsic.Print("LEVEL 25: i4 =", i4)
+	intrinsic.Print("LEVEL 25: i8 =", i8)
+	intrinsic.Print("LEVEL 25: r4 =", r4)
+	intrinsic.Print("LEVEL 25: r8 =", r8)
 }
 
 func SET_COMMON_VALUES() {

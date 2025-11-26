@@ -123,8 +123,8 @@ func TestTranspileGolden(t *testing.T) {
 		})
 
 	}
-	if lvl < 23 {
-		t.Fatalf("expected at least 23 levels, got %d", lvl)
+	if lvl < 25 {
+		t.Fatalf("expected at least 25 levels, got %d", lvl)
 	}
 	maxLvl := lvl
 	// write helper subroutines:

@@ -58,9 +58,24 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 		dst = append(dst, v...)
 		return dst
 
+	case int8: // INTEGER (kind=1): 1 leading space (+ 1 from Print = 2 total)
+		dst = strconv.AppendInt(dst, int64(v), 10)
+		leftPad = 1
+		rightPad = 0
+
+	case int16: // INTEGER (kind=2): 1 leading space (+ 1 from Print = 2 total)
+		dst = strconv.AppendInt(dst, int64(v), 10)
+		leftPad = 1
+		rightPad = 0
+
 	case int32: // INTEGER (kind=4): width=11, right-aligned
 		dst = strconv.AppendInt(dst, int64(v), 10)
 		leftPad = 11 - (len(dst) - prevLen)
+		rightPad = 0
+
+	case int64: // INTEGER (kind=8): 1 leading space (+ 1 from Print = 2 total)
+		dst = strconv.AppendInt(dst, v, 10)
+		leftPad = 1
 		rightPad = 0
 
 	case float32: // REAL (kind=4): gfortran uses different widths based on magnitude
@@ -89,11 +104,15 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 		}
 		rightPad = 16 - leftPad - valueLen
 
-	case float64: // DOUBLE PRECISION (kind=8): width=25, right-aligned
+	case float64: // DOUBLE PRECISION (kind=8, REAL*8): total width ~25
+		// gfortran format: 2 leading spaces + value + trailing spaces to fill ~25 total
 		dst = strconv.AppendFloat(dst, v, 'f', 16, 64)
-		nIntDig := int(math.Log10(math.Abs(v))) + 1
-		leftPad = 3 - nIntDig
-		rightPad = 16 - (len(dst) - prevLen) - leftPad
+		valueLen := len(dst) - prevLen
+		leftPad = 2
+		rightPad = 25 - leftPad - valueLen
+		if rightPad < 0 {
+			rightPad = 0
+		}
 
 	case bool: // LOGICAL: just T or F, no padding
 		if v {

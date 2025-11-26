@@ -70,7 +70,7 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 		if param.ArraySpec != nil {
 			tg.arrays[param.Name] = param.ArraySpec
 			// Array element type will be set from parameter type
-			tp := tg.fortranTypeToGo(param.Type)
+			tp := tg.fortranTypeToGoWithKind(param.Type, param.TypeKind)
 			if tp == nil {
 				panic(fmt.Sprintf("unknown parameter type: %s", param.Type))
 			}
@@ -171,8 +171,8 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 	// In Go: return result
 	bodyStmts = tg.convertFunctionResultToReturn(fn.Name, bodyStmts)
 
-	// Map Fortran result type to Go type
-	resultType := tg.fortranTypeToGo(fn.ResultType)
+	// Map Fortran result type to Go type, considering KIND parameter
+	resultType := tg.fortranTypeToGoWithKind(fn.ResultType, fn.ResultKind)
 	if resultType == nil {
 		return nil, fmt.Errorf("unknown fortran result type: %s", fn.ResultType)
 	}
@@ -294,8 +294,8 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 	var fields []*ast.Field
 
 	for _, param := range params {
-		// Get the Go type for this parameter
-		goType := tg.fortranTypeToGo(param.Type)
+		// Get the Go type for this parameter, considering KIND
+		goType := tg.fortranTypeToGoWithKind(param.Type, param.TypeKind)
 		if goType == nil {
 			panic(fmt.Sprintf("unhandled type %s", param.Type))
 		}
@@ -808,14 +808,42 @@ func (tg *TranspileToGo) transformExpressions(exprs []f90.Expression) []ast.Expr
 	return goExprs
 }
 
+// fortranTypeToGo converts Fortran type to Go type, ignoring KIND parameter
 func (tg *TranspileToGo) fortranTypeToGo(ft string) (goType ast.Expr) {
+	return tg.fortranTypeToGoWithKind(ft, nil)
+}
+
+// fortranTypeToGoWithKind converts Fortran type to Go type, considering KIND parameter
+// KIND mappings:
+//
+//	INTEGER(KIND=1) → int8, INTEGER(KIND=2) → int16
+//	INTEGER(KIND=4) → int32, INTEGER(KIND=8) → int64
+//	REAL(KIND=4) → float32, REAL(KIND=8) → float64
+func (tg *TranspileToGo) fortranTypeToGoWithKind(ft string, kindParam f90.Expression) (goType ast.Expr) {
+	// Extract KIND value if present
+	kindValue := tg.extractKindValue(kindParam)
+
 	switch ft {
 	default:
 		return nil //
 	case "INTEGER":
-		goType = ast.NewIdent("int32")
+		switch kindValue {
+		case 1:
+			goType = ast.NewIdent("int8")
+		case 2:
+			goType = ast.NewIdent("int16")
+		case 8:
+			goType = ast.NewIdent("int64")
+		default: // 4 or unspecified
+			goType = ast.NewIdent("int32")
+		}
 	case "REAL":
-		goType = ast.NewIdent("float32")
+		switch kindValue {
+		case 8:
+			goType = ast.NewIdent("float64")
+		default: // 4 or unspecified
+			goType = ast.NewIdent("float32")
+		}
 	case "DOUBLE PRECISION":
 		goType = ast.NewIdent("float64")
 	case "LOGICAL":
@@ -827,6 +855,54 @@ func (tg *TranspileToGo) fortranTypeToGo(ft string) (goType ast.Expr) {
 		// We'll handle initialization per-entity below
 	}
 	return goType
+}
+
+// extractKindValue extracts the integer KIND value from a KIND parameter expression
+// Returns 0 if KIND is not specified or cannot be evaluated
+func (tg *TranspileToGo) extractKindValue(kindParam f90.Expression) int {
+	if kindParam == nil {
+		return 0
+	}
+
+	// Handle integer literals
+	if intLit, ok := kindParam.(*f90.IntegerLiteral); ok {
+		return int(intLit.Value)
+	}
+
+	// For more complex expressions, default to 0 (use default KIND)
+	// TODO: Handle named constants, expressions, etc.
+	return 0
+}
+
+// cleanIntegerLiteral removes Fortran KIND suffix from integer literals
+// Example: 9223372036854775807_8 → 9223372036854775807
+func (tg *TranspileToGo) cleanIntegerLiteral(raw string) string {
+	// Remove _<kind> suffix if present
+	if idx := strings.LastIndex(raw, "_"); idx >= 0 {
+		return raw[:idx]
+	}
+	return raw
+}
+
+// cleanRealLiteral converts Fortran double precision literals to Go format
+// Examples:
+//
+//	3.141592653589793D0 → 3.141592653589793
+//	1.5D+10 → 1.5e+10
+//	2.0D-5 → 2.0e-5
+func (tg *TranspileToGo) cleanRealLiteral(raw string) string {
+	// Replace D exponent notation with e notation
+	// Fortran uses D for double precision: 1.5D+10
+	// Go uses e: 1.5e+10
+	result := strings.ReplaceAll(raw, "D", "e")
+	result = strings.ReplaceAll(result, "d", "e")
+
+	// Handle D0 suffix (no exponent) by removing it
+	if strings.HasSuffix(result, "e0") {
+		result = result[:len(result)-2]
+	}
+
+	return result
 }
 
 // fortranConstantToGoExpr converts a Fortran constant expression string to Go AST expression
@@ -880,8 +956,8 @@ func (tg *TranspileToGo) fortranConstantToGoExpr(fortranExpr string) ast.Expr {
 
 // transformTypeDeclaration transforms a Fortran type declaration to Go var declaration
 func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast.Stmt {
-	// Map Fortran type to Go type
-	goType := tg.fortranTypeToGo(decl.TypeSpec)
+	// Map Fortran type to Go type, considering KIND parameter
+	goType := tg.fortranTypeToGoWithKind(decl.TypeSpec, decl.KindParam)
 	if goType == nil {
 		return nil
 	}
@@ -1230,12 +1306,12 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 	case *f90.IntegerLiteral:
 		return &ast.BasicLit{
 			Kind:  token.INT,
-			Value: e.Raw,
+			Value: tg.cleanIntegerLiteral(e.Raw),
 		}
 	case *f90.RealLiteral:
 		return &ast.BasicLit{
 			Kind:  token.FLOAT,
-			Value: e.Raw,
+			Value: tg.cleanRealLiteral(e.Raw),
 		}
 	case *f90.LogicalLiteral:
 		// .TRUE. → true, .FALSE. → false
@@ -1277,9 +1353,42 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 			return tg.transformArrayRef(arrayRef)
 		}
 		return tg.transformFunctionCall(e)
+	case *f90.ArrayConstructor:
+		return tg.transformArrayConstructor(e)
 	default:
 		// For now, unsupported expressions return nil
 		return nil
+	}
+}
+
+// transformArrayConstructor transforms a Fortran array constructor (/ ... /) to Go array initialization
+// Example: (/ 10, 20, 30 /) → intrinsic.NewArrayFromValues([]int32{10, 20, 30})
+func (tg *TranspileToGo) transformArrayConstructor(ac *f90.ArrayConstructor) ast.Expr {
+	// Transform each value in the constructor
+	goValues := make([]ast.Expr, len(ac.Values))
+	for i, val := range ac.Values {
+		goValues[i] = tg.transformExpression(val)
+	}
+
+	// Create slice literal: []T{values...}
+	// We'll infer the type from the first element or default to int32
+	var elemType ast.Expr = ast.NewIdent("int32") // Default type
+
+	// Create composite literal for the slice
+	sliceLit := &ast.CompositeLit{
+		Type: &ast.ArrayType{
+			Elt: elemType,
+		},
+		Elts: goValues,
+	}
+
+	// Generate: intrinsic.NewArrayFromValues[int32]([]int32{...})
+	return &ast.CallExpr{
+		Fun: &ast.IndexExpr{
+			X:     _astFnNewArrayFromValues,
+			Index: elemType,
+		},
+		Args: []ast.Expr{sliceLit},
 	}
 }
 
@@ -2033,6 +2142,10 @@ var (
 	_astFnNewCharArray = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("NewCharacterArray"),
+	}
+	_astFnNewArrayFromValues = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewArrayFromValues"),
 	}
 	_astTypeCharArray = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),

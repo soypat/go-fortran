@@ -1,8 +1,8 @@
 # Fortran-to-Go Transpiler: Current Status
 
-## Implementation Progress: LEVEL01-23 Complete ✅
+## Implementation Progress: LEVEL01-25 Complete ✅
 
-All 23 progressive test levels implemented and passing. The transpiler can handle a substantial subset of Fortran 77/90 code.
+All 25 progressive test levels implemented and passing. The transpiler can handle a substantial subset of Fortran 77/90 code.
 
 ## Fully Implemented Features
 
@@ -23,7 +23,7 @@ All 23 progressive test levels implemented and passing. The transpiler can handl
 - ✅ **Strings**: Character variables and concatenation (//)
 - ✅ **Intrinsics**: SIN, COS, ABS, SQRT, MAX, MIN with proper type handling
 
-### Advanced Features (LEVEL13-23)
+### Advanced Features (LEVEL13-25)
 - ✅ **Loop Control**: CYCLE (continue), EXIT (break), CONTINUE (labels)
 - ✅ **Labels**: Numeric statement labels with GOTO
 - ✅ **SELECT CASE**: Multi-way branch with DEFAULT
@@ -36,16 +36,19 @@ All 23 progressive test levels implemented and passing. The transpiler can handl
 - ✅ **Computed GOTO**: GO TO (label1, label2, ...), index
 - ✅ **STOP**: Program termination with exit codes
 - ✅ **PARAMETER Constants**: Named compile-time constants with expression evaluation
+- ✅ **Array Constructors**: Inline array initialization with (/ ... /) syntax
+- ✅ **KIND Parameters**: Type sizing with INTEGER(KIND=n), REAL(KIND=n)
+  - INTEGER(KIND=1) → int8, KIND=2 → int16, KIND=4 → int32, KIND=8 → int64
+  - REAL(KIND=4) → float32, REAL(KIND=8) → float64
+  - Literal conversion: Fortran D0 exponent → Go e notation
 
 ## Parser-Only (Not Transpiled)
 
 These features are parsed but not yet transpiled to Go:
 
 ### Specification Statements
-- ⚠️ **IMPLICIT** rules (default and custom)
-- ⚠️ **KIND** parameters (INTEGER(KIND=8), REAL*8)
-- ⚠️ **EXTERNAL/INTRINSIC** declarations
-- ⚠️ **PARAMETER** attribute (named constants)
+- ⚠️ **IMPLICIT** rules (default and custom) - parsed but not used in transpilation
+- ⚠️ **EXTERNAL/INTRINSIC** declarations - parsed but not enforced
 - ⚠️ **DIMENSION** attribute (alternative array syntax)
 - ⚠️ **SAVE** attribute (persistent variables)
 
@@ -175,13 +178,13 @@ After these, the transpiler will handle ~80% of typical Fortran 77/90 code.
 
 ## Metrics
 
-- **Lines of Transpiler Code**: ~2000
+- **Lines of Transpiler Code**: ~2100
 - **Lines of Parser Code**: ~4000
 - **Lines of Test Code**: ~3000
 - **AST Node Types**: 50+
-- **Implemented Levels**: 22/22 (100%)
+- **Implemented Levels**: 25/25 (100%)
 - **Parser Coverage**: ~85% of F77/F90 spec
-- **Transpiler Coverage**: ~60% of parsed features
+- **Transpiler Coverage**: ~65% of parsed features
 - **Test Success Rate**: 100% (all passing)
 
 ---

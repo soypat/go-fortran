@@ -26,6 +26,8 @@
       CALL LEVEL20()
       CALL LEVEL21()
       CALL LEVEL23()
+      CALL LEVEL24()
+      CALL LEVEL25()
       CALL LEVEL22()
       STOP 0
       CONTAINS
@@ -585,6 +587,55 @@
           PRINT *, 'LEVEL 23: PI =', PI
           PRINT *, 'LEVEL 23: TAU =', TAU
       END SUBROUTINE LEVEL23
+
+! ==============================================================================
+! LEVEL 24: Array Constructors
+! ==============================================================================
+      SUBROUTINE LEVEL24()
+          INTEGER, DIMENSION(3) :: vec1
+          INTEGER, DIMENSION(5) :: vec2
+
+          ! Array constructor with explicit values
+          vec1 = (/ 10, 20, 30 /)
+
+          PRINT *, 'LEVEL 24: vec1(1) =', vec1(1)
+          PRINT *, 'LEVEL 24: vec1(2) =', vec1(2)
+          PRINT *, 'LEVEL 24: vec1(3) =', vec1(3)
+
+          ! Array constructor with multiple values
+          vec2 = (/ 100, 200, 300, 400, 500 /)
+
+          PRINT *, 'LEVEL 24: vec2(1) =', vec2(1)
+          PRINT *, 'LEVEL 24: vec2(5) =', vec2(5)
+      END SUBROUTINE LEVEL24
+
+! ==============================================================================
+! LEVEL 25: KIND Parameters
+! ==============================================================================
+      SUBROUTINE LEVEL25()
+          ! Test various KIND parameters
+          INTEGER(KIND=1) :: i1
+          INTEGER(KIND=2) :: i2
+          INTEGER(KIND=4) :: i4
+          INTEGER(KIND=8) :: i8
+          REAL(KIND=4) :: r4
+          REAL(KIND=8) :: r8
+
+          ! Assign values
+          i1 = 127           ! Max value for int8
+          i2 = 32767         ! Max value for int16
+          i4 = 2147483647    ! Max value for int32
+          i8 = 9223372036854775807_8  ! Max value for int64
+          r4 = 3.14159
+          r8 = 3.141592653589793D0
+
+          PRINT *, 'LEVEL 25: i1 =', i1
+          PRINT *, 'LEVEL 25: i2 =', i2
+          PRINT *, 'LEVEL 25: i4 =', i4
+          PRINT *, 'LEVEL 25: i8 =', i8
+          PRINT *, 'LEVEL 25: r4 =', r4
+          PRINT *, 'LEVEL 25: r8 =', r8
+      END SUBROUTINE LEVEL25
 
 ! ==============================================================================
 ! Helper Subroutines and Functions
