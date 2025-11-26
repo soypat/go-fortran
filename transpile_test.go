@@ -159,10 +159,7 @@ func TestTranspileGolden(t *testing.T) {
 	output := helperRunGo(t, &formattedSrc)
 
 	// Read expected output and extract only the lines for implemented levels
-	expectedFull, err := os.ReadFile("testdata/golden.out")
-	if err != nil {
-		t.Fatalf("failed to read golden.out: %v", err)
-	}
+	expectedFull := helperRunFortran(t, strings.NewReader(goldensrc))
 	lvlStr := fmt.Sprintf("LEVEL %d:", maxLvl)
 	idx := bytes.LastIndex(expectedFull, []byte(lvlStr))
 	if idx < 0 {
@@ -184,10 +181,6 @@ func TestTranspileGolden(t *testing.T) {
 			break
 		}
 	}
-	// if !bytes.Equal(expected, output) {
-	// 	t.Errorf("output mismatch:\nExpected: %q\nGot:      %q", expected, string(output))
-	// 	os.WriteFile("testdata/bad.out", output, 0777)
-	// }
 }
 
 func helperGetGoldenLevel(t *testing.T, lvl int, pus []f90.ProgramUnit) *f90.Subroutine {
@@ -215,6 +208,32 @@ func helperWriteGoFunc(t *testing.T, w *bytes.Buffer, f *ast.FuncDecl) {
 		t.Fatalf("failed to write Go function: %v", err)
 	}
 	w.WriteString("\n")
+}
+
+func helperRunFortran(t *testing.T, fsrc io.Reader) (output []byte) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	srcBytes, err := io.ReadAll(fsrc)
+	if err != nil {
+		t.Fatalf("failed to read Go source: %v", err)
+	}
+	// Write source to temp file
+	srcFile := filepath.Join(tmpDir, "main.f90")
+	if err := os.WriteFile(srcFile, []byte(srcBytes), 0644); err != nil {
+		t.Fatalf("failed to write Fortran source: %v", err)
+	}
+	binFile := filepath.Join(tmpDir, "main.f90.bin")
+	cmd := exec.Command("gfortran", "-o", binFile, srcFile)
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command(binFile)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return output
 }
 
 func helperRunGo(t *testing.T, gosrc io.Reader) (output []byte) {
