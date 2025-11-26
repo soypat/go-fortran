@@ -33,6 +33,9 @@ func main() {
 	LEVEL20()
 	LEVEL21()
 	LEVEL22()
+	LEVEL23()
+
+	intrinsic.Exit(0)
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
@@ -521,9 +524,15 @@ label400:
 }
 
 func LEVEL22() {
-	intrinsic.Print("LEVEL 22: About to STOP")
-	intrinsic.Print("LEVEL 22: STOP with code 0")
-	intrinsic.Exit(0)
+}
+
+func LEVEL23() {
+	const MAX_SIZE int32 = 100
+	const PI float32 = 3.14159
+	const TAU float32 = 2.0 * PI
+	intrinsic.Print("LEVEL 23: MAX_SIZE =", MAX_SIZE)
+	intrinsic.Print("LEVEL 23: PI =", PI)
+	intrinsic.Print("LEVEL 23: TAU =", TAU)
 }
 
 func SET_COMMON_VALUES() {

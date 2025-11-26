@@ -25,8 +25,9 @@
       CALL LEVEL19()
       CALL LEVEL20()
       CALL LEVEL21()
+      CALL LEVEL23()
       CALL LEVEL22()
-
+      STOP 0
       CONTAINS
 
 ! ==============================================================================
@@ -571,10 +572,19 @@
 
       ! LEVEL 22: STOP Statement
       SUBROUTINE LEVEL22()
-          PRINT *, 'LEVEL 22: About to STOP'
-          PRINT *, 'LEVEL 22: STOP with code 0'
-          STOP 0
+
       END SUBROUTINE LEVEL22
+
+      ! LEVEL 23: PARAMETER Constants
+      SUBROUTINE LEVEL23()
+          INTEGER, PARAMETER :: MAX_SIZE = 100
+          REAL, PARAMETER :: PI = 3.14159
+          REAL, PARAMETER :: TAU = 2.0 * PI
+
+          PRINT *, 'LEVEL 23: MAX_SIZE =', MAX_SIZE
+          PRINT *, 'LEVEL 23: PI =', PI
+          PRINT *, 'LEVEL 23: TAU =', TAU
+      END SUBROUTINE LEVEL23
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

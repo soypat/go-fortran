@@ -123,8 +123,8 @@ func TestTranspileGolden(t *testing.T) {
 		})
 
 	}
-	if lvl < 22 {
-		t.Fatalf("expected at least 22 levels, got %d", lvl)
+	if lvl < 23 {
+		t.Fatalf("expected at least 23 levels, got %d", lvl)
 	}
 	maxLvl := lvl
 	// write helper subroutines:
@@ -173,12 +173,13 @@ func TestTranspileGolden(t *testing.T) {
 	for lvl := 1; lvl <= maxLvl; lvl++ {
 		fmt.Fprintf(&outsrc, "\tLEVEL%02d()\n", lvl)
 	}
-	outsrc.WriteString("}\n")
+	outsrc.WriteString("\n\tintrinsic.Exit(0)\n}\n")
 	funcsrc.WriteTo(&outsrc)
 	var formattedSrc bytes.Buffer
 	helperFormatGoSrc(t, &outsrc, &formattedSrc)
-	os.WriteFile("testdata/golden.go", formattedSrc.Bytes(), 0777)
-	output := helperRunGo(t, &formattedSrc)
+	const goFile = "testdata/golden.go"
+	os.WriteFile(goFile, formattedSrc.Bytes(), 0777)
+	output := helperRunGoFile(t, goFile)
 
 	// Read expected output and extract only the lines for implemented levels
 	expectedFull := helperRunFortran(t, strings.NewReader(goldensrc))
@@ -258,60 +259,19 @@ func helperRunFortran(t *testing.T, fsrc io.Reader) (output []byte) {
 	return output
 }
 
-func helperRunGo(t *testing.T, gosrc io.Reader) (output []byte) {
-	t.Helper()
-
-	// Create temp directory
-	tmpDir := t.TempDir()
-
-	// Read source
-	srcBytes, err := io.ReadAll(gosrc)
-	if err != nil {
-		t.Fatalf("failed to read Go source: %v", err)
-	}
-
-	// Write source to temp file
-	srcFile := filepath.Join(tmpDir, "main.go")
-	if err := os.WriteFile(srcFile, []byte(srcBytes), 0644); err != nil {
-		t.Fatalf("failed to write Go source: %v", err)
-	}
-
-	// Create go.mod file that points to the local module
-	// This allows the generated code to import github.com/soypat/go-fortran/intrinsic
-	goModContent := `module testprog
-
-go 1.21
-
-require github.com/soypat/go-fortran v0.0.0
-
-replace github.com/soypat/go-fortran => ` + mustGetwd(t) + `
-`
-	goModFile := filepath.Join(tmpDir, "go.mod")
-	if err := os.WriteFile(goModFile, []byte(goModContent), 0644); err != nil {
-		t.Fatalf("failed to write go.mod: %v", err)
-	}
-
-	// Run go mod tidy to resolve dependencies
-	tidyCmd := exec.Command("go", "mod", "tidy")
-	tidyCmd.Dir = tmpDir
-	if out, err := tidyCmd.CombinedOutput(); err != nil {
-		t.Fatalf("go mod tidy failed: %s\n%v", out, err)
-	}
-
-	// Compile
-	cmd := exec.Command("go", "build", "-o", filepath.Join(tmpDir, "test"), srcFile)
-	cmd.Dir = tmpDir
+func helperRunGoFile(t *testing.T, pathToFile string) (output []byte) {
+	executable := pathToFile + ".bin"
+	cmd := exec.Command("go", "build", "-o", executable, pathToFile)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("compilation failed: %s\n%v", out, err)
+		t.Fatalf("compilation failed %s: %s\n%v", pathToFile, out, err)
 	}
 
 	// Run
-	cmd = exec.Command(filepath.Join(tmpDir, "test"))
-	output, err = cmd.CombinedOutput()
+	cmd = exec.Command(executable)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("execution failed: %v\nOutput: %s", err, output)
 	}
-
 	return output
 }
 
@@ -325,11 +285,16 @@ func mustGetwd(t *testing.T) string {
 }
 
 func helperFormatGoSrc(t *testing.T, r io.Reader, w io.Writer) {
+	var stderr bytes.Buffer
+	var src bytes.Buffer
+	src.ReadFrom(r)
 	cmd := exec.Command("gofmt")
-	cmd.Stdin = r
+	cmd.Stdin = bytes.NewBuffer(src.Bytes())
 	cmd.Stdout = w
+	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
-		t.Fatal(err)
+		t.Error(stderr.String(), err)
+		src.WriteTo(w) // Still output data
 	}
 }

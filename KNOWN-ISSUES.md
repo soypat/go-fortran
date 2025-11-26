@@ -622,7 +622,34 @@ The transpiler test suite includes workarounds for known issues:
 - Generated code compiles and runs ✅
 - Output matches expected results exactly ✅
 
-**LEVEL21-22**: Not yet implemented (planned)
+**LEVEL21 (Advanced GOTO)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- **Arithmetic IF Statement**:
+  - `IF (x) 10, 20, 30` → three-way branch based on sign of expression ✅
+  - Generates if-else chain: `if x < 0 { goto label10 } else if x == 0 { goto label20 } else { goto label30 }` ✅
+- **Computed GOTO Statement**:
+  - `GO TO (100, 200, 300), choice` → jump to label based on integer value ✅
+  - Generates switch statement with 1-based case indexing ✅
+  - `case 1: goto label100; case 2: goto label200; case 3: goto label300` ✅
+- Test cases:
+  - Arithmetic IF with negative value branches to first label ✅
+  - Computed GOTO with choice=2 branches to second label ✅
+- Generated code compiles and runs ✅
+- Output matches expected results exactly ✅
+
+**LEVEL22 (STOP Statement)**: ✅ Working
+- Parses correctly ✅
+- Transpiles to Go successfully ✅
+- **STOP Statement**:
+  - `STOP` → `intrinsic.Exit(0)` ✅
+  - `STOP n` → `intrinsic.Exit(n)` with specified exit code ✅
+  - `intrinsic.Exit()` handles stdout flushing before exit ✅
+- Test case:
+  - STOP with exit code 0 ✅
+  - Output flushed before program termination ✅
+- Generated code compiles and runs ✅
+- Program exits cleanly with correct exit code ✅
 
 ---
 
@@ -825,6 +852,29 @@ go test -run Transpile
     - REAL variables: x, y initialized with 3.14, 2.71
   - Updated `golden.out` with expected output (5 lines)
   - Updated `transpile_test.go` maxLvl from 19 to 20
+  - All tests pass with exact output matching ✅
+- **2025-11-26** (Session 8): LEVEL23 implementation - PARAMETER Constants
+  - Added LEVEL23 test case to `golden.f90` with PARAMETER attribute constants
+  - Implemented `fortranConstantToGoExpr()` helper function for constant expression conversion:
+    - Handles numeric literals (integers and floats)
+    - Handles boolean literals (.TRUE., .FALSE. → true, false)
+    - Handles string literals with proper quoting
+    - Handles simple binary expressions (e.g., `2.0 * PI`)
+    - Recursively processes nested constant expressions
+  - Modified `transformTypeDeclaration()` to detect PARAMETER attribute:
+    - Generates `const` declarations instead of `var` for PARAMETER entities
+    - Extracts and transforms initializer expressions
+  - Fixed parser bug in `parseTypeDecl()` initializer collection:
+    - Operator tokens (*, +, etc.) have empty `lit` fields
+    - Added fallback to `tok.String()` when `lit` is empty
+    - Now correctly captures `2.0 * PI` instead of `2.0  PI`
+  - Test cases:
+    - INTEGER constant: MAX_SIZE = 100
+    - REAL constant: PI = 3.14159
+    - Computed constant: TAU = 2.0 * PI (evaluates to 6.28318)
+  - Updated `golden.out` with expected output (3 lines)
+  - Updated `transpile_test.go` maxLvl from 22 to 23
+  - Fixed test helper `helperFormatGoSrc()`: Changed from CombinedOutput() to Run()
   - All tests pass with exact output matching ✅
 - **2025-11-25** (Session 4): LEVEL13 implementation - Loop control (CYCLE, EXIT, CONTINUE)
   - Added LEVEL13 test case to `golden.f90` with CYCLE, EXIT, and labeled CONTINUE

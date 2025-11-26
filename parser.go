@@ -2879,7 +2879,13 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 						initTokens = append(initTokens, ' ')
 					}
 				}
-				initTokens = append(initTokens, p.current.lit...)
+				// Append token literal - for operators, use String() if lit is empty
+				if len(p.current.lit) > 0 {
+					initTokens = append(initTokens, p.current.lit...)
+				} else {
+					// Operator tokens have empty lit, use token's string representation
+					initTokens = append(initTokens, []byte(p.current.tok.String())...)
+				}
 				p.nextToken()
 			}
 			entity.Initializer = string(initTokens)

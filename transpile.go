@@ -829,6 +829,55 @@ func (tg *TranspileToGo) fortranTypeToGo(ft string) (goType ast.Expr) {
 	return goType
 }
 
+// fortranConstantToGoExpr converts a Fortran constant expression string to Go AST expression
+// This is a simple converter for PARAMETER constants that handles basic cases
+func (tg *TranspileToGo) fortranConstantToGoExpr(fortranExpr string) ast.Expr {
+	fortranExpr = strings.TrimSpace(fortranExpr)
+
+	// Handle boolean literals
+	if fortranExpr == ".TRUE." {
+		return ast.NewIdent("true")
+	}
+	if fortranExpr == ".FALSE." {
+		return ast.NewIdent("false")
+	}
+
+	// Handle numeric literals (integer or float)
+	if _, err := strconv.ParseInt(fortranExpr, 10, 64); err == nil {
+		// It's an integer literal
+		return &ast.BasicLit{Kind: token.INT, Value: fortranExpr}
+	}
+	if _, err := strconv.ParseFloat(fortranExpr, 64); err == nil {
+		// It's a float literal
+		return &ast.BasicLit{Kind: token.FLOAT, Value: fortranExpr}
+	}
+
+	// Handle string literals (quoted strings)
+	if strings.HasPrefix(fortranExpr, "'") || strings.HasPrefix(fortranExpr, "\"") {
+		// Remove Fortran quotes and add Go quotes
+		unquoted := strings.Trim(fortranExpr, "'\"")
+		return &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(unquoted)}
+	}
+
+	// Handle simple expressions like "2.0 * PI"
+	// For now, check for simple binary operations and identifiers
+	if strings.Contains(fortranExpr, "*") && !strings.Contains(fortranExpr, "**") {
+		parts := strings.SplitN(fortranExpr, "*", 2)
+		if len(parts) == 2 {
+			left := tg.fortranConstantToGoExpr(strings.TrimSpace(parts[0]))
+			right := tg.fortranConstantToGoExpr(strings.TrimSpace(parts[1]))
+			return &ast.BinaryExpr{
+				X:  left,
+				Op: token.MUL,
+				Y:  right,
+			}
+		}
+	}
+
+	// Otherwise, assume it's an identifier (like another PARAMETER constant)
+	return ast.NewIdent(fortranExpr)
+}
+
 // transformTypeDeclaration transforms a Fortran type declaration to Go var declaration
 func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast.Stmt {
 	// Map Fortran type to Go type
@@ -836,12 +885,15 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 	if goType == nil {
 		return nil
 	}
-	// Check if this declaration has ALLOCATABLE attribute
+	// Check for special attributes
 	isAllocatable := false
+	isParameter := false
 	for _, attr := range decl.Attributes {
 		if attr == f90token.ALLOCATABLE {
 			isAllocatable = true
-			break
+		}
+		if attr == f90token.PARAMETER {
+			isParameter = true
 		}
 	}
 
@@ -891,8 +943,22 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 			Type:  goType,
 		}
 
-		// For CHARACTER, check entity-specific length and initialize with CharacterArray
-		if decl.TypeSpec == "CHARACTER" && entity.CharLen != nil {
+		// For PARAMETER constants, convert initializer to Go expression
+		if isParameter {
+			if entity.Initializer != "" {
+				// Strip = or => prefix
+				initStr := strings.TrimSpace(entity.Initializer)
+				if strings.HasPrefix(initStr, "=") {
+					initStr = strings.TrimSpace(initStr[1:])
+				} else if strings.HasPrefix(initStr, "=>") {
+					initStr = strings.TrimSpace(initStr[2:])
+				}
+
+				// Convert Fortran constant expression to Go expression
+				spec.Values = []ast.Expr{tg.fortranConstantToGoExpr(initStr)}
+			}
+		} else if decl.TypeSpec == "CHARACTER" && entity.CharLen != nil {
+			// For CHARACTER variables (not constants), initialize with CharacterArray
 			if length := tg.extractIntLiteral(entity.CharLen); length > 0 {
 				// Track CHARACTER length for later use in assignments
 				tg.charLengths[entity.Name] = length
@@ -917,9 +983,15 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		return nil
 	}
 
+	// Use CONST token for PARAMETER declarations, VAR for regular variables
+	tok := token.VAR
+	if isParameter {
+		tok = token.CONST
+	}
+
 	return &ast.DeclStmt{
 		Decl: &ast.GenDecl{
-			Tok:   token.VAR,
+			Tok:   tok,
 			Specs: specs,
 		},
 	}
