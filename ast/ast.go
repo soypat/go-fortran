@@ -197,7 +197,7 @@ func (s *Subroutine) AppendString(dst []byte) []byte {
 //	END FUNCTION average
 type Function struct {
 	Name           string
-	ResultType     string        // e.g., "INTEGER", "REAL"
+	ResultType     token.Token   // e.g., "INTEGER", "REAL"
 	ResultKind     Expression    // KIND parameter for result type (nil if default kind)
 	Parameters     []Parameter   // Function parameters with type information
 	ResultVariable string        // For RESULT(var) clause
@@ -217,8 +217,8 @@ func (f *Function) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "FUNCTION"...)
 }
 func (f *Function) AppendString(dst []byte) []byte {
-	if f.ResultType != "" {
-		dst = append(dst, f.ResultType...)
+	if f.ResultType != 0 {
+		dst = append(dst, f.ResultType.String()...)
 		dst = append(dst, ' ')
 	}
 	dst = append(dst, "FUNCTION "...)
@@ -362,8 +362,8 @@ type ImplicitRule struct {
 //	IMPLICIT INTEGER (I-N)
 //	IMPLICIT REAL(KIND=8) (A-C, X-Z)
 type ImplicitStatement struct {
-	IsNone bool            // true for IMPLICIT NONE
-	Rules  []ImplicitRule  // Custom type rules (empty if IsNone)
+	IsNone bool           // true for IMPLICIT NONE
+	Rules  []ImplicitRule // Custom type rules (empty if IsNone)
 	Label  string
 	Position
 }
@@ -598,7 +598,8 @@ func (ds *DataStmt) AppendString(dst []byte) []byte {
 //	REAL, PARAMETER :: PI = 3.14159
 //	CHARACTER(LEN=80), INTENT(IN) :: filename
 type TypeDeclaration struct {
-	TypeSpec   string        // e.g., "INTEGER", "REAL", "CHARACTER"
+	Type       token.Token
+	TypeName   string        // e.g., "INTEGER", "REAL", "CHARACTER"
 	KindParam  Expression    // KIND parameter: INTEGER(KIND=8), REAL*8, etc. (nil if not specified)
 	Attributes []token.Token // e.g., PARAMETER, SAVE, INTENT, etc.
 	Entities   []DeclEntity  // Variables being declared
@@ -612,10 +613,10 @@ func (td *TypeDeclaration) GetLabel() string { return td.Label }
 
 func (td *TypeDeclaration) statementNode() {}
 func (td *TypeDeclaration) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, td.TypeSpec...)
+	return append(dst, td.Type.String()...)
 }
 func (td *TypeDeclaration) AppendString(dst []byte) []byte {
-	dst = append(dst, td.TypeSpec...)
+	dst = append(dst, td.Type.String()...)
 	if len(td.Attributes) > 0 {
 		dst = append(dst, ", "...)
 		for i, attr := range td.Attributes {
@@ -719,7 +720,7 @@ func (it IntentType) String() string {
 //	CHARACTER(LEN=*), OPTIONAL :: message
 type Parameter struct {
 	Name       string        // Parameter name
-	Type       string        // Type specification (INTEGER, REAL, etc.)
+	Type       token.Token   // Type specification (INTEGER, REAL, etc.)
 	TypeKind   Expression    // KIND parameter for this type (nil if default kind)
 	Intent     IntentType    // INTENT(IN/OUT/INOUT)
 	Attributes []token.Token // Other attributes (OPTIONAL, POINTER, TARGET, etc.)

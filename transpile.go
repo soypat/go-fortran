@@ -809,7 +809,7 @@ func (tg *TranspileToGo) transformExpressions(exprs []f90.Expression) []ast.Expr
 }
 
 // fortranTypeToGo converts Fortran type to Go type, ignoring KIND parameter
-func (tg *TranspileToGo) fortranTypeToGo(ft string) (goType ast.Expr) {
+func (tg *TranspileToGo) fortranTypeToGo(ft f90token.Token) (goType ast.Expr) {
 	return tg.fortranTypeToGoWithKind(ft, nil)
 }
 
@@ -819,14 +819,14 @@ func (tg *TranspileToGo) fortranTypeToGo(ft string) (goType ast.Expr) {
 //	INTEGER(KIND=1) → int8, INTEGER(KIND=2) → int16
 //	INTEGER(KIND=4) → int32, INTEGER(KIND=8) → int64
 //	REAL(KIND=4) → float32, REAL(KIND=8) → float64
-func (tg *TranspileToGo) fortranTypeToGoWithKind(ft string, kindParam f90.Expression) (goType ast.Expr) {
+func (tg *TranspileToGo) fortranTypeToGoWithKind(ft f90token.Token, kindParam f90.Expression) (goType ast.Expr) {
 	// Extract KIND value if present
 	kindValue := tg.extractKindValue(kindParam)
 
 	switch ft {
 	default:
 		return nil //
-	case "INTEGER":
+	case f90token.INTEGER:
 		switch kindValue {
 		case 1:
 			goType = ast.NewIdent("int8")
@@ -837,18 +837,18 @@ func (tg *TranspileToGo) fortranTypeToGoWithKind(ft string, kindParam f90.Expres
 		default: // 4 or unspecified
 			goType = ast.NewIdent("int32")
 		}
-	case "REAL":
+	case f90token.REAL:
 		switch kindValue {
 		case 8:
 			goType = ast.NewIdent("float64")
 		default: // 4 or unspecified
 			goType = ast.NewIdent("float32")
 		}
-	case "DOUBLE PRECISION":
+	case f90token.DOUBLEPRECISION:
 		goType = ast.NewIdent("float64")
-	case "LOGICAL":
+	case f90token.LOGICAL:
 		goType = ast.NewIdent("bool")
-	case "CHARACTER":
+	case f90token.CHARACTER:
 		// CHARACTER(LEN=n) maps to intrinsic.CharacterArray
 		goType = _astTypeCharArray
 		// CHARACTER(LEN=n) length is specified per-entity in entity.CharLen
@@ -957,7 +957,7 @@ func (tg *TranspileToGo) fortranConstantToGoExpr(fortranExpr string) ast.Expr {
 // transformTypeDeclaration transforms a Fortran type declaration to Go var declaration
 func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast.Stmt {
 	// Map Fortran type to Go type, considering KIND parameter
-	goType := tg.fortranTypeToGoWithKind(decl.TypeSpec, decl.KindParam)
+	goType := tg.fortranTypeToGoWithKind(decl.Type, decl.KindParam)
 	if goType == nil {
 		return nil
 	}
@@ -1033,7 +1033,7 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 				// Convert Fortran constant expression to Go expression
 				spec.Values = []ast.Expr{tg.fortranConstantToGoExpr(initStr)}
 			}
-		} else if decl.TypeSpec == "CHARACTER" && entity.CharLen != nil {
+		} else if decl.Type == f90token.CHARACTER && entity.CharLen != nil {
 			// For CHARACTER variables (not constants), initialize with CharacterArray
 			if length := tg.extractIntLiteral(entity.CharLen); length > 0 {
 				// Track CHARACTER length for later use in assignments
