@@ -26,11 +26,11 @@ func LEVEL02() {
 	var i int32
 	var x float32
 	var flag bool
-	var message string = "                    "
+	var message intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
 	i = 42
 	x = 3.14159
 	flag = true
-	message = "Variables assigned  "
+	message.SetFromString("Variables assigned")
 	intrinsic.Print("LEVEL 2: i =", i, ", x =", x)
 	intrinsic.Print("LEVEL 2: flag =", flag)
 	intrinsic.Print("LEVEL 2:", message)
@@ -201,13 +201,13 @@ func LEVEL10() {
 }
 func LEVEL11() {
 	var (
-		str1 string = "          "
-		str2 string = "          "
+		str1 intrinsic.CharacterArray = intrinsic.NewCharacterArray(10)
+		str2 intrinsic.CharacterArray = intrinsic.NewCharacterArray(10)
 	)
-	var str3 string = "                    "
-	str1 = "Hello     "
-	str2 = "World     "
-	str3 = str1 + " " + str2
+	var str3 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+	str1.SetFromString("Hello")
+	str2.SetFromString("World")
+	str3.SetFromString(str1.String() + " " + str2.String())
 	intrinsic.Print("LEVEL 11: concatenation:", str3)
 }
 func LEVEL12() {

@@ -27,14 +27,16 @@ func (f Formatter) Print(v ...any) {
 	// - String values: need explicit separator space (except first)
 	prevWasString := false
 	for i, val := range v {
-		// Check if this is a string and not the first item
+		// Check if this is a string (or CharacterArray) and not the first item
 		_, thisIsString := val.(string)
-		dontSpace := i == 1 && prevWasString && thisIsString
+		_, thisIsCharArray := val.(CharacterArray)
+		isStringType := thisIsString || thisIsCharArray
+		dontSpace := i == 1 && prevWasString && isStringType
 		if !dontSpace && i > 0 { // Don't add separator before first item
 			buf = append(buf, ' ')
 		}
 		buf = f.formatValue(buf, val)
-		prevWasString = thisIsString
+		prevWasString = isStringType
 	}
 
 	// Print with newline (Fortran PRINT statement behavior)

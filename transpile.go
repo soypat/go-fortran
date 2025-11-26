@@ -279,7 +279,11 @@ func (tg *TranspileToGo) fortranTypeToGoType(fortranType string) ast.Expr {
 	case "LOGICAL":
 		return ast.NewIdent("bool")
 	case "CHARACTER":
-		return ast.NewIdent("string")
+		// CHARACTER(LEN=n) maps to intrinsic.CharacterArray
+		return &ast.SelectorExpr{
+			X:   ast.NewIdent("intrinsic"),
+			Sel: ast.NewIdent("CharacterArray"),
+		}
 	default:
 		// Unknown type, default to interface{}
 		return ast.NewIdent("interface{}")
@@ -586,8 +590,12 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 	case "LOGICAL":
 		goType = ast.NewIdent("bool")
 	case "CHARACTER":
-		goType = ast.NewIdent("string")
-		// CHARACTER(LEN=n) is specified per-entity in entity.CharLen
+		// CHARACTER(LEN=n) maps to intrinsic.CharacterArray
+		goType = &ast.SelectorExpr{
+			X:   ast.NewIdent("intrinsic"),
+			Sel: ast.NewIdent("CharacterArray"),
+		}
+		// CHARACTER(LEN=n) length is specified per-entity in entity.CharLen
 		// We'll handle initialization per-entity below
 	default:
 		// Unknown type, skip
@@ -617,17 +625,24 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 			Type:  goType,
 		}
 
-		// For CHARACTER, check entity-specific length and initialize with spaces
+		// For CHARACTER, check entity-specific length and initialize with CharacterArray
 		if decl.TypeSpec == "CHARACTER" && entity.CharLen != nil {
 			if length := tg.extractIntLiteral(entity.CharLen); length > 0 {
-				// Track CHARACTER length for padding assignments
+				// Track CHARACTER length for later use in assignments
 				tg.charLengths[entity.Name] = length
-				// Initialize with spaces
-				spaces := strings.Repeat(" ", length)
-				spec.Values = []ast.Expr{&ast.BasicLit{
-					Kind:  token.STRING,
-					Value: fmt.Sprintf("%q", spaces),
-				}}
+				// Initialize with intrinsic.NewCharacterArray(length)
+				spec.Values = []ast.Expr{
+					&ast.CallExpr{
+						Fun: &ast.SelectorExpr{
+							X:   ast.NewIdent("intrinsic"),
+							Sel: ast.NewIdent("NewCharacterArray"),
+						},
+						Args: []ast.Expr{&ast.BasicLit{
+							Kind:  token.INT,
+							Value: strconv.Itoa(length),
+						}},
+					},
+				}
 			}
 		}
 
@@ -737,9 +752,18 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 
 	// Check if LHS is a pointer parameter (OUT/INOUT scalar) - need to dereference
 	if ident, ok := lhs.(*ast.Ident); ok {
-		// Check character length for padding
-		if charLen, isChar := tg.charLengths[ident.Name]; isChar {
-			rhs = tg.padStringLiteral(rhs, charLen)
+		// Check if this is a CHARACTER assignment - use SetFromString() method
+		if _, isChar := tg.charLengths[ident.Name]; isChar {
+			// Generate: name.SetFromString(value)
+			return &ast.ExprStmt{
+				X: &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   lhs,
+						Sel: ast.NewIdent("SetFromString"),
+					},
+					Args: []ast.Expr{rhs},
+				},
+			}
 		}
 		// Check if this is a pointer parameter - need to dereference for assignment
 		if tg.pointerParams[strings.ToUpper(ident.Name)] {
@@ -804,6 +828,23 @@ func (tg *TranspileToGo) padStringLiteral(expr ast.Expr, targetLen int) ast.Expr
 			return &ast.BasicLit{
 				Kind:  token.STRING,
 				Value: strconv.Quote(str), // Re-quote with proper escaping
+			}
+		}
+	}
+	return expr
+}
+
+// wrapCharArrayToString wraps a CharacterArray expression with .String() method call
+// to convert it to a Go string for use in string concatenation expressions.
+func (tg *TranspileToGo) wrapCharArrayToString(expr ast.Expr) ast.Expr {
+	// If expr is a CharacterArray identifier, wrap with .String() call
+	if ident, ok := expr.(*ast.Ident); ok {
+		if _, isChar := tg.charLengths[ident.Name]; isChar {
+			return &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   ident,
+					Sel: ast.NewIdent("String"),
+				},
 			}
 		}
 	}
@@ -929,7 +970,11 @@ func (tg *TranspileToGo) transformBinaryExpr(expr *f90.BinaryExpr) ast.Expr {
 	case f90token.OR:
 		goOp = token.LOR // .OR. → ||
 	case f90token.StringConcat:
-		goOp = token.ADD // // → + (string concatenation)
+		// String concatenation: // → +
+		// Convert CharacterArray operands to strings using String() method
+		left = tg.wrapCharArrayToString(left)
+		right = tg.wrapCharArrayToString(right)
+		goOp = token.ADD
 	default:
 		// Unsupported operator
 		return nil
