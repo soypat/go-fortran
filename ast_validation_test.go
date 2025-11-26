@@ -147,8 +147,8 @@ END SUBROUTINE old_style
 					t.Errorf("Parameter %d: expected name %q, got %q", i, exp.name, param.Name)
 				}
 
-				if param.Type != exp.typ {
-					t.Errorf("Parameter %d (%s): expected type %q, got %q", i, param.Name, exp.typ, param.Type)
+				if param.Type.String() != exp.typ {
+					t.Errorf("Parameter %d (%s): expected type %q, got %q", i, param.Name, exp.typ, param.Type.String())
 				}
 
 				if param.Intent != exp.intent {
@@ -368,7 +368,7 @@ END PROGRAM test
 				for _, param := range params {
 					if param.Name == exp.name {
 						found = true
-						actualType = param.Type
+						actualType = param.Type.String()
 						actualCharLenExpr = param.CharLen
 						// Convert Expression to string for comparison if present
 						if actualCharLenExpr != nil {
@@ -398,7 +398,7 @@ END PROGRAM test
 									if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
 										for _, e := range typeDecl.Entities {
 											if e.Name == entity.Name {
-												actualType = typeDecl.TypeSpec
+												actualType = typeDecl.Type.String()
 												break
 											}
 										}
@@ -409,7 +409,7 @@ END PROGRAM test
 									if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
 										for _, e := range typeDecl.Entities {
 											if e.Name == entity.Name {
-												actualType = typeDecl.TypeSpec
+												actualType = typeDecl.Type.String()
 												break
 											}
 										}
@@ -1191,7 +1191,7 @@ END FUNCTION`
 		t.Fatalf("Expected Function, got %T", unit)
 	}
 
-	if fn.ResultType != "REAL" {
+	if fn.ResultType.String() != "REAL" {
 		t.Errorf("Expected ResultType 'REAL', got '%s'", fn.ResultType)
 	}
 
@@ -1247,7 +1247,7 @@ END SUBROUTINE`
 	if param0.Name != "n" {
 		t.Errorf("Expected parameter 0 name 'n', got '%s'", param0.Name)
 	}
-	if param0.Type != "INTEGER" {
+	if param0.Type.String() != "INTEGER" {
 		t.Errorf("Expected parameter 0 type 'INTEGER', got '%s'", param0.Type)
 	}
 	if param0.TypeKind == nil {
@@ -1266,7 +1266,7 @@ END SUBROUTINE`
 	if param1.Name != "arr" {
 		t.Errorf("Expected parameter 1 name 'arr', got '%s'", param1.Name)
 	}
-	if param1.Type != "REAL" {
+	if param1.Type.String() != "REAL" {
 		t.Errorf("Expected parameter 1 type 'REAL', got '%s'", param1.Type)
 	}
 	if param1.TypeKind == nil {

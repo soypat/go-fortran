@@ -48,6 +48,30 @@ func (sp Position) SourcePos() Position {
 	return sp
 }
 
+type TypeSpec struct {
+	Token token.Token // Intrinsic used to specify type.
+	Name  string      // Is non-empty for TYPE specified.
+	// Optional kind parameter. Valid for token.INTEGER, token.REAL, token.COMPLEX, token.LOGICAL
+	// For CHARACTER type is required and is the LEN attribute.
+	KindOrLen Expression
+}
+
+func (ts TypeSpec) AppendString(dst []byte) []byte {
+	return appendTypenameOrTok(dst, ts.Name, ts.Token)
+}
+
+func appendTypenameOrTok(dst []byte, typename string, tok token.Token) []byte {
+	if typename != "" {
+		dst = append(dst, typename...)
+	} else {
+		if tok != token.TYPE {
+			dst = append(dst, "<unexpected token type>"...)
+		}
+		dst = append(dst, tok.String()...)
+	}
+	return dst
+}
+
 // Program represents the root node of a Fortran source file, containing one or
 // more program units. A file may contain multiple independent programs, modules,
 // functions, or subroutines.
@@ -197,8 +221,7 @@ func (s *Subroutine) AppendString(dst []byte) []byte {
 //	END FUNCTION average
 type Function struct {
 	Name           string
-	ResultType     token.Token   // e.g., "INTEGER", "REAL"
-	ResultKind     Expression    // KIND parameter for result type (nil if default kind)
+	Type           TypeSpec      // Result type with optional KIND/LEN
 	Parameters     []Parameter   // Function parameters with type information
 	ResultVariable string        // For RESULT(var) clause
 	Attributes     []token.Token // RECURSIVE, PURE, ELEMENTAL
@@ -217,9 +240,8 @@ func (f *Function) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "FUNCTION"...)
 }
 func (f *Function) AppendString(dst []byte) []byte {
-	if f.ResultType != 0 {
-		dst = append(dst, f.ResultType.String()...)
-		dst = append(dst, ' ')
+	if f.Type.Token != 0 {
+		dst = f.Type.AppendString(dst)
 	}
 	dst = append(dst, "FUNCTION "...)
 	dst = append(dst, f.Name...)
@@ -344,9 +366,7 @@ type LetterRange struct {
 // Example: "IMPLICIT REAL(KIND=8) (A-H, O-Z)" creates a rule with
 // Type="REAL", Kind=8, and two letter ranges
 type ImplicitRule struct {
-	Type         string        // "INTEGER", "REAL", "CHARACTER", etc.
-	Kind         Expression    // Optional KIND parameter
-	CharLen      Expression    // Optional CHARACTER length
+	Type         TypeSpec      // Type with optional KIND/LEN in TypeSpec.KindOrLen
 	LetterRanges []LetterRange // Letter ranges this rule applies to
 }
 
@@ -387,10 +407,10 @@ func (is *ImplicitStatement) AppendString(dst []byte) []byte {
 		} else {
 			dst = append(dst, ' ')
 		}
-		dst = append(dst, rule.Type...)
-		if rule.Kind != nil {
+		dst = rule.Type.AppendString(dst)
+		if rule.Type.KindOrLen != nil {
 			dst = append(dst, '(')
-			dst = rule.Kind.AppendString(dst)
+			dst = rule.Type.KindOrLen.AppendString(dst)
 			dst = append(dst, ')')
 		}
 		dst = append(dst, " ("...)
@@ -598,9 +618,7 @@ func (ds *DataStmt) AppendString(dst []byte) []byte {
 //	REAL, PARAMETER :: PI = 3.14159
 //	CHARACTER(LEN=80), INTENT(IN) :: filename
 type TypeDeclaration struct {
-	Type       token.Token
-	TypeName   string        // e.g., "INTEGER", "REAL", "CHARACTER"
-	KindParam  Expression    // KIND parameter: INTEGER(KIND=8), REAL*8, etc. (nil if not specified)
+	Type       TypeSpec      // Type with optional KIND/LEN
 	Attributes []token.Token // e.g., PARAMETER, SAVE, INTENT, etc.
 	Entities   []DeclEntity  // Variables being declared
 	Label      string
@@ -613,10 +631,10 @@ func (td *TypeDeclaration) GetLabel() string { return td.Label }
 
 func (td *TypeDeclaration) statementNode() {}
 func (td *TypeDeclaration) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, td.Type.String()...)
+	return td.Type.AppendString(dst)
 }
 func (td *TypeDeclaration) AppendString(dst []byte) []byte {
-	dst = append(dst, td.Type.String()...)
+	dst = td.Type.AppendString(dst)
 	if len(td.Attributes) > 0 {
 		dst = append(dst, ", "...)
 		for i, attr := range td.Attributes {
@@ -720,12 +738,10 @@ func (it IntentType) String() string {
 //	CHARACTER(LEN=*), OPTIONAL :: message
 type Parameter struct {
 	Name       string        // Parameter name
-	Type       token.Token   // Type specification (INTEGER, REAL, etc.)
-	TypeKind   Expression    // KIND parameter for this type (nil if default kind)
+	Type       TypeSpec      // Type with optional KIND/LEN
 	Intent     IntentType    // INTENT(IN/OUT/INOUT)
 	Attributes []token.Token // Other attributes (OPTIONAL, POINTER, TARGET, etc.)
 	ArraySpec  *ArraySpec    // Array dimensions if this is an array parameter
-	CharLen    Expression    // CHARACTER length specification (nil if using type default or *)
 }
 
 // Identifier represents a variable name, function name, or other named entity
@@ -2258,7 +2274,7 @@ func (dts *DerivedTypeStmt) AppendString(dst []byte) []byte {
 //	REAL, DIMENSION(3) :: velocity
 //	TYPE(Date), POINTER :: birth_date
 type ComponentDecl struct {
-	Type       string
+	Type       TypeSpec      // Type with optional KIND/LEN
 	Attributes []token.Token
 	Components []DeclEntity
 	Label      string
@@ -2271,10 +2287,10 @@ func (cd *ComponentDecl) GetLabel() string { return cd.Label }
 
 func (cd *ComponentDecl) statementNode() {}
 func (cd *ComponentDecl) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, cd.Type...)
+	return cd.Type.AppendString(dst)
 }
 func (cd *ComponentDecl) AppendString(dst []byte) []byte {
-	dst = append(dst, cd.Type...)
+	dst = cd.Type.AppendString(dst)
 	if len(cd.Attributes) > 0 {
 		dst = append(dst, ", "...)
 		for i, attr := range cd.Attributes {

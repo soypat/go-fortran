@@ -406,9 +406,14 @@ func (tok Token) IsEnd() bool {
 	return false
 }
 
+// IsTypeIntrinsic returns true if the token is a type instrinsic keyword.
+func (tok Token) IsTypeIntrinsic() bool {
+	return tok >= INTEGER && tok <= DOUBLEPRECISION
+}
+
 // IsTypeDeclaration returns true if the token is a type declaration keyword.
 func (tok Token) IsTypeDeclaration() bool {
-	return tok >= INTEGER && tok <= DOUBLEPRECISION || tok == TYPE
+	return tok.IsTypeIntrinsic() || tok == TYPE
 }
 
 // IsAttribute returns true if the token is a Fortran 90 attribute.

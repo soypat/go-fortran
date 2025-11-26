@@ -37,8 +37,8 @@ func Walk(v Visitor, node Node) {
 		}
 
 	case *Function:
-		if n.ResultKind != nil {
-			Walk(v, n.ResultKind)
+		if n.Type.KindOrLen != nil {
+			Walk(v, n.Type.KindOrLen)
 		}
 		for _, stmt := range n.Body {
 			Walk(v, stmt)
@@ -59,8 +59,8 @@ func Walk(v Visitor, node Node) {
 
 	// Declaration statements
 	case *TypeDeclaration:
-		if n.KindParam != nil {
-			Walk(v, n.KindParam)
+		if n.Type.KindOrLen != nil {
+			Walk(v, n.Type.KindOrLen)
 		}
 		for _, entity := range n.Entities {
 			if entity.ArraySpec != nil {
@@ -81,11 +81,8 @@ func Walk(v Visitor, node Node) {
 
 	case *ImplicitStatement:
 		for _, rule := range n.Rules {
-			if rule.Kind != nil {
-				Walk(v, rule.Kind)
-			}
-			if rule.CharLen != nil {
-				Walk(v, rule.CharLen)
+			if rule.Type.KindOrLen != nil {
+				Walk(v, rule.Type.KindOrLen)
 			}
 		}
 

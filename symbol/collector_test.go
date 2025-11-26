@@ -16,14 +16,14 @@ func TestCollectSimpleTypeDeclarations(t *testing.T) {
 				Name: "test",
 				Body: []ast.Statement{
 					&ast.TypeDeclaration{
-						TypeSpec: "INTEGER",
+						Type: token.INTEGER,
 						Entities: []ast.DeclEntity{
 							{Name: "i"},
 							{Name: "j"},
 						},
 					},
 					&ast.TypeDeclaration{
-						TypeSpec: "REAL",
+						Type: token.REAL,
 						Entities: []ast.DeclEntity{
 							{Name: "x"},
 						},
@@ -172,14 +172,14 @@ func TestCollectFunction(t *testing.T) {
 		Units: []ast.ProgramUnit{
 			&ast.Function{
 				Name:       "compute",
-				ResultType: "REAL",
+				ResultType: token.REAL,
 				Parameters: []ast.Parameter{
-					{Name: "x", Type: "REAL"},
-					{Name: "n", Type: "INTEGER"},
+					{Name: "x", Type: token.REAL},
+					{Name: "n", Type: token.INTEGER},
 				},
 				Body: []ast.Statement{
 					&ast.TypeDeclaration{
-						TypeSpec: "REAL",
+						Type: token.REAL,
 						Entities: []ast.DeclEntity{
 							{Name: "result"},
 						},
@@ -254,8 +254,8 @@ func TestCollectSubroutine(t *testing.T) {
 			&ast.Subroutine{
 				Name: "process",
 				Parameters: []ast.Parameter{
-					{Name: "data", Type: "REAL"},
-					{Name: "size", Type: "INTEGER"},
+					{Name: "data", Type: token.REAL},
+					{Name: "size", Type: token.INTEGER},
 				},
 				Body: []ast.Statement{},
 			},
@@ -438,7 +438,7 @@ func TestCollectNestedScopes(t *testing.T) {
 				Name: "mymod",
 				Body: []ast.Statement{
 					&ast.TypeDeclaration{
-						TypeSpec: "INTEGER",
+						Type: token.INTEGER,
 						Entities: []ast.DeclEntity{
 							{Name: "module_var"},
 						},
@@ -447,7 +447,7 @@ func TestCollectNestedScopes(t *testing.T) {
 				Contains: []ast.ProgramUnit{
 					&ast.Subroutine{
 						Name:       "modsub",
-						Parameters: []ast.Parameter{{Name: "x", Type: "REAL"}},
+						Parameters: []ast.Parameter{{Name: "x", Type: token.REAL}},
 						Body:       []ast.Statement{},
 					},
 				},
@@ -505,7 +505,7 @@ func TestCollectParameterAttribute(t *testing.T) {
 				Name: "test",
 				Body: []ast.Statement{
 					&ast.TypeDeclaration{
-						TypeSpec:   "REAL",
+						Type:       token.REAL,
 						Attributes: []token.Token{token.PARAMETER},
 						Entities: []ast.DeclEntity{
 							{Name: "PI", Initializer: "3.14159"},

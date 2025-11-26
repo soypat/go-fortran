@@ -34,6 +34,10 @@ func (pe *ParserError) Error() string {
 	return string(dst)
 }
 
+func (pe ParserError) String() string {
+	return pe.Error()
+}
+
 type sourcePos struct {
 	Source string
 	Line   int
@@ -2352,12 +2356,11 @@ func (p *Parser90) parseDerivedTypeStmt() *ast.DerivedTypeStmt {
 //	integer, kind :: k = kind(0.0)
 func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	startPos := p.current.start
-	if !p.current.tok.IsTypeDeclaration() {
-		p.addError("expected type declaration, got " + p.current.tok.String())
+	ts := p.expectTypeSpec()
+	if ts.KindOrLen != nil {
+		p.addError("did not expect kind in component declaration")
+		return nil
 	}
-	typeSpec := string(p.current.lit)
-	p.nextToken()
-
 	// Parse optional attributes
 	var attributes []token.Token
 	for p.loopUntil(token.DoubleColon) && p.consumeIf(token.Comma) {
@@ -2389,7 +2392,7 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	}
 
 	return &ast.ComponentDecl{
-		Type:       typeSpec,
+		Type:       ts,
 		Attributes: attributes,
 		Components: components,
 		Position:   ast.Pos(startPos, p.current.start),
@@ -2630,35 +2633,44 @@ func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
 			p.addError("expected type specification in IMPLICIT statement")
 			break
 		}
-		rule.Type = strings.ToUpper(string(p.current.lit))
+
+		tok := p.current.tok
 		p.nextToken()
 
 		// Handle DOUBLE PRECISION (two tokens) or DOUBLEPRECISION (one token)
-		if rule.Type == "DOUBLE" && p.currentTokenIs(token.PRECISION) {
-			rule.Type = "DOUBLE PRECISION"
+		if tok == token.DOUBLE && p.currentTokenIs(token.PRECISION) {
+			tok = token.DOUBLEPRECISION
 			p.nextToken()
-		} else if rule.Type == "DOUBLEPRECISION" {
-			rule.Type = "DOUBLE PRECISION" // Normalize to canonical form
+		} else if tok == token.DOUBLEPRECISION {
+			tok = token.DOUBLEPRECISION // Already normalized
 		}
 
 		// Parse optional KIND or CHARACTER length
 		// In IMPLICIT statements, KIND/length must be specified before letter ranges
 		// Valid: IMPLICIT REAL*8 (A-H) or IMPLICIT REAL(KIND=8) (A-H)
 		// Invalid: IMPLICIT REAL(8) (A-H) - ambiguous, use KIND= form
-		if rule.Type == "CHARACTER" {
+		var kindOrLen ast.Expression
+		if tok == token.CHARACTER {
 			// CHARACTER can have length: CHARACTER*10 or CHARACTER(LEN=10)
 			if p.consumeIf(token.Asterisk) {
-				rule.CharLen = p.parseExpression(0)
+				kindOrLen = p.parseExpression(0)
 			} else if p.currentTokenIs(token.LParen) && p.peek.tok == token.LEN {
-				rule.CharLen = p.parseCharacterLength()
+				kindOrLen = p.parseCharacterLength()
 			}
-		} else if rule.Type != "DOUBLE PRECISION" {
+		} else if tok != token.DOUBLEPRECISION {
 			// Other types can have KIND with * or (KIND=...)
 			if p.consumeIf(token.Asterisk) {
-				rule.Kind = p.parseExpression(0)
+				kindOrLen = p.parseExpression(0)
 			} else if p.currentTokenIs(token.LParen) && p.peek.tok == token.KIND {
-				rule.Kind = p.parseKindSelector()
+				kindOrLen = p.parseKindSelector()
 			}
+		}
+
+		// Create TypeSpec
+		rule.Type = ast.TypeSpec{
+			Token:     tok,
+			Name:      "", // IMPLICIT doesn't use TYPE(typename) syntax
+			KindOrLen: kindOrLen,
 		}
 
 		// Parse letter ranges: (A-H, O-Z) or (I, J, K-N)
@@ -2770,43 +2782,51 @@ func (p *Parser90) parseUse() ast.Statement {
 	return stmt
 }
 
-func (p *Parser90) expectTypeDeclName() (typename string, kindParam ast.Expression, tok token.Token) {
-	tok = p.current.tok
-	if !tok.IsTypeDeclaration() {
-		p.addError("expected type, got " + tok.String() + " (" + string(p.current.lit) + ")")
-		return "", nil, 0
-	} else if tok == token.TYPE {
+func (p *Parser90) expectTypeSpecIntrinsic() (ts ast.TypeSpec) {
+	if !p.current.tok.IsTypeIntrinsic() {
+		p.addError("expected type instrinsic, got " + p.current.String())
+		return ast.TypeSpec{}
+	}
+	// typename contained in token, no need to return string representation, consume it.
+	p.nextToken()
+	if ts.Token == token.DOUBLE && p.consumeIf(token.PRECISION) {
+		ts.Token = token.DOUBLEPRECISION
+	}
+	if p.currentTokenIs(token.LParen) || p.currentTokenIs(token.Asterisk) {
+		switch ts.Token {
+		case token.CHARACTER:
+			// CHARACTER uses LEN= not KIND=
+			ts.KindOrLen = p.parseCharacterLength()
+		case token.INTEGER, token.REAL, token.COMPLEX, token.LOGICAL:
+			ts.KindOrLen = p.parseKindSelector()
+		default:
+			p.addError("unexpected KIND usage for " + ts.Token.String())
+		}
+	}
+	return ts
+}
+
+func (p *Parser90) expectTypeSpec() (ts ast.TypeSpec) {
+	ts.Token = p.current.tok
+	if ts.Token == token.TYPE {
 		p.nextToken()
 		if !p.consumeIf(token.LParen) || !p.canUseAsIdentifier() || !p.peekTokenIs(token.RParen) {
 			p.addError("expected TYPE(<typename>)")
-			return "", nil, 0
+			return ast.TypeSpec{}
 		}
-		typename = string(p.current.lit)
-		p.nextToken()             // consume identifier
-		p.nextToken()             // consume )
-		return typename, nil, tok // tok=TYPE
+		ts.Name = string(p.current.lit)
+		p.nextToken() // consume identifier
+		p.nextToken() // consume )
+		return ts     // tok=TYPE
 	}
-	p.nextToken()
-	if tok == token.DOUBLE && p.consumeIf(token.PRECISION) {
-		tok = token.DOUBLEPRECISION
-	}
-	if p.currentTokenIs(token.LParen) || p.currentTokenIs(token.Asterisk) {
-		switch tok {
-		case token.INTEGER, token.REAL, token.COMPLEX, token.CHARACTER, token.LOGICAL:
-			kindParam = p.parseKindSelector()
-		default:
-			p.addError("unexpected KIND usage for " + tok.String())
-		}
-	}
-
-	return "", kindParam, tok // typename contained in token, no need to return string representation.
+	return p.expectTypeSpecIntrinsic()
 }
 
 // parseTypeDecl parses INTEGER :: x, y or REAL, PARAMETER :: pi = 3.14 or TYPE(typename) :: var
 // If paramMap is provided, it will populate type information for any parameters found
 func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Statement {
 	start := p.sourcePos()
-	typename, kindParam, tok := p.expectTypeDeclName()
+	ts := p.expectTypeSpec()
 
 	// Parse attributes (PARAMETER, INTENT, etc.)
 	var attributes []token.Token
@@ -2833,7 +2853,6 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 			p.nextToken() // consume intent.
 			p.expect(token.RParen, "INTENT attribute")
 		case p.consumeIf(token.DIMENSION):
-			p.nextToken()
 			if p.currentTokenIs(token.LParen) {
 				arraySpec = p.parseArraySpec()
 			}
@@ -2852,8 +2871,8 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		entityName := string(p.current.lit)
 		entity := ast.DeclEntity{Name: entityName}
 		// Set CHARACTER length if this is a CHARACTER type
-		if tok == token.CHARACTER {
-			entity.CharLen = kindParam
+		if ts.Token == token.CHARACTER {
+			entity.CharLen = ts.KindOrLen
 		}
 		// Start with arraySpec from DIMENSION attribute if present
 		if arraySpec != nil {
@@ -2920,11 +2939,9 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		// If this entity is a parameter, populate its type information
 		if paramMap != nil {
 			if param, exists := paramMap[entityName]; exists {
-				param.Type = tok
-				param.TypeKind = kindParam
+				param.Type = ts
 				param.Intent = intentType
 				param.Attributes = append(param.Attributes, attributes...)
-				param.CharLen = entity.CharLen
 				// Use entity array spec if present, otherwise DIMENSION attribute spec
 				if entityArraySpec != nil {
 					param.ArraySpec = entityArraySpec
@@ -2940,9 +2957,7 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		p.nextToken()
 	}
 	stmt := &ast.TypeDeclaration{
-		Type:       tok,
-		TypeName:   typename,
-		KindParam:  kindParam,
+		Type:       ts,
 		Attributes: attributes,
 		Entities:   entities,
 		Position:   ast.Pos(start.Pos, p.current.start),
@@ -3249,17 +3264,19 @@ func (p *Parser90) parseArraySpec() *ast.ArraySpec {
 // Expects current token to be '(' and consumes up to and including ')'
 // Returns the length specification as an Expression
 func (p *Parser90) parseCharacterLength() ast.Expression {
-	if !p.expect(token.LParen, "CHAR LENGTH") {
-		return nil
-	}
-	// Check for LEN= prefix
-	if p.consumeIf(token.LEN) {
-		p.consumeIf(token.Equals) // consume =
+	inParens := false
+	if p.consumeIf(token.LParen) {
+		p.consumeIf2(token.LEN, token.Equals) // Consume Length prefix.
+		inParens = true
+	} else if !p.consumeIf(token.Asterisk) {
+		p.addError("char length expected '*' or '('")
 	}
 	// Parse as expression (handles *, :, integer literals, identifiers, etc.)
 	expr := p.parseExpression(0)
 	// p.expect(token.RParen, "close CHARACTER spec") // TODO: why not expect RParen?
-	p.consumeIf(token.RParen)
+	if inParens {
+		p.expect(token.RParen, "closing ')'")
+	}
 	return expr
 }
 
@@ -3759,19 +3776,15 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 // parseTypePrefixedConstruct handles type-prefixed functions like "INTEGER FUNCTION foo()"
 func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 	// Save the type token
-	typename, kindParam, tok := p.expectTypeDeclName()
-	if tok == token.TYPE {
-		p.addError("TYPE return type for function unsupported")
+	ts := p.expectTypeSpecIntrinsic()
+	if ts.Token == 0 {
 		return nil
 	}
-
 	// Check if this is a function
 	if p.currentTokenIs(token.FUNCTION) {
 		// Parse as function
 		fn := p.parseFunction().(*ast.Function)
-		_ = typename // fn.ResultTypename = typename
-		fn.ResultType = tok
-		fn.ResultKind = kindParam
+		fn.Type = ts
 		return fn
 	}
 
@@ -3821,8 +3834,8 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 			stmt = p.parseFunction()
 			if fn, ok := stmt.(*ast.Function); ok {
 				fn.Attributes = attributes
-				fn.ResultType = typeToken
-				fn.ResultKind = kindParam
+				fn.Type.Token = typeToken
+				fn.Type.KindOrLen = kindParam
 			}
 		} else {
 			p.addError("expected FUNCTION after type keyword")

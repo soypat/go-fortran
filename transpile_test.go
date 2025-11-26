@@ -40,6 +40,8 @@ func TestTranspileGolden(t *testing.T) {
 			break
 		}
 	}
+	// Check for parser errors
+	helperPrintErrors(t, &parser)
 
 	// Debug: print what units we got
 	t.Logf("Parsed %d program units:", len(progUnits))

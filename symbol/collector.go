@@ -82,7 +82,7 @@ func (dc *DeclarationCollector) Visit(node ast.Node) ast.Visitor {
 		parentScope := dc.table.CurrentScope().Parent()
 		if parentScope != nil {
 			funcType := &ResolvedType{
-				BaseType: n.ResultType,
+				BaseType: n.Type.Token.String(),
 			}
 			sym := NewSymbol(n.Name, SymFunction)
 			sym.SetType(funcType)
@@ -96,7 +96,7 @@ func (dc *DeclarationCollector) Visit(node ast.Node) ast.Visitor {
 		if n.ResultVariable != "" {
 			// RESULT clause: define the result variable
 			resultType := &ResolvedType{
-				BaseType: n.ResultType,
+				BaseType: n.Type.Token.String(),
 			}
 			resultSym := NewSymbol(n.ResultVariable, SymVariable)
 			resultSym.SetType(resultType)
@@ -107,7 +107,7 @@ func (dc *DeclarationCollector) Visit(node ast.Node) ast.Visitor {
 		} else {
 			// No RESULT clause: function name is the result variable
 			funcType := &ResolvedType{
-				BaseType: n.ResultType,
+				BaseType: n.Type.Token.String(),
 			}
 			funcVar := NewSymbol(n.Name, SymVariable)
 			funcVar.SetType(funcType)
@@ -191,18 +191,18 @@ func (dc *DeclarationCollector) handleTypeDeclaration(decl *ast.TypeDeclaration)
 
 		// Create resolved type
 		resolvedType := &ResolvedType{
-			BaseType: decl.TypeSpec,
+			BaseType: decl.Type.Token.String(),
 		}
 
 		// Handle KIND parameter
-		if decl.KindParam != nil {
+		if decl.Type.KindOrLen != nil {
 			// For now, we just note that KIND exists
 			// Full evaluation would require constant expression evaluation
 			resolvedType.Kind = 0 // Placeholder
 		}
 
 		// Handle CHARACTER length
-		if decl.TypeSpec == "CHARACTER" && entity.CharLen != nil {
+		if decl.Type.Token.String() == "CHARACTER" && entity.CharLen != nil {
 			// Similar to KIND, full evaluation requires expression evaluation
 			resolvedType.CharLen = 0 // Placeholder
 		}
@@ -256,7 +256,7 @@ func (dc *DeclarationCollector) handleImplicitStatement(stmt *ast.ImplicitStatem
 		for _, letterRange := range rule.LetterRanges {
 			for letter := letterRange.Start; letter <= letterRange.End; letter++ {
 				idx := letter - 'A'
-				implicit.LetterTypes[idx] = rule.Type
+				implicit.LetterTypes[idx] = rule.Type.Token.String()
 				// KIND evaluation would go here
 				implicit.LetterKinds[idx] = 0
 			}
@@ -370,7 +370,7 @@ func (dc *DeclarationCollector) handleDerivedTypeStmt(stmt *ast.DerivedTypeStmt)
 func (dc *DeclarationCollector) defineParameter(param ast.Parameter) {
 	currentScope := dc.table.CurrentScope()
 	paramType := &ResolvedType{
-		BaseType: param.Type,
+		BaseType: param.Type.Token.String(),
 	}
 
 	sym := NewSymbol(param.Name, SymVariable)

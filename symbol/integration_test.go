@@ -22,21 +22,21 @@ func TestIntegrationFullPipeline(t *testing.T) {
 
 					// Explicit declarations
 					&ast.TypeDeclaration{
-						TypeSpec: "INTEGER",
+						Type: token.INTEGER,
 						Entities: []ast.DeclEntity{
 							{Name: "n"},
 							{Name: "i"},
 						},
 					},
 					&ast.TypeDeclaration{
-						TypeSpec:   "REAL",
+						Type:       token.REAL,
 						Attributes: []token.Token{token.PARAMETER},
 						Entities: []ast.DeclEntity{
 							{Name: "PI", Initializer: "3.14159"},
 						},
 					},
 					&ast.TypeDeclaration{
-						TypeSpec: "REAL",
+						Type: token.REAL,
 						Entities: []ast.DeclEntity{
 							{
 								Name: "forces",
@@ -263,14 +263,14 @@ func TestIntegrationCustomImplicit(t *testing.T) {
 						IsNone: false,
 						Rules: []ast.ImplicitRule{
 							{
-								Type: "REAL",
+						Type: "REAL",
 								LetterRanges: []ast.LetterRange{
 									{Start: 'A', End: 'H'},
 									{Start: 'O', End: 'Z'},
 								},
 							},
 							{
-								Type: "INTEGER",
+						Type: "INTEGER",
 								LetterRanges: []ast.LetterRange{
 									{Start: 'I', End: 'N'},
 								},
@@ -332,9 +332,9 @@ func TestIntegrationFunctionWithImplicitVars(t *testing.T) {
 		Units: []ast.ProgramUnit{
 			&ast.Function{
 				Name:       "compute",
-				ResultType: "REAL",
+				ResultType: token.REAL,
 				Parameters: []ast.Parameter{
-					{Name: "x", Type: "REAL"},
+					{Name: "x", Type: token.REAL},
 				},
 				Body: []ast.Statement{
 					// temp is implicitly REAL (T = O-Z)
@@ -421,11 +421,11 @@ func TestIntegrationExpressionTypeInference(t *testing.T) {
 				Name: "test",
 				Body: []ast.Statement{
 					&ast.TypeDeclaration{
-						TypeSpec: "INTEGER",
+						Type: token.INTEGER,
 						Entities: []ast.DeclEntity{{Name: "i"}},
 					},
 					&ast.TypeDeclaration{
-						TypeSpec: "REAL",
+						Type: token.REAL,
 						Entities: []ast.DeclEntity{{Name: "x"}},
 					},
 

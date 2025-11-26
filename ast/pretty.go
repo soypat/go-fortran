@@ -51,7 +51,9 @@ func pp(buf *bytes.Buffer, node Node, indent int) {
 
 	case *TypeDeclaration:
 		writeIndent(buf, indent)
-		buf.WriteString(n.Type.String())
+		// TypeSpec has AppendString method, not String
+		tmp := n.Type.AppendString(nil)
+		buf.Write(tmp)
 		if len(n.Attributes) > 0 {
 			for _, attr := range n.Attributes {
 				buf.WriteString(", ")
