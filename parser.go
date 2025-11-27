@@ -171,7 +171,7 @@ func (p *Parser90) sourcePos() sourcePos {
 }
 
 func (p *Parser90) currentAstPos() ast.Position {
-	return ast.Pos(p.current.start, len(p.current.lit))
+	return ast.Pos(p.current.start, p.current.start+len(p.current.lit))
 }
 
 // IsDone returns true if the parser is done parsing, whether it be by EOF or error(s) encountered.
@@ -2700,54 +2700,75 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 	// DATA var1 /val1/, var2 /val2/, var3 /val3/
 	// Loop to handle all pairs
 	for p.loopUntil(token.NewLine) {
-		if p.consumeIf(token.LParen) {
-			startPos := p.sourcePos()
-			doExpr := p.parseExpression(0)
-			// Implied DO loop: (arr(i), i=1,n) - skip entire construct
-			impliedDoLoop := p.tryParseImpliedDoLoop(startPos.Pos, doExpr)
-			if impliedDoLoop == nil {
-				return nil
+		// Parse variable list: x, y, z OR (arr(i), i=1,n)
+		for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.NewLine) && !p.IsDone() {
+			if p.currentTokenIs(token.LParen) {
+				startPos := p.sourcePos()
+				p.nextToken()
+				doExpr := p.parseExpression(0)
+				impliedDoLoop := p.tryParseImpliedDoLoop(startPos.Pos, doExpr)
+				if impliedDoLoop == nil {
+					return nil
+				}
+				stmt.Variables = append(stmt.Variables, impliedDoLoop)
+			} else if p.canUseAsIdentifier() {
+				varStart := p.sourcePos()
+				varName := string(p.current.lit)
+				p.nextToken()
+
+				// Array subscript: arr(1)
+				if p.currentTokenIs(token.LParen) {
+					var subscripts []ast.Expression
+					for p.loopWhile(token.LParen) {
+						expr := p.parseExpression(0, token.Slash, token.Comma)
+						if expr == nil {
+							return nil
+						}
+						subscripts = append(subscripts, expr)
+					}
+
+					stmt.Variables = append(stmt.Variables, &ast.ArrayRef{
+						Name:       varName,
+						Subscripts: subscripts,
+						Position:   ast.Pos(varStart.Pos, p.currentAstPos().End()),
+					})
+				} else {
+					stmt.Variables = append(stmt.Variables, &ast.Identifier{
+						Value:    varName,
+						Position: ast.Pos(varStart.Pos, p.currentAstPos().Start()),
+					})
+				}
+			} else {
+				break
 			}
+
+			p.consumeIf(token.Comma)
 		}
 
 		// Expect opening slash
 		if !p.expect(token.Slash, "expected / before DATA values") {
 			return stmt
 		}
-		numType := p.current.tok
-		if numType != token.IntLit && numType != token.FloatLit {
-			p.addError("expected integer or float literal, got: " + p.current.String())
-		}
-		exprs, err := parseCommaSeparatedList(p, token.Slash, func() (expr ast.Expression, _ error) {
-			got := p.current.tok
-			if got != numType {
-				return nil, fmt.Errorf("expected %s literals in data statement, got %s", numType.String(), got.String())
+
+		// Parse value list - use parseExpression with terminators
+		for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.NewLine) && !p.IsDone() {
+			value := p.parseExpression(0, token.Slash, token.Comma)
+			if value != nil {
+				stmt.Values = append(stmt.Values, value)
+			} else {
+				break
 			}
 
-			switch numType {
-			case token.IntLit:
-				expr = p.tryParseIntLit()
-			case token.FloatLit:
-				expr = p.tryParseFloatLit()
+			if !p.consumeIf(token.Comma) {
+				break
 			}
-			if expr == nil {
-				return nil, fmt.Errorf("failed to parse literal: %s", p.current.String())
-			}
-			return expr, nil
-		})
-		if err != nil {
-			p.addError(err.Error())
-			return nil
 		}
-		stmt.Values = append(stmt.Values, exprs...)
+
 		// Expect closing slash
 		p.expect(token.Slash, "expected / after DATA values")
 
 		// Check for comma or another variable (continuation case)
-		// F77: DATA A /1/, B /2/        - comma separated
-		// F77: DATA A /1/ &             - continuation, no comma
-		//           B /2/
-		p.consumeIf(token.Comma) // Optional comma
+		p.consumeIf(token.Comma)
 
 		// If next token is not an identifier, we're done
 		if !p.canUseAsIdentifier() {
@@ -3395,15 +3416,15 @@ func (p *Parser90) isRightAssociative(op token.Token) bool {
 
 // parseExpression parses a Fortran expression using precedence climbing
 // minPrec is the minimum precedence level to parse
-func (p *Parser90) parseExpression(minPrec int) ast.Expression {
+func (p *Parser90) parseExpression(minPrec int, terminators ...token.Token) ast.Expression {
 	// Parse primary expression (literal, identifier, function call, etc.)
 	left := p.parsePrimaryExpr()
 	if left == nil {
 		return nil
 	}
 	start := left.SourcePos().Start()
-	// Precedence climbing
-	for !p.IsDone() {
+	// Precedence climbing while checking for terminator tokens.
+	for p.loopUntil(terminators...) {
 		// Check if current token is a binary operator
 		prec := p.getOperatorPrecedence(p.current.tok)
 		if prec == 0 || prec < minPrec {
@@ -3441,7 +3462,7 @@ func (p *Parser90) parseExpression(minPrec int) ast.Expression {
 		}
 
 		// Parse right side
-		right := p.parseExpression(nextMinPrec)
+		right := p.parseExpression(nextMinPrec, terminators...)
 		if right == nil {
 			p.addError("expected expression after operator")
 			return left
@@ -3622,6 +3643,23 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 		}
 		p.nextToken()
 		return lit
+	}
+
+	// Handle hex/octal/binary literals: Z'...', O'...', B'...'
+	if p.canUseAsIdentifier() && p.peekTokenIs(token.StringLit) {
+		prefix := strings.ToUpper(string(p.current.lit))
+		if prefix == "Z" || prefix == "O" || prefix == "B" {
+			startPos := p.current.start
+			p.nextToken() // consume Z/O/B
+			hexStr := string(p.current.lit)
+			endPos := p.current.start + len(p.current.lit)
+			p.nextToken() // consume string
+			return &ast.IntegerLiteral{
+				Value:    0, // TODO: parse to actual value
+				Raw:      prefix + "'" + hexStr + "'",
+				Position: ast.Pos(startPos, endPos),
+			}
+		}
 	}
 
 	// Handle identifiers, function calls, and array references
