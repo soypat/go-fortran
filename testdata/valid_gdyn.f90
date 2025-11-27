@@ -5,6 +5,7 @@ PROGRAM GDYN2E
       REAL lat,lon
       DOUBLE PRECISION ah,aw,zdh,zdw
       END TYPE
+      DATA  XMCON(1,1)/+169.51D0/
       DATA I_DEFALT(1) /Z'7777777'/    ! hex    jjm 9/98
       DATA ZER/MAXZER*0.D0/
       DATA   A_HEI / 2.53D-5 / &

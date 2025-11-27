@@ -2716,16 +2716,22 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 				varName := string(p.current.lit)
 				p.nextToken()
 
-				// Array subscript: arr(1)
+				// Array subscript: arr(1,2,3)
 				if p.currentTokenIs(token.LParen) {
+					p.nextToken() // consume (
 					var subscripts []ast.Expression
-					for p.loopWhile(token.LParen) {
-						expr := p.parseExpression(0, token.Slash, token.Comma)
+					for p.loopUntil(token.RParen) {
+						expr := p.parseExpression(0, token.RParen, token.Comma)
 						if expr == nil {
+							p.addError("failed to parse array subscript in DATA statement")
 							return nil
 						}
 						subscripts = append(subscripts, expr)
+						if !p.consumeIf(token.Comma) {
+							break
+						}
 					}
+					p.expect(token.RParen, "closing array subscript")
 
 					stmt.Variables = append(stmt.Variables, &ast.ArrayRef{
 						Name:       varName,
