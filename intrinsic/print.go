@@ -1,6 +1,7 @@
 package intrinsic
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"strconv"
@@ -44,7 +45,7 @@ func (f Formatter) Print(v ...any) {
 }
 
 func (f Formatter) formatValue(dst []byte, value any) []byte {
-	const space = "                                         "
+
 	prevLen := len(dst)
 
 	// Control variables: leftPad and rightPad calculated per type
@@ -91,9 +92,13 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 			totalWidth = 25
 		}
 		absX := math.Abs(x)
+		usedEFormat := false
 		// gfortran uses exponential for very small values
 		if absX > 0 && absX < 0.01 {
 			dst = strconv.AppendFloat(dst, x, 'E', 16, 64)
+			// F95 requires min 3-digit exponent (E-005 not E-05)
+			dst = fixExponent(dst, prevLen)
+			usedEFormat = true
 		} else {
 			// Fixed format with variable precision based on magnitude
 			var decPlaces int
@@ -105,13 +110,18 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 			}
 			dst = strconv.AppendFloat(dst, x, 'f', decPlaces, 64)
 		}
-		valueLen := len(dst) - prevLen
-		if absX < 1.0 {
+		valueLen := len(dst) - prevLen // Calculate AFTER fixExponent
+		if usedEFormat {
+			// E format: use full width minus value (no separate left/right distribution)
+			leftPad = totalWidth - valueLen
+			rightPad = 0
+		} else if absX < 1.0 {
 			leftPad = 1
+			rightPad = totalWidth - leftPad - valueLen
 		} else {
 			leftPad = 2
+			rightPad = totalWidth - leftPad - valueLen
 		}
-		rightPad = totalWidth - leftPad - valueLen
 
 	case bool: // LOGICAL: just T or F, no padding
 		if v {
@@ -123,19 +133,67 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 	default:
 		panic(fmt.Sprintf("unsupported format type: %T", value))
 	}
-
+	const space = "                                         "
 	// Apply padding
 	if leftPad > 0 {
-		totalAppended := len(dst) - prevLen
-		// First grow slice if needed
-		dst = append(dst, space[:leftPad]...)
-		// Now copy value bytes to end (achieves right-alignment)
-		copy(dst[len(dst)-totalAppended:], dst[prevLen:prevLen+totalAppended])
-		// Now set left pad of bytes to space
-		copy(dst[prevLen:prevLen+leftPad], space)
+		dst = padLeft(dst, prevLen, leftPad)
 	}
 	if rightPad > 0 {
 		dst = append(dst, space[:rightPad]...)
+	}
+	return dst
+}
+
+// appendFloat formats floating-point per F95 list-directed output (10.8.2):
+// Uses F format if magnitude in range, else E format with 2-digit exponent minimum
+func appendFloat[T float](dst []byte, x T, fmt byte, prec int) []byte {
+	s := strconv.AppendFloat(dst, float64(x), fmt, prec, 64)
+	// F95 requires min 2-digit exponent (E-005 not E-05)
+	if i := bytes.IndexByte(s[len(dst):], 'E'); i >= 0 {
+		i += len(dst)
+		// Find exponent sign
+		if i+1 < len(s) && (s[i+1] == '+' || s[i+1] == '-') {
+			exp := s[i+2:]
+			// Pad to 3 digits if needed (Fortran E format minimum)
+			if len(exp) < 3 {
+				s = append(s[:i+2], '0')
+				s = append(s, exp...)
+			}
+			if len(exp) < 2 {
+				s = append(s[:i+2], '0')
+				s = append(s, s[i+2:]...)
+			}
+		}
+	}
+	return s
+}
+
+func padLeft(dst []byte, startOff, leftPad int) []byte {
+	const space = "                                         "
+	strLen := len(dst) - startOff
+	// First grow slice if needed
+	dst = append(dst, space[:leftPad]...)
+	// Now copy value bytes to end (achieves right-alignment)
+	copy(dst[len(dst)-strLen:], dst[startOff:startOff+strLen])
+	// Now set left pad of bytes to space
+	copy(dst[startOff:startOff+leftPad], space)
+	return dst
+}
+
+// fixExponent pads exponent to 3 digits minimum per F95 spec (E-005 not E-05)
+func fixExponent(dst []byte, start int) []byte {
+	if i := bytes.IndexByte(dst[start:], 'E'); i >= 0 {
+		i += start
+		if i+2 < len(dst) && (dst[i+1] == '+' || dst[i+1] == '-') {
+			// Find where exponent digits start
+			expStart := i + 2
+			expDigits := dst[expStart:]
+			// Pad to 3 digits
+			for len(expDigits) < 3 {
+				dst = append(dst[:expStart], append([]byte{'0'}, dst[expStart:]...)...)
+				expDigits = dst[expStart:]
+			}
+		}
 	}
 	return dst
 }
