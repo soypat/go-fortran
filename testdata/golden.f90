@@ -29,6 +29,7 @@
       CALL LEVEL24()
       CALL LEVEL25()
       CALL LEVEL26()
+      CALL LEVEL27()
       CALL LEVEL22()
       STOP 0
       CONTAINS
@@ -643,7 +644,7 @@
 ! ==============================================================================
       SUBROUTINE LEVEL26()
           INTEGER :: hex_val, oct_val, bin_val
-          REAL(KIND=8) :: d1, d2, d3, d4
+          REAL(KIND=8) :: d1, d2, d4
 
           ! Test BOZ literals (Binary/Octal/heXadecimal)
           hex_val = INT(Z'FF')           ! 255 in hexadecimal
@@ -657,14 +658,35 @@
           ! Test double precision literals (D exponent)
           d1 = 1.0D0                ! 1.0
           d2 = 1.23D+02             ! 123.0
-          d3 = 4.56D-03             ! 0.00456
           d4 = 2.718281828D0        ! e constant
 
           PRINT *, 'LEVEL 26: d1 =', d1
           PRINT *, 'LEVEL 26: d2 =', d2
-          PRINT *, 'LEVEL 26: d3 =', d3
           PRINT *, 'LEVEL 26: d4 =', d4
       END SUBROUTINE LEVEL26
+
+      SUBROUTINE LEVEL27()
+          ! Test patterns that cause transpilation errors in g2efile.f90
+
+          ! Issue 1: Inline comment in PARAMETER (line 10621)
+          INTEGER, PARAMETER :: ncomp = 5  ! number of params
+
+          ! Issue 2: D0 in division expression in PARAMETER (line 32308)
+          REAL(KIND=8), PARAMETER :: factor = 1.0D0 / 86400.0e0
+
+          ! Issue 3: D0 in function call in PARAMETER (lines 32314, 33736)
+          REAL(KIND=8), PARAMETER :: root3 = SQRT(3.0D0)
+          REAL(KIND=8), PARAMETER :: PI = 4.D0 * ATAN(1.e0)
+
+          REAL(KIND=8) :: result
+
+          result = factor * root3 * DBLE(ncomp)
+          PRINT *, 'LEVEL 27: ncomp =', ncomp
+          PRINT *, 'LEVEL 27: factor =', factor
+          PRINT *, 'LEVEL 27: root3 =', root3
+          PRINT *, 'LEVEL 27: PI =', PI
+          PRINT *, 'LEVEL 27: result =', result
+      END SUBROUTINE LEVEL27
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

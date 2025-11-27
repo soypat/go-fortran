@@ -3120,6 +3120,11 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 			depth := 0
 			// Stop at newline or construct-ending keywords to avoid consuming tokens from parent scope
 			for p.loopUntilEndElseOr(token.NewLine) {
+				// Skip inline comments (LineComment tokens) - they shouldn't be part of the expression
+				if p.currentTokenIs(token.LineComment) {
+					p.nextToken()
+					continue
+				}
 				if p.currentTokenIs(token.LParen) {
 					depth++
 				} else if p.currentTokenIs(token.RParen) {
@@ -4092,18 +4097,12 @@ func (p *Parser90) parseCommonStmt() ast.Statement {
 
 		// Check for array specification: var(dims)
 		// COMMON blocks can contain arrays with dimension specs
-		if p.consumeIf(token.LParen) {
-			// Skip array dimensions using balanced parenthesis tracking
-			depth := 1
-			for depth > 0 && !p.IsDone() {
-				if p.currentTokenIs(token.LParen) {
-					depth++
-				} else if p.currentTokenIs(token.RParen) {
-					depth--
-				}
-				p.nextToken()
-			}
+		var arraySpec *ast.ArraySpec
+		if p.currentTokenIs(token.LParen) {
+			// Parse array dimensions
+			arraySpec = p.parseArraySpec()
 		}
+		stmt.ArraySpecs = append(stmt.ArraySpecs, arraySpec)
 
 		// Check for comma (more variables) or end of statement
 		if !p.consumeIf(token.Comma) {

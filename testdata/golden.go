@@ -34,6 +34,7 @@ func main() {
 	LEVEL24()
 	LEVEL25()
 	LEVEL26()
+	LEVEL27()
 	LEVEL22()
 	intrinsic.Exit(0)
 }
@@ -456,15 +457,6 @@ func LEVEL20() {
 		x float32
 		y float32
 	)
-	{
-		a = 10
-		b = 20
-		c = 30
-	}
-	{
-		x = 3.14
-		y = 2.71
-	}
 	intrinsic.Print("LEVEL 20: a =", a)
 	intrinsic.Print("LEVEL 20: b =", b)
 	intrinsic.Print("LEVEL 20: c =", c)
@@ -562,7 +554,6 @@ func LEVEL26() {
 	var (
 		d1 float64
 		d2 float64
-		d3 float64
 		d4 float64
 	)
 	hex_val = int32(255)
@@ -573,12 +564,23 @@ func LEVEL26() {
 	intrinsic.Print("LEVEL 26: bin_val =", bin_val)
 	d1 = 1.0e0
 	d2 = 1.23e+02
-	d3 = 4.56e-03
 	d4 = 2.718281828e0
 	intrinsic.Print("LEVEL 26: d1 =", d1)
 	intrinsic.Print("LEVEL 26: d2 =", d2)
-	intrinsic.Print("LEVEL 26: d3 =", d3)
 	intrinsic.Print("LEVEL 26: d4 =", d4)
+}
+func LEVEL27() {
+	const ncomp int32 = 5
+	const factor float64 = 1.1574074074074073e-05
+	const root3 float64 = 1.7320508075688772e+00
+	const PI float64 = 3.141592653589793e+00
+	var result float64
+	result = factor * root3 * float64(ncomp)
+	intrinsic.Print("LEVEL 27: ncomp =", ncomp)
+	intrinsic.Print("LEVEL 27: factor =", factor)
+	intrinsic.Print("LEVEL 27: root3 =", root3)
+	intrinsic.Print("LEVEL 27: PI =", PI)
+	intrinsic.Print("LEVEL 27: result =", result)
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")

@@ -479,10 +479,12 @@ func (us *UseStatement) AppendString(dst []byte) []byte {
 //	COMMON /block1/ a, b, c
 //	COMMON /block2/ x, y, z
 //	COMMON // blank_var        ! Blank COMMON (no name)
+//	COMMON /block3/ arr(10, 20), scalar
 type CommonStmt struct {
-	BlockName string   // Empty string for blank COMMON
-	Variables []string // Variable names in this block
-	Label     string
+	BlockName  string       // Empty string for blank COMMON
+	Variables  []string     // Variable names in this block
+	ArraySpecs []*ArraySpec // Array specs for each variable (nil for scalars)
+	Label      string
 	Position
 }
 

@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/token"
 	"maps"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -50,17 +51,18 @@ func sanitizeIdent(name string) string {
 
 // TranspileToGo transforms Fortran AST to Go AST
 type TranspileToGo struct {
-	symTable      *symbol.Table
-	imports       []string
-	charLengths   map[string]int              // Track CHARACTER(LEN=n) for padding assignments
-	arrays        map[string]*f90.ArraySpec   // Track array dimensions for initialization
-	arrayTypes    map[string]ast.Expr         // Track element types for arrays
-	allocatables  map[string]bool             // Track ALLOCATABLE arrays (don't initialize)
-	parameters    map[string]bool             // Track parameter names to avoid redeclaration
-	pointerParams map[string]bool             // Track OUT/INOUT scalar parameters (need dereference in assignments)
-	commonBlocks  map[string]*commonBlockInfo // COMMON block name -> info
-	commonVars    map[string]string           // Variable name -> COMMON block name (for lookups)
-	errors        []transpileError
+	symTable       *symbol.Table
+	imports        []string
+	charLengths    map[string]int              // Track CHARACTER(LEN=n) for padding assignments
+	arrays         map[string]*f90.ArraySpec   // Track array dimensions for initialization
+	arrayTypes     map[string]ast.Expr         // Track element types for arrays
+	allocatables   map[string]bool             // Track ALLOCATABLE arrays (don't initialize)
+	parameters     map[string]bool             // Track parameter names to avoid redeclaration
+	pointerParams  map[string]bool             // Track OUT/INOUT scalar parameters (need dereference in assignments)
+	commonBlocks   map[string]*commonBlockInfo // COMMON block name -> info
+	commonVars     map[string]string           // Variable name -> COMMON block name (for lookups)
+	implicitVars   map[string]ast.Expr         // Implicitly-typed local variables discovered during transpilation
+	errors         []transpileError
 }
 
 // Reset initializes the transpiler with a symbol table
@@ -83,12 +85,56 @@ func (tg *TranspileToGo) Reset(symTable *symbol.Table) error {
 
 // commonBlockInfo tracks variables in a COMMON block
 type commonBlockInfo struct {
-	Name   string // COMMON block name (empty for blank COMMON)
-	Fields []*ast.Field
+	Name       string              // COMMON block name (empty for blank COMMON)
+	Fields     []*ast.Field        // Go struct fields for each variable
+	ArraySpecs map[string]*f90.ArraySpec // Array specs for array variables
 }
 
 func (cbi commonBlockInfo) goVarname() string {
 	return cbi.Name
+}
+
+// trackImplicitVariable tracks a variable that may be implicitly typed
+// and adds it to the implicitVars map if it's not already declared
+func (tg *TranspileToGo) trackImplicitVariable(name string) {
+	// Skip if already tracked as implicit variable
+	if _, exists := tg.implicitVars[name]; exists {
+		return
+	}
+
+	// Check if variable is declared elsewhere - skip if so
+	if tg.parameters[strings.ToUpper(name)] {
+		return // Function parameter
+	}
+	if _, inCommon := tg.commonVars[name]; inCommon {
+		return // COMMON block variable
+	}
+	if _, isArray := tg.arrays[name]; isArray {
+		return // Declared array
+	}
+	if _, isChar := tg.charLengths[name]; isChar {
+		return // Declared CHARACTER
+	}
+	if _, isParam := tg.parameters[strings.ToUpper(name)]; isParam {
+		return // PARAMETER constant
+	}
+
+	// Infer type from first letter using Fortran IMPLICIT rules
+	if name != "" {
+		firstLetter := strings.ToUpper(name[:1])[0]
+		var varType ast.Expr
+		// L prefix → LOGICAL (bool)
+		// I-N → INTEGER (int32)
+		// Others → REAL (float64)
+		if firstLetter == 'L' {
+			varType = ast.NewIdent("bool")
+		} else if firstLetter >= 'I' && firstLetter <= 'N' {
+			varType = ast.NewIdent("int32")
+		} else {
+			varType = ast.NewIdent("float64")
+		}
+		tg.implicitVars[name] = varType
+	}
 }
 
 // enterProcedure initializes tracking maps for a function or subroutine
@@ -102,6 +148,7 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 	tg.allocatables = make(map[string]bool)
 	tg.parameters = make(map[string]bool)
 	tg.pointerParams = make(map[string]bool)
+	tg.implicitVars = make(map[string]ast.Expr)
 
 	// Mark all parameters to avoid redeclaration in body
 	// Also mark pointer parameters (OUT/INOUT scalars) for dereference in assignments
@@ -193,9 +240,41 @@ func (tg *TranspileToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 	for _, blockName := range names {
 		block := tg.commonBlocks[blockName]
 
-		// Filter out fields with nil Type (variables whose type was never declared)
+		// Apply default types to implicitly-typed variables (those with nil Type)
+		// Fortran default IMPLICIT rules: I-N = INTEGER, A-H,O-Z = REAL
+		// Common convention: L prefix = LOGICAL
 		validFields := make([]*ast.Field, 0, len(block.Fields))
 		for _, field := range block.Fields {
+			if field.Type == nil && len(field.Names) > 0 {
+				// Apply Fortran default IMPLICIT type based on first letter
+				varName := field.Names[0].Name
+				if varName != "" {
+					firstLetter := strings.ToUpper(varName[:1])[0]
+					// Determine element type: L prefix → bool, I-N → int32, others → float64
+					var elemType ast.Expr
+					if firstLetter == 'L' {
+						elemType = ast.NewIdent("bool")
+					} else if firstLetter >= 'I' && firstLetter <= 'N' {
+						elemType = ast.NewIdent("int32")
+					} else {
+						elemType = ast.NewIdent("float64")
+					}
+
+					// Check if this variable is an array
+					if _, isArray := block.ArraySpecs[varName]; isArray {
+						// Generate array type: *intrinsic.Array[elemType]
+						field.Type = &ast.StarExpr{
+							X: &ast.IndexExpr{
+								X:     _astTypeArray,
+								Index: elemType,
+							},
+						}
+					} else {
+						// Scalar type
+						field.Type = elemType
+					}
+				}
+			}
 			if field.Type != nil {
 				validFields = append(validFields, field)
 			}
@@ -627,6 +706,12 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) (gostmt ast.Stmt
 		return nil, nil
 	case *f90.EntryStmt:
 		// ENTRY statements (multiple entry points) - not supported
+		return nil, nil
+	case *f90.AssignStmt:
+		// ASSIGN label TO variable (Fortran 77 feature) - not supported, skip silently
+		return nil, nil
+	case *f90.AssignedGotoStmt:
+		// GOTO variable (assigned GOTO using label from ASSIGN statement) - not supported
 		return nil, nil
 	case *f90.ImplicitStatement, *f90.UseStatement, *f90.ExternalStmt, *f90.IntrinsicStmt:
 		// Specification statement - no code generation (intentionally nil)
@@ -1168,6 +1253,7 @@ func (tg *TranspileToGo) cleanIntegerLiteral(raw string) string {
 //	3.141592653589793D0 → 3.141592653589793
 //	1.5D+10 → 1.5e+10
 //	2.0D-5 → 2.0e-5
+//
 // rewriteFloatLit converts Fortran float literals to Go format
 // Converts D/d/Q/q exponents (double/quad precision) to e
 // Example: 1.0D0 → 1.0e0, 1.23D+02 → 1.23e+02
@@ -1186,6 +1272,11 @@ func (tg *TranspileToGo) rewriteFloatLit(s string) string {
 // This is a simple converter for PARAMETER constants that handles basic cases
 func (tg *TranspileToGo) fortranConstantToGoExpr(fortranExpr string) ast.Expr {
 	fortranExpr = strings.TrimSpace(fortranExpr)
+
+	// Strip inline comments (! and everything after)
+	if idx := strings.Index(fortranExpr, "!"); idx >= 0 {
+		fortranExpr = strings.TrimSpace(fortranExpr[:idx])
+	}
 
 	// Handle unary + or - prefix
 	if strings.HasPrefix(fortranExpr, "+") {
@@ -1219,13 +1310,76 @@ func (tg *TranspileToGo) fortranConstantToGoExpr(fortranExpr string) ast.Expr {
 		return &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(unquoted)}
 	}
 
-	// Handle simple expressions like "2.0 * PI"
-	// For now, check for simple binary operations and identifiers
+	// Handle function calls like SQRT(3.0D0) or ATAN(1.0)
+	// Must check that funcName is a simple identifier (no operators or spaces in it)
+	if idx := strings.Index(fortranExpr, "("); idx > 0 {
+		funcName := strings.TrimSpace(fortranExpr[:idx])
+		// Only treat as function call if funcName is a simple identifier (no operators like *, /, etc.)
+		if !strings.ContainsAny(funcName, "*/+-") && strings.HasSuffix(fortranExpr, ")") {
+			argStr := fortranExpr[idx+1 : len(fortranExpr)-1]
+			// Try to recursively evaluate argument as constant expression
+			argExpr := tg.fortranConstantToGoExpr(argStr)
+
+			// Try to evaluate intrinsic at compile time for PARAMETER constants
+			if lit, ok := argExpr.(*ast.BasicLit); ok && (lit.Kind == token.FLOAT || lit.Kind == token.INT) {
+				// Parse the numeric value
+				var argVal float64
+				var err error
+				if lit.Kind == token.FLOAT {
+					argVal, err = strconv.ParseFloat(lit.Value, 64)
+				} else {
+					var intVal int64
+					intVal, err = strconv.ParseInt(lit.Value, 10, 64)
+					argVal = float64(intVal)
+				}
+				if err == nil {
+					// Try to evaluate the intrinsic function
+					if result, ok := tg.evalNumericIntrinsic(funcName, argVal); ok {
+						// Return evaluated constant as a float literal
+						return &ast.BasicLit{
+							Kind:  token.FLOAT,
+							Value: strconv.FormatFloat(result, 'e', -1, 64),
+						}
+					}
+				}
+			}
+
+			// If we can't evaluate it, return a call expression (will fail for const but ok for var)
+			return &ast.CallExpr{
+				Fun:  ast.NewIdent(funcName),
+				Args: []ast.Expr{argExpr},
+			}
+		}
+	}
+
+	// Handle binary operations: *, /, +, -
+	// Process in order of precedence (lower precedence first, so they become parent nodes)
+	// Division and multiplication have same precedence
+	if strings.Contains(fortranExpr, "/") {
+		parts := strings.SplitN(fortranExpr, "/", 2)
+		if len(parts) == 2 {
+			left := tg.fortranConstantToGoExpr(strings.TrimSpace(parts[0]))
+			right := tg.fortranConstantToGoExpr(strings.TrimSpace(parts[1]))
+			// Try to evaluate at compile time if both are numeric literals
+			if result, ok := tg.evalBinaryOp(left, token.QUO, right); ok {
+				return result
+			}
+			return &ast.BinaryExpr{
+				X:  left,
+				Op: token.QUO,
+				Y:  right,
+			}
+		}
+	}
 	if strings.Contains(fortranExpr, "*") && !strings.Contains(fortranExpr, "**") {
 		parts := strings.SplitN(fortranExpr, "*", 2)
 		if len(parts) == 2 {
 			left := tg.fortranConstantToGoExpr(strings.TrimSpace(parts[0]))
 			right := tg.fortranConstantToGoExpr(strings.TrimSpace(parts[1]))
+			// Try to evaluate at compile time if both are numeric literals
+			if result, ok := tg.evalBinaryOp(left, token.MUL, right); ok {
+				return result
+			}
 			return &ast.BinaryExpr{
 				X:  left,
 				Op: token.MUL,
@@ -1540,6 +1694,9 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 		if tg.pointerParams[strings.ToUpper(ident.Name)] {
 			lhs = &ast.StarExpr{X: lhs}
 		}
+
+		// Track implicitly-typed variables (not in any declaration tracking map)
+		tg.trackImplicitVariable(ident.Name)
 	}
 
 	return &ast.AssignStmt{
@@ -1571,9 +1728,21 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 				return nil
 			}
 
+			// Generate CHARACTER array expression - check if in COMMON block
+			var charArrayExpr ast.Expr
+			if blockName, inCommon := tg.commonVars[ref.Name]; inCommon {
+				block := tg.commonBlocks[blockName]
+				charArrayExpr = &ast.SelectorExpr{
+					X:   ast.NewIdent(block.goVarname()),
+					Sel: ast.NewIdent(sanitizeIdent(ref.Name)),
+				}
+			} else {
+				charArrayExpr = ast.NewIdent(ref.Name)
+			}
+
 			setRangeCall := &ast.CallExpr{
 				Fun: &ast.SelectorExpr{
-					X:   ast.NewIdent(ref.Name),
+					X:   charArrayExpr,
 					Sel: ast.NewIdent("SetRange"),
 				},
 				Args: []ast.Expr{
@@ -1603,11 +1772,25 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 		})
 	}
 
-	// Generate: arrayName.Set(value, int(i), int(j), int(k))
+	// Generate array access expression - check if array is in COMMON block
+	var arrayExpr ast.Expr
+	if blockName, inCommon := tg.commonVars[ref.Name]; inCommon {
+		// Array is in COMMON block: BLOCKNAME.arrayname.Set(...)
+		block := tg.commonBlocks[blockName]
+		arrayExpr = &ast.SelectorExpr{
+			X:   ast.NewIdent(block.goVarname()),
+			Sel: ast.NewIdent(sanitizeIdent(ref.Name)),
+		}
+	} else {
+		// Regular array: arrayname.Set(...)
+		arrayExpr = ast.NewIdent(ref.Name)
+	}
+
+	// Generate: arrayExpr.Set(value, int(i), int(j), int(k))
 	// Note: Fortran indexing preserved - Array.Set() handles it internally
 	setCall := &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
-			X:   ast.NewIdent(ref.Name),
+			X:   arrayExpr,
 			Sel: ast.NewIdent("Set"),
 		},
 		Args: append([]ast.Expr{rhs}, indices...),
@@ -1747,12 +1930,24 @@ func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
 				return nil
 			}
 
-			// Generate: str.View(int(start), int(end)).String()
+			// Generate CHARACTER array expression - check if in COMMON block
+			var charArrayExpr ast.Expr
+			if blockName, inCommon := tg.commonVars[ref.Name]; inCommon {
+				block := tg.commonBlocks[blockName]
+				charArrayExpr = &ast.SelectorExpr{
+					X:   ast.NewIdent(block.goVarname()),
+					Sel: ast.NewIdent(sanitizeIdent(ref.Name)),
+				}
+			} else {
+				charArrayExpr = ast.NewIdent(ref.Name)
+			}
+
+			// Generate: charArrayExpr.View(int(start), int(end)).String()
 			return &ast.CallExpr{
 				Fun: &ast.SelectorExpr{
 					X: &ast.CallExpr{
 						Fun: &ast.SelectorExpr{
-							X:   ast.NewIdent(ref.Name),
+							X:   charArrayExpr,
 							Sel: ast.NewIdent("View"),
 						},
 						Args: []ast.Expr{
@@ -1782,11 +1977,25 @@ func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
 		})
 	}
 
-	// Generate: arrayName.At(int(i), int(j), int(k))
+	// Generate array access expression - check if array is in COMMON block
+	var arrayExpr ast.Expr
+	if blockName, inCommon := tg.commonVars[ref.Name]; inCommon {
+		// Array is in COMMON block: BLOCKNAME.arrayname.At(...)
+		block := tg.commonBlocks[blockName]
+		arrayExpr = &ast.SelectorExpr{
+			X:   ast.NewIdent(block.goVarname()),
+			Sel: ast.NewIdent(sanitizeIdent(ref.Name)),
+		}
+	} else {
+		// Regular array: arrayname.At(...)
+		arrayExpr = ast.NewIdent(ref.Name)
+	}
+
+	// Generate: arrayExpr.At(int(i), int(j), int(k))
 	// Note: No index adjustment needed - Array.At() handles Fortran indexing
 	return &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
-			X:   ast.NewIdent(ref.Name),
+			X:   arrayExpr,
 			Sel: ast.NewIdent("At"),
 		},
 		Args: indices,
@@ -1921,23 +2130,31 @@ func (tg *TranspileToGo) transformFunctionCall(call *f90.FunctionCall) ast.Expr 
 		}
 	case "SQRT", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN",
 		"EXP", "LOG", "LOG10", "SINH", "COSH", "TANH":
-		// Math intrinsics: SQRT(x) → intrinsic.SQRT[float32](x)
+		// Math intrinsics: SQRT(x) → intrinsic.SQRT[float64](x) or intrinsic.SQRT[float32](x)
 		if len(call.Args) != 1 {
 			return nil
+		}
+		// Determine precision from argument type
+		floatType := "float32" // default
+		if lit, ok := call.Args[0].(*f90.RealLiteral); ok {
+			// Check if it's a double precision literal (contains D or Q exponent)
+			if strings.ContainsAny(lit.Raw, "DdQq") {
+				floatType = "float64"
+			}
 		}
 		arg := tg.transformExpression(call.Args[0])
 		if arg == nil {
 			return nil
 		}
 		tg.useImport("github.com/soypat/go-fortran/intrinsic")
-		// Call: intrinsic.SQRT[float32](arg)
+		// Call: intrinsic.SQRT[float64](arg) or intrinsic.SQRT[float32](arg)
 		return &ast.CallExpr{
 			Fun: &ast.IndexListExpr{
 				X: &ast.SelectorExpr{
 					X:   ast.NewIdent("intrinsic"),
 					Sel: ast.NewIdent(funcName),
 				},
-				Indices: []ast.Expr{ast.NewIdent("float32")},
+				Indices: []ast.Expr{ast.NewIdent(floatType)},
 			},
 			Args: []ast.Expr{arg},
 		}
@@ -2257,6 +2474,60 @@ func (tg *TranspileToGo) transformCommonStmt(stmt *f90.CommonStmt) ast.Stmt {
 	return nil
 }
 
+// createDataAssignment creates an assignment statement for DATA initialization
+// Handles CHARACTER variables specially (uses SetFromString method)
+func (tg *TranspileToGo) createDataAssignment(varExpr f90.Expression, valExpr f90.Expression) ast.Stmt {
+	// Check if this is a simple identifier that we should skip
+	// (implicitly-typed variables in COMMON blocks or undeclared program-level vars)
+	if ident, ok := varExpr.(*f90.Identifier); ok {
+		// Skip if not in our tracking maps (likely implicitly-typed variable)
+		_, isChar := tg.charLengths[ident.Value]
+		_, isArray := tg.arrays[ident.Value]
+		_, isParam := tg.parameters[strings.ToUpper(ident.Value)]
+		_, inCommon := tg.commonVars[ident.Value]
+
+		if !isChar && !isArray && !isParam && !inCommon {
+			// Implicitly-typed variable not yet supported - skip DATA initialization
+			return nil
+		}
+	}
+
+	// Transform the variable (left-hand side)
+	lhs := tg.transformExpression(varExpr)
+	if lhs == nil {
+		return nil
+	}
+
+	// Transform the value (right-hand side)
+	rhs := tg.transformExpression(valExpr)
+	if rhs == nil {
+		return nil
+	}
+
+	// Check if LHS is a CHARACTER variable - need to use SetFromString() method
+	if ident, ok := lhs.(*ast.Ident); ok {
+		if _, isChar := tg.charLengths[ident.Name]; isChar {
+			// Generate: name.SetFromString(value)
+			return &ast.ExprStmt{
+				X: &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   lhs,
+						Sel: ast.NewIdent("SetFromString"),
+					},
+					Args: []ast.Expr{rhs},
+				},
+			}
+		}
+	}
+
+	// Regular assignment
+	return &ast.AssignStmt{
+		Lhs: []ast.Expr{lhs},
+		Tok: token.ASSIGN,
+		Rhs: []ast.Expr{rhs},
+	}
+}
+
 // transformDataStmt transforms a Fortran DATA statement to Go assignment statements
 // DATA statements initialize variables with compile-time constant values
 // Fortran: DATA a, b, c / 10, 20, 30 /
@@ -2272,25 +2543,37 @@ func (tg *TranspileToGo) transformDataStmt(stmt *f90.DataStmt) ast.Stmt {
 	// Create assignment statements
 	var stmts []ast.Stmt
 	for i := 0; i < len(stmt.Variables) && i < len(stmt.Values); i++ {
-		// Transform the variable (left-hand side)
-		lhs := tg.transformExpression(stmt.Variables[i])
-		if lhs == nil {
-			continue
+		varExpr := stmt.Variables[i]
+		valExpr := stmt.Values[i]
+
+		// Check if this is an array element assignment (need to use .Set() method)
+		var assignStmt ast.Stmt
+		if arrayRef, ok := varExpr.(*f90.ArrayRef); ok {
+			// Array element assignment: arr(i) = val → arr.Set(val, i)
+			assignStmt = tg.transformArrayAssignment(arrayRef, valExpr)
+		} else if funcCall, ok := varExpr.(*f90.FunctionCall); ok {
+			// Check if it's actually an array reference (parser ambiguity)
+			_, isArray := tg.arrays[funcCall.Name]
+			_, isChar := tg.charLengths[funcCall.Name]
+			if isArray || isChar {
+				// Convert to ArrayRef and generate .Set() or .SetRange() call
+				arrayRef := &f90.ArrayRef{
+					Name:       funcCall.Name,
+					Subscripts: funcCall.Args,
+				}
+				assignStmt = tg.transformArrayAssignment(arrayRef, valExpr)
+			} else {
+				// Not an array, treat as regular assignment
+				assignStmt = tg.createDataAssignment(varExpr, valExpr)
+			}
+		} else {
+			// Regular scalar variable assignment
+			assignStmt = tg.createDataAssignment(varExpr, valExpr)
 		}
 
-		// Transform the value (right-hand side)
-		rhs := tg.transformExpression(stmt.Values[i])
-		if rhs == nil {
-			continue
+		if assignStmt != nil {
+			stmts = append(stmts, assignStmt)
 		}
-
-		// Create assignment statement: var = value
-		assignStmt := &ast.AssignStmt{
-			Lhs: []ast.Expr{lhs},
-			Tok: token.ASSIGN,
-			Rhs: []ast.Expr{rhs},
-		}
-		stmts = append(stmts, assignStmt)
 	}
 
 	// If only one assignment, return it directly
@@ -2450,29 +2733,165 @@ func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
 			}
 
 			// Get or create COMMON block info
-			_, exists := tg.commonBlocks[blockName]
+			block, exists := tg.commonBlocks[blockName]
 			if !exists {
 				// Create fields for each variable (types will be set later)
 				var fields []*ast.Field
-				for _, varName := range commonStmt.Variables {
+				arraySpecs := make(map[string]*f90.ArraySpec)
+				for i, varName := range commonStmt.Variables {
+					// Track array spec if this variable is an array
+					var arraySpec *f90.ArraySpec
+					if i < len(commonStmt.ArraySpecs) {
+						arraySpec = commonStmt.ArraySpecs[i]
+					}
+					if arraySpec != nil {
+						// Store array spec in the block info
+						arraySpecs[varName] = arraySpec
+					}
+
 					fields = append(fields, &ast.Field{
 						Names: []*ast.Ident{ast.NewIdent(varName)},
-						Type:  nil, // Will be set when we see the type declaration
+						Type:  nil, // Will be set when we see the type declaration or by IMPLICIT typing
 					})
 				}
-				block := &commonBlockInfo{
-					Name:   blockName,
-					Fields: fields,
+				block = &commonBlockInfo{
+					Name:       blockName,
+					Fields:     fields,
+					ArraySpecs: arraySpecs,
 				}
 				tg.commonBlocks[blockName] = block
 			}
 
-			// Record each variable in the COMMON block
+			// Record each variable in the COMMON block and register arrays
 			for _, varName := range commonStmt.Variables {
 				tg.commonVars[varName] = blockName
+				// If this variable is an array, register it in tg.arrays for the current procedure
+				if arraySpec, isArray := block.ArraySpecs[varName]; isArray {
+					tg.arrays[varName] = arraySpec
+				}
 			}
 		}
 	}
+}
+
+// evalNumericIntrinsic evaluates numeric intrinsic functions at compile time for PARAMETER constants
+// Returns [value, ok] where ok indicates if evaluation was successful
+func (tg *TranspileToGo) evalNumericIntrinsic(intrinsic string, args ...float64) (float64, bool) {
+	if len(args) == 0 {
+		return 0, false
+	}
+
+	switch strings.ToUpper(intrinsic) {
+	case "SQRT":
+		if len(args) == 1 && args[0] >= 0 {
+			return math.Sqrt(args[0]), true
+		}
+	case "SIN":
+		if len(args) == 1 {
+			return math.Sin(args[0]), true
+		}
+	case "COS":
+		if len(args) == 1 {
+			return math.Cos(args[0]), true
+		}
+	case "TAN":
+		if len(args) == 1 {
+			return math.Tan(args[0]), true
+		}
+	case "ASIN":
+		if len(args) == 1 && args[0] >= -1 && args[0] <= 1 {
+			return math.Asin(args[0]), true
+		}
+	case "ACOS":
+		if len(args) == 1 && args[0] >= -1 && args[0] <= 1 {
+			return math.Acos(args[0]), true
+		}
+	case "ATAN":
+		if len(args) == 1 {
+			return math.Atan(args[0]), true
+		}
+	case "EXP":
+		if len(args) == 1 {
+			return math.Exp(args[0]), true
+		}
+	case "LOG":
+		if len(args) == 1 && args[0] > 0 {
+			return math.Log(args[0]), true
+		}
+	case "LOG10":
+		if len(args) == 1 && args[0] > 0 {
+			return math.Log10(args[0]), true
+		}
+	case "ABS":
+		if len(args) == 1 {
+			return math.Abs(args[0]), true
+		}
+	}
+	return 0, false
+}
+
+// evalBinaryOp evaluates binary operations at compile time if both operands are numeric literals
+// Returns [result expr, ok] where ok indicates if evaluation was successful
+func (tg *TranspileToGo) evalBinaryOp(left ast.Expr, op token.Token, right ast.Expr) (ast.Expr, bool) {
+	// Extract numeric values from both operands
+	leftLit, leftOk := left.(*ast.BasicLit)
+	rightLit, rightOk := right.(*ast.BasicLit)
+	if !leftOk || !rightOk {
+		return nil, false
+	}
+
+	// Parse numeric values
+	var leftVal, rightVal float64
+	var err error
+	if leftLit.Kind == token.FLOAT {
+		leftVal, err = strconv.ParseFloat(leftLit.Value, 64)
+	} else if leftLit.Kind == token.INT {
+		var intVal int64
+		intVal, err = strconv.ParseInt(leftLit.Value, 10, 64)
+		leftVal = float64(intVal)
+	} else {
+		return nil, false
+	}
+	if err != nil {
+		return nil, false
+	}
+
+	if rightLit.Kind == token.FLOAT {
+		rightVal, err = strconv.ParseFloat(rightLit.Value, 64)
+	} else if rightLit.Kind == token.INT {
+		var intVal int64
+		intVal, err = strconv.ParseInt(rightLit.Value, 10, 64)
+		rightVal = float64(intVal)
+	} else {
+		return nil, false
+	}
+	if err != nil {
+		return nil, false
+	}
+
+	// Evaluate the operation
+	var result float64
+	switch op {
+	case token.ADD:
+		result = leftVal + rightVal
+	case token.SUB:
+		result = leftVal - rightVal
+	case token.MUL:
+		result = leftVal * rightVal
+	case token.QUO:
+		if rightVal == 0 {
+			return nil, false // Division by zero
+		}
+		result = leftVal / rightVal
+	default:
+		return nil, false
+	}
+
+	// Return as float literal
+	return &ast.BasicLit{
+		Kind:  token.FLOAT,
+		Value: strconv.FormatFloat(result, 'e', -1, 64),
+	}, true
 }
 
 // Common intrinsic identifiers.
