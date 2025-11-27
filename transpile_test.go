@@ -69,13 +69,13 @@ func TestTranspileGolden(t *testing.T) {
 
 	// Write complete file to buffer
 	var progSrc bytes.Buffer
-	commons := tp.AppendCommonDecls(nil)
-	imports := tp.AppendImportSpec(nil)
-	t.Log("imports:", len(imports))
+	progDecls := tp.AppendImportDecl(nil)
+	progDecls = tp.AppendCommonDecls(progDecls)
+	progDecls = append(progDecls, procedureDecls...)
 	helperWriteGoAST(t, &progSrc, &ast.File{
 		Name:    ast.NewIdent("main"),
-		Imports: imports,
-		Decls:   append(commons, procedureDecls...),
+		Imports: tp.AppendImportSpec(nil),
+		Decls:   progDecls,
 	})
 
 	var formattedSrc bytes.Buffer

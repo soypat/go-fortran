@@ -89,6 +89,16 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 }
 
 func (tg *TranspileToGo) AppendImportSpec(dst []*ast.ImportSpec) []*ast.ImportSpec {
+	slices.SortFunc(tg.imports, func(a, b string) int {
+		aIsThird := strings.Contains(a, ".")
+		bIsThird := strings.Contains(b, ".")
+		if aIsThird == bIsThird {
+			return strings.Compare(a, b)
+		} else if aIsThird {
+			return -1
+		}
+		return 1
+	})
 	for _, importPath := range tg.imports {
 		dst = append(dst, &ast.ImportSpec{
 			Path: &ast.BasicLit{
@@ -100,13 +110,27 @@ func (tg *TranspileToGo) AppendImportSpec(dst []*ast.ImportSpec) []*ast.ImportSp
 	return dst
 }
 
+func (tg *TranspileToGo) AppendImportDecl(dst []ast.Decl) []ast.Decl {
+	importSpecs := tg.AppendImportSpec(nil)
+	if len(importSpecs) > 0 {
+		importDecl := &ast.GenDecl{
+			Tok:   token.IMPORT,
+			Specs: make([]ast.Spec, len(importSpecs)),
+		}
+		for i, spec := range importSpecs {
+			importDecl.Specs[i] = spec
+		}
+		dst = append(dst, importDecl)
+	}
+	return dst
+}
+
 func (tg *TranspileToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 	// Ensure output is ordered and repeatable, we do not want to generate diffs on every transpile.
 	names := slices.AppendSeq([]string{}, maps.Keys(tg.commonBlocks))
 	slices.Sort(names)
 	for _, blockName := range names {
 		block := tg.commonBlocks[blockName]
-		// Generate: var common_<blockname> struct { ... }
 		structType := &ast.StructType{
 			Fields: &ast.FieldList{
 				List: block.Fields,
@@ -127,6 +151,35 @@ func (tg *TranspileToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 	}
 
 	return dst
+}
+
+// MakeFile creates a complete Go AST file with package declaration, imports, and declarations
+func (tg *TranspileToGo) MakeFile(packageName string, decls []ast.Decl) *ast.File {
+	file := &ast.File{
+		Name:  ast.NewIdent(packageName),
+		Decls: []ast.Decl{},
+	}
+
+	// Add import declaration if there are any imports
+	importSpecs := tg.AppendImportSpec(nil)
+	if len(importSpecs) > 0 {
+		importDecl := &ast.GenDecl{
+			Tok:   token.IMPORT,
+			Specs: make([]ast.Spec, len(importSpecs)),
+		}
+		for i, spec := range importSpecs {
+			importDecl.Specs[i] = spec
+		}
+		file.Decls = append(file.Decls, importDecl)
+	}
+
+	// Add COMMON block declarations
+	file.Decls = tg.AppendCommonDecls(file.Decls)
+
+	// Add provided declarations
+	file.Decls = append(file.Decls, decls...)
+
+	return file
 }
 
 // TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration

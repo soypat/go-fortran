@@ -1,5 +1,7 @@
 package main
 
+import "github.com/soypat/go-fortran/intrinsic"
+
 var SHARED struct {
 	x int32
 	y int32
