@@ -362,14 +362,80 @@ func (tg *TranspileToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 			},
 		}
 
-		decl := &ast.GenDecl{
-			Tok: token.VAR,
-			Specs: []ast.Spec{
-				&ast.ValueSpec{
-					Names: []*ast.Ident{ast.NewIdent(block.goVarname())},
-					Type:  structType,
+		// Build composite literal for array initialization
+		var compositeLitElts []ast.Expr
+		for varName, arraySpec := range block.ArraySpecs {
+			// Find element type from field
+			var elemType ast.Expr
+			for _, field := range validFields {
+				if len(field.Names) > 0 && field.Names[0].Name == varName {
+					if starExpr, ok := field.Type.(*ast.StarExpr); ok {
+						if indexExpr, ok := starExpr.X.(*ast.IndexExpr); ok {
+							elemType = indexExpr.Index
+						}
+					}
+					break
+				}
+			}
+			if elemType == nil {
+				continue
+			}
+
+			// Build dims from arraySpec
+			var dims []ast.Expr
+			for _, bound := range arraySpec.Bounds {
+				size := tg.transformExpression(bound.Upper)
+				if size == nil {
+					continue
+				}
+				dims = append(dims, size)
+			}
+
+			// Skip if no dimensions could be determined
+			if len(dims) == 0 {
+				continue
+			}
+
+			// Create composite literal element: varName: intrinsic.NewArray[elemType](dims...)
+			compositeLitElts = append(compositeLitElts, &ast.KeyValueExpr{
+				Key: ast.NewIdent(varName),
+				Value: &ast.CallExpr{
+					Fun: &ast.IndexExpr{
+						X: &ast.SelectorExpr{
+							X:   ast.NewIdent("intrinsic"),
+							Sel: ast.NewIdent("NewArray"),
+						},
+						Index: elemType,
+					},
+					Args: dims,
 				},
-			},
+			})
+		}
+
+		// Create variable declaration with or without composite literal
+		var valueSpec *ast.ValueSpec
+		if len(compositeLitElts) > 0 {
+			// var BLOCKNAME = struct{...}{field: value, ...}
+			valueSpec = &ast.ValueSpec{
+				Names: []*ast.Ident{ast.NewIdent(block.goVarname())},
+				Values: []ast.Expr{
+					&ast.CompositeLit{
+						Type: structType,
+						Elts: compositeLitElts,
+					},
+				},
+			}
+		} else {
+			// var BLOCKNAME struct{...} (no initialization needed)
+			valueSpec = &ast.ValueSpec{
+				Names: []*ast.Ident{ast.NewIdent(block.goVarname())},
+				Type:  structType,
+			}
+		}
+
+		decl := &ast.GenDecl{
+			Tok:   token.VAR,
+			Specs: []ast.Spec{valueSpec},
 		}
 
 		dst = append(dst, decl)
@@ -1507,17 +1573,37 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		if v.InCommonBlock != "" {
 			blockName := v.InCommonBlock
 			if block, exists := tg.commonBlocks[blockName]; exists {
+				// Determine the field type
+				var fieldType ast.Expr
+				if entity.ArraySpec != nil {
+					// Array type: *intrinsic.Array[elemType]
+					fieldType = &ast.StarExpr{
+						X: &ast.IndexExpr{
+							X:     _astTypeArray,
+							Index: goType,
+						},
+					}
+					v.ArraySpec = entity.ArraySpec
+					v.ElementType = goType
+					// Update the block's ArraySpecs map (for init function generation)
+					block.ArraySpecs[entity.Name] = entity.ArraySpec
+				} else {
+					// Scalar type
+					fieldType = goType
+				}
+
 				// Find the field for this variable and set its type
 				for _, field := range block.Fields {
 					if len(field.Names) > 0 && field.Names[0].Name == entity.Name {
-						field.Type = goType
+						field.Type = fieldType
 						break
 					}
 				}
+
+				// Track in unified vars map
+				v.Type = fieldType
 			}
 
-			// Track in unified vars map
-			v.Type = goType
 			// v.InCommonBlock was already set by preScanCommonBlocks
 
 			// Variables in COMMON blocks will be accessed via the global struct
@@ -3041,6 +3127,10 @@ var (
 	_astFnNewArrayFromValues = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("NewArrayFromValues"),
+	}
+	_astFnNewArray = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewArray"),
 	}
 	_astTypeCharArray = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),

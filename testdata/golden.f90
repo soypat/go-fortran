@@ -30,6 +30,7 @@
       CALL LEVEL25()
       CALL LEVEL26()
       CALL LEVEL27()
+      CALL LEVEL28()
       CALL LEVEL22()
       STOP 0
       CONTAINS
@@ -687,6 +688,27 @@
           PRINT *, 'LEVEL 27: PI =', PI
           PRINT *, 'LEVEL 27: result =', result
       END SUBROUTINE LEVEL27
+
+      SUBROUTINE LEVEL28()
+          ! Test COMMON block arrays with initialization
+          REAL :: YQR(256), SUMXRQ(512), YMNRT(3)
+          REAL :: MATRIX(10,20)
+          INTEGER :: COUNTS(100)
+          COMMON/HOLDRT/YQR,SUMXRQ,YMNRT,MATRIX
+          COMMON/STATS/COUNTS
+
+          PRINT *, 'LEVEL 28: COMMON block arrays initialized'
+          YQR(1) = 1.5
+          SUMXRQ(512) = 99.9
+          YMNRT(2) = 3.14
+          MATRIX(5,10) = 42.5
+          COUNTS(50) = 42
+          PRINT *, 'LEVEL 28: YQR(1) =', YQR(1)
+          PRINT *, 'LEVEL 28: SUMXRQ(512) =', SUMXRQ(512)
+          PRINT *, 'LEVEL 28: YMNRT(2) =', YMNRT(2)
+          PRINT *, 'LEVEL 28: MATRIX(5,10) =', MATRIX(5,10)
+          PRINT *, 'LEVEL 28: COUNTS(50) =', COUNTS(50)
+      END SUBROUTINE LEVEL28
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

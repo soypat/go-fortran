@@ -2,11 +2,20 @@ package main
 
 import "github.com/soypat/go-fortran/intrinsic"
 
+var HOLDRT = struct {
+	YQR    *intrinsic.Array[float32]
+	SUMXRQ *intrinsic.Array[float32]
+	YMNRT  *intrinsic.Array[float32]
+	MATRIX *intrinsic.Array[float32]
+}{YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20)}
 var SHARED struct {
 	x int32
 	y int32
 	z float32
 }
+var STATS = struct {
+	COUNTS *intrinsic.Array[int32]
+}{COUNTS: intrinsic.NewArray[int32](100)}
 
 func main() {
 	LEVEL01()
@@ -35,6 +44,7 @@ func main() {
 	LEVEL25()
 	LEVEL26()
 	LEVEL27()
+	LEVEL28()
 	LEVEL22()
 	intrinsic.Exit(0)
 }
@@ -590,6 +600,19 @@ func LEVEL27() {
 	intrinsic.Print("LEVEL 27: root3 =", root3)
 	intrinsic.Print("LEVEL 27: PI =", PI)
 	intrinsic.Print("LEVEL 27: result =", result)
+}
+func LEVEL28() {
+	intrinsic.Print("LEVEL 28: COMMON block arrays initialized")
+	HOLDRT.YQR.Set(1.5, int(1))
+	HOLDRT.SUMXRQ.Set(99.9, int(512))
+	HOLDRT.YMNRT.Set(3.14, int(2))
+	HOLDRT.MATRIX.Set(42.5, int(5), int(10))
+	STATS.COUNTS.Set(42, int(50))
+	intrinsic.Print("LEVEL 28: YQR(1) =", HOLDRT.YQR.At(int(1)))
+	intrinsic.Print("LEVEL 28: SUMXRQ(512) =", HOLDRT.SUMXRQ.At(int(512)))
+	intrinsic.Print("LEVEL 28: YMNRT(2) =", HOLDRT.YMNRT.At(int(2)))
+	intrinsic.Print("LEVEL 28: MATRIX(5,10) =", HOLDRT.MATRIX.At(int(5), int(10)))
+	intrinsic.Print("LEVEL 28: COUNTS(50) =", STATS.COUNTS.At(int(50)))
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
