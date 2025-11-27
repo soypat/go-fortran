@@ -78,8 +78,7 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 		leftPad = 1
 		rightPad = 0
 
-	case float32, float64: // REAL (kind=4): gfortran uses different widths based on magnitude
-		// gfortran uses: 11 chars (9 decimals) for |x| < 1, 10 chars (variable) for |x| >= 1
+	case float32, float64: // REAL: gfortran formatting
 		var width, totalWidth int
 		var x float64
 		if k, ok := v.(float32); ok {
@@ -91,26 +90,26 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 			width = 18
 			totalWidth = 25
 		}
-		var decPlaces int
 		absX := math.Abs(x)
-		if absX < 1.0 {
-			// Values like 0.479... get 11 chars total: 0 + '.' + 9 decimals
-			decPlaces = width - 1
+		// gfortran uses exponential for very small values
+		if absX > 0 && absX < 0.01 {
+			dst = strconv.AppendFloat(dst, x, 'E', 16, 64)
 		} else {
-			// Values like 3.14... get 10 chars total with variable decimals
-			nIntDig := int(math.Log10(absX)) + 1
-			decPlaces = width - nIntDig - 1 // e.g., 10 - 1 - 1 = 8 for single-digit values
+			// Fixed format with variable precision based on magnitude
+			var decPlaces int
+			if absX < 1.0 {
+				decPlaces = width - 1 // e.g., 0.479 → 9 decimals
+			} else {
+				nIntDig := int(math.Log10(absX)) + 1
+				decPlaces = width - nIntDig - 1
+			}
+			dst = strconv.AppendFloat(dst, x, 'f', decPlaces, 64)
 		}
-		dst = strconv.AppendFloat(dst, x, 'f', decPlaces, 64)
 		valueLen := len(dst) - prevLen
-		// Total field width = 17 (includes 1 separator added by Print)
-		// formatValue adds: leftPad + value + rightPad = 16
-		// Pattern: |x| < 1 → 2 leading (1 sep + 1 pad) + 11-char value + 4 trailing
-		//          |x| >= 1 → 3 leading (1 sep + 2 pad) + 10-char value + 4 trailing
 		if absX < 1.0 {
-			leftPad = 1 // 1 sep (Print) + 1 leftPad = 2 total leading spaces
+			leftPad = 1
 		} else {
-			leftPad = 2 // 1 sep (Print) + 2 leftPad = 3 total leading spaces
+			leftPad = 2
 		}
 		rightPad = totalWidth - leftPad - valueLen
 
