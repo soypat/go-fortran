@@ -14,10 +14,13 @@ import (
 type Flags uint64
 
 const (
-	FlagImplicit Flags = 1 << iota
-	FlagUsed
-	FlagPointer
-	FlagTarget
+	FlagImplicit     Flags = 1 << iota // Type inferred from IMPLICIT rules
+	FlagUsed                            // Symbol is referenced in code
+	FlagPointer                         // Has POINTER attribute
+	FlagTarget                          // Has TARGET attribute
+	FlagParameter                       // Is a function/subroutine parameter
+	FlagPointerParam                    // OUT/INOUT scalar parameter (needs dereference)
+	FlagAllocatable                     // Has ALLOCATABLE attribute
 )
 
 func (f Flags) HasAny(hasBits Flags) bool { return f&hasBits != 0 }
