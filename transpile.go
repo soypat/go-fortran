@@ -52,8 +52,8 @@ func sanitizeIdent(name string) string {
 // VarInfo tracks all information about a variable in the current scope
 type VarInfo struct {
 	// Core metadata
-	Type  ast.Expr      // Go type expression (e.g., ast.NewIdent("int32"))
-	Flags symbol.Flags  // Variable flags (IsParameter, IsImplicit, IsAllocatable, etc.)
+	Type  ast.Expr     // Go type expression (e.g., ast.NewIdent("int32"))
+	Flags symbol.Flags // Variable flags (IsParameter, IsImplicit, IsAllocatable, etc.)
 
 	// COMMON block membership
 	InCommonBlock string // Non-empty if variable is in a COMMON block (stores block name)
@@ -92,8 +92,8 @@ func (tg *TranspileToGo) Reset(symTable *symbol.Table) error {
 
 // commonBlockInfo tracks variables in a COMMON block
 type commonBlockInfo struct {
-	Name       string              // COMMON block name (empty for blank COMMON)
-	Fields     []*ast.Field        // Go struct fields for each variable
+	Name       string                    // COMMON block name (empty for blank COMMON)
+	Fields     []*ast.Field              // Go struct fields for each variable
 	ArraySpecs map[string]*f90.ArraySpec // Array specs for array variables
 }
 

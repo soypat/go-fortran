@@ -676,7 +676,7 @@
 
           ! Issue 3: D0 in function call in PARAMETER (lines 32314, 33736)
           REAL(KIND=8), PARAMETER :: root3 = SQRT(3.0D0)
-          REAL(KIND=8), PARAMETER :: PI = 4.D0 * ATAN(1.e0)
+          REAL(KIND=8), PARAMETER :: PI = 4.D0 * ATAN(1.D0)
 
           REAL(KIND=8) :: result
 
