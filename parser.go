@@ -3336,9 +3336,23 @@ func (p *Parser90) parseCharacterLength() ast.Expression {
 	} else if !p.consumeIf(token.Asterisk) {
 		p.addError("char length expected '*' or '('")
 	}
-	// Parse as expression (handles *, :, integer literals, identifiers, etc.)
-	expr := p.parseExpression(0)
-	// p.expect(token.RParen, "close CHARACTER spec") // TODO: why not expect RParen?
+
+	// Check for assumed length: CHARACTER(*) or CHARACTER(LEN=*)
+	if p.currentTokenIs(token.Asterisk) {
+		pos := p.current.start
+		p.nextToken() // consume *
+		if inParens {
+			p.expect(token.RParen, "closing ')'")
+		}
+		// Return identifier "*" to represent assumed length
+		return &ast.Identifier{
+			Value:    "*",
+			Position: ast.Pos(pos, pos+1),
+		}
+	}
+
+	// Parse as expression (handles :, integer literals, identifiers, etc.)
+	expr := p.parseExpression(0, token.RParen, token.Comma)
 	if inParens {
 		p.expect(token.RParen, "closing ')'")
 	}
