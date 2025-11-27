@@ -170,9 +170,23 @@ func (tg *TranspileToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 	slices.Sort(names)
 	for _, blockName := range names {
 		block := tg.commonBlocks[blockName]
+
+		// Filter out fields with nil Type (variables whose type was never declared)
+		validFields := make([]*ast.Field, 0, len(block.Fields))
+		for _, field := range block.Fields {
+			if field.Type != nil {
+				validFields = append(validFields, field)
+			}
+		}
+
+		// Skip empty COMMON blocks
+		if len(validFields) == 0 {
+			continue
+		}
+
 		structType := &ast.StructType{
 			Fields: &ast.FieldList{
-				List: block.Fields,
+				List: validFields,
 			},
 		}
 
@@ -278,7 +292,11 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 	// Map Fortran result type to Go type, considering KIND parameter
 	resultType := tg.fortranTypeToGoWithKind(fn.Type, fn.Type.KindOrLen)
 	if resultType == nil {
-		return nil, fmt.Errorf("unknown fortran result type: %s", fn.Type.Token)
+		if fn.Type.Token.String() != "<undefined>" {
+			return nil, fmt.Errorf("unknown fortran result type: %s", fn.Type.Token)
+		}
+		// Skip functions with undefined types
+		return nil, nil
 	}
 
 	// Create function declaration
@@ -336,13 +354,17 @@ func (tg *TranspileToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, e
 			if err != nil {
 				return nil, err
 			}
-			decls = append(decls, funcDecl)
+			if funcDecl != nil {
+				decls = append(decls, funcDecl)
+			}
 		case *f90.Function:
 			funcDecl, err := tg.TransformFunction(c)
 			if err != nil {
 				return nil, err
 			}
-			decls = append(decls, funcDecl)
+			if funcDecl != nil {
+				decls = append(decls, funcDecl)
+			}
 		default:
 			return decls, fmt.Errorf("unknown CONTAINS declaration: %T", c)
 		}
@@ -450,7 +472,9 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 		// Get the Go type for this parameter, considering KIND
 		goType := tg.fortranTypeToGoWithKind(param.Type, param.Type.KindOrLen)
 		if goType == nil {
-			tg.addError(fmt.Sprintf("unhandled type parameter %s", param.Type.Token))
+			if param.Type.Token.String() != "<undefined>" {
+				tg.addError(fmt.Sprintf("unhandled type parameter %s", param.Type.Token))
+			}
 			continue
 		}
 		// Handle arrays - always use intrinsic.Array[T]
@@ -571,6 +595,17 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) (gostmt ast.Stmt
 		gostmt = tg.transformComputedGotoStmt(s)
 	case *f90.StopStmt:
 		gostmt = tg.transformStopStmt(s)
+	case *f90.WriteStmt:
+		gostmt = tg.transformWriteStmt(s)
+	case *f90.FormatStmt:
+		// FORMAT statements are compile-time format definitions, no runtime code
+		return nil, nil
+	case *f90.OpenStmt, *f90.CloseStmt, *f90.ReadStmt, *f90.BackspaceStmt, *f90.RewindStmt, *f90.EndfileStmt, *f90.InquireStmt:
+		// File I/O statements - not yet implemented, skip silently
+		return nil, nil
+	case *f90.EntryStmt:
+		// ENTRY statements (multiple entry points) - not supported
+		return nil, nil
 	case *f90.ImplicitStatement, *f90.UseStatement, *f90.ExternalStmt, *f90.IntrinsicStmt:
 		// Specification statement - no code generation (intentionally nil)
 		return nil, nil
@@ -599,6 +634,57 @@ func (tg *TranspileToGo) transformPrint(print *f90.PrintStmt) ast.Stmt {
 				Sel: ast.NewIdent("Print"),
 			},
 			Args: args,
+		},
+	}
+}
+
+// transformWriteStmt transforms a Fortran WRITE statement
+// For now, implements list-directed WRITE (WRITE(*,*) or WRITE(6,*)) as intrinsic.Print
+// TODO: Handle formatted output, file units, error handling
+func (tg *TranspileToGo) transformWriteStmt(write *f90.WriteStmt) ast.Stmt {
+	// For MVP: treat list-directed WRITE to stdout (unit * or 6) as PRINT
+	// Check if this is list-directed format (Format is *)
+	isListDirected := false
+	if ident, ok := write.Format.(*f90.Identifier); ok && ident.Value == "*" {
+		isListDirected = true
+	}
+
+	// Check if writing to stdout (unit * or 6)
+	isStdout := false
+	if ident, ok := write.Unit.(*f90.Identifier); ok && ident.Value == "*" {
+		isStdout = true
+	}
+	if lit, ok := write.Unit.(*f90.IntegerLiteral); ok && lit.Raw == "6" {
+		isStdout = true
+	}
+
+	// For now, only support list-directed WRITE to stdout
+	if isListDirected && isStdout {
+		args := tg.transformExpressions(write.OutputList)
+		return &ast.ExprStmt{
+			X: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   ast.NewIdent("intrinsic"),
+					Sel: ast.NewIdent("Print"),
+				},
+				Args: args,
+			},
+		}
+	}
+
+	// Formatted or file WRITE not yet supported - generate comment
+	return &ast.ExprStmt{
+		X: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent("intrinsic"),
+				Sel: ast.NewIdent("Print"),
+			},
+			Args: []ast.Expr{
+				&ast.BasicLit{
+					Kind:  token.STRING,
+					Value: `"[WRITE statement - formatted output not yet supported]"`,
+				},
+			},
 		},
 	}
 }
@@ -990,8 +1076,12 @@ func (tg *TranspileToGo) fortranTypeToGoWithKind(ft f90.TypeSpec, kindParam f90.
 
 	switch ft.Token {
 	default:
-		tg.addError(fmt.Sprintf("unable to resolve token as go type: %s", ft.Token.String()))
-		return nil //
+		// Unknown type - skip with warning rather than fail
+		tokenStr := ft.Token.String()
+		if tokenStr != "<undefined>" && tokenStr != "TYPE" {
+			tg.addError(fmt.Sprintf("unable to resolve token as go type: %s", tokenStr))
+		}
+		return nil // Skip this declaration
 	case f90token.INTEGER:
 		switch kindValue {
 		case 1:

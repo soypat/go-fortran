@@ -77,11 +77,10 @@ func TestTranspileGolden(t *testing.T) {
 		Imports: tp.AppendImportSpec(nil),
 		Decls:   progDecls,
 	})
-
-	var formattedSrc bytes.Buffer
-	helperFormatGoSrc(t, &progSrc, &formattedSrc)
 	const goFile = "testdata/golden.go"
-	os.WriteFile(goFile, formattedSrc.Bytes(), 0777)
+	os.WriteFile(goFile, progSrc.Bytes(), 0777)
+	helperFormatGoSrc(t, goFile)
+
 	output := helperRunGoFile(t, goFile)
 
 	// Read expected output and extract only the lines for implemented levels
@@ -162,17 +161,10 @@ func helperRunGoFile(t *testing.T, pathToFile string) (output []byte) {
 	return output
 }
 
-func helperFormatGoSrc(t *testing.T, r io.Reader, w io.Writer) {
-	var stderr bytes.Buffer
-	var src bytes.Buffer
-	src.ReadFrom(r)
-	cmd := exec.Command("gofmt")
-	cmd.Stdin = bytes.NewBuffer(src.Bytes())
-	cmd.Stdout = w
-	cmd.Stderr = &stderr
-	err := cmd.Run()
+func helperFormatGoSrc(t *testing.T, filePath string) {
+	cmd := exec.Command("gofmt", "-w", filePath)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Error(stderr.String(), err)
-		src.WriteTo(w) // Still output data
+		t.Error(string(out), err)
 	}
 }

@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/soypat/go-fortran/token"
@@ -271,6 +273,18 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 		if isIdentifierChar(ch) {
 			literal = l.readIdentifier()
 			tok = token.LookupKeyword(literal)
+
+			// Check for BOZ literals: Z'...', O'...', B'...'
+			if tok == token.Identifier && len(literal) == 1 && (l.ch == '\'' || l.ch == '"') {
+				prefix := rune(literal[0])
+				if prefix == 'Z' || prefix == 'z' || prefix == 'O' || prefix == 'o' || prefix == 'B' || prefix == 'b' {
+					quote := l.ch
+					literal = l.readBOZLiteral(prefix, quote)
+					tok = token.IntLit
+					return tok, startPos, literal
+				}
+			}
+
 			// Check if this could be a format specifier (e.g., I3, F10, E12, TL5, TR10)
 			// Format specs are 1-2 format letters followed immediately by digits/dots
 			if tok == token.Identifier && len(literal) > 1 && isFormatLetter(rune(literal[0])) {
@@ -398,6 +412,62 @@ func (l *Lexer90) readIdentifier() []byte {
 	for isIdentifierChar(l.ch) || isDigit(l.ch) {
 		l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
 		l.readChar()
+	}
+	return l.idbuf[start:]
+}
+
+// readBOZLiteral reads a BOZ (Binary/Octal/heXadecimal) literal: Z'...', O'...', B'...'
+// Returns the literal as a decimal integer string
+func (l *Lexer90) readBOZLiteral(prefix rune, quote rune) []byte {
+	start := l.bufstart()
+	l.readChar() // consume opening quote
+
+	// Read the content between quotes
+	var digits []rune
+	for l.ch != 0 && l.ch != quote {
+		if l.ch == '\n' {
+			l.err = errors.New("unterminated BOZ literal")
+			return l.idbuf[start:]
+		}
+		// Collect hex/octal/binary digits
+		if (l.ch >= '0' && l.ch <= '9') || (l.ch >= 'A' && l.ch <= 'F') || (l.ch >= 'a' && l.ch <= 'f') {
+			digits = append(digits, l.ch)
+		}
+		l.readChar()
+	}
+
+	if l.ch == quote {
+		l.readChar() // consume closing quote
+	} else {
+		l.err = errors.New("unterminated BOZ literal")
+		return l.idbuf[start:]
+	}
+
+	// Parse the value based on prefix
+	var value uint64
+	var base int
+	switch prefix {
+	case 'Z', 'z':
+		base = 16
+	case 'O', 'o':
+		base = 8
+	case 'B', 'b':
+		base = 2
+	}
+
+	// Parse digits
+	digitStr := string(digits)
+	if parsed, err := strconv.ParseUint(digitStr, base, 64); err == nil {
+		value = parsed
+	} else {
+		l.err = fmt.Errorf("invalid BOZ literal: %w", err)
+		return l.idbuf[start:]
+	}
+
+	// Return as decimal string
+	result := strconv.FormatUint(value, 10)
+	for _, r := range result {
+		l.idbuf = utf8.AppendRune(l.idbuf, r)
 	}
 	return l.idbuf[start:]
 }

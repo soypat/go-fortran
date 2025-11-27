@@ -21,7 +21,8 @@ _old*
 !/go.mod
 testdata/golden
 testdata/golden.out
-
+# test transpile files.
+*.f90.go 
 # `__debug_bin` Debug binary generated in VSCode when using the built-in debugger.
 **__debug_bin*
 *bin

@@ -3665,23 +3665,6 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 		return lit
 	}
 
-	// Handle hex/octal/binary literals: Z'...', O'...', B'...'
-	if p.canUseAsIdentifier() && p.peekTokenIs(token.StringLit) {
-		prefix := strings.ToUpper(string(p.current.lit))
-		if prefix == "Z" || prefix == "O" || prefix == "B" {
-			startPos := p.current.start
-			p.nextToken() // consume Z/O/B
-			hexStr := string(p.current.lit)
-			endPos := p.current.start + len(p.current.lit)
-			p.nextToken() // consume string
-			return &ast.IntegerLiteral{
-				Value:    0, // TODO: parse to actual value
-				Raw:      prefix + "'" + hexStr + "'",
-				Position: ast.Pos(startPos, endPos),
-			}
-		}
-	}
-
 	// Handle identifiers, function calls, and array references
 	if p.current.tok.IsKeyword() || p.current.tok.IsAttribute() || p.canUseAsIdentifier() {
 		name := string(p.current.lit)
