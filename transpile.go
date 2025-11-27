@@ -163,6 +163,23 @@ func (tg *TranspileToGo) getVarFromCommon(name string) (*VarInfo, string) {
 	return nil, ""
 }
 
+// getImplicitType returns the Go type for a name based on Fortran IMPLICIT rules
+// L prefix → bool (LOGICAL)
+// I-N → int32 (INTEGER)
+// Others → float64 (REAL)
+func getImplicitType(name string) ast.Expr {
+	if name == "" {
+		return nil
+	}
+	firstLetter := strings.ToUpper(name[:1])[0]
+	if firstLetter == 'L' {
+		return ast.NewIdent("bool")
+	} else if firstLetter >= 'I' && firstLetter <= 'N' {
+		return ast.NewIdent("int32")
+	}
+	return ast.NewIdent("float64")
+}
+
 // trackImplicitVariable tracks a variable that may be implicitly typed
 // and adds it to the vars map if it's not already declared
 func (tg *TranspileToGo) trackImplicitVariable(name string) {
@@ -179,20 +196,8 @@ func (tg *TranspileToGo) trackImplicitVariable(name string) {
 	}
 
 	// Infer type from first letter using Fortran IMPLICIT rules
-	if name != "" {
-		firstLetter := strings.ToUpper(name[:1])[0]
-		var varType ast.Expr
-		// L prefix → LOGICAL (bool)
-		// I-N → INTEGER (int32)
-		// Others → REAL (float64)
-		if firstLetter == 'L' {
-			varType = ast.NewIdent("bool")
-		} else if firstLetter >= 'I' && firstLetter <= 'N' {
-			varType = ast.NewIdent("int32")
-		} else {
-			varType = ast.NewIdent("float64")
-		}
-
+	varType := getImplicitType(name)
+	if varType != nil {
 		// Track in unified vars map
 		v.Type = varType
 		v.Flags |= symbol.FlagImplicit
@@ -249,10 +254,20 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 
 	// Track all parameters in vars map
 	for _, param := range params {
+		// Skip alternate return specifiers (legacy Fortran feature: SUBROUTINE FOO(X,Y,*))
+		if param.Name == "*" {
+			continue
+		}
+
 		// Get element type
 		tp := tg.fortranTypeToGoWithKind(param.Type, param.Type.KindOrLen)
 		if tp == nil {
-			continue
+			// If type is undefined, use implicit typing rules
+			// This handles cases like: SUBROUTINE FOO(X,Y) with no type declarations
+			tp = getImplicitType(param.Name)
+			if tp == nil {
+				continue
+			}
 		}
 
 		// Track in unified vars map
@@ -760,13 +775,25 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 	var fields []*ast.Field
 
 	for _, param := range params {
+		// Skip alternate return specifiers (legacy Fortran feature: SUBROUTINE FOO(X,Y,*))
+		if param.Name == "*" {
+			continue
+		}
+
 		// Get the Go type for this parameter, considering KIND
 		goType := tg.fortranTypeToGoWithKind(param.Type, param.Type.KindOrLen)
 		if goType == nil {
-			if param.Type.Token.String() != "<undefined>" {
+			tokenStr := param.Type.Token.String()
+			if tokenStr != "<undefined>" && tokenStr != "TYPE" {
 				tg.addError(fmt.Sprintf("unhandled type parameter %s", param.Type.Token))
+				continue
 			}
-			continue
+			// If type is undefined, use implicit typing rules
+			// This handles cases like: SUBROUTINE FOO(X,Y) with no type declarations
+			goType = getImplicitType(param.Name)
+			if goType == nil {
+				continue
+			}
 		}
 		// Handle arrays - always use intrinsic.Array[T]
 		if param.ArraySpec != nil {
@@ -1383,6 +1410,12 @@ func (tg *TranspileToGo) fortranTypeToGoWithKind(ft f90.TypeSpec, kindParam f90.
 			tg.addError(fmt.Sprintf("unable to resolve token as go type: %s", tokenStr))
 		}
 		return nil // Skip this declaration
+	case f90token.TYPE:
+		// User-defined TYPE - use the type name as the Go struct name
+		if ft.Name != "" {
+			return ast.NewIdent(ft.Name)
+		}
+		return nil // TYPE without name - skip
 	case f90token.INTEGER:
 		switch kindValue {
 		case 1:
