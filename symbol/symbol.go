@@ -598,5 +598,107 @@ func loadIntrinsics() map[string]*Intrinsic {
 	add("LBOUND", "INTEGER")
 	add("UBOUND", "INTEGER")
 
+	// Logical array reduction functions
+	add("ALL", "LOGICAL")    // .TRUE. if all values are true
+	add("ANY", "LOGICAL")    // .TRUE. if any value is true
+	add("COUNT", "INTEGER")  // Count of .TRUE. elements
+
+	// Array reduction functions
+	add("SUM", "REAL")       // Sum of array elements
+	add("PRODUCT", "REAL")   // Product of array elements
+	add("MAXVAL", "REAL")    // Maximum value in array
+	add("MINVAL", "REAL")    // Minimum value in array
+	add("MAXLOC", "INTEGER") // Location of maximum value
+	add("MINLOC", "INTEGER") // Location of minimum value
+
+	// Array construction and manipulation
+	add("MERGE", "REAL")     // Merge arrays under mask
+	add("PACK", "REAL")      // Pack array into vector under mask
+	add("UNPACK", "REAL")    // Unpack vector into array under mask
+	add("SPREAD", "REAL")    // Replicate array by adding dimension
+	add("RESHAPE", "REAL")   // Reshape array to different dimensions
+	add("TRANSPOSE", "REAL") // Matrix transpose
+	add("EOSHIFT", "REAL")   // End-off shift
+	add("CSHIFT", "REAL")    // Circular shift
+
+	// Matrix operations
+	add("MATMUL", "REAL")       // Matrix multiplication
+	add("DOT_PRODUCT", "REAL")  // Dot product of vectors
+
+	// Character functions
+	add("ADJUSTL", "CHARACTER")  // Adjust left (remove leading spaces)
+	add("ADJUSTR", "CHARACTER")  // Adjust right (remove trailing spaces)
+	add("LEN_TRIM", "INTEGER")   // Length without trailing spaces
+	add("SCAN", "INTEGER")       // Scan for character set
+	add("VERIFY", "INTEGER")     // Verify character set
+	add("REPEAT", "CHARACTER")   // Repeat string
+	add("CHAR", "CHARACTER")     // Convert integer to character
+	add("ICHAR", "INTEGER")      // Convert character to integer
+	add("ACHAR", "CHARACTER")    // ASCII character (F90)
+	add("IACHAR", "INTEGER")     // ASCII integer code (F90)
+
+	// Bit manipulation (F90)
+	add("IAND", "INTEGER")   // Bitwise AND
+	add("IOR", "INTEGER")    // Bitwise inclusive OR
+	add("IEOR", "INTEGER")   // Bitwise exclusive OR
+	add("NOT", "INTEGER")    // Bitwise complement
+	add("BTEST", "LOGICAL")  // Test bit
+	add("IBSET", "INTEGER")  // Set bit
+	add("IBCLR", "INTEGER")  // Clear bit
+	add("IBITS", "INTEGER")  // Extract bit sequence
+	add("ISHFT", "INTEGER")  // Logical shift
+	add("ISHFTC", "INTEGER") // Circular shift
+
+	// Numeric functions
+	add("FLOOR", "INTEGER")     // Greatest integer <= x
+	add("CEILING", "INTEGER")   // Least integer >= x
+	add("MODULO", "REAL")       // Modulo function
+	add("NINT", "INTEGER")      // Nearest integer
+	add("ANINT", "REAL")        // Nearest whole number
+	add("AINT", "REAL")         // Truncate to whole number
+	add("FRACTION", "REAL")     // Fractional part of model representation
+	add("EXPONENT", "INTEGER")  // Exponent part of model representation
+	add("SCALE", "REAL")        // Scale by power of radix
+	add("NEAREST", "REAL")      // Nearest different machine number
+	add("SPACING", "REAL")      // Absolute spacing of model numbers
+	add("RRSPACING", "REAL")    // Reciprocal of relative spacing
+	add("SET_EXPONENT", "REAL") // Set exponent part
+
+	// Hyperbolic functions (F2008, but commonly supported)
+	add("SINH", "REAL")  // Hyperbolic sine
+	add("COSH", "REAL")  // Hyperbolic cosine
+	add("TANH", "REAL")  // Hyperbolic tangent
+	add("ASINH", "REAL") // Inverse hyperbolic sine
+	add("ACOSH", "REAL") // Inverse hyperbolic cosine
+	add("ATANH", "REAL") // Inverse hyperbolic tangent
+
+	// Kind and model inquiry functions
+	add("KIND", "INTEGER")              // Kind type parameter value
+	add("SELECTED_INT_KIND", "INTEGER") // Integer kind meeting range requirement
+	add("SELECTED_REAL_KIND", "INTEGER") // Real kind meeting precision requirement
+	add("PRECISION", "INTEGER")         // Decimal precision
+	add("RANGE", "INTEGER")             // Decimal exponent range
+	add("RADIX", "INTEGER")             // Base of the model
+	add("DIGITS", "INTEGER")            // Number of significant digits
+	add("MINEXPONENT", "INTEGER")       // Minimum exponent
+	add("MAXEXPONENT", "INTEGER")       // Maximum exponent
+	add("EPSILON", "REAL")              // Machine epsilon
+	add("TINY", "REAL")                 // Smallest positive number
+	add("HUGE", "REAL")                 // Largest number
+
+	// Transfer and conversion
+	add("TRANSFER", "REAL") // Treat bit pattern as different type
+
+	// Pointer and allocation inquiry
+	add("ALLOCATED", "LOGICAL")  // Test allocation status
+	add("ASSOCIATED", "LOGICAL") // Test pointer association status
+	add("PRESENT", "LOGICAL")    // Test presence of optional argument
+
+	// Miscellaneous
+	add("NULL", "POINTER")   // Null pointer
+	add("DATE_AND_TIME", "") // Get date and time (subroutine)
+	add("SYSTEM_CLOCK", "")  // Get system clock (subroutine)
+	add("CPU_TIME", "")      // Get CPU time (subroutine)
+
 	return intrinsics
 }

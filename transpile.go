@@ -1,6 +1,7 @@
 package fortran
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -14,6 +15,17 @@ import (
 	f90token "github.com/soypat/go-fortran/token"
 )
 
+type transpileError struct {
+	msg string
+}
+
+func (te *transpileError) Error() string {
+	return te.msg
+}
+func (te transpileError) String() string {
+	return te.msg
+}
+
 // TranspileToGo transforms Fortran AST to Go AST
 type TranspileToGo struct {
 	symTable      *symbol.Table
@@ -26,16 +38,24 @@ type TranspileToGo struct {
 	pointerParams map[string]bool             // Track OUT/INOUT scalar parameters (need dereference in assignments)
 	commonBlocks  map[string]*commonBlockInfo // COMMON block name -> info
 	commonVars    map[string]string           // Variable name -> COMMON block name (for lookups)
+	errors        []transpileError
 }
 
 // Reset initializes the transpiler with a symbol table
 func (tg *TranspileToGo) Reset(symTable *symbol.Table) error {
-	tg.imports = tg.imports[:0]
-	tg.useImport("github.com/soypat/go-fortran/intrinsic")
-	tg.symTable = symTable
-	tg.charLengths = make(map[string]int)
-	tg.commonBlocks = make(map[string]*commonBlockInfo)
-	tg.commonVars = make(map[string]string)
+	*tg = TranspileToGo{
+		symTable:      symTable,
+		imports:       tg.imports[:0],
+		charLengths:   make(map[string]int),
+		commonBlocks:  make(map[string]*commonBlockInfo),
+		commonVars:    make(map[string]string),
+		arrays:        tg.arrays,
+		arrayTypes:    tg.arrayTypes,
+		allocatables:  tg.allocatables,
+		parameters:    tg.parameters,
+		pointerParams: tg.pointerParams,
+		errors:        tg.errors[:0],
+	}
 	return nil
 }
 
@@ -70,9 +90,9 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 		if param.ArraySpec != nil {
 			tg.arrays[param.Name] = param.ArraySpec
 			// Array element type will be set from parameter type
-			tp := tg.fortranTypeToGoWithKind(param.Type.Token, param.Type.KindOrLen)
+			tp := tg.fortranTypeToGoWithKind(param.Type, param.Type.KindOrLen)
 			if tp == nil {
-				panic(fmt.Sprintf("unknown parameter type: %s", param.Type.Token))
+				continue
 			}
 			tg.arrayTypes[param.Name] = tp
 		}
@@ -86,6 +106,25 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 	for _, name := range additionalParams {
 		tg.parameters[strings.ToUpper(name)] = true
 	}
+}
+
+func (tg *TranspileToGo) Errors() []transpileError {
+	return append([]transpileError{}, tg.errors...)
+}
+
+func (tg *TranspileToGo) Err() error {
+	if len(tg.errors) > 0 {
+		var str strings.Builder
+		for i, err := range tg.errors {
+			if i > 5 {
+				break
+			}
+			str.WriteString(err.msg)
+			str.WriteByte('\n')
+		}
+		return errors.New(str.String())
+	}
+	return nil
 }
 
 func (tg *TranspileToGo) AppendImportSpec(dst []*ast.ImportSpec) []*ast.ImportSpec {
@@ -212,7 +251,7 @@ func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl
 		},
 	}
 
-	return funcDecl, nil
+	return funcDecl, tg.Err()
 }
 
 // TransformFunction transforms a Fortran FUNCTION to a Go function declaration
@@ -237,7 +276,7 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 	bodyStmts = tg.convertFunctionResultToReturn(fn.Name, bodyStmts)
 
 	// Map Fortran result type to Go type, considering KIND parameter
-	resultType := tg.fortranTypeToGoWithKind(fn.Type.Token, fn.Type.KindOrLen)
+	resultType := tg.fortranTypeToGoWithKind(fn.Type, fn.Type.KindOrLen)
 	if resultType == nil {
 		return nil, fmt.Errorf("unknown fortran result type: %s", fn.Type.Token)
 	}
@@ -260,7 +299,7 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 		},
 	}
 
-	return funcDecl, nil
+	return funcDecl, tg.Err()
 }
 
 // TransformProgram transforms a Fortran PROGRAM block to Go declarations
@@ -409,9 +448,10 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 
 	for _, param := range params {
 		// Get the Go type for this parameter, considering KIND
-		goType := tg.fortranTypeToGoWithKind(param.Type.Token, param.Type.KindOrLen)
+		goType := tg.fortranTypeToGoWithKind(param.Type, param.Type.KindOrLen)
 		if goType == nil {
-			panic(fmt.Sprintf("unhandled type %s", param.Type.Token))
+			tg.addError(fmt.Sprintf("unhandled type parameter %s", param.Type.Token))
+			continue
 		}
 		// Handle arrays - always use intrinsic.Array[T]
 		if param.ArraySpec != nil {
@@ -444,11 +484,11 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 
 // transformStatements transforms a slice of Fortran statements to Go statements
 // Handles labeled statements by wrapping them in LabeledStmt nodes
-func (tg *TranspileToGo) transformStatements(stmts []f90.Statement) []ast.Stmt {
-	var goStmts []ast.Stmt
-
+func (tg *TranspileToGo) transformStatements(stmts []f90.Statement) (goStmts []ast.Stmt) {
+	var err error
 	for _, stmt := range stmts {
-		goStmt := tg.transformStatement(stmt)
+		var goStmt ast.Stmt
+		goStmt, err = tg.transformStatement(stmt)
 		if goStmt != nil {
 			// Check if the Fortran statement has a label (e.g., "100" in "100 CONTINUE")
 			if label := stmt.GetLabel(); label != "" {
@@ -460,85 +500,86 @@ func (tg *TranspileToGo) transformStatements(stmts []f90.Statement) []ast.Stmt {
 			}
 			goStmts = append(goStmts, goStmt)
 		}
+		if err != nil {
+			tg.addError(err.Error())
+		}
 	}
-
 	return goStmts
 }
 
+func (tg *TranspileToGo) addError(msg string) {
+	tg.errors = append(tg.errors, transpileError{
+		msg: msg,
+	})
+}
+
 // transformStatement transforms a single Fortran statement to a Go statement
-func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
+func (tg *TranspileToGo) transformStatement(stmt f90.Statement) (gostmt ast.Stmt, err error) {
 	switch s := stmt.(type) {
 	case *f90.TypeDeclaration:
-		return tg.transformTypeDeclaration(s)
+		gostmt = tg.transformTypeDeclaration(s)
 	case *f90.DerivedTypeStmt:
-		return tg.transformDerivedType(s)
+		gostmt = tg.transformDerivedType(s)
 	case *f90.AssignmentStmt:
-		return tg.transformAssignment(s)
+		gostmt = tg.transformAssignment(s)
 	case *f90.PrintStmt:
-		return tg.transformPrint(s)
+		gostmt = tg.transformPrint(s)
 	case *f90.IfStmt:
-		return tg.transformIfStmt(s)
+		gostmt = tg.transformIfStmt(s)
 	case *f90.DoLoop:
-		return tg.transformDoLoop(s)
+		gostmt = tg.transformDoLoop(s)
 	case *f90.CallStmt:
-		return tg.transformCallStmt(s)
+		gostmt = tg.transformCallStmt(s)
 	case *f90.ReturnStmt:
 		// RETURN statement in functions will be handled by convertFunctionResultToReturn
 		// For now, just generate empty return (will be filled with result value later)
-		return &ast.ReturnStmt{}
+		gostmt = &ast.ReturnStmt{}
 	case *f90.CycleStmt:
 		// CYCLE → continue
-		return &ast.BranchStmt{
+		gostmt = &ast.BranchStmt{
 			Tok: token.CONTINUE,
 		}
 	case *f90.ExitStmt:
 		// EXIT → break
-		return &ast.BranchStmt{
+		gostmt = &ast.BranchStmt{
 			Tok: token.BREAK,
 		}
 	case *f90.ContinueStmt:
 		// CONTINUE → empty statement (no-op in Go)
 		// If there's a label, it will be handled by label processing later
-		return &ast.EmptyStmt{}
+		gostmt = &ast.EmptyStmt{}
 	case *f90.GotoStmt:
 		// GOTO label → goto labelN
-		return &ast.BranchStmt{
+		gostmt = &ast.BranchStmt{
 			Tok:   token.GOTO,
 			Label: ast.NewIdent("label" + s.Target),
 		}
 	case *f90.AllocateStmt:
-		return tg.transformAllocateStmt(s)
+		gostmt = tg.transformAllocateStmt(s)
 	case *f90.DeallocateStmt:
-		return tg.transformDeallocateStmt(s)
+		gostmt = tg.transformDeallocateStmt(s)
 	case *f90.SelectCaseStmt:
-		return tg.transformSelectCaseStmt(s)
+		gostmt = tg.transformSelectCaseStmt(s)
 	case *f90.CommonStmt:
-		return tg.transformCommonStmt(s)
+		gostmt = tg.transformCommonStmt(s)
 	case *f90.DataStmt:
-		return tg.transformDataStmt(s)
+		gostmt = tg.transformDataStmt(s)
 	case *f90.ArithmeticIfStmt:
-		return tg.transformArithmeticIfStmt(s)
+		gostmt = tg.transformArithmeticIfStmt(s)
 	case *f90.ComputedGotoStmt:
-		return tg.transformComputedGotoStmt(s)
+		gostmt = tg.transformComputedGotoStmt(s)
 	case *f90.StopStmt:
-		return tg.transformStopStmt(s)
-	case *f90.ImplicitStatement:
+		gostmt = tg.transformStopStmt(s)
+	case *f90.ImplicitStatement, *f90.UseStatement, *f90.ExternalStmt, *f90.IntrinsicStmt:
 		// Specification statement - no code generation
-		return nil
-	case *f90.UseStatement:
-		// Specification statement - no code generation
-		return nil
-	case *f90.ExternalStmt:
-		// Specification statement - no code generation
-		return nil
-	case *f90.IntrinsicStmt:
-		// Specification statement - no code generation
-		return nil
 	default:
 		// For now, unsupported statements are skipped
-		panic(fmt.Sprintf("unsupported statement: %T", s))
-		return nil
+		err = fmt.Errorf("unsupported transpile statement: %T", s)
 	}
+	if err == nil && gostmt == nil {
+		tg.addError(fmt.Sprintf("transpile to nil statement for %T", stmt))
+	}
+	return gostmt, err
 }
 
 // transformPrint transforms a Fortran PRINT statement to intrinsic.Formatter.Print call
@@ -936,23 +977,19 @@ func (tg *TranspileToGo) transformExpressions(exprs []f90.Expression) []ast.Expr
 	return goExprs
 }
 
-// fortranTypeToGo converts Fortran type to Go type, ignoring KIND parameter
-func (tg *TranspileToGo) fortranTypeToGo(ft f90token.Token) (goType ast.Expr) {
-	return tg.fortranTypeToGoWithKind(ft, nil)
-}
-
 // fortranTypeToGoWithKind converts Fortran type to Go type, considering KIND parameter
 // KIND mappings:
 //
 //	INTEGER(KIND=1) → int8, INTEGER(KIND=2) → int16
 //	INTEGER(KIND=4) → int32, INTEGER(KIND=8) → int64
 //	REAL(KIND=4) → float32, REAL(KIND=8) → float64
-func (tg *TranspileToGo) fortranTypeToGoWithKind(ft f90token.Token, kindParam f90.Expression) (goType ast.Expr) {
+func (tg *TranspileToGo) fortranTypeToGoWithKind(ft f90.TypeSpec, kindParam f90.Expression) (goType ast.Expr) {
 	// Extract KIND value if present
 	kindValue := tg.extractKindValue(kindParam)
 
-	switch ft {
+	switch ft.Token {
 	default:
+		tg.addError(fmt.Sprintf("unable to resolve token as go type: %s", ft.Token.String()))
 		return nil //
 	case f90token.INTEGER:
 		switch kindValue {
@@ -1085,7 +1122,7 @@ func (tg *TranspileToGo) fortranConstantToGoExpr(fortranExpr string) ast.Expr {
 // transformTypeDeclaration transforms a Fortran type declaration to Go var declaration
 func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast.Stmt {
 	// Map Fortran type to Go type, considering KIND parameter
-	goType := tg.fortranTypeToGoWithKind(decl.Type.Token, decl.Type.KindOrLen)
+	goType := tg.fortranTypeToGoWithKind(decl.Type, decl.Type.KindOrLen)
 	if goType == nil {
 		return nil
 	}
@@ -1212,7 +1249,7 @@ func (tg *TranspileToGo) transformDerivedType(deriv *f90.DerivedTypeStmt) ast.St
 	// Transform each component declaration to struct fields
 	for _, comp := range deriv.Components {
 		// Get Go type for this component
-		goType := tg.fortranTypeToGoWithKind(comp.Type.Token, comp.Type.KindOrLen)
+		goType := tg.fortranTypeToGoWithKind(comp.Type, comp.Type.KindOrLen)
 		if goType == nil {
 			continue // Skip components we can't translate
 		}

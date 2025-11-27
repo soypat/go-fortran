@@ -11,9 +11,25 @@ import (
 // DeclarationCollector traverses an AST and populates a SymbolTable with
 // all declarations, handling scope management and implicit typing rules.
 type DeclarationCollector struct {
-	table      *Table
-	errors     []error
-	scopeStack []ast.Node // Track which nodes opened scopes for proper exit
+	table  *Table
+	errors []error
+}
+
+// scopedVisitor wraps the collector and exits a specific scope when done
+type scopedVisitor struct {
+	*DeclarationCollector
+	scopeNode ast.Node
+}
+
+// Visit delegates to the collector's Visit, but exits scope on nil
+func (sv *scopedVisitor) Visit(node ast.Node) ast.Visitor {
+	if node == nil {
+		// Exiting - exit the scope this visitor was created for
+		sv.table.ExitScope()
+		return nil
+	}
+	// Delegate to collector
+	return sv.DeclarationCollector.Visit(node)
 }
 
 // NewDeclarationCollector creates a new collector for building a symbol table.
@@ -42,11 +58,7 @@ func (dc *DeclarationCollector) SymbolTable() (*Table, []error) {
 // Visit implements the ast.Visitor interface.
 func (dc *DeclarationCollector) Visit(node ast.Node) ast.Visitor {
 	if node == nil {
-		// Exiting a node - check if we need to exit a scope
-		if len(dc.scopeStack) > 0 {
-			dc.table.ExitScope()
-			dc.scopeStack = dc.scopeStack[:len(dc.scopeStack)-1]
-		}
+		// Nodes that don't open scopes - just return
 		return nil
 	}
 
@@ -54,30 +66,33 @@ func (dc *DeclarationCollector) Visit(node ast.Node) ast.Visitor {
 	// Program units - create new scopes
 	case *ast.ProgramBlock:
 		dc.table.EnterScope(n, ScopeProgram)
-		dc.scopeStack = append(dc.scopeStack, n)
-		return dc
+		return &scopedVisitor{dc, n}
 
 	case *ast.Subroutine:
 		dc.table.EnterScope(n, ScopeProcedure)
-		dc.scopeStack = append(dc.scopeStack, n)
 		// Define the subroutine itself in parent scope
 		parentScope := dc.table.CurrentScope().Parent()
 		if parentScope != nil {
 			sym := NewSymbol(n.Name, SymSubroutine)
 			sym.SetDeclNode(n)
 			if err := parentScope.Define(sym); err != nil {
-				dc.addError(err)
+				// Enhanced error with more context
+				if existing := parentScope.Lookup(n.Name); existing != nil {
+					dc.addError(fmt.Errorf("symbol %s already defined in scope as %s (previous definition: %T)",
+						n.Name, existing.Kind(), existing.DeclNode()))
+				} else {
+					dc.addError(err)
+				}
 			}
 		}
 		// Define parameters in the subroutine's scope
 		for _, param := range n.Parameters {
 			dc.defineParameter(param)
 		}
-		return dc
+		return &scopedVisitor{dc, n}
 
 	case *ast.Function:
 		dc.table.EnterScope(n, ScopeProcedure)
-		dc.scopeStack = append(dc.scopeStack, n)
 		// Define the function itself in parent scope
 		parentScope := dc.table.CurrentScope().Parent()
 		if parentScope != nil {
@@ -120,11 +135,10 @@ func (dc *DeclarationCollector) Visit(node ast.Node) ast.Visitor {
 		for _, param := range n.Parameters {
 			dc.defineParameter(param)
 		}
-		return dc
+		return &scopedVisitor{dc, n}
 
 	case *ast.Module:
 		dc.table.EnterScope(n, ScopeModule)
-		dc.scopeStack = append(dc.scopeStack, n)
 		// Define the module in parent scope
 		parentScope := dc.table.CurrentScope().Parent()
 		if parentScope != nil {
@@ -136,12 +150,11 @@ func (dc *DeclarationCollector) Visit(node ast.Node) ast.Visitor {
 		}
 		// Register module info
 		dc.table.modules[normalizeCase(n.Name)] = NewModuleInfo(n.Name, dc.table.CurrentScope())
-		return dc
+		return &scopedVisitor{dc, n}
 
 	case *ast.BlockData:
 		dc.table.EnterScope(n, ScopeBlock)
-		dc.scopeStack = append(dc.scopeStack, n)
-		return dc
+		return &scopedVisitor{dc, n}
 
 	// Declaration statements
 	case *ast.TypeDeclaration:
@@ -233,7 +246,7 @@ func (dc *DeclarationCollector) handleTypeDeclaration(decl *ast.TypeDeclaration)
 		sym.setImplicit(false)
 
 		if err := currentScope.Define(sym); err != nil {
-			dc.addError(err)
+			dc.addError(fmt.Errorf("failed to define %s in %s scope: %w", entity.Name, currentScope.Type(), err))
 		}
 	}
 }
