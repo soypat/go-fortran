@@ -36,44 +36,6 @@ func TestTranspileGolden(t *testing.T) {
 	// Check for parser errors
 	helperPrintErrors(t, &parser)
 
-	// Debug: print what units we got
-	t.Logf("Parsed %d program units:", len(progUnits))
-	for i, pu := range progUnits {
-		switch u := pu.(type) {
-		case *f90.ProgramBlock:
-			t.Logf("  [%d] PROGRAM %s", i, u.Name)
-		case *f90.Subroutine:
-			t.Logf("  [%d] SUBROUTINE %s (params: %v)", i, u.Name, len(u.Parameters))
-		case *f90.Function:
-			t.Logf("  [%d] FUNCTION %s (params: %v)", i, u.Name, len(u.Parameters))
-		default:
-			t.Logf("  [%d] %T", i, pu)
-		}
-	}
-
-	// WORKAROUND: Parser bug - it returns PROGRAM twice
-	// Remove duplicate program units
-	seen := make(map[string]bool)
-	var uniqueUnits []f90.ProgramUnit
-	for _, pu := range progUnits {
-		key := ""
-		switch u := pu.(type) {
-		case *f90.ProgramBlock:
-			key = "PROGRAM:" + u.Name
-		case *f90.Subroutine:
-			key = "SUBROUTINE:" + u.Name
-		case *f90.Function:
-			key = "FUNCTION:" + u.Name
-		}
-		if key != "" && seen[key] {
-			t.Logf("Skipping duplicate: %s", key)
-			continue
-		}
-		seen[key] = true
-		uniqueUnits = append(uniqueUnits, pu)
-	}
-	progUnits = uniqueUnits
-
 	// Collect symbols
 	syms, err := symbol.CollectFromProgram(&f90.Program{
 		Units: progUnits,
@@ -82,96 +44,42 @@ func TestTranspileGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("got errors collecting symbols in golden.f90: %v", err)
 	}
-	// TODO: Fix type resolver to skip format specifiers
-	// For now, skip type resolution as it's not needed for basic transpilation
-	// resolver := symbol.NewTypeResolver(syms)
-	// for i := range progUnits {
-	// 	errs := resolver.Resolve(progUnits[i])
-	// 	if errs != nil {
-	// 		t.Fatalf("got errors resolving prog unit %d %T: %v", i, progUnits[i], errs)
-	// 	}
-	// }
+
 	var tp TranspileToGo
 	err = tp.Reset(syms)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var funcsrc bytes.Buffer
+	procedureDecls, err := tp.TransformProgram(program)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Transpile LEVEL subroutines
+	// Count LEVEL functions to verify completeness
 	lvl := 0
-	for {
-		lvl++
-		routine := helperGetGoldenLevel(t, lvl, progUnits)
-		if routine == nil {
-			lvl--
-			break
+	for _, decl := range procedureDecls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && strings.HasPrefix(fn.Name.Name, "LEVEL") {
+			lvl++
 		}
-		var gofunc *ast.FuncDecl
-		t.Run(routine.Name, func(t *testing.T) {
-			// Measure time for transpile AST and write to file.
-			gofunc, err = tp.TransformSubroutine(routine)
-			if err != nil {
-				t.Fatal(err)
-			}
-			helperWriteGoFunc(t, &funcsrc, gofunc)
-		})
-
 	}
 	if lvl < 25 {
 		t.Fatalf("expected at least 25 levels, got %d", lvl)
 	}
 	maxLvl := lvl
-	// write helper subroutines:
-	for _, pu := range progUnits {
-		if sub, ok := pu.(*f90.Subroutine); ok && !strings.HasPrefix(sub.Name, "LEVEL") {
-			gofunc, err := tp.TransformSubroutine(sub)
-			if err != nil {
-				t.Fatalf("failed to transpile helper %s: %v", sub.Name, err)
-			}
-			helperWriteGoFunc(t, &funcsrc, gofunc)
-		}
-	}
 
-	// write helper functions:
-	for _, pu := range progUnits {
-		if fn, ok := pu.(*f90.Function); ok {
-			gofunc, err := tp.TransformFunction(fn)
-			if err != nil {
-				t.Fatalf("failed to transpile function %s: %v", fn.Name, err)
-			}
-			helperWriteGoFunc(t, &funcsrc, gofunc)
-		}
-	}
+	// Write complete file to buffer
+	var progSrc bytes.Buffer
+	commons := tp.AppendCommonDecls(nil)
+	imports := tp.AppendImportSpec(nil)
+	t.Log("imports:", len(imports))
+	helperWriteGoAST(t, &progSrc, &ast.File{
+		Name:    ast.NewIdent("main"),
+		Imports: imports,
+		Decls:   append(commons, procedureDecls...),
+	})
 
-	var outsrc bytes.Buffer
-	outsrc.WriteString("package main\n\nimport(\n")
-	for _, imp := range tp.imports {
-		fmt.Fprintf(&outsrc, "\t\"%s\"\n", imp)
-	}
-	outsrc.WriteString(")\n\n")
-
-	// Generate COMMON block declarations
-	var commonDecls []ast.Decl
-	commonDecls = tp.AppendCommonDecls(commonDecls)
-	if len(commonDecls) > 0 {
-		fset := token.NewFileSet()
-		for _, decl := range commonDecls {
-			if err := printer.Fprint(&outsrc, fset, decl); err != nil {
-				t.Fatalf("failed to write COMMON declaration: %v", err)
-			}
-			outsrc.WriteString("\n\n")
-		}
-	}
-
-	outsrc.WriteString("func main() {\n")
-	for lvl := 1; lvl <= maxLvl; lvl++ {
-		fmt.Fprintf(&outsrc, "\tLEVEL%02d()\n", lvl)
-	}
-	outsrc.WriteString("\n\tintrinsic.Exit(0)\n}\n")
-	funcsrc.WriteTo(&outsrc)
 	var formattedSrc bytes.Buffer
-	helperFormatGoSrc(t, &outsrc, &formattedSrc)
+	helperFormatGoSrc(t, &progSrc, &formattedSrc)
 	const goFile = "testdata/golden.go"
 	os.WriteFile(goFile, formattedSrc.Bytes(), 0777)
 	output := helperRunGoFile(t, goFile)
@@ -217,7 +125,7 @@ func helperGetGoldenLevel(t *testing.T, lvl int, pus []f90.ProgramUnit) *f90.Sub
 	return nil
 }
 
-func helperWriteGoFunc(t *testing.T, w *bytes.Buffer, f *ast.FuncDecl) {
+func helperWriteGoAST(t *testing.T, w *bytes.Buffer, f ast.Node) {
 	t.Helper()
 
 	// Use go/printer to write the function

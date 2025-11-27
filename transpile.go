@@ -88,6 +88,18 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 	}
 }
 
+func (tg *TranspileToGo) AppendImportSpec(dst []*ast.ImportSpec) []*ast.ImportSpec {
+	for _, importPath := range tg.imports {
+		dst = append(dst, &ast.ImportSpec{
+			Path: &ast.BasicLit{
+				Kind:  token.STRING,
+				Value: fmt.Sprintf("%q", importPath),
+			},
+		})
+	}
+	return dst
+}
+
 func (tg *TranspileToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 	// Ensure output is ordered and repeatable, we do not want to generate diffs on every transpile.
 	names := slices.AppendSeq([]string{}, maps.Keys(tg.commonBlocks))
@@ -196,6 +208,55 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 	}
 
 	return funcDecl, nil
+}
+
+// TransformProgram transforms a Fortran PROGRAM block to Go declarations
+// Returns a list of declarations: func main() {...} and any contained procedures
+func (tg *TranspileToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
+	// Initialize procedure tracking for PROGRAM scope (no parameters)
+	tg.enterProcedure(nil)
+
+	// Pre-scan for COMMON blocks to know which variables to skip in declarations
+	tg.preScanCommonBlocks(prog.Body)
+
+	// Transform all statements in program body
+	bodyStmts := tg.transformStatements(prog.Body)
+
+	// Create main function declaration
+	mainFunc := &ast.FuncDecl{
+		Name: ast.NewIdent("main"),
+		Type: &ast.FuncType{
+			Params: &ast.FieldList{}, // No parameters for main
+		},
+		Body: &ast.BlockStmt{
+			List: bodyStmts,
+		},
+	}
+
+	// Start with main function
+	decls := []ast.Decl{mainFunc}
+
+	// Transform contained procedures (CONTAINS section)
+	for _, contained := range prog.Contains {
+		switch c := contained.(type) {
+		case *f90.Subroutine:
+			funcDecl, err := tg.TransformSubroutine(c)
+			if err != nil {
+				return nil, err
+			}
+			decls = append(decls, funcDecl)
+		case *f90.Function:
+			funcDecl, err := tg.TransformFunction(c)
+			if err != nil {
+				return nil, err
+			}
+			decls = append(decls, funcDecl)
+		default:
+			return decls, fmt.Errorf("unknown CONTAINS declaration: %T", c)
+		}
+	}
+
+	return decls, nil
 }
 
 // convertFunctionResultToReturn converts assignments to function name into return statements
@@ -406,6 +467,18 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 		return tg.transformComputedGotoStmt(s)
 	case *f90.StopStmt:
 		return tg.transformStopStmt(s)
+	case *f90.ImplicitStatement:
+		// Specification statement - no code generation
+		return nil
+	case *f90.UseStatement:
+		// Specification statement - no code generation
+		return nil
+	case *f90.ExternalStmt:
+		// Specification statement - no code generation
+		return nil
+	case *f90.IntrinsicStmt:
+		// Specification statement - no code generation
+		return nil
 	default:
 		// For now, unsupported statements are skipped
 		panic(fmt.Sprintf("unsupported statement: %T", s))
