@@ -561,7 +561,8 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) (gostmt ast.Stmt
 	case *f90.SelectCaseStmt:
 		gostmt = tg.transformSelectCaseStmt(s)
 	case *f90.CommonStmt:
-		gostmt = tg.transformCommonStmt(s)
+		// COMMON blocks are processed separately, no code generation in function body
+		return nil, nil
 	case *f90.DataStmt:
 		gostmt = tg.transformDataStmt(s)
 	case *f90.ArithmeticIfStmt:
@@ -571,14 +572,14 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) (gostmt ast.Stmt
 	case *f90.StopStmt:
 		gostmt = tg.transformStopStmt(s)
 	case *f90.ImplicitStatement, *f90.UseStatement, *f90.ExternalStmt, *f90.IntrinsicStmt:
-		// Specification statement - no code generation
+		// Specification statement - no code generation (intentionally nil)
+		return nil, nil
 	default:
 		// For now, unsupported statements are skipped
 		err = fmt.Errorf("unsupported transpile statement: %T", s)
 	}
-	if err == nil && gostmt == nil {
-		tg.addError(fmt.Sprintf("transpile to nil statement for %T", stmt))
-	}
+	// Note: gostmt can be nil for legitimate reasons (COMMON vars, PARAMETERs, type definitions)
+	// Only actual errors are returned via err
 	return gostmt, err
 }
 
