@@ -33,6 +33,7 @@ func main() {
 	LEVEL23()
 	LEVEL24()
 	LEVEL25()
+	LEVEL26()
 	LEVEL22()
 	intrinsic.Exit(0)
 }
@@ -551,6 +552,33 @@ func LEVEL25() {
 	intrinsic.Print("LEVEL 25: i8 =", i8)
 	intrinsic.Print("LEVEL 25: r4 =", r4)
 	intrinsic.Print("LEVEL 25: r8 =", r8)
+}
+func LEVEL26() {
+	var (
+		hex_val int32
+		oct_val int32
+		bin_val int32
+	)
+	var (
+		d1 float64
+		d2 float64
+		d3 float64
+		d4 float64
+	)
+	hex_val = int32(255)
+	oct_val = int32(255)
+	bin_val = int32(255)
+	intrinsic.Print("LEVEL 26: hex_val =", hex_val)
+	intrinsic.Print("LEVEL 26: oct_val =", oct_val)
+	intrinsic.Print("LEVEL 26: bin_val =", bin_val)
+	d1 = 1.0
+	d2 = 1.23e+02
+	d3 = 4.56e-03
+	d4 = 2.718281828
+	intrinsic.Print("LEVEL 26: d1 =", d1)
+	intrinsic.Print("LEVEL 26: d2 =", d2)
+	intrinsic.Print("LEVEL 26: d3 =", d3)
+	intrinsic.Print("LEVEL 26: d4 =", d4)
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")

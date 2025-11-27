@@ -560,8 +560,13 @@ func (l *Lexer90) readNumber() ([]byte, bool) {
 				continue
 			} else if ch == 'E' || ch == 'e' || ch == 'D' || ch == 'd' || ch == 'Q' || ch == 'q' {
 				// Handle scientific notation exponent (e.g., 1.5E3, 100.D0, 1.Q0)
+				// Convert D/d/Q/q (double/quad precision) to e for Go compatibility
 				seenDot = true // Numbers with exponents are always floats
-				l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
+				if ch == 'D' || ch == 'd' || ch == 'Q' || ch == 'q' {
+					l.idbuf = utf8.AppendRune(l.idbuf, 'e')
+				} else {
+					l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
+				}
 				l.readChar()
 
 				// Check for optional sign in exponent

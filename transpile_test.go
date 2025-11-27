@@ -133,9 +133,9 @@ func helperRunFortran(t *testing.T, fsrc io.Reader) (output []byte) {
 	}
 	binFile := filepath.Join(tmpDir, "main.f90.bin")
 	cmd := exec.Command("gfortran", "-o", binFile, srcFile)
-	err = cmd.Run()
+	errMsg, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal(string(errMsg), err)
 	}
 	cmd = exec.Command(binFile)
 	output, err = cmd.CombinedOutput()

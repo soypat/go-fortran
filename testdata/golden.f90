@@ -28,6 +28,7 @@
       CALL LEVEL23()
       CALL LEVEL24()
       CALL LEVEL25()
+      CALL LEVEL26()
       CALL LEVEL22()
       STOP 0
       CONTAINS
@@ -636,6 +637,34 @@
           PRINT *, 'LEVEL 25: r4 =', r4
           PRINT *, 'LEVEL 25: r8 =', r8
       END SUBROUTINE LEVEL25
+
+! ==============================================================================
+! LEVEL 26: BOZ Literals and Double Precision
+! ==============================================================================
+      SUBROUTINE LEVEL26()
+          INTEGER :: hex_val, oct_val, bin_val
+          REAL(KIND=8) :: d1, d2, d3, d4
+
+          ! Test BOZ literals (Binary/Octal/heXadecimal)
+          hex_val = INT(Z'FF')           ! 255 in hexadecimal
+          oct_val = INT(O'377')          ! 255 in octal
+          bin_val = INT(B'11111111')     ! 255 in binary
+
+          PRINT *, 'LEVEL 26: hex_val =', hex_val
+          PRINT *, 'LEVEL 26: oct_val =', oct_val
+          PRINT *, 'LEVEL 26: bin_val =', bin_val
+
+          ! Test double precision literals (D exponent)
+          d1 = 1.0D0                ! 1.0
+          d2 = 1.23D+02             ! 123.0
+          d3 = 4.56D-03             ! 0.00456
+          d4 = 2.718281828D0        ! e constant
+
+          PRINT *, 'LEVEL 26: d1 =', d1
+          PRINT *, 'LEVEL 26: d2 =', d2
+          PRINT *, 'LEVEL 26: d3 =', d3
+          PRINT *, 'LEVEL 26: d4 =', d4
+      END SUBROUTINE LEVEL26
 
 ! ==============================================================================
 ! Helper Subroutines and Functions
