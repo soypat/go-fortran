@@ -457,6 +457,15 @@ func LEVEL20() {
 		x float32
 		y float32
 	)
+	{
+		a = 10
+		b = 20
+		c = 30
+	}
+	{
+		x = 3.14
+		y = 2.71
+	}
 	intrinsic.Print("LEVEL 20: a =", a)
 	intrinsic.Print("LEVEL 20: b =", b)
 	intrinsic.Print("LEVEL 20: c =", c)
@@ -597,7 +606,6 @@ func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 	intrinsic.Print("LEVEL 7: Inside MODIFY_ARRAY")
 }
 func FACTORIAL(n int32) int32 {
-	var FACTORIAL float64
 	var (
 		i      int32
 		result int32
@@ -609,11 +617,9 @@ func FACTORIAL(n int32) int32 {
 	return result
 }
 func SQUARE_ROOT(x float32) float32 {
-	var SQUARE_ROOT float64
 	return intrinsic.SQRT[float32](x)
 }
 func FIBONACCI(n int32) int32 {
-	var FIBONACCI float64
 	var (
 		a    int32
 		b    int32

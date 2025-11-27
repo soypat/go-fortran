@@ -128,6 +128,12 @@ func (tg *TranspileToGo) trackImplicitVariable(name string) {
 		return // Already has type (explicitly declared, parameter, or already implicit)
 	}
 
+	// Skip function result variables (marked as parameters but without type)
+	// In Fortran, assignments to function names are converted to return statements
+	if v.Flags&symbol.FlagParameter != 0 {
+		return // This is a function result variable, don't generate implicit declaration
+	}
+
 	// Infer type from first letter using Fortran IMPLICIT rules
 	if name != "" {
 		firstLetter := strings.ToUpper(name[:1])[0]
@@ -2609,17 +2615,12 @@ func (tg *TranspileToGo) transformCommonStmt(stmt *f90.CommonStmt) ast.Stmt {
 // Handles CHARACTER variables specially (uses SetFromString method)
 func (tg *TranspileToGo) createDataAssignment(varExpr f90.Expression, valExpr f90.Expression) ast.Stmt {
 	// Check if this is a simple identifier that we should skip
-	// (implicitly-typed variables in COMMON blocks or undeclared program-level vars)
+	// Skip only if variable is not tracked at all (truly undeclared)
 	if ident, ok := varExpr.(*f90.Identifier); ok {
-		// Skip if not in our tracking maps (likely implicitly-typed variable)
 		v := tg.vars[strings.ToUpper(ident.Value)]
-		isChar := v != nil && v.CharLength > 0
-		isArray := v != nil && v.ElementType != nil
-		isParam := v != nil && v.Flags&symbol.FlagParameter != 0
-		inCommon := v != nil && v.InCommonBlock != ""
-
-		if !isChar && !isArray && !isParam && !inCommon {
-			// Implicitly-typed variable not yet supported - skip DATA initialization
+		if v == nil || v.Type == nil {
+			// Untracked or implicitly-typed variable - skip DATA initialization
+			// (These should have explicit type declarations to use DATA)
 			return nil
 		}
 	}
