@@ -1,12 +1,20 @@
 PROGRAM GDYN2E
 ! &
 !
+      TYPE :: vmf_def
+      REAL lat,lon
+      DOUBLE PRECISION ah,aw,zdh,zdw
+      END TYPE
+      DATA I_DEFALT(1) /Z'7777777'/    ! hex    jjm 9/98
+      DATA ZER/MAXZER*0.D0/
+      DATA   A_HEI / 2.53D-5 / &
+     &       B_HEI / 5.49D-3 / &
+     &       C_HEI / 1.14D-3 /
       INTEGER ::  MAXDM1 =   6000000
       INTEGER :: ISTATAA
       use antphc_module
       POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1))
       COMMON/TRQANG/DTQDAN(3,3,2)
-      INCLUDE 'COMMON_DECL.inc'
       COMMON/APHASE/NANT_sat
       DOUBLEPRECISION          :: DEFALT
       IF(LNORMP) CALL TITLE(IOUT15)

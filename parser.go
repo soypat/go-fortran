@@ -170,6 +170,10 @@ func (p *Parser90) sourcePos() sourcePos {
 	}
 }
 
+func (p *Parser90) currentAstPos() ast.Position {
+	return ast.Pos(p.current.start, len(p.current.lit))
+}
+
 // IsDone returns true if the parser is done parsing, whether it be by EOF or error(s) encountered.
 func (p *Parser90) IsDone() bool {
 	p.posCheck()
@@ -2563,10 +2567,9 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 		attributes = append(attributes, p.current.tok) // Collect attribute tokens
 		p.nextToken()
 	}
-	// Expect ::
-	if !p.expect(token.DoubleColon, "in component declaration") {
-		return nil
-	}
+	// F77: REAL lat, lon (no ::)
+	// F90: REAL :: lat, lon (with ::)
+	p.consumeIf(token.DoubleColon)
 	// Parse component names (similar to entity list)
 	// Note: DATA can be used as component name, even though tok.CanBeUsedAsIdentifier() returns false for it
 	var components []ast.DeclEntity
@@ -2693,98 +2696,64 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 		Position: ast.Pos(start, p.current.start),
 	}
 
-	// Parse variable list (before the slash)
-	// Can be: simple vars, array elements, or implied DO loops like (arr(i),i=1,n)
-	for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.NewLine) && !p.IsDone() {
-		if p.currentTokenIs(token.LParen) {
+	// F77 allows multiple var-list/value-list pairs:
+	// DATA var1 /val1/, var2 /val2/, var3 /val3/
+	// Loop to handle all pairs
+	for p.loopUntil(token.NewLine) {
+		if p.consumeIf(token.LParen) {
+			startPos := p.sourcePos()
+			doExpr := p.parseExpression(0)
 			// Implied DO loop: (arr(i), i=1,n) - skip entire construct
-			depth := 1
-			p.nextToken() // consume (
-			for depth > 0 && !p.IsDone() {
-				if p.currentTokenIs(token.LParen) {
-					depth++
-				} else if p.currentTokenIs(token.RParen) {
-					depth--
-				}
-				if depth > 0 {
-					p.nextToken()
-				}
+			impliedDoLoop := p.tryParseImpliedDoLoop(startPos.Pos, doExpr)
+			if impliedDoLoop == nil {
+				return nil
 			}
-			p.nextToken() // consume final )
-		} else if p.canUseAsIdentifier() {
-			varName := string(p.current.lit)
-			p.nextToken()
+		}
 
-			// Array reference like arr(1)
-			if p.currentTokenIs(token.LParen) {
-				depth := 1
-				p.nextToken() // consume (
-				for depth > 0 && !p.IsDone() {
-					if p.currentTokenIs(token.LParen) {
-						depth++
-					} else if p.currentTokenIs(token.RParen) {
-						depth--
-					}
-					if depth > 0 {
-						p.nextToken()
-					}
-				}
-				p.nextToken() // consume final )
+		// Expect opening slash
+		if !p.expect(token.Slash, "expected / before DATA values") {
+			return stmt
+		}
+		numType := p.current.tok
+		if numType != token.IntLit && numType != token.FloatLit {
+			p.addError("expected integer or float literal, got: " + p.current.String())
+		}
+		exprs, err := parseCommaSeparatedList(p, token.Slash, func() (expr ast.Expression, _ error) {
+			got := p.current.tok
+			if got != numType {
+				return nil, fmt.Errorf("expected %s literals in data statement, got %s", numType.String(), got.String())
 			}
 
-			stmt.Variables = append(stmt.Variables, &ast.Identifier{Value: varName})
-		} else {
-			// Unknown token - must be end of variable list (likely the /)
+			switch numType {
+			case token.IntLit:
+				expr = p.tryParseIntLit()
+			case token.FloatLit:
+				expr = p.tryParseFloatLit()
+			}
+			if expr == nil {
+				return nil, fmt.Errorf("failed to parse literal: %s", p.current.String())
+			}
+			return expr, nil
+		})
+		if err != nil {
+			p.addError(err.Error())
+			return nil
+		}
+		stmt.Values = append(stmt.Values, exprs...)
+		// Expect closing slash
+		p.expect(token.Slash, "expected / after DATA values")
+
+		// Check for comma or another variable (continuation case)
+		// F77: DATA A /1/, B /2/        - comma separated
+		// F77: DATA A /1/ &             - continuation, no comma
+		//           B /2/
+		p.consumeIf(token.Comma) // Optional comma
+
+		// If next token is not an identifier, we're done
+		if !p.canUseAsIdentifier() {
 			break
 		}
-
-		p.consumeIf(token.Comma)
 	}
-
-	// Expect opening slash
-	if !p.expect(token.Slash, "expected / before DATA values") {
-		return stmt
-	}
-
-	// Parse value list (between the slashes)
-	// Values are restricted: literals or N*literal (repetition count)
-	// Cannot use parseExpression because / is both division operator and delimiter
-	for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.NewLine) && !p.IsDone() {
-		var value ast.Expression
-
-		// Check for repetition count: N*literal (e.g., 55*0.0)
-		if p.currentTokenIs(token.IntLit) && p.peekTokenIs(token.Asterisk) {
-			// Parse N*literal without using full expression parser
-			count := p.parsePrimaryExpr() // Parse the integer
-			if count != nil && p.currentTokenIs(token.Asterisk) {
-				p.nextToken()               // consume *
-				val := p.parsePrimaryExpr() // Parse the literal value
-				if val != nil {
-					value = &ast.BinaryExpr{
-						Left:  count,
-						Op:    token.Asterisk,
-						Right: val,
-					}
-				}
-			}
-		} else {
-			// Simple literal or identifier (named constant)
-			value = p.parsePrimaryExpr()
-		}
-
-		if value != nil {
-			stmt.Values = append(stmt.Values, value)
-		} else {
-			break // Failed to parse value
-		}
-
-		if !p.consumeIf(token.Comma) {
-			break // No more values
-		}
-	}
-
-	// Expect closing slash
-	p.expect(token.Slash, "expected / after DATA values")
 
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
@@ -3621,34 +3590,12 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 		}
 	}
 	pos := ast.Pos(startPos, p.current.start+len(p.current.lit))
-	// Handle integer literals
-	if p.currentTokenIs(token.IntLit) {
-		rawStr := string(p.current.lit)
-		value, err := parseInt64(rawStr)
-		if err != nil {
-			p.addError(fmt.Sprintf("invalid integer literal: %s", rawStr))
-			value = 0
-		}
-		lit := &ast.IntegerLiteral{
-			Value:    value,
-			Raw:      rawStr,
-			Position: pos,
-		}
-		p.nextToken()
-		return lit
+	if flit := p.tryParseFloatLit(); flit != nil {
+		return flit
 	}
-
-	// Handle real literals
-	if p.currentTokenIs(token.FloatLit) {
-		lit := &ast.RealLiteral{
-			Value:    0.0, // Will need proper parsing
-			Raw:      string(p.current.lit),
-			Position: pos,
-		}
-		p.nextToken()
-		return lit
+	if ilit := p.tryParseIntLit(); ilit != nil {
+		return ilit
 	}
-
 	// Handle string literals
 	if p.currentTokenIs(token.StringLit) {
 		lit := &ast.StringLiteral{
@@ -3733,6 +3680,38 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 	}
 
 	return nil
+}
+
+func (p *Parser90) tryParseFloatLit() *ast.RealLiteral {
+	if !p.currentTokenIs(token.FloatLit) {
+		return nil
+	}
+	lit := &ast.RealLiteral{
+		Value:    0.0, // Will need proper parsing
+		Raw:      string(p.current.lit),
+		Position: p.currentAstPos(),
+	}
+	p.nextToken()
+	return lit
+}
+
+func (p *Parser90) tryParseIntLit() *ast.IntegerLiteral {
+	if !p.currentTokenIs(token.IntLit) {
+		return nil
+	}
+	rawStr := string(p.current.lit)
+	value, err := parseInt64(rawStr)
+	if err != nil {
+		p.addError(fmt.Sprintf("invalid integer literal: %s", rawStr))
+		value = 0
+	}
+	lit := &ast.IntegerLiteral{
+		Value:    value,
+		Raw:      rawStr,
+		Position: p.currentAstPos(),
+	}
+	p.nextToken()
+	return lit
 }
 
 // parseOneArg parses an argument in a parentheses preceding an identifier.
