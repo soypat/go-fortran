@@ -9,9 +9,9 @@ var HOLDRT = struct {
 	MATRIX *intrinsic.Array[float32]
 }{YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20)}
 var SHARED struct {
-	x int32
-	y int32
-	z float32
+	X int32
+	Y int32
+	Z float32
 }
 var STATS = struct {
 	COUNTS *intrinsic.Array[int32]
@@ -448,14 +448,14 @@ func LEVEL19() {
 	PRINT_COMMON_VALUES()
 }
 func SET_COMMON_VALUES() {
-	SHARED.x = 42
-	SHARED.y = 99
-	SHARED.z = 3.14159
+	SHARED.X = 42
+	SHARED.Y = 99
+	SHARED.Z = 3.14159
 }
 func PRINT_COMMON_VALUES() {
-	intrinsic.Print("LEVEL 19: x =", SHARED.x)
-	intrinsic.Print("LEVEL 19: y =", SHARED.y)
-	intrinsic.Print("LEVEL 19: z =", SHARED.z)
+	intrinsic.Print("LEVEL 19: x =", SHARED.X)
+	intrinsic.Print("LEVEL 19: y =", SHARED.Y)
+	intrinsic.Print("LEVEL 19: z =", SHARED.Z)
 }
 func LEVEL20() {
 	var (

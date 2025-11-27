@@ -21,6 +21,7 @@ const (
 	FlagParameter                       // Is a function/subroutine parameter
 	FlagPointerParam                    // OUT/INOUT scalar parameter (needs dereference)
 	FlagAllocatable                     // Has ALLOCATABLE attribute
+	FlagCommon                          // Variable is in a COMMON block
 )
 
 func (f Flags) HasAny(hasBits Flags) bool { return f&hasBits != 0 }

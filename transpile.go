@@ -101,8 +101,12 @@ func (cbi commonBlockInfo) goVarname() string {
 	return cbi.Name
 }
 
-// getVar retrieves or creates VarInfo for a variable (normalized to uppercase for Fortran case-insensitivity)
 func (tg *TranspileToGo) getVar(name string) *VarInfo {
+	return tg.vars[strings.ToUpper(name)]
+}
+
+// getOrMakeVar retrieves or creates VarInfo for a variable (normalized to uppercase for Fortran case-insensitivity)
+func (tg *TranspileToGo) getOrMakeVar(name string) *VarInfo {
 	key := strings.ToUpper(name)
 	if v, ok := tg.vars[key]; ok {
 		return v
@@ -119,11 +123,51 @@ func (tg *TranspileToGo) hasVar(name string) bool {
 	return ok
 }
 
+// getVarFromCommon checks if a variable exists in any COMMON block and returns its info
+func (tg *TranspileToGo) getVarFromCommon(name string) (*VarInfo, string) {
+	upperName := strings.ToUpper(name)
+	for blockName, block := range tg.commonBlocks {
+		// Check if this variable is in this COMMON block (ArraySpecs uses uppercase keys)
+		if arraySpec, exists := block.ArraySpecs[upperName]; exists {
+			// Found it - create a VarInfo from the field
+			for _, field := range block.Fields {
+				if len(field.Names) > 0 && field.Names[0].Name == upperName {
+					// Extract type info from field
+					var elemType ast.Expr
+					if starExpr, ok := field.Type.(*ast.StarExpr); ok {
+						if indexExpr, ok := starExpr.X.(*ast.IndexExpr); ok {
+							elemType = indexExpr.Index
+						}
+					}
+					return &VarInfo{
+						Type:          field.Type,
+						ElementType:   elemType,
+						InCommonBlock: blockName,
+						ArraySpec:     arraySpec,
+						Flags:         symbol.FlagCommon,
+					}, blockName
+				}
+			}
+		}
+		// Also check scalar fields (fields use uppercase names)
+		for _, field := range block.Fields {
+			if len(field.Names) > 0 && field.Names[0].Name == upperName {
+				return &VarInfo{
+					Type:          field.Type,
+					InCommonBlock: blockName,
+					Flags:         symbol.FlagCommon,
+				}, blockName
+			}
+		}
+	}
+	return nil, ""
+}
+
 // trackImplicitVariable tracks a variable that may be implicitly typed
 // and adds it to the vars map if it's not already declared
 func (tg *TranspileToGo) trackImplicitVariable(name string) {
 	// Use unified vars map to check if variable already has a type
-	v := tg.getVar(name)
+	v := tg.getOrMakeVar(name)
 	if v.Type != nil {
 		return // Already has type (explicitly declared, parameter, or already implicit)
 	}
@@ -176,7 +220,7 @@ func (tg *TranspileToGo) prependImplicitVarDecls(stmts []ast.Stmt) []ast.Stmt {
 	// Create var declarations
 	var varDecls []ast.Stmt
 	for _, name := range names {
-		v := tg.vars[name]
+		v := tg.getVar(name)
 		decl := &ast.DeclStmt{
 			Decl: &ast.GenDecl{
 				Tok: token.VAR,
@@ -212,7 +256,7 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 		}
 
 		// Track in unified vars map
-		v := tg.getVar(param.Name)
+		v := tg.getOrMakeVar(param.Name)
 		v.Flags |= symbol.FlagParameter
 
 		// Track array parameters so array references work correctly
@@ -242,7 +286,7 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 
 	// Mark additional parameters (e.g., function result variable)
 	for _, name := range additionalParams {
-		v := tg.getVar(name)
+		v := tg.getOrMakeVar(name)
 		v.Flags |= symbol.FlagParameter
 		// Note: Type will be set when the variable is explicitly declared
 	}
@@ -365,7 +409,7 @@ func (tg *TranspileToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 		// Build composite literal for array initialization
 		var compositeLitElts []ast.Expr
 		for varName, arraySpec := range block.ArraySpecs {
-			// Find element type from field
+			// Find element type from field (varName and field.Names are both uppercase)
 			var elemType ast.Expr
 			for _, field := range validFields {
 				if len(field.Names) > 0 && field.Names[0].Name == varName {
@@ -1089,7 +1133,7 @@ func (tg *TranspileToGo) transformAllocateStmt(stmt *f90.AllocateStmt) ast.Stmt 
 			continue
 		}
 
-		v := tg.vars[strings.ToUpper(name)]
+		v := tg.getVar(name)
 		if v == nil || v.ElementType == nil {
 			continue
 		}
@@ -1567,7 +1611,7 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		entity := &decl.Entities[i]
 
 		// Get or create VarInfo for this entity
-		v := tg.getVar(entity.Name)
+		v := tg.getOrMakeVar(entity.Name)
 
 		// If this variable is in a COMMON block, record its type
 		if v.InCommonBlock != "" {
@@ -1592,9 +1636,10 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 					fieldType = goType
 				}
 
-				// Find the field for this variable and set its type
+				// Find the field for this variable and set its type (fields use uppercase names)
+				upperName := strings.ToUpper(entity.Name)
 				for _, field := range block.Fields {
-					if len(field.Names) > 0 && field.Names[0].Name == entity.Name {
+					if len(field.Names) > 0 && field.Names[0].Name == upperName {
 						field.Type = fieldType
 						break
 					}
@@ -1778,7 +1823,7 @@ func (tg *TranspileToGo) transformDerivedType(deriv *f90.DerivedTypeStmt) ast.St
 // Generates: var arr *intrinsic.Array[int32] = intrinsic.NewArray[int32](3, 4)
 func (tg *TranspileToGo) transformArrayDeclaration(name string, elemType ast.Expr, arraySpec *f90.ArraySpec) *ast.ValueSpec {
 	// Track this array in unified vars map for disambiguation (FunctionCall vs ArrayRef)
-	v := tg.getVar(name)
+	v := tg.getOrMakeVar(name)
 	v.ArraySpec = arraySpec
 	v.ElementType = elemType
 
@@ -1827,7 +1872,7 @@ func (tg *TranspileToGo) transformArrayDeclaration(name string, elemType ast.Exp
 // These will be initialized later by ALLOCATE statements
 func (tg *TranspileToGo) transformAllocatableArrayDeclaration(name string, elemType ast.Expr) *ast.ValueSpec {
 	// Track this array in unified vars map for disambiguation (FunctionCall vs ArrayRef)
-	v := tg.getVar(name)
+	v := tg.getOrMakeVar(name)
 	v.ElementType = elemType
 	// v.ArraySpec is nil for ALLOCATABLE (unknown bounds until ALLOCATE)
 
@@ -1865,8 +1910,14 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 
 	// Check for FunctionCall that's actually an array reference (parser ambiguity)
 	if funcCall, ok := assign.Target.(*f90.FunctionCall); ok {
-		v := tg.vars[strings.ToUpper(funcCall.Name)]
-		isArray := v != nil && v.ElementType != nil
+		v := tg.getVar(funcCall.Name)
+		// Also check COMMON blocks if not found in local vars
+		if v == nil || v.Type == nil {
+			v, _ = tg.getVarFromCommon(funcCall.Name)
+		}
+		// Check if it's an array - check both ArraySpec and ElementType
+		// (ALLOCATABLE arrays have ElementType but no ArraySpec until allocated)
+		isArray := v != nil && (v.ArraySpec != nil || v.ElementType != nil)
 		isChar := v != nil && v.CharLength > 0
 		if isArray || isChar {
 			// Convert to ArrayRef and generate .Set() or .SetRange() call
@@ -1890,7 +1941,7 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 	// Check if LHS is a pointer parameter (OUT/INOUT scalar) - need to dereference
 	if ident, ok := lhs.(*ast.Ident); ok {
 		// Check if this is a CHARACTER assignment - use SetFromString() method
-		v := tg.vars[strings.ToUpper(ident.Name)]
+		v := tg.getVar(ident.Name)
 		if v != nil && v.CharLength > 0 {
 			// Generate: name.SetFromString(value)
 			return &ast.ExprStmt{
@@ -1928,7 +1979,7 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 	}
 
 	// Check if this is a CHARACTER variable with substring assignment
-	v := tg.vars[strings.ToUpper(ref.Name)]
+	v := tg.getVar(ref.Name)
 	if v != nil && v.CharLength > 0 && len(ref.Subscripts) == 1 {
 		// Check if the subscript is a RangeExpr (substring assignment)
 		if rangeExpr, isRange := ref.Subscripts[0].(*f90.RangeExpr); isRange {
@@ -1949,7 +2000,7 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 				block := tg.commonBlocks[blockName]
 				charArrayExpr = &ast.SelectorExpr{
 					X:   ast.NewIdent(block.goVarname()),
-					Sel: ast.NewIdent(sanitizeIdent(ref.Name)),
+					Sel: ast.NewIdent(strings.ToUpper(ref.Name)), // Use uppercase for field access
 				}
 			} else {
 				charArrayExpr = ast.NewIdent(ref.Name)
@@ -1988,6 +2039,10 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 	}
 
 	// Generate array access expression - check if array is in COMMON block
+	// Also check COMMON blocks if not found in local vars
+	if v == nil || v.Type == nil {
+		v, _ = tg.getVarFromCommon(ref.Name)
+	}
 	var arrayExpr ast.Expr
 	if v != nil && v.InCommonBlock != "" {
 		// Array is in COMMON block: BLOCKNAME.arrayname.Set(...)
@@ -1995,7 +2050,7 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 		block := tg.commonBlocks[blockName]
 		arrayExpr = &ast.SelectorExpr{
 			X:   ast.NewIdent(block.goVarname()),
-			Sel: ast.NewIdent(sanitizeIdent(ref.Name)),
+			Sel: ast.NewIdent(strings.ToUpper(ref.Name)), // Use uppercase for field access
 		}
 	} else {
 		// Regular array: arrayname.Set(...)
@@ -2020,7 +2075,7 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 func (tg *TranspileToGo) wrapCharArrayToString(expr ast.Expr) ast.Expr {
 	// If expr is a CharacterArray identifier, wrap with .String() call
 	if ident, ok := expr.(*ast.Ident); ok {
-		v := tg.vars[strings.ToUpper(ident.Name)]
+		v := tg.getVar(ident.Name)
 		if v != nil && v.CharLength > 0 {
 			return &ast.CallExpr{
 				Fun: &ast.SelectorExpr{
@@ -2059,13 +2114,17 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 		return ast.NewIdent("false")
 	case *f90.Identifier:
 		// Check if this identifier is in a COMMON block
-		v := tg.vars[strings.ToUpper(e.Value)]
+		v := tg.getVar(e.Value)
+		// Also check COMMON blocks if not found in local vars
+		if v == nil || v.Type == nil {
+			v, _ = tg.getVarFromCommon(e.Value)
+		}
 		if v != nil && v.InCommonBlock != "" {
 			blockName := v.InCommonBlock
 			block := tg.commonBlocks[blockName]
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(block.goVarname()),
-				Sel: ast.NewIdent(sanitizeIdent(e.Value)),
+				Sel: ast.NewIdent(strings.ToUpper(e.Value)), // Use uppercase for field access
 			}
 		}
 		return ast.NewIdent(sanitizeIdent(e.Value))
@@ -2081,7 +2140,7 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 		return tg.transformExpression(e.Expr)
 	case *f90.FunctionCall:
 		// Check if this is actually an array reference (parser ambiguity)
-		v := tg.vars[strings.ToUpper(e.Name)]
+		v := tg.getVar(e.Name)
 		isArray := v != nil && v.ElementType != nil
 		isChar := v != nil && v.CharLength > 0
 		if isArray || isChar {
@@ -2137,7 +2196,7 @@ func (tg *TranspileToGo) transformArrayConstructor(ac *f90.ArrayConstructor) ast
 // Fortran indexing is preserved (1-based) since Array.At() handles it internally
 func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
 	// Check if this is a CHARACTER variable with substring operation
-	v := tg.vars[strings.ToUpper(ref.Name)]
+	v := tg.getVar(ref.Name)
 	if v != nil && v.CharLength > 0 && len(ref.Subscripts) == 1 {
 		// Check if the subscript is a RangeExpr (substring operation)
 		if rangeExpr, isRange := ref.Subscripts[0].(*f90.RangeExpr); isRange {
@@ -2158,7 +2217,7 @@ func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
 				block := tg.commonBlocks[blockName]
 				charArrayExpr = &ast.SelectorExpr{
 					X:   ast.NewIdent(block.goVarname()),
-					Sel: ast.NewIdent(sanitizeIdent(ref.Name)),
+					Sel: ast.NewIdent(strings.ToUpper(ref.Name)), // Use uppercase for field access
 				}
 			} else {
 				charArrayExpr = ast.NewIdent(ref.Name)
@@ -2703,7 +2762,7 @@ func (tg *TranspileToGo) createDataAssignment(varExpr f90.Expression, valExpr f9
 	// Check if this is a simple identifier that we should skip
 	// Skip only if variable is not tracked at all (truly undeclared)
 	if ident, ok := varExpr.(*f90.Identifier); ok {
-		v := tg.vars[strings.ToUpper(ident.Value)]
+		v := tg.getVar(ident.Value)
 		if v == nil || v.Type == nil {
 			// Untracked or implicitly-typed variable - skip DATA initialization
 			// (These should have explicit type declarations to use DATA)
@@ -2725,7 +2784,7 @@ func (tg *TranspileToGo) createDataAssignment(varExpr f90.Expression, valExpr f9
 
 	// Check if LHS is a CHARACTER variable - need to use SetFromString() method
 	if ident, ok := lhs.(*ast.Ident); ok {
-		v := tg.vars[strings.ToUpper(ident.Name)]
+		v := tg.getVar(ident.Name)
 		if v != nil && v.CharLength > 0 {
 			// Generate: name.SetFromString(value)
 			return &ast.ExprStmt{
@@ -2773,7 +2832,7 @@ func (tg *TranspileToGo) transformDataStmt(stmt *f90.DataStmt) ast.Stmt {
 			assignStmt = tg.transformArrayAssignment(arrayRef, valExpr)
 		} else if funcCall, ok := varExpr.(*f90.FunctionCall); ok {
 			// Check if it's actually an array reference (parser ambiguity)
-			v := tg.vars[strings.ToUpper(funcCall.Name)]
+			v := tg.getVar(funcCall.Name)
 			isArray := v != nil && v.ElementType != nil
 			isChar := v != nil && v.CharLength > 0
 			if isArray || isChar {
@@ -2965,12 +3024,13 @@ func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
 						arraySpec = commonStmt.ArraySpecs[i]
 					}
 					if arraySpec != nil {
-						// Store array spec in the block info
-						arraySpecs[varName] = arraySpec
+						// Store array spec in the block info (use uppercase key for case-insensitive lookup)
+						arraySpecs[strings.ToUpper(varName)] = arraySpec
 					}
 
+					// Normalize field name to uppercase for case-insensitive access
 					fields = append(fields, &ast.Field{
-						Names: []*ast.Ident{ast.NewIdent(varName)},
+						Names: []*ast.Ident{ast.NewIdent(strings.ToUpper(varName))},
 						Type:  nil, // Will be set when we see the type declaration or by IMPLICIT typing
 					})
 				}
@@ -2985,8 +3045,9 @@ func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
 			// Record each variable in the COMMON block and register arrays
 			for _, varName := range commonStmt.Variables {
 				// Track in unified vars map
-				v := tg.getVar(varName)
+				v := tg.getOrMakeVar(varName)
 				v.InCommonBlock = blockName
+				v.Flags |= symbol.FlagCommon
 
 				// If this variable is an array, register it in the unified vars map
 				if arraySpec, isArray := block.ArraySpecs[varName]; isArray {
