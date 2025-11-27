@@ -26,6 +26,28 @@ func (te transpileError) String() string {
 	return te.msg
 }
 
+// goKeywords is the set of reserved keywords in Go that cannot be used as identifiers
+var goKeywords = map[string]bool{
+	"break": true, "case": true, "chan": true, "const": true, "continue": true,
+	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true,
+	"func": true, "go": true, "goto": true, "if": true, "import": true,
+	"interface": true, "map": true, "package": true, "range": true, "return": true,
+	"select": true, "struct": true, "switch": true, "type": true, "var": true,
+}
+
+// sanitizeIdent returns a valid Go identifier by capitalizing the first letter if it's a Go keyword
+func sanitizeIdent(name string) string {
+	if name == "" {
+		return name
+	}
+	// Check if it's a Go keyword (case-insensitive since Fortran is case-insensitive)
+	if goKeywords[strings.ToLower(name)] {
+		// Capitalize first letter
+		return strings.ToUpper(name[:1]) + name[1:]
+	}
+	return name
+}
+
 // TranspileToGo transforms Fortran AST to Go AST
 type TranspileToGo struct {
 	symTable      *symbol.Table
@@ -497,7 +519,7 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 
 		// Create parameter field
 		field := &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(param.Name)},
+			Names: []*ast.Ident{ast.NewIdent(sanitizeIdent(param.Name))},
 			Type:  goType,
 		}
 		fields = append(fields, field)
@@ -853,7 +875,7 @@ func (tg *TranspileToGo) transformAllocateStmt(stmt *f90.AllocateStmt) ast.Stmt 
 
 		// Generate: name = intrinsic.NewArray[elemType](dims...)
 		assignment := &ast.AssignStmt{
-			Lhs: []ast.Expr{ast.NewIdent(name)},
+			Lhs: []ast.Expr{ast.NewIdent(sanitizeIdent(name))},
 			Tok: token.ASSIGN,
 			Rhs: []ast.Expr{
 				&ast.CallExpr{
@@ -898,7 +920,7 @@ func (tg *TranspileToGo) transformDeallocateStmt(stmt *f90.DeallocateStmt) ast.S
 
 		// Generate: name = nil
 		assignment := &ast.AssignStmt{
-			Lhs: []ast.Expr{ast.NewIdent(name)},
+			Lhs: []ast.Expr{ast.NewIdent(sanitizeIdent(name))},
 			Tok: token.ASSIGN,
 			Rhs: []ast.Expr{ast.NewIdent("nil")},
 		}
@@ -968,17 +990,17 @@ func (tg *TranspileToGo) transformDoLoop(loop *f90.DoLoop) ast.Stmt {
 	// Use assignment (=) not declaration (:=) since loop vars are pre-declared in Fortran
 	return &ast.ForStmt{
 		Init: &ast.AssignStmt{
-			Lhs: []ast.Expr{ast.NewIdent(loop.Var)},
+			Lhs: []ast.Expr{ast.NewIdent(sanitizeIdent(loop.Var))},
 			Tok: token.ASSIGN, // = (not :=)
 			Rhs: []ast.Expr{start},
 		},
 		Cond: &ast.BinaryExpr{
-			X:  ast.NewIdent(loop.Var),
+			X:  ast.NewIdent(sanitizeIdent(loop.Var)),
 			Op: token.LEQ, // <= for inclusive upper bound (Fortran semantics)
 			Y:  end,
 		},
 		Post: &ast.AssignStmt{
-			Lhs: []ast.Expr{ast.NewIdent(loop.Var)},
+			Lhs: []ast.Expr{ast.NewIdent(sanitizeIdent(loop.Var))},
 			Tok: token.ADD_ASSIGN, // +=
 			Rhs: []ast.Expr{step},
 		},
@@ -1146,18 +1168,17 @@ func (tg *TranspileToGo) cleanIntegerLiteral(raw string) string {
 //	3.141592653589793D0 → 3.141592653589793
 //	1.5D+10 → 1.5e+10
 //	2.0D-5 → 2.0e-5
-func (tg *TranspileToGo) cleanRealLiteral(raw string) string {
-	// Replace D exponent notation with e notation
-	// Fortran uses D for double precision: 1.5D+10
-	// Go uses e: 1.5e+10
-	result := strings.ReplaceAll(raw, "D", "e")
+// rewriteFloatLit converts Fortran float literals to Go format
+// Converts D/d/Q/q exponents (double/quad precision) to e
+// Example: 1.0D0 → 1.0e0, 1.23D+02 → 1.23e+02
+func (tg *TranspileToGo) rewriteFloatLit(s string) string {
+	// Replace D/d/Q/q exponent notation with e notation
+	// Fortran: 1.5D+10, 1.0Q0
+	// Go:      1.5e+10, 1.0e0
+	result := strings.ReplaceAll(s, "D", "e")
 	result = strings.ReplaceAll(result, "d", "e")
-
-	// Handle D0 suffix (no exponent) by removing it
-	if strings.HasSuffix(result, "e0") {
-		result = result[:len(result)-2]
-	}
-
+	result = strings.ReplaceAll(result, "Q", "e")
+	result = strings.ReplaceAll(result, "q", "e")
 	return result
 }
 
@@ -1165,6 +1186,11 @@ func (tg *TranspileToGo) cleanRealLiteral(raw string) string {
 // This is a simple converter for PARAMETER constants that handles basic cases
 func (tg *TranspileToGo) fortranConstantToGoExpr(fortranExpr string) ast.Expr {
 	fortranExpr = strings.TrimSpace(fortranExpr)
+
+	// Handle unary + or - prefix
+	if strings.HasPrefix(fortranExpr, "+") {
+		fortranExpr = strings.TrimSpace(fortranExpr[1:])
+	}
 
 	// Handle boolean literals
 	if fortranExpr == ".TRUE." {
@@ -1179,9 +1205,11 @@ func (tg *TranspileToGo) fortranConstantToGoExpr(fortranExpr string) ast.Expr {
 		// It's an integer literal
 		return &ast.BasicLit{Kind: token.INT, Value: fortranExpr}
 	}
-	if _, err := strconv.ParseFloat(fortranExpr, 64); err == nil {
+	// Try to parse as float (after converting D/Q exponents to e)
+	rewritten := tg.rewriteFloatLit(fortranExpr)
+	if _, err := strconv.ParseFloat(rewritten, 64); err == nil {
 		// It's a float literal
-		return &ast.BasicLit{Kind: token.FLOAT, Value: fortranExpr}
+		return &ast.BasicLit{Kind: token.FLOAT, Value: rewritten}
 	}
 
 	// Handle string literals (quoted strings)
@@ -1271,7 +1299,7 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		}
 
 		spec := &ast.ValueSpec{
-			Names: []*ast.Ident{ast.NewIdent(entity.Name)},
+			Names: []*ast.Ident{ast.NewIdent(sanitizeIdent(entity.Name))},
 			Type:  goType,
 		}
 
@@ -1348,7 +1376,7 @@ func (tg *TranspileToGo) transformDerivedType(deriv *f90.DerivedTypeStmt) ast.St
 		// Process each entity in the component declaration
 		for _, entity := range comp.Components {
 			field := &ast.Field{
-				Names: []*ast.Ident{ast.NewIdent(entity.Name)},
+				Names: []*ast.Ident{ast.NewIdent(sanitizeIdent(entity.Name))},
 				Type:  goType,
 			}
 
@@ -1426,7 +1454,7 @@ func (tg *TranspileToGo) transformArrayDeclaration(name string, elemType ast.Exp
 	}
 
 	return &ast.ValueSpec{
-		Names:  []*ast.Ident{ast.NewIdent(name)},
+		Names:  []*ast.Ident{ast.NewIdent(sanitizeIdent(name))},
 		Values: []ast.Expr{constructorCall},
 	}
 }
@@ -1448,7 +1476,7 @@ func (tg *TranspileToGo) transformAllocatableArrayDeclaration(name string, elemT
 
 	// Return uninitialized pointer (will be set by ALLOCATE statement)
 	return &ast.ValueSpec{
-		Names: []*ast.Ident{ast.NewIdent(name)},
+		Names: []*ast.Ident{ast.NewIdent(sanitizeIdent(name))},
 		Type:  arrayType,
 	}
 }
@@ -1621,7 +1649,7 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 	case *f90.RealLiteral:
 		return &ast.BasicLit{
 			Kind:  token.FLOAT,
-			Value: tg.cleanRealLiteral(e.Raw),
+			Value: tg.rewriteFloatLit(e.Raw),
 		}
 	case *f90.LogicalLiteral:
 		// .TRUE. → true, .FALSE. → false
@@ -1635,10 +1663,10 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 			block := tg.commonBlocks[blockName]
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(block.goVarname()),
-				Sel: ast.NewIdent(e.Value),
+				Sel: ast.NewIdent(sanitizeIdent(e.Value)),
 			}
 		}
-		return ast.NewIdent(e.Value)
+		return ast.NewIdent(sanitizeIdent(e.Value))
 	case *f90.ArrayRef:
 		return tg.transformArrayRef(e)
 	case *f90.BinaryExpr:

@@ -545,7 +545,7 @@ func LEVEL25() {
 	i4 = 2147483647
 	i8 = 9223372036854775807
 	r4 = 3.14159
-	r8 = 3.141592653589793
+	r8 = 3.141592653589793e0
 	intrinsic.Print("LEVEL 25: i1 =", i1)
 	intrinsic.Print("LEVEL 25: i2 =", i2)
 	intrinsic.Print("LEVEL 25: i4 =", i4)
@@ -571,10 +571,10 @@ func LEVEL26() {
 	intrinsic.Print("LEVEL 26: hex_val =", hex_val)
 	intrinsic.Print("LEVEL 26: oct_val =", oct_val)
 	intrinsic.Print("LEVEL 26: bin_val =", bin_val)
-	d1 = 1.0
+	d1 = 1.0e0
 	d2 = 1.23e+02
 	d3 = 4.56e-03
-	d4 = 2.718281828
+	d4 = 2.718281828e0
 	intrinsic.Print("LEVEL 26: d1 =", d1)
 	intrinsic.Print("LEVEL 26: d2 =", d2)
 	intrinsic.Print("LEVEL 26: d3 =", d3)
