@@ -470,6 +470,8 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) ast.Stmt {
 	switch s := stmt.(type) {
 	case *f90.TypeDeclaration:
 		return tg.transformTypeDeclaration(s)
+	case *f90.DerivedTypeStmt:
+		return tg.transformDerivedType(s)
 	case *f90.AssignmentStmt:
 		return tg.transformAssignment(s)
 	case *f90.PrintStmt:
@@ -1195,6 +1197,60 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		Decl: &ast.GenDecl{
 			Tok:   tok,
 			Specs: specs,
+		},
+	}
+}
+
+// transformDerivedType transforms a Fortran TYPE definition to a Go struct
+// Example: TYPE :: person ... END TYPE → type person struct { ... }
+func (tg *TranspileToGo) transformDerivedType(deriv *f90.DerivedTypeStmt) ast.Stmt {
+	// Create struct field list
+	fields := &ast.FieldList{
+		List: make([]*ast.Field, 0, len(deriv.Components)),
+	}
+
+	// Transform each component declaration to struct fields
+	for _, comp := range deriv.Components {
+		// Get Go type for this component
+		goType := tg.fortranTypeToGoWithKind(comp.Type.Token, comp.Type.KindOrLen)
+		if goType == nil {
+			continue // Skip components we can't translate
+		}
+
+		// Process each entity in the component declaration
+		for _, entity := range comp.Components {
+			field := &ast.Field{
+				Names: []*ast.Ident{ast.NewIdent(entity.Name)},
+				Type:  goType,
+			}
+
+			// Handle array components
+			if entity.ArraySpec != nil {
+				// For struct fields that are arrays, use *intrinsic.Array[T]
+				field.Type = &ast.StarExpr{
+					X: &ast.IndexExpr{
+						X:     _astTypeArray,
+						Index: goType,
+					},
+				}
+			}
+
+			fields.List = append(fields.List, field)
+		}
+	}
+
+	// Create Go type declaration
+	return &ast.DeclStmt{
+		Decl: &ast.GenDecl{
+			Tok: token.TYPE,
+			Specs: []ast.Spec{
+				&ast.TypeSpec{
+					Name: ast.NewIdent(deriv.Name),
+					Type: &ast.StructType{
+						Fields: fields,
+					},
+				},
+			},
 		},
 	}
 }

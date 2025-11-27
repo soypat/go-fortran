@@ -38,9 +38,13 @@ All 25 progressive test levels implemented and passing. The transpiler can handl
 - ✅ **PARAMETER Constants**: Named compile-time constants with expression evaluation
 - ✅ **Array Constructors**: Inline array initialization with (/ ... /) syntax
 - ✅ **KIND Parameters**: Type sizing with INTEGER(KIND=n), REAL(KIND=n)
-  - INTEGER(KIND=1) → int8, KIND=2 → int16, KIND=4 → int32, KIND=8 → int64
+  - INTEGER(KIND=1) → int8, KIND=2 → int16, KIND=4) → int32, KIND=8 → int64
   - REAL(KIND=4) → float32, REAL(KIND=8) → float64
   - Literal conversion: Fortran D0 exponent → Go e notation
+- ✅ **Derived Types (TYPE...END TYPE)**: User-defined composite types map to Go structs
+  - Component fields with proper type mapping
+  - Array components use `*intrinsic.Array[T]`
+  - Component access (`%`) already supported in expressions
 
 ## Parser-Only (Not Transpiled)
 
@@ -53,16 +57,13 @@ These features are parsed but not yet transpiled to Go:
 - ⚠️ **SAVE** attribute (persistent variables)
 
 ### Program Structure
-- ⚠️ **PROGRAM** blocks (only subroutines/functions transpiled)
-- ⚠️ **MODULE** definitions
-- ⚠️ **USE** statements (module imports)
-- ⚠️ **CONTAINS** sections
-- ⚠️ **BLOCKDATA** units
+- ⚠️ **MODULE** definitions - parsed but not transpiled
+- ⚠️ **USE** statements (module imports) - parsed but not transpiled
+- ⚠️ **BLOCKDATA** units - parsed but not transpiled
 
 ### Advanced Types
-- ⚠️ **Derived Types** (TYPE...END TYPE) - parsing skipped
-- ⚠️ **POINTER** statement
-- ⚠️ **TARGET** attribute
+- ⚠️ **POINTER** statement - parsed but not transpiled
+- ⚠️ **TARGET** attribute - parsed but not transpiled
 
 ### Not Parsed
 - ❌ **INTERFACE** blocks - parsing skipped
@@ -168,15 +169,15 @@ Analyzed 153-line real Fortran program. Features used:
 1. **Transpile PROGRAM Blocks** ✅ COMPLETED (2025-11-26)
    - Parser fully supports PROGRAM/CONTAINS
    - Implemented `TransformProgram()` following existing patterns
+   - Implemented `MakeFile()` for complete Go file generation
    - **Impact**: Enable standalone program transpilation
-   - **Implementation**: 44 lines in transpile.go:201-246
+   - **Implementation**: transpile.go:201-248
 
-2. **PARAMETER Constants** (2-3 days) 🎯
-   - Already parsed with PARAMETER attribute
-   - Generate Go `const` declarations
-   - Simple constant folding for literals
-   - **Impact**: Very common in real code
-   - **Effort**: Extend type declaration transpilation
+2. **PARAMETER Constants** ✅ COMPLETED (in LEVEL23)
+   - Generates Go `const` declarations
+   - Handles literal values and expressions (e.g., `2.0 * PI`)
+   - Already tested and working in golden test suite
+   - **Implementation**: transpile.go:1148-1192
 
 3. **Use Symbol Table for Types** (2-3 days) 🎯
    - Symbol table exists, declaration collector works
@@ -186,11 +187,11 @@ Analyzed 153-line real Fortran program. Features used:
 
 ### Medium Priority (1-2 weeks each)
 
-4. **Derived Types (TYPE...END TYPE)** (1 week)
-   - Parser skips these currently
-   - Maps cleanly to Go structs
-   - Component access `%` already works
-   - **Impact**: Modern Fortran compatibility
+4. **Derived Types (TYPE...END TYPE)** ✅ COMPLETED (2025-11-27)
+   - Transpiles to Go structs
+   - Component fields with type mapping
+   - Array components supported
+   - **Implementation**: transpile.go:1204-1256
 
 5. **MODULE Basics** (1-2 weeks)
    - Generate separate Go files per MODULE

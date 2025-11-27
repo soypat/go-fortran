@@ -109,22 +109,6 @@ func TestTranspileGolden(t *testing.T) {
 	}
 }
 
-func helperGetGoldenLevel(t *testing.T, lvl int, pus []f90.ProgramUnit) *f90.Subroutine {
-	t.Helper()
-	levelName := fmt.Sprintf("LEVEL%02d", lvl)
-
-	// Search through program units for the subroutine
-	for _, pu := range pus {
-		if sub, ok := pu.(*f90.Subroutine); ok {
-			if strings.EqualFold(sub.Name, levelName) {
-				return sub
-			}
-		}
-	}
-
-	return nil
-}
-
 func helperWriteGoAST(t *testing.T, w *bytes.Buffer, f ast.Node) {
 	t.Helper()
 
@@ -176,15 +160,6 @@ func helperRunGoFile(t *testing.T, pathToFile string) (output []byte) {
 		t.Fatalf("execution failed: %v\nOutput: %s", err, output)
 	}
 	return output
-}
-
-func mustGetwd(t *testing.T) string {
-	t.Helper()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	return wd
 }
 
 func helperFormatGoSrc(t *testing.T, r io.Reader, w io.Writer) {
