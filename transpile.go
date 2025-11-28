@@ -40,6 +40,84 @@ func sanitizeIdent(name string) string {
 	return name
 }
 
+// AST Helper Methods - Create common Go AST patterns concisely
+
+// astMethodCall creates: receiver.methodName(args...)
+func (tg *TranspileToGo) astMethodCall(receiver, methodName string, args ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   ast.NewIdent(sanitizeIdent(receiver)),
+			Sel: ast.NewIdent(methodName),
+		},
+		Args: args,
+	}
+}
+
+// astPkgCall creates: pkgName.fnName(args...)
+func (tg *TranspileToGo) astPkgCall(pkgName, fnName string, args ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   ast.NewIdent(pkgName),
+			Sel: ast.NewIdent(fnName),
+		},
+		Args: args,
+	}
+}
+
+// astIntrinsicCall creates: intrinsic.fnName(args...) with auto-import
+func (tg *TranspileToGo) astIntrinsicCall(fnName string, args ...ast.Expr) *ast.CallExpr {
+	// tg.useImport("github.com/soypat/go-fortran/intrinsic") // intrinsic package imported on TranspileToGo initialization.
+	return tg.astPkgCall("intrinsic", fnName, args...)
+}
+
+// astGenericCall creates: pkgName.fnName[T](args...)
+func (tg *TranspileToGo) astGenericCall(pkgName, fnName string, typeParam ast.Expr, args ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.IndexExpr{
+			X: &ast.SelectorExpr{
+				X:   ast.NewIdent(pkgName),
+				Sel: ast.NewIdent(fnName),
+			},
+			Index: typeParam,
+		},
+		Args: args,
+	}
+}
+
+// astGenericCall2 creates: pkgName.fnName[T1, T2](args...)
+func (tg *TranspileToGo) astGenericCall2(pkgName, fnName string, t1, t2 ast.Expr, args ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.IndexListExpr{
+			X: &ast.SelectorExpr{
+				X:   ast.NewIdent(pkgName),
+				Sel: ast.NewIdent(fnName),
+			},
+			Indices: []ast.Expr{t1, t2},
+		},
+		Args: args,
+	}
+}
+
+// astIntLit creates: 42
+func (tg *TranspileToGo) astIntLit(value int) *ast.BasicLit {
+	return &ast.BasicLit{
+		Kind:  token.INT,
+		Value: strconv.Itoa(value),
+	}
+}
+
+// astIntrinsicGeneric creates: intrinsic.fnName[T](args...) with auto-import
+func (tg *TranspileToGo) astIntrinsicGeneric(fnName string, typeParam ast.Expr, args ...ast.Expr) *ast.CallExpr {
+	// tg.useImport("github.com/soypat/go-fortran/intrinsic") // intrinsic package imported on TranspileToGo initialization.
+	return tg.astGenericCall("intrinsic", fnName, typeParam, args...)
+}
+
+// astIntrinsicGeneric2 creates: intrinsic.fnName[T1, T2](args...) with auto-import
+func (tg *TranspileToGo) astIntrinsicGeneric2(fnName string, t1, t2 ast.Expr, args ...ast.Expr) *ast.CallExpr {
+	// tg.useImport("github.com/soypat/go-fortran/intrinsic") // intrinsic package imported on TranspileToGo initialization.
+	return tg.astGenericCall2("intrinsic", fnName, t1, t2, args...)
+}
+
 // VarInfo tracks all information about a variable in the current scope
 type VarInfo struct {
 	// Core metadata
@@ -58,6 +136,9 @@ type VarInfo struct {
 
 	// CHARACTER information
 	CharLength int // For CHARACTER(LEN=n), stores n (0 for non-CHARACTER)
+
+	// Original name casing (for generating correct Go identifiers)
+	OriginalName string // Original name as it appeared in Fortran source (before uppercase normalization)
 }
 
 // TranspileToGo transforms Fortran AST to Go AST
@@ -99,6 +180,46 @@ func (tg *TranspileToGo) getVar(name string) *VarInfo {
 	return tg.vars[strings.ToUpper(name)]
 }
 
+// markVarUsed marks a variable as used (to suppress "declared and not used" warnings)
+func (tg *TranspileToGo) markVarUsed(name string) {
+	if v := tg.getVar(name); v != nil {
+		v.Flags |= symbol.FlagUsed
+	}
+}
+
+// markExpressionsUsed walks a Fortran expression tree and marks all referenced
+// variables as used. This is called for RHS expressions to track variable usage.
+func (tg *TranspileToGo) markExpressionsUsed(expr f90.Expression) {
+	if expr == nil {
+		return
+	}
+
+	switch e := expr.(type) {
+	case *f90.Identifier:
+		tg.markVarUsed(e.Value)
+	case *f90.ArrayRef:
+		tg.markVarUsed(e.Name)
+		for _, sub := range e.Subscripts {
+			tg.markExpressionsUsed(sub)
+		}
+	case *f90.FunctionCall:
+		// Function calls use all their arguments
+		for _, arg := range e.Args {
+			tg.markExpressionsUsed(arg)
+		}
+	case *f90.BinaryExpr:
+		tg.markExpressionsUsed(e.Left)
+		tg.markExpressionsUsed(e.Right)
+	case *f90.UnaryExpr:
+		tg.markExpressionsUsed(e.Operand)
+	case *f90.ParenExpr:
+		tg.markExpressionsUsed(e.Expr)
+	// Literals don't reference variables, so nothing to mark
+	case *f90.IntegerLiteral, *f90.RealLiteral, *f90.StringLiteral, *f90.LogicalLiteral:
+		// No variables to mark
+	}
+}
+
 // getOrMakeVar retrieves or creates VarInfo for a variable (normalized to uppercase for Fortran case-insensitivity)
 func (tg *TranspileToGo) getOrMakeVar(name string) *VarInfo {
 	key := strings.ToUpper(name)
@@ -106,7 +227,9 @@ func (tg *TranspileToGo) getOrMakeVar(name string) *VarInfo {
 		return v
 	}
 	// Create new entry
-	v := &VarInfo{}
+	v := &VarInfo{
+		OriginalName: name, // Store original casing
+	}
 	tg.vars[key] = v
 	return v
 }
@@ -247,17 +370,7 @@ func (tg *TranspileToGo) prependImplicitVarDecls(stmts []ast.Stmt) []ast.Stmt {
 			}
 
 			// Generate: var NAME = intrinsic.NewArray[elemType](dims...)
-			tg.useImport("github.com/soypat/go-fortran/intrinsic")
-			init := &ast.CallExpr{
-				Fun: &ast.IndexExpr{
-					X: &ast.SelectorExpr{
-						X:   ast.NewIdent("intrinsic"),
-						Sel: ast.NewIdent("NewArray"),
-					},
-					Index: elemType,
-				},
-				Args: dims,
-			}
+			init := tg.astIntrinsicGeneric("NewArray", elemType, dims...)
 
 			decl := &ast.DeclStmt{
 				Decl: &ast.GenDecl{
@@ -290,6 +403,53 @@ func (tg *TranspileToGo) prependImplicitVarDecls(stmts []ast.Stmt) []ast.Stmt {
 
 	// Prepend declarations to statements
 	return append(varDecls, stmts...)
+}
+
+// appendUnusedVarSuppressions adds `_ = var` statements for variables that were
+// declared but never used (read from), to suppress Go's "declared and not used" errors.
+func (tg *TranspileToGo) appendUnusedVarSuppressions(stmts []ast.Stmt) []ast.Stmt {
+	var unusedVars []string
+
+	// Find all variables that are not marked as FlagUsed
+	for name, v := range tg.vars {
+		if v.Flags&symbol.FlagUsed == 0 {
+			// Skip parameters - Go doesn't complain about unused parameters
+			if v.Flags&symbol.FlagParameter != 0 {
+				continue
+			}
+			// Skip variables in COMMON blocks - they're fields, not local vars
+			if v.InCommonBlock != "" {
+				continue
+			}
+			// Skip pointees - they don't exist as separate Go variables
+			if v.Flags&symbol.FlagPointee != 0 {
+				continue
+			}
+			unusedVars = append(unusedVars, name)
+		}
+	}
+
+	if len(unusedVars) == 0 {
+		return stmts
+	}
+
+	// Sort for consistent output
+	slices.Sort(unusedVars)
+
+	// Generate _ = var statements for each unused variable
+	for _, name := range unusedVars {
+		v := tg.vars[name] // name is already uppercase key
+		// Use the original name casing from the Fortran source
+		goName := sanitizeIdent(v.OriginalName)
+		stmt := &ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent("_")},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{ast.NewIdent(goName)},
+		}
+		stmts = append(stmts, stmt)
+	}
+
+	return stmts
 }
 
 // enterProcedure initializes tracking maps for a function or subroutine
@@ -508,17 +668,8 @@ func (tg *TranspileToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 
 			// Create composite literal element: varName: intrinsic.NewArray[elemType](dims...)
 			compositeLitElts = append(compositeLitElts, &ast.KeyValueExpr{
-				Key: ast.NewIdent(varName),
-				Value: &ast.CallExpr{
-					Fun: &ast.IndexExpr{
-						X: &ast.SelectorExpr{
-							X:   ast.NewIdent("intrinsic"),
-							Sel: ast.NewIdent("NewArray"),
-						},
-						Index: elemType,
-					},
-					Args: dims,
-				},
+				Key:   ast.NewIdent(varName),
+				Value: tg.astIntrinsicGeneric("NewArray", elemType, dims...),
 			})
 		}
 
@@ -603,6 +754,9 @@ func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl
 	// Add declarations for implicitly-typed variables
 	bodyStmts = tg.prependImplicitVarDecls(bodyStmts)
 
+	// Add blank assignments for unused variables to suppress "declared and not used" errors
+	bodyStmts = tg.appendUnusedVarSuppressions(bodyStmts)
+
 	// Create function declaration
 	funcDecl := &ast.FuncDecl{
 		Name: ast.NewIdent(sub.Name),
@@ -642,6 +796,9 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 
 	// Add declarations for implicitly-typed variables
 	bodyStmts = tg.prependImplicitVarDecls(bodyStmts)
+
+	// Add blank assignments for unused variables to suppress "declared and not used" errors
+	bodyStmts = tg.appendUnusedVarSuppressions(bodyStmts)
 
 	// Map Fortran result type to Go type, considering KIND parameter
 	resultType := tg.fortranTypeToGoWithKind(fn.Type, fn.Type.KindOrLen)
@@ -688,6 +845,9 @@ func (tg *TranspileToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, e
 
 	// Add declarations for implicitly-typed variables
 	bodyStmts = tg.prependImplicitVarDecls(bodyStmts)
+
+	// Add blank assignments for unused variables to suppress "declared and not used" errors
+	bodyStmts = tg.appendUnusedVarSuppressions(bodyStmts)
 
 	// Create main function declaration
 	mainFunc := &ast.FuncDecl{
@@ -1014,6 +1174,11 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) (gostmt ast.Stmt
 // transformPrint transforms a Fortran PRINT statement to intrinsic.Formatter.Print call
 // Note: Fortran PRINT * uses list-directed I/O formatting
 func (tg *TranspileToGo) transformPrint(print *f90.PrintStmt) ast.Stmt {
+	// Mark all print arguments as used
+	for _, expr := range print.OutputList {
+		tg.markExpressionsUsed(expr)
+	}
+
 	// Transform output expressions
 	args := tg.transformExpressions(print.OutputList)
 
@@ -1021,13 +1186,7 @@ func (tg *TranspileToGo) transformPrint(print *f90.PrintStmt) ast.Stmt {
 	// This handles: leading space, T/F for LOGICAL, field widths, spacing between items
 
 	return &ast.ExprStmt{
-		X: &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X:   ast.NewIdent("intrinsic"),
-				Sel: ast.NewIdent("Print"),
-			},
-			Args: args,
-		},
+		X: tg.astIntrinsicCall("Print", args...),
 	}
 }
 
@@ -1055,35 +1214,24 @@ func (tg *TranspileToGo) transformWriteStmt(write *f90.WriteStmt) ast.Stmt {
 	if isListDirected && isStdout {
 		args := tg.transformExpressions(write.OutputList)
 		return &ast.ExprStmt{
-			X: &ast.CallExpr{
-				Fun: &ast.SelectorExpr{
-					X:   ast.NewIdent("intrinsic"),
-					Sel: ast.NewIdent("Print"),
-				},
-				Args: args,
-			},
+			X: tg.astIntrinsicCall("Print", args...),
 		}
 	}
 
 	// Formatted or file WRITE not yet supported - generate comment
 	return &ast.ExprStmt{
-		X: &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X:   ast.NewIdent("intrinsic"),
-				Sel: ast.NewIdent("Print"),
-			},
-			Args: []ast.Expr{
-				&ast.BasicLit{
-					Kind:  token.STRING,
-					Value: `"[WRITE statement - formatted output not yet supported]"`,
-				},
-			},
-		},
+		X: tg.astIntrinsicCall("Print", &ast.BasicLit{
+			Kind:  token.STRING,
+			Value: `"[WRITE statement - formatted output not yet supported]"`,
+		}),
 	}
 }
 
 // transformIfStmt transforms a Fortran IF statement to Go if/else statement
 func (tg *TranspileToGo) transformIfStmt(ifStmt *f90.IfStmt) ast.Stmt {
+	// Mark variables in condition as used
+	tg.markExpressionsUsed(ifStmt.Condition)
+
 	// Transform the condition
 	condition := tg.transformExpression(ifStmt.Condition)
 	if condition == nil {
@@ -1324,6 +1472,9 @@ func (tg *TranspileToGo) transformDoLoop(loop *f90.DoLoop) ast.Stmt {
 	// Check if this is DO WHILE (Var is empty, Start contains condition)
 	if loop.Var == "" {
 		// DO WHILE loop: for condition { }
+		// Mark variables in condition as used
+		tg.markExpressionsUsed(loop.Start)
+
 		condition := tg.transformExpression(loop.Start)
 		if condition == nil {
 			return nil
@@ -1339,6 +1490,13 @@ func (tg *TranspileToGo) transformDoLoop(loop *f90.DoLoop) ast.Stmt {
 	// Counter-controlled DO loop
 	// Track loop variable (may be implicitly typed)
 	tg.trackImplicitVariable(loop.Var)
+
+	// Mark loop bounds as used
+	tg.markExpressionsUsed(loop.Start)
+	tg.markExpressionsUsed(loop.End)
+	if loop.Step != nil {
+		tg.markExpressionsUsed(loop.Step)
+	}
 
 	start := tg.transformExpression(loop.Start)
 	if start == nil {
@@ -1442,6 +1600,9 @@ func (tg *TranspileToGo) transformCallStmt(call *f90.CallStmt) ast.Stmt {
 	}
 
 	for i, arg := range call.Args {
+		// Mark variables in arguments as used
+		tg.markExpressionsUsed(arg)
+
 		goArg := tg.transformExpression(arg)
 		if goArg == nil {
 			continue
@@ -2128,22 +2289,16 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 		// Generate: param.Set(1, rhs)
 		rhs := tg.transformExpression(assign.Value)
 		return &ast.ExprStmt{
-			X: &ast.CallExpr{
-				Fun: &ast.SelectorExpr{
-					X:   ast.NewIdent(paramName),
-					Sel: ast.NewIdent("Set"),
-				},
-				Args: []ast.Expr{
-					&ast.BasicLit{Kind: token.INT, Value: "1"},
-					rhs,
-				},
-			},
+			X: tg.astMethodCall(paramName, "Set", tg.astIntLit(1), rhs),
 		}
 	}
 
 	// Regular assignment (not to array element)
 	lhs := tg.transformExpression(assign.Target)
 	rhs := tg.transformExpression(assign.Value)
+
+	// Mark RHS variables as used (LHS variables are not "used" in Go's sense - only assigned)
+	tg.markExpressionsUsed(assign.Value)
 
 	if lhs == nil || rhs == nil {
 		return nil
@@ -2220,17 +2375,7 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 									if lhsElemType != rhsElemType {
 										// Different element types - use Equivalence
 										// Generate: intrinsic.Equivalence[LhsType, RhsType](rhs)
-										tg.useImport("github.com/soypat/go-fortran/intrinsic")
-										rhs = &ast.CallExpr{
-											Fun: &ast.IndexListExpr{
-												X: &ast.SelectorExpr{
-													X:   ast.NewIdent("intrinsic"),
-													Sel: ast.NewIdent("Equivalence"),
-												},
-												Indices: []ast.Expr{lhsIdx.Index, rhsIdx.Index},
-											},
-											Args: []ast.Expr{rhsIdent},
-										}
+										rhs = tg.astIntrinsicGeneric2("Equivalence", lhsIdx.Index, rhsIdx.Index, rhsIdent)
 									}
 								}
 							}
@@ -2442,15 +2587,7 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 		// Check if this is a scalar pointer parameter being read
 		// Need to generate x.At(1) instead of just x
 		if v != nil && v.Flags&symbol.FlagPointerParam != 0 && !isArrayType(v.Type) {
-			return &ast.CallExpr{
-				Fun: &ast.SelectorExpr{
-					X:   ast.NewIdent(sanitizeIdent(e.Value)),
-					Sel: ast.NewIdent("At"),
-				},
-				Args: []ast.Expr{
-					&ast.BasicLit{Kind: token.INT, Value: "1"},
-				},
-			}
+			return tg.astMethodCall(e.Value, "At", tg.astIntLit(1))
 		}
 		return ast.NewIdent(sanitizeIdent(e.Value))
 	case *f90.ArrayRef:
@@ -2541,18 +2678,11 @@ func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
 		}
 
 		// Generate: pointerVar.At(int(index))
-		return &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X:   ast.NewIdent(v.PointerVar),
-				Sel: ast.NewIdent("At"),
-			},
-			Args: []ast.Expr{
-				&ast.CallExpr{
-					Fun:  ast.NewIdent("int"),
-					Args: []ast.Expr{index},
-				},
-			},
-		}
+		return tg.astMethodCall(v.PointerVar, "At",
+			&ast.CallExpr{
+				Fun:  ast.NewIdent("int"),
+				Args: []ast.Expr{index},
+			})
 	}
 
 	// Check if this is a CHARACTER variable with substring operation

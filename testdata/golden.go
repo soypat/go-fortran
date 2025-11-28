@@ -7,7 +7,7 @@ var HOLDRT = struct {
 	SUMXRQ *intrinsic.Array[float32]
 	YMNRT  *intrinsic.Array[float32]
 	MATRIX *intrinsic.Array[float32]
-}{YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20), YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512)}
+}{SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20), YQR: intrinsic.NewArray[float32](256)}
 var SHARED struct {
 	X int32
 	Y int32
@@ -129,6 +129,8 @@ func LEVEL05() {
 	matrix.Set(1.0, int(3), int(3))
 	intrinsic.Print("LEVEL 5: matrix(1,1) =", matrix.At(int(1), int(1)))
 	intrinsic.Print("LEVEL 5: matrix(2,2) =", matrix.At(int(2), int(2)))
+	_ = arr1
+	_ = matrix
 }
 func LEVEL06() {
 	var (
@@ -154,6 +156,8 @@ func LEVEL06() {
 		}
 	}
 	intrinsic.Print("LEVEL 6: nested loop count =", sum_val)
+	_ = arr1
+	_ = j
 }
 func LEVEL07() {
 	var arr1 = intrinsic.NewArray[int32](5)
@@ -304,6 +308,7 @@ func LEVEL13() {
 		count = i
 	}
 	intrinsic.Print("LEVEL 13: last count =", count)
+	_ = arr
 }
 func LEVEL14() {
 	var (
@@ -522,6 +527,9 @@ label200:
 label300:
 	intrinsic.Print("LEVEL 21: Choice was 3")
 label400:
+	;
+	_ = choice
+	_ = x
 }
 func LEVEL22() {
 }
@@ -543,6 +551,8 @@ func LEVEL24() {
 	vec2 = intrinsic.NewArrayFromValues[int32]([]int32{100, 200, 300, 400, 500})
 	intrinsic.Print("LEVEL 24: vec2(1) =", vec2.At(int(1)))
 	intrinsic.Print("LEVEL 24: vec2(5) =", vec2.At(int(5)))
+	_ = vec1
+	_ = vec2
 }
 func LEVEL25() {
 	var i1 int8
@@ -646,6 +656,9 @@ func LEVEL29() {
 	}
 	intrinsic.Print("LEVEL 29: AA(2) ", NPAA.At(int(2)))
 	intrinsic.Print("LEVEL 29: Initialized", MAXMUM-M+1, "elements")
+	_ = I_DEFALT
+	_ = N
+	_ = NPLL
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
@@ -660,6 +673,7 @@ func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 		arr.Set(arr.At(int(i))*2, int(i))
 	}
 	intrinsic.Print("LEVEL 7: Inside MODIFY_ARRAY")
+	_ = i
 }
 func FACTORIAL(n int32) int32 {
 	var (
@@ -693,4 +707,5 @@ func FIBONACCI(n int32) int32 {
 		b = temp
 	}
 	return b
+	_ = i
 }
