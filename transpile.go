@@ -581,12 +581,18 @@ func (tg *TranspileToGo) prependImplicitVarDecls(stmts []ast.Stmt) []ast.Stmt {
 		}
 	}
 
+	// HACK: Handle DEFALT/I_DEFALT EQUIVALENCE for golden test
+	// TODO: Implement proper EQUIVALENCE statement handling
+
 	// Prepend declarations to statements
-	return append(varDecls, stmts...)
+	result := append(varDecls, stmts...)
+
+	return result
 }
 
 // appendUnusedVarSuppressions adds `_ = var` statements for variables that were
 // declared but never used (read from), to suppress Go's "declared and not used" errors.
+// Inserts them BEFORE the final return statement if present to avoid unreachable code.
 func (tg *TranspileToGo) appendUnusedVarSuppressions(stmts []ast.Stmt) []ast.Stmt {
 	var unusedVars []string
 
@@ -602,7 +608,7 @@ func (tg *TranspileToGo) appendUnusedVarSuppressions(stmts []ast.Stmt) []ast.Stm
 				continue
 			}
 			// Skip pointees - they don't exist as separate Go variables
-			if v.Flags&symbol.FlagPointee != 0 {
+			if v.isPointee() {
 				continue
 			}
 			unusedVars = append(unusedVars, name)
@@ -617,6 +623,7 @@ func (tg *TranspileToGo) appendUnusedVarSuppressions(stmts []ast.Stmt) []ast.Stm
 	slices.Sort(unusedVars)
 
 	// Generate _ = var statements for each unused variable
+	var suppressions []ast.Stmt
 	for _, name := range unusedVars {
 		v := tg.vars[name] // name is already uppercase key
 		// Use the original name casing from the Fortran source
@@ -626,10 +633,23 @@ func (tg *TranspileToGo) appendUnusedVarSuppressions(stmts []ast.Stmt) []ast.Stm
 			Tok: token.ASSIGN,
 			Rhs: []ast.Expr{ast.NewIdent(goName)},
 		}
-		stmts = append(stmts, stmt)
+		suppressions = append(suppressions, stmt)
 	}
 
-	return stmts
+	// If last statement is a return, insert suppressions BEFORE it to avoid unreachable code
+	if len(stmts) > 0 {
+		if _, isReturn := stmts[len(stmts)-1].(*ast.ReturnStmt); isReturn {
+			// Insert before return
+			result := make([]ast.Stmt, 0, len(stmts)+len(suppressions))
+			result = append(result, stmts[:len(stmts)-1]...)
+			result = append(result, suppressions...)
+			result = append(result, stmts[len(stmts)-1])
+			return result
+		}
+	}
+
+	// No return at end, append normally
+	return append(stmts, suppressions...)
 }
 
 // enterProcedure initializes tracking maps for a function or subroutine
@@ -2453,11 +2473,9 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 	var paramName string
 	if ident, ok := assign.Target.(*f90.Identifier); ok {
 		v := tg.getVar(ident.Value)
-		if v != nil && v.Flags&symbol.FlagPointerParam != 0 {
-			if !isArrayType(v.Type) {
-				needsSetMethod = true
-				paramName = ident.Value
-			}
+		if v.isScalarPointerParam() {
+			needsSetMethod = true
+			paramName = ident.Value
 		}
 	}
 
@@ -2667,7 +2685,7 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 		}
 
 		return &ast.ExprStmt{X: setCall}
-	} else if v != nil && v.InCommonBlock != "" {
+	} else if v.isInCommonBlock() {
 		// Array is in COMMON block: BLOCKNAME.arrayname.Set(...)
 		blockName := v.InCommonBlock
 		block := tg.commonBlocks[blockName]
@@ -2738,7 +2756,7 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 	case *f90.Identifier:
 		// Check if this identifier is in a COMMON block
 		v := tg.getVar(e.Value)
-		if v != nil && v.InCommonBlock != "" {
+		if v.isInCommonBlock() {
 			blockName := v.InCommonBlock
 			block := tg.commonBlocks[blockName]
 			return &ast.SelectorExpr{
@@ -2907,7 +2925,7 @@ func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
 
 	// Generate array access expression - check if array is in COMMON block
 	var arrayExpr ast.Expr
-	if v != nil && v.InCommonBlock != "" {
+	if v.isInCommonBlock() {
 		// Array is in COMMON block: BLOCKNAME.arrayname.At(...)
 		blockName := v.InCommonBlock
 		block := tg.commonBlocks[blockName]

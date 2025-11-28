@@ -7,7 +7,7 @@ var HOLDRT = struct {
 	SUMXRQ *intrinsic.Array[float32]
 	YMNRT  *intrinsic.Array[float32]
 	MATRIX *intrinsic.Array[float32]
-}{SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20), YQR: intrinsic.NewArray[float32](256)}
+}{YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20), YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512)}
 var SHARED struct {
 	X int32
 	Y int32
@@ -706,6 +706,6 @@ func FIBONACCI(n int32) int32 {
 		a = b
 		b = temp
 	}
-	return b
 	_ = i
+	return b
 }
