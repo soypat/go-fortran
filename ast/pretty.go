@@ -8,6 +8,7 @@ import (
 // PrettyPrint generates a formatted Fortran source code string from an AST node.
 func PrettyPrint(node Node) string {
 	var buf bytes.Buffer
+
 	pp(&buf, node, 0)
 	return buf.String()
 }
@@ -54,10 +55,10 @@ func pp(buf *bytes.Buffer, node Node, indent int) {
 		// TypeSpec has AppendString method, not String
 		tmp := n.Type.AppendString(nil)
 		buf.Write(tmp)
-		if len(n.Attributes) > 0 {
-			for _, attr := range n.Attributes {
+		if len(n.Type.Attributes) > 0 {
+			for _, attr := range n.Type.Attributes {
 				buf.WriteString(", ")
-				buf.WriteString(attr.String())
+				buf.WriteString(string(attr.AppendString(nil)))
 			}
 		}
 		buf.WriteString(" :: ")

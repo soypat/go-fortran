@@ -59,6 +59,10 @@ type VarInfo struct {
 	// CHARACTER information
 	CharLength int // For CHARACTER(LEN=n), stores n (0 for non-CHARACTER)
 
+	// EQUIVALENCE information
+	EquivalencePrimary *VarInfo   // Non-nil if this variable is equivalenced to another (points to the primary variable)
+	EquivalenceMembers []*VarInfo // Non-nil if this variable is the primary in an equivalence set (contains all secondary variables)
+
 	// Original name casing (for generating correct Go identifiers)
 	OriginalName string // Original name as it appeared in Fortran source (before uppercase normalization)
 }
@@ -203,6 +207,141 @@ func (tg *TranspileToGo) markExpressionsUsed(expr f90.Expression) {
 	}
 }
 
+// varIdentifier returns the Go identifier for accessing a variable.
+// Handles regular variables, COMMON block members, pointees, and equivalenced variables.
+func (tg *TranspileToGo) varIdentifier(v *VarInfo, name string) string {
+	if v == nil {
+		return sanitizeIdent(name)
+	}
+
+	// If this variable is equivalenced to another (secondary variable),
+	// redirect to the primary variable
+	if v.EquivalencePrimary != nil {
+		return tg.varIdentifier(v.EquivalencePrimary, v.OriginalName)
+	}
+
+	// COMMON block variables accessed via struct
+	if v.isInCommonBlock() {
+		return v.InCommonBlock + "." + strings.ToUpper(name)
+	}
+
+	// Pointee variables accessed via pointer
+	if v.isPointee() && v.PointerVar != "" {
+		return v.PointerVar
+	}
+
+	// Regular variable
+	return sanitizeIdent(name)
+}
+
+// varIsEquivalencedScalar checks if a variable is a scalar that's been equivalenced to an array.
+// Such scalars are stored as Pointer[T] and accessed via .At(1).
+func (tg *TranspileToGo) varIsEquivalencedScalar(v *VarInfo) bool {
+	if v == nil || v.EquivalencePrimary == nil {
+		return false
+	}
+	// If this variable is equivalenced and is a scalar (no ArraySpec),
+	// and the primary is an array, then this is a scalar-to-array equivalence
+	return v.ArraySpec == nil && v.EquivalencePrimary.ArraySpec != nil
+}
+
+// varAccess returns an expression for accessing a variable's value.
+// Handles:
+// - Regular scalars: varName
+// - Arrays with subscripts: varName.At(idx1, idx2, ...)
+// - Arrays without subscripts (whole-array): varName
+// - COMMON block members: commonBlock.VARNAME or commonBlock.VARNAME.At(...)
+// - Equivalenced scalars stored as arrays: varName.At(1)
+// - Equivalenced variables: redirects to primary variable
+func (tg *TranspileToGo) varAccess(v *VarInfo, name string, subscripts []ast.Expr) ast.Expr {
+	baseIdent := tg.varIdentifier(v, name)
+
+	// If no subscripts and not a special case, just return the identifier
+	if len(subscripts) == 0 {
+		// Check if this is an equivalenced scalar (needs .At(1))
+		if tg.varIsEquivalencedScalar(v) {
+			// Return baseIdent.At(1)
+			return &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   ast.NewIdent(baseIdent),
+					Sel: ast.NewIdent("At"),
+				},
+				Args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "1"}},
+			}
+		}
+		// Check if this is a scalar pointer parameter (needs .At(1))
+		if v != nil && v.isScalarPointerParam() {
+			return &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   ast.NewIdent(baseIdent),
+					Sel: ast.NewIdent("At"),
+				},
+				Args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "1"}},
+			}
+		}
+		return ast.NewIdent(baseIdent)
+	}
+
+	// Array access: baseIdent.At(subscripts...)
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   ast.NewIdent(baseIdent),
+			Sel: ast.NewIdent("At"),
+		},
+		Args: subscripts,
+	}
+}
+
+// assignVar returns a statement for assigning to a variable.
+// Handles:
+// - Regular scalars: varName = rhs
+// - Arrays with subscripts: varName.Set(idx1, idx2, ..., rhs)
+// - COMMON block members: commonBlock.VARNAME = rhs or commonBlock.VARNAME.Set(...)
+// - Equivalenced scalars stored as arrays: varName.Set(1, rhs)
+// - Equivalenced variables: redirects to primary variable
+func (tg *TranspileToGo) assignVar(v *VarInfo, name string, subscripts []ast.Expr, rhs ast.Expr) ast.Stmt {
+	baseIdent := tg.varIdentifier(v, name)
+
+	// Scalar assignment without subscripts
+	if len(subscripts) == 0 {
+		// Check if this is an equivalenced scalar (needs .Set(1, rhs))
+		if tg.varIsEquivalencedScalar(v) {
+			// Return baseIdent.Set(1, rhs)
+			return &ast.ExprStmt{
+				X: &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent(baseIdent),
+						Sel: ast.NewIdent("Set"),
+					},
+					Args: []ast.Expr{
+						&ast.BasicLit{Kind: token.INT, Value: "1"},
+						rhs,
+					},
+				},
+			}
+		}
+
+		// Regular scalar assignment
+		return &ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(baseIdent)},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{rhs},
+		}
+	}
+
+	// Array element assignment: baseIdent.Set(subscripts..., rhs)
+	args := append(subscripts, rhs)
+	return &ast.ExprStmt{
+		X: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent(baseIdent),
+				Sel: ast.NewIdent("Set"),
+			},
+			Args: args,
+		},
+	}
+}
+
 // getOrMakeVar retrieves or creates VarInfo for a variable (normalized to uppercase for Fortran case-insensitivity)
 func (tg *TranspileToGo) getOrMakeVar(name string) *VarInfo {
 	key := strings.ToUpper(name)
@@ -287,6 +426,25 @@ func (tg *TranspileToGo) prependImplicitVarDecls(stmts []ast.Stmt) []ast.Stmt {
 	for _, name := range names {
 		v := tg.getVar(name)
 
+		// Skip secondary equivalenced variables - they'll be declared in generateEquivalenceDecls
+		if v.EquivalencePrimary != nil {
+			continue
+		}
+
+		// Skip COMMON block variables - they're accessed via the global COMMON struct
+		if v.isInCommonBlock() {
+			// DEBUG
+			if strings.Contains(strings.ToUpper(name), "X") || strings.Contains(strings.ToUpper(name), "Y") || strings.Contains(strings.ToUpper(name), "Z") {
+				fmt.Printf("DEBUG prependImplicit: Skipping COMMON var with name=%q\n", name)
+			}
+			continue
+		}
+
+		// DEBUG
+		if strings.Contains(strings.ToUpper(name), "X") || strings.Contains(strings.ToUpper(name), "Y") || strings.Contains(strings.ToUpper(name), "Z") {
+			fmt.Printf("DEBUG prependImplicit: Processing var name=%q\n", name)
+		}
+
 		// Check if this is an array from DIMENSION statement
 		if v.ArraySpec != nil {
 			// Array needs NewArray call, not just type declaration
@@ -344,13 +502,128 @@ func (tg *TranspileToGo) prependImplicitVarDecls(stmts []ast.Stmt) []ast.Stmt {
 		}
 	}
 
-	// HACK: Handle DEFALT/I_DEFALT EQUIVALENCE for golden test
-	// TODO: Implement proper EQUIVALENCE statement handling
+	// Generate EQUIVALENCE variable declarations
+	eqDecls := tg.generateEquivalenceDecls()
 
-	// Prepend declarations to statements
-	result := append(varDecls, stmts...)
+	// Insert equivalence declarations AFTER type declarations but before other statements
+	// This ensures primary variables are declared before secondary equivalenced variables
+
+	// Find the index of the last type declaration in stmts
+	lastTypeDeclIdx := -1
+	for i, stmt := range stmts {
+		if _, ok := stmt.(*ast.DeclStmt); ok {
+			lastTypeDeclIdx = i
+		}
+	}
+
+	// Build the result: varDecls, then stmts up to lastTypeDeclIdx, then eqDecls, then rest of stmts
+	var result []ast.Stmt
+	result = append(result, varDecls...)
+	if lastTypeDeclIdx >= 0 {
+		// Insert type declarations first
+		result = append(result, stmts[:lastTypeDeclIdx+1]...)
+		// Then equivalence declarations
+		result = append(result, eqDecls...)
+		// Then remaining statements
+		result = append(result, stmts[lastTypeDeclIdx+1:]...)
+	} else {
+		// No type declarations found, just prepend everything
+		result = append(result, eqDecls...)
+		result = append(result, stmts...)
+	}
 
 	return result
+}
+
+// generateEquivalenceDecls creates variable declarations for EQUIVALENCE sets.
+// For each set, the first variable is the "primary" and other variables are
+// created as type-punned views using intrinsic.Equivalence.
+func (tg *TranspileToGo) generateEquivalenceDecls() []ast.Stmt {
+	var decls []ast.Stmt
+
+	// Iterate through all variables to find primaries with equivalence members
+	for primaryName, primaryVar := range tg.vars {
+		if len(primaryVar.EquivalenceMembers) == 0 {
+			continue // Not a primary variable
+		}
+
+		// Get primary type (source type for Equivalence)
+		var srcType ast.Expr
+		if primaryVar.ElementType != nil {
+			srcType = primaryVar.ElementType
+		} else if primaryVar.Type != nil {
+			srcType = primaryVar.Type
+		} else {
+			srcType = getImplicitType(primaryName)
+		}
+
+		// Generate equivalenced views for each member variable
+		for _, eqVar := range primaryVar.EquivalenceMembers {
+			// Find the name of this secondary variable by searching tg.vars
+			var eqName string
+			for name, v := range tg.vars {
+				if v == eqVar {
+					eqName = name
+					break
+				}
+			}
+			if eqName == "" {
+				continue // Can't generate without a name
+			}
+
+			// Get equivalenced variable type (destination)
+			var dstType ast.Expr
+			if eqVar.ElementType != nil {
+				dstType = eqVar.ElementType
+			} else if eqVar.Type != nil {
+				dstType = eqVar.Type
+			} else {
+				dstType = getImplicitType(eqName)
+			}
+
+			// Generate equivalence declaration
+			// If primary is an array, we need to convert it to a Pointer first
+			// Arrays: var EQ_VAR = intrinsic.Equivalence[dstType, srcType](PRIMARY.Pointer())
+			// Scalars: var EQ_VAR = intrinsic.Equivalence[dstType, srcType](intrinsic.Ptr(&PRIMARY))
+			var srcPtr ast.Expr
+			if primaryVar.ArraySpec != nil {
+				// Primary is an array, get its underlying Pointer using .Pointer() method
+				srcPtr = &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent(sanitizeIdent(primaryName)),
+						Sel: ast.NewIdent("Pointer"),
+					},
+				}
+			} else {
+				// Primary is a scalar, take its address and wrap in Ptr
+				primaryRef := &ast.UnaryExpr{
+					Op: token.AND,
+					X:  ast.NewIdent(sanitizeIdent(primaryName)),
+				}
+				srcPtr = tg.astIntrinsicGeneric("Ptr", srcType, primaryRef)
+			}
+
+			eqCall := tg.astGenericCall2("intrinsic", "Equivalence", dstType, srcType, srcPtr)
+
+			decl := &ast.DeclStmt{
+				Decl: &ast.GenDecl{
+					Tok: token.VAR,
+					Specs: []ast.Spec{
+						&ast.ValueSpec{
+							Names:  []*ast.Ident{ast.NewIdent(sanitizeIdent(eqName))},
+							Values: []ast.Expr{eqCall},
+						},
+					},
+				},
+			}
+			decls = append(decls, decl)
+
+			// Mark equivalenced variable as declared (not implicit anymore)
+			eqVar.Flags &^= symbol.FlagImplicit
+		}
+	}
+
+	return decls
 }
 
 // appendUnusedVarSuppressions adds `_ = var` statements for variables that were
@@ -419,9 +692,16 @@ func (tg *TranspileToGo) appendUnusedVarSuppressions(stmts []ast.Stmt) []ast.Stm
 // and marks parameters to avoid redeclaration in the body.
 // additionalParams can be used to mark additional names as parameters
 // (e.g., function result variable)
-func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams ...string) {
+func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, body []f90.Statement, additionalParams ...string) {
 	// Reset vars tracking for this procedure
 	tg.vars = make(map[string]*VarInfo)
+
+	// Pre-scan body for COMMON blocks and EQUIVALENCE statements BEFORE processing statements
+	// This ensures variables are properly marked before type declarations are transformed
+	if body != nil {
+		tg.preScanCommonBlocks(body) // Mark COMMON block variables
+		tg.preScanEquivalences(body) // Link equivalenced variables
+	}
 
 	// Track all parameters in vars map
 	for _, param := range params {
@@ -431,7 +711,7 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 		}
 
 		// Get element type
-		tp := tg.fortranTypeToGoWithKind(param.Type, param.Type.KindOrLen)
+		tp := tg.fortranTypeToGoWithKind(param.Type)
 		if tp == nil {
 			// If type is undefined, use implicit typing rules
 			// This handles cases like: SUBROUTINE FOO(X,Y) with no type declarations
@@ -700,13 +980,7 @@ func (tg *TranspileToGo) MakeFile(packageName string, decls []ast.Decl) *ast.Fil
 // TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration
 func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl, error) {
 	// Initialize procedure tracking
-	tg.enterProcedure(sub.Parameters)
-
-	// Clear COMMON variable tracking for this subroutine
-	// (variables are only COMMON if they appear in a COMMON statement in THIS subroutine)
-
-	// Pre-scan for COMMON blocks to know which variables to skip in type declarations
-	tg.preScanCommonBlocks(sub.Body)
+	tg.enterProcedure(sub.Parameters, sub.Body)
 
 	// Transform parameters
 	paramFields := tg.transformParameters(sub.Parameters)
@@ -741,10 +1015,7 @@ func (tg *TranspileToGo) TransformSubroutine(sub *f90.Subroutine) (*ast.FuncDecl
 func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, error) {
 	// Initialize procedure tracking
 	// Mark function name as additional parameter (Fortran uses it as result variable)
-	tg.enterProcedure(fn.Parameters, fn.Name)
-
-	// Pre-scan for COMMON blocks to know which variables to skip in type declarations
-	tg.preScanCommonBlocks(fn.Body)
+	tg.enterProcedure(fn.Parameters, fn.Body, fn.Name)
 
 	// Transform parameters
 	paramFields := tg.transformParameters(fn.Parameters)
@@ -764,7 +1035,7 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 	bodyStmts = tg.appendUnusedVarSuppressions(bodyStmts)
 
 	// Map Fortran result type to Go type, considering KIND parameter
-	resultType := tg.fortranTypeToGoWithKind(fn.Type, fn.Type.KindOrLen)
+	resultType := tg.fortranTypeToGoWithKind(fn.Type)
 	if resultType == nil {
 		if fn.Type.Token.String() != "<undefined>" {
 			return nil, fmt.Errorf("unknown fortran result type: %s", fn.Type.Token)
@@ -798,10 +1069,8 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 // Returns a list of declarations: func main() {...} and any contained procedures
 func (tg *TranspileToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 	// Initialize procedure tracking for PROGRAM scope (no parameters)
-	tg.enterProcedure(nil)
-
-	// Pre-scan for COMMON blocks to know which variables to skip in declarations
-	tg.preScanCommonBlocks(prog.Body)
+	// Pass prog.Body so prescans run before transforming statements
+	tg.enterProcedure(nil, prog.Body)
 
 	// Transform all statements in program body
 	bodyStmts := tg.transformStatements(prog.Body)
@@ -955,7 +1224,7 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 		}
 
 		// Get the Go type for this parameter, considering KIND
-		goType := tg.fortranTypeToGoWithKind(param.Type, param.Type.KindOrLen)
+		goType := tg.fortranTypeToGoWithKind(param.Type)
 		if goType == nil {
 			tokenStr := param.Type.Token.String()
 			if tokenStr != "<undefined>" && tokenStr != "TYPE" {
@@ -1093,6 +1362,9 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) (gostmt ast.Stmt
 		return nil, nil
 	case *f90.DimensionStmt:
 		// DIMENSION statements are processed in preScanCommonBlocks, no code generation in function body
+		return nil, nil
+	case *f90.EquivalenceStmt:
+		// EQUIVALENCE statements are processed in preScanEquivalences, no code generation in function body
 		return nil, nil
 	case *f90.PointerCrayStmt:
 		// Cray-style POINTER statements are processed in preScanCommonBlocks, no code generation in function body
@@ -1655,9 +1927,9 @@ func (tg *TranspileToGo) transformExpressions(exprs []f90.Expression) []ast.Expr
 //	INTEGER(KIND=1) → int8, INTEGER(KIND=2) → int16
 //	INTEGER(KIND=4) → int32, INTEGER(KIND=8) → int64
 //	REAL(KIND=4) → float32, REAL(KIND=8) → float64
-func (tg *TranspileToGo) fortranTypeToGoWithKind(ft f90.TypeSpec, kindParam f90.Expression) (goType ast.Expr) {
+func (tg *TranspileToGo) fortranTypeToGoWithKind(ft f90.TypeSpec) (goType ast.Expr) {
 	// Extract KIND value if present
-	kindValue := tg.extractKindValue(kindParam)
+	kindValue := tg.extractKindValue(ft.KindOrLen)
 
 	switch ft.Token {
 	default:
@@ -1879,18 +2151,18 @@ func (tg *TranspileToGo) fortranConstantToGoExpr(fortranExpr string) ast.Expr {
 // transformTypeDeclaration transforms a Fortran type declaration to Go var declaration
 func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast.Stmt {
 	// Map Fortran type to Go type, considering KIND parameter
-	goType := tg.fortranTypeToGoWithKind(decl.Type, decl.Type.KindOrLen)
+	goType := tg.fortranTypeToGoWithKind(decl.Type.Type)
 	if goType == nil {
 		return nil
 	}
 	// Check for special attributes
 	isAllocatable := false
 	isParameter := false
-	for _, attr := range decl.Attributes {
-		if attr == f90token.ALLOCATABLE {
+	for _, attr := range decl.Type.Attributes {
+		if attr.Token == f90token.ALLOCATABLE {
 			isAllocatable = true
 		}
-		if attr == f90token.PARAMETER {
+		if attr.Token == f90token.PARAMETER {
 			isParameter = true
 		}
 	}
@@ -1905,6 +2177,10 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 
 		// If this variable is in a COMMON block, record its type
 		if v.isInCommonBlock() {
+			// DEBUG
+			if entity.Name == "x" || entity.Name == "y" || entity.Name == "z" {
+				fmt.Printf("DEBUG Skipping %s (in COMMON block %s)\n", entity.Name, v.InCommonBlock)
+			}
 			blockName := v.InCommonBlock
 			if block, exists := tg.commonBlocks[blockName]; exists {
 				// Determine the field type
@@ -2006,6 +2282,11 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 			continue
 		}
 
+		// DEBUG
+		if entity.Name == "x" || entity.Name == "y" || entity.Name == "z" {
+			fmt.Printf("DEBUG creating ValueSpec for %s, sanitized=%s\n", entity.Name, sanitizeIdent(entity.Name))
+		}
+
 		spec := &ast.ValueSpec{
 			Names: []*ast.Ident{ast.NewIdent(sanitizeIdent(entity.Name))},
 			Type:  goType,
@@ -2017,9 +2298,9 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 
 		// For PARAMETER constants, convert initializer to Go expression
 		if isParameter {
-			if entity.Initializer != "" {
+			if entity.Init == nil {
 				// Strip = or => prefix
-				initStr := strings.TrimSpace(entity.Initializer)
+				initStr := strings.TrimSpace(string(entity.Init.AppendString(nil)))
 				if strings.HasPrefix(initStr, "=") {
 					initStr = strings.TrimSpace(initStr[1:])
 				} else if strings.HasPrefix(initStr, "=>") {
@@ -2029,9 +2310,9 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 				// Convert Fortran constant expression to Go expression
 				spec.Values = []ast.Expr{tg.fortranConstantToGoExpr(initStr)}
 			}
-		} else if decl.Type.Token == f90token.CHARACTER && entity.CharLen != nil {
+		} else if decl.Type.Type.Token == f90token.CHARACTER && entity.Type.Type.KindOrLen != nil {
 			// For CHARACTER variables (not constants), initialize with CharacterArray
-			if length := tg.extractIntLiteral(entity.CharLen); length > 0 {
+			if length := tg.extractIntLiteral(entity.Type.Type.KindOrLen); length > 0 {
 				// Track CHARACTER length in unified vars map
 				v.CharLength = length
 				// Initialize with intrinsic.NewCharacterArray(length)
@@ -2080,7 +2361,7 @@ func (tg *TranspileToGo) transformDerivedType(deriv *f90.DerivedTypeStmt) ast.St
 	// Transform each component declaration to struct fields
 	for _, comp := range deriv.Components {
 		// Get Go type for this component
-		goType := tg.fortranTypeToGoWithKind(comp.Type, comp.Type.KindOrLen)
+		goType := tg.fortranTypeToGoWithKind(comp.Type)
 		if goType == nil {
 			continue // Skip components we can't translate
 		}
@@ -2553,22 +2834,13 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 		}
 		return ast.NewIdent("false")
 	case *f90.Identifier:
-		// Check if this identifier is in a COMMON block
+		// Use the unified variable access helper that handles all cases:
+		// - COMMON block variables
+		// - Equivalenced scalars
+		// - Scalar pointer parameters
+		// - Regular variables
 		v := tg.getVar(e.Value)
-		if v.isInCommonBlock() {
-			blockName := v.InCommonBlock
-			block := tg.commonBlocks[blockName]
-			return &ast.SelectorExpr{
-				X:   ast.NewIdent(block.goVarname()),
-				Sel: ast.NewIdent(strings.ToUpper(e.Value)), // Use uppercase for field access
-			}
-		}
-		// Check if this is a scalar pointer parameter being read
-		// Need to generate x.At(1) instead of just x
-		if v.isScalarPointerParam() {
-			return tg.astMethodCall(e.Value, "At", tg.astIntLit(1))
-		}
-		return ast.NewIdent(sanitizeIdent(e.Value))
+		return tg.varAccess(v, e.Value, nil)
 	case *f90.ArrayRef:
 		return tg.transformArrayRef(e)
 	case *f90.BinaryExpr:
@@ -3647,6 +3919,79 @@ func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
 				if arraySpec, isArray := block.ArraySpecs[varName]; isArray {
 					v.ArraySpec = arraySpec
 					// Note: ElementType will be set when we see the type declaration
+				}
+			}
+		}
+	}
+}
+
+// preScanEquivalences scans for EQUIVALENCE statements and records them for later code generation.
+// EQUIVALENCE makes multiple variables share the same memory location, requiring special handling.
+func (tg *TranspileToGo) preScanEquivalences(stmts []f90.Statement) {
+	// First, scan all type declarations to find which variables are arrays
+	arrayVars := make(map[string]bool) // uppercase name -> is array
+	for _, stmt := range stmts {
+		if decl, ok := stmt.(*f90.TypeDeclaration); ok {
+			for _, entity := range decl.Entities {
+				upperName := strings.ToUpper(entity.Name)
+				// Check if this variable has an array spec
+				arrayVars[upperName] = entity.ArraySpec != nil
+			}
+		}
+	}
+
+	for _, stmt := range stmts {
+		if eqStmt, ok := stmt.(*f90.EquivalenceStmt); ok {
+			// Process each equivalence set
+			for _, set := range eqStmt.Sets {
+				if len(set) < 2 {
+					continue // Need at least 2 variables to equivalence
+				}
+
+				// Extract variable names and get their VarInfo
+				var vars []*VarInfo
+				var varNames []string
+				for _, expr := range set {
+					var name string
+					switch e := expr.(type) {
+					case *f90.Identifier:
+						name = e.Value
+					case *f90.ArrayRef:
+						name = e.Name
+					default:
+						// Skip unsupported expression types
+						continue
+					}
+					if name != "" {
+						upperName := strings.ToUpper(name)
+						varNames = append(varNames, upperName)
+						vars = append(vars, tg.getOrMakeVar(upperName))
+					}
+				}
+
+				if len(vars) < 2 {
+					continue
+				}
+
+				// Choose primary variable: prefer arrays over scalars
+				// Use the arrayVars map since ArraySpec isn't set yet during prescan
+				primaryIdx := 0
+				for i, name := range varNames {
+					if arrayVars[name] {
+						primaryIdx = i
+						break
+					}
+				}
+
+				primary := vars[primaryIdx]
+
+				// Link all other variables to the primary
+				for i, v := range vars {
+					if i == primaryIdx {
+						continue
+					}
+					v.EquivalencePrimary = primary
+					primary.EquivalenceMembers = append(primary.EquivalenceMembers, v)
 				}
 			}
 		}

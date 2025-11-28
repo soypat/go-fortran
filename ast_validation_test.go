@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/soypat/go-fortran/ast"
+	"github.com/soypat/go-fortran/token"
 )
 
 // TestParameterTypeInfo verifies that parameter type information is correctly
@@ -384,8 +385,8 @@ END PROGRAM test
 					for _, entity := range entities {
 						if entity.Name == exp.name {
 							found = true
-							actualInit = entity.Initializer
-							actualCharLenExpr = entity.CharLen
+							actualInit = string(entity.Init.AppendString(nil))
+							actualCharLenExpr = entity.Type.Type.KindOrLen
 							// Convert Expression to string for comparison if present
 							if actualCharLenExpr != nil {
 								actualCharLen = exprToString(actualCharLenExpr)
@@ -398,7 +399,7 @@ END PROGRAM test
 									if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
 										for _, e := range typeDecl.Entities {
 											if e.Name == entity.Name {
-												actualType = typeDecl.Type.Token.String()
+												actualType = typeDecl.Type.Type.Token.String()
 												break
 											}
 										}
@@ -409,7 +410,7 @@ END PROGRAM test
 									if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
 										for _, e := range typeDecl.Entities {
 											if e.Name == entity.Name {
-												actualType = typeDecl.Type.Token.String()
+												actualType = typeDecl.Type.Type.Token.String()
 												break
 											}
 										}
@@ -485,7 +486,7 @@ END SUBROUTINE test
 	// Check for DIMENSION attribute in the attributes list
 	hasDimension := false
 	for _, attr := range arrParam.Attributes {
-		if attr.String() == "DIMENSION" {
+		if attr.Token == token.DIMENSION {
 			hasDimension = true
 			break
 		}
@@ -506,7 +507,7 @@ END SUBROUTINE test
 
 	hasOptional := false
 	for _, attr := range optParam.Attributes {
-		if attr.String() == "OPTIONAL" {
+		if attr.Token == token.OPTIONAL {
 			hasOptional = true
 			break
 		}
@@ -948,6 +949,7 @@ func exprEqual(t *testing.T, got, want ast.Expression) bool {
 		return false
 	}
 }
+
 // TestKindParameterSupport verifies that KIND parameters are correctly captured
 // in type declarations for INTEGER, REAL, and other types
 func TestKindParameterSupport(t *testing.T) {
@@ -1044,15 +1046,15 @@ END PROGRAM`,
 
 			// Check KIND parameter
 			if tt.expectKind {
-				if typeDecl.Type.KindOrLen == nil {
+				if typeDecl.Type.Type.KindOrLen == nil {
 					t.Errorf("Expected KindParam to be non-nil")
 					return
 				}
 
 				if tt.kindIsLiteral {
-					lit, ok := typeDecl.Type.KindOrLen.(*ast.IntegerLiteral)
+					lit, ok := typeDecl.Type.Type.KindOrLen.(*ast.IntegerLiteral)
 					if !ok {
-						t.Errorf("Expected KIND to be IntegerLiteral, got %T", typeDecl.Type.KindOrLen)
+						t.Errorf("Expected KIND to be IntegerLiteral, got %T", typeDecl.Type.Type.KindOrLen)
 						return
 					}
 					if lit.Value != tt.kindValue {
@@ -1060,8 +1062,8 @@ END PROGRAM`,
 					}
 				}
 			} else {
-				if typeDecl.Type.KindOrLen != nil {
-					t.Errorf("Expected KindOrLen to be nil for default kind, got %T", typeDecl.Type.KindOrLen)
+				if typeDecl.Type.Type.KindOrLen != nil {
+					t.Errorf("Expected KindOrLen to be nil for default kind, got %T", typeDecl.Type.Type.KindOrLen)
 				}
 			}
 		})
@@ -1145,14 +1147,14 @@ END PROGRAM`,
 			entity := typeDecl.Entities[0]
 
 			if tt.expectLength {
-				if entity.CharLen == nil {
+				if entity.Type.Type.KindOrLen == nil {
 					t.Errorf("Expected CharLen to be non-nil Expression")
 					return
 				}
 
-				lit, ok := entity.CharLen.(*ast.IntegerLiteral)
+				lit, ok := entity.Type.Type.KindOrLen.(*ast.IntegerLiteral)
 				if !ok {
-					t.Errorf("Expected CharLen to be IntegerLiteral, got %T", entity.CharLen)
+					t.Errorf("Expected CharLen to be IntegerLiteral, got %T", entity.Type.Type.KindOrLen)
 					return
 				}
 

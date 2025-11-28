@@ -13,7 +13,7 @@ PROGRAM GDYN2E
      &       B_HEI / 5.49D-3 / &
      &       C_HEI / 1.14D-3 /
       INTEGER ::  MAXDM1 =   6000000
-      INTEGER :: ISTATAA
+      INTEGER :: ISTATAA, IT
       use antphc_module
       POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1))
       COMMON/TRQANG/DTQDAN(3,3,2)

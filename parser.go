@@ -1,11 +1,14 @@
 package fortran
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -20,6 +23,31 @@ var debugNoStuckCheck string
 type (
 	statementParseFn func() ast.Statement // For statement-level constructs
 )
+
+// symflags for parser.
+type symflags uint64
+
+const (
+	flagImplicit     symflags = 1 << iota // Type inferred from IMPLICIT rules
+	flagUsed                              // Symbol is referenced in code
+	flagPointer                           // Has POINTER attribute
+	flagTarget                            // Has TARGET attribute
+	flagParameter                         // Is a function/subroutine parameter
+	flagPointerParam                      // OUT/INOUT scalar parameter (needs dereference)
+	flagAllocatable                       // Has ALLOCATABLE attribute
+	flagCommon                            // Variable is in a COMMON block
+	flagPointee                           // Cray-style pointee (accessed through pointer variable)
+)
+
+func (f symflags) HasAny(hasBits symflags) bool { return f&hasBits != 0 }
+func (f symflags) HasAll(hasBits symflags) bool { return f&hasBits == hasBits }
+func (f symflags) With(mask symflags, setBits bool) symflags {
+	if setBits {
+		return f | mask
+	} else {
+		return f &^ mask
+	}
+}
 
 type ParserError struct {
 	sp  sourcePos
@@ -65,13 +93,13 @@ func (l *sourcePos) AppendString(b []byte) []byte {
 }
 
 type Parser90 struct {
-	l        Lexer90
-	current  toktuple
-	peek     toktuple
-	uberpeek toktuple
-	stmtFns  map[token.Token]statementParseFn // Statement parsers
-	errors   []ParserError                    // Collected parsing errors
-
+	l             Lexer90
+	current       toktuple
+	peek          toktuple
+	uberpeek      toktuple
+	stmtFns       map[token.Token]statementParseFn // Statement parsers
+	errors        []ParserError                    // Collected parsing errors
+	vars          []varinfo                        // variables defined in current scope.
 	maxStatements int
 	maxErrs       int
 	nStatements   int
@@ -82,6 +110,60 @@ type Parser90 struct {
 	died               bool
 }
 
+type varinfo struct {
+	Type    ast.TypeSpec
+	flags   symflags
+	sname   string
+	name    []byte // variable declaration name
+	common  []byte // set to COMMON block name if found in COMMON statement
+	pointee []byte // the pointer alias this variable references in EQUIVALENCE or cray style POINTER statement.
+	declPos sourcePos
+}
+
+func (p *varinfo) reset() {
+	*p = varinfo{
+		name:    p.name[:0],
+		common:  p.common[:0],
+		pointee: p.pointee[:0],
+	}
+}
+
+func (p *Parser90) varResetAll() {
+	p.vars = p.vars[:0]
+}
+
+func (p *Parser90) varInit(name string) (vi *varinfo) {
+	vi = p.varSGet(name)
+	if vi != nil {
+		p.addError("double variable initialization with " + vi.declPos.String())
+		return vi
+	}
+	p.vars = slices.Grow(p.vars, 1)
+	p.vars = p.vars[:len(p.vars)+1]
+	vi = &p.vars[len(p.vars)-1]
+	vi.reset()
+	vi.name = append(vi.name, name...)
+	vi.sname = name
+	vi.declPos = p.sourcePos()
+	return vi
+}
+
+func (p *Parser90) varGet(name []byte) (vi *varinfo) {
+	for i := range p.vars {
+		if bytes.EqualFold(p.vars[i].name, name) {
+			return &p.vars[i]
+		}
+	}
+	return nil
+}
+func (p *Parser90) varSGet(name string) (vi *varinfo) {
+	for i := range p.vars {
+		if strings.EqualFold(p.vars[i].sname, name) {
+			return &p.vars[i]
+		}
+	}
+	return nil
+}
 func (p *Parser90) Reset(source string, r io.Reader) error {
 	err := p.l.Reset(source, r)
 	if err != nil {
@@ -319,11 +401,9 @@ func (p *Parser90) parseModule() ast.Statement {
 	p.expect(token.MODULE, "")
 
 	// Parse module name (keywords can be used as module names)
-	if !p.canUseAsIdentifier() {
-		p.addError("expected module name, got " + p.current.tok.String())
+	if !p.expectIdentifier(&mod.Name, "module name") {
 		return nil
 	}
-	mod.Name = string(p.current.lit)
 	p.nextToken() // consume module name
 
 	p.skipNewlinesAndComments()
@@ -357,18 +437,16 @@ func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramU
 // parseSubroutine parses a SUBROUTINE...END SUBROUTINE block
 // Precondition: current token is SUBROUTINE
 func (p *Parser90) parseSubroutine() ast.Statement {
+	p.varResetAll()
 	start := p.sourcePos()
 	sub := &ast.Subroutine{}
 
 	p.expect(token.SUBROUTINE, "")
 
 	// Parse subroutine name (keywords can be used as subroutine names)
-	if !p.canUseAsIdentifier() {
-		p.addError("expected subroutine name, got " + p.current.tok.String())
+	if !p.expectIdentifier(&sub.Name, "subroutine name") {
 		return nil
 	}
-	sub.Name = string(p.current.lit)
-	p.nextToken() // consume subroutine name
 
 	// Parse parameter list if present
 	if p.currentTokenIs(token.LParen) {
@@ -389,19 +467,16 @@ func (p *Parser90) parseSubroutine() ast.Statement {
 // parseFunction parses a FUNCTION...END FUNCTION block
 // Precondition: current token is FUNCTION
 func (p *Parser90) parseFunction() ast.Statement {
+	p.varResetAll()
 	start := p.sourcePos()
 	fn := &ast.Function{}
 
 	p.expect(token.FUNCTION, "")
 
 	// Parse function name (can be Identifier, FormatSpec, or keyword used as identifier)
-	if !p.canUseAsIdentifier() {
-		p.addError("expected function name, got " + p.current.tok.String())
+	if !p.expectIdentifier(&fn.Name, "function name") {
 		return nil
 	}
-	fn.Name = string(p.current.lit)
-	p.nextToken() // consume function name
-
 	// Parse parameter list
 	if p.currentTokenIs(token.LParen) {
 		fn.Parameters = p.parseParameterList()
@@ -655,10 +730,45 @@ func (p *Parser90) strToks() string {
 		p.peek.lit, p.peek.tok, p.uberpeek.lit, p.uberpeek.tok)
 }
 
+func (p *Parser90) consumeIdentifier(dst *string, allowTokens ...token.Token) bool {
+	if p.canUseAsIdentifier() || slices.Contains(allowTokens, p.current.tok) {
+		*dst = p.currentLiteral()
+		p.nextToken()
+		return true
+	}
+	return false
+}
+
+func (p *Parser90) expectIdentifier(dst *string, reason string, allowTokens ...token.Token) bool {
+	consumed := p.consumeIdentifier(dst, allowTokens...)
+	if !consumed {
+		p.addError("expected identifier got " + p.current.String() + ": " + reason)
+	}
+	return consumed
+}
+
 // canUseAsIdentifier returns true if the current token can be used as an identifier.
 // In Fortran, keywords can be used as variable/function/subroutine names in many contexts.
 func (p *Parser90) canUseAsIdentifier() bool {
 	return p.current.tok.CanBeUsedAsIdentifier()
+}
+
+func (p *Parser90) currentLiteral() string {
+	if len(p.current.lit) > 0 {
+		return string(p.current.lit)
+	}
+	return p.current.tok.String()
+}
+
+func (p *Parser90) currentAsVarString(bitset symflags) string {
+	v := p.varGet(p.current.lit)
+	if v != nil {
+		v.flags |= bitset
+		return v.sname
+	}
+	lit := p.currentLiteral()
+	p.addError("variable " + lit + " undefined")
+	return lit
 }
 
 // parseParameterList parses a parameter list like (a, b, c)
@@ -679,31 +789,11 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 
 	// Parse parameters using generic helper
 	parseOneParam := func() (ast.Parameter, error) {
-		// Accept identifiers, keywords, or * (alternate return specifier in F77)
+		// Accept identifiers, keywords, or *, even DATA (alternate return specifier in F77)
 		var paramName string
-		if p.currentTokenIs(token.Asterisk) {
-			paramName = "*"
-			p.nextToken()
-
-		} else if p.currentTokenIs(token.END) || p.currentTokenIs(token.DATA) {
-			// TODO: figure out way to not have this special case.
-			// Special case: END and DATA can be used as parameter names
-			// even though they're excluded from canUseAsIdentifier()
-			paramName = p.current.tok.String()
-			p.nextToken()
-		} else if p.canUseAsIdentifier() {
-			// Accept any token that can be used as an identifier (includes keywords)
-			// For keywords, use token.String(); for identifiers, use the literal
-			if len(p.current.lit) > 0 {
-				paramName = string(p.current.lit)
-			} else {
-				paramName = p.current.tok.String()
-			}
-			p.nextToken()
-		} else {
-			return ast.Parameter{}, fmt.Errorf("expected parameter name")
+		if !p.expectIdentifier(&paramName, "parameter name", token.DATA, token.Asterisk) {
+			return ast.Parameter{}, errors.New("bad parameter")
 		}
-
 		// Create Parameter with just the name for now
 		// Type information will be filled in by parseBody when it sees type declarations
 		return ast.Parameter{Name: paramName}, nil
@@ -717,6 +807,8 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 			p.addError(err.Error())
 			break
 		}
+		vi := p.varInit(param.Name)
+		vi.flags |= flagParameter
 		params = append(params, param)
 		if p.currentTokenIs(token.Comma) {
 			p.nextToken()
@@ -2182,7 +2274,7 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 	} else {
 		// Counter-controlled DO loop
 		if p.canUseAsIdentifier() {
-			stmt.Var = string(p.current.lit)
+			stmt.Var = p.currentAsVarString(flagUsed)
 			p.nextToken()
 			p.expect(token.Equals, "after loop variable")
 
@@ -2507,10 +2599,10 @@ func (p *Parser90) skipToNextStatement() {
 func (p *Parser90) parseDerivedTypeStmt() *ast.DerivedTypeStmt {
 	startPos := p.sourcePos()
 	p.expect(token.TYPE, "parse derived type")
-	attrs, spec, intent := p.parseTypeAttributes()
-	if intent != 0 || spec != nil {
-		p.addError("derived type statement should not have array spec nor intent attribute")
-	}
+	attrs := p.parseTypeAttributes()
+	// if intent != 0 || spec != nil { // TODO: validate here?
+	// 	p.addError("derived type statement should not have array spec nor intent attribute")
+	// }
 	p.consumeIf(token.DoubleColon)                                // Optional :: after TYPE
 	if !p.canUseAsIdentifier() || !p.peekTokenIs(token.NewLine) { // Type name
 		p.addError("expected type name after TYPE and newline")
@@ -3079,175 +3171,83 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 	ts := p.expectTypeSpec()
 
 	// Parse attributes (PARAMETER, INTENT, etc.)
-	attributes, arraySpec, intentType := p.parseTypeAttributes()
+	attributes := p.parseTypeAttributes()
 
+	stmt := &ast.TypeDeclaration{
+		Type: ast.DeclType{
+			Type:       ts,
+			Attributes: attributes,
+		},
+		Position: ast.Pos(start.Pos, p.current.start),
+	}
 	// F77: INTEGER A, B, C (no ::)
 	// F90: INTEGER :: A, B, C (with ::)
 	p.consumeIf(token.DoubleColon)
 
 	// Parse entity list
 	// Note: DATA can be used as a variable name here, even though tok.CanBeUsedAsIdentifier() returns false for it
-	var entities []ast.DeclEntity
-	for p.canUseAsIdentifier() || p.currentTokenIs(token.DATA) {
-		entityName := string(p.current.lit)
-		entity := ast.DeclEntity{Name: entityName}
-		// Set CHARACTER length if this is a CHARACTER type
-		if ts.Token == token.CHARACTER {
-			entity.CharLen = ts.KindOrLen
+	var entityName string
+	for p.consumeIdentifier(&entityName, token.DATA) {
+		entity := ast.DeclEntity{
+			Name: entityName,
+			Type: &stmt.Type,
 		}
-		// Start with arraySpec from DIMENSION attribute if present
-		if arraySpec != nil {
-			entity.ArraySpec = arraySpec
-		}
-
-		p.nextToken()
-
-		// Check for array declarator: arr(10,20)
-		var entityArraySpec *ast.ArraySpec
 		if p.currentTokenIs(token.LParen) {
-			// This could be an array declarator - parse it
-			entityArraySpec = p.parseArraySpec()
-			// Entity-level array spec takes precedence over DIMENSION attribute
-			if entityArraySpec != nil {
-				entity.ArraySpec = entityArraySpec
-			}
+			entity.ArraySpec = p.parseArraySpec()
 		}
-
-		// Parse initialization expression: = value or => null()
-		if p.currentTokenIs(token.Equals) || p.currentTokenIs(token.PointerAssign) {
-			isPointerAssign := p.currentTokenIs(token.PointerAssign)
-			p.nextToken() // consume = or =>
-
-			var initTokens []byte
-			if isPointerAssign {
-				initTokens = append(initTokens, []byte("=> ")...)
+		switch p.current.tok {
+		case token.Comma:
+			p.nextToken() // No initializer.
+		case token.Equals, token.PointerAssign:
+			p.nextToken()
+			if p.currentTokenIs(token.LParen) && p.peekTokenIs(token.Slash) {
+				entity.Init = p.parseArrayConstructor()
+			} else {
+				entity.Init = p.parseExpression(0, token.Comma)
 			}
-
-			depth := 0
-			// Stop at newline or construct-ending keywords to avoid consuming tokens from parent scope
-			for p.loopUntilEndElseOr(token.NewLine) {
-				// Skip inline comments (LineComment tokens) - they shouldn't be part of the expression
-				if p.currentTokenIs(token.LineComment) {
-					p.nextToken()
-					continue
-				}
-				if p.currentTokenIs(token.LParen) {
-					depth++
-				} else if p.currentTokenIs(token.RParen) {
-					depth--
-				} else if p.currentTokenIs(token.Comma) && depth == 0 {
-					break
-				}
-				// Add space before token if needed (but not before first token, and not around parens/slashes)
-				if len(initTokens) > 0 {
-					lastChar := initTokens[len(initTokens)-1]
-					currIsSpecial := p.currentTokenIs(token.LParen) || p.currentTokenIs(token.RParen) || p.currentTokenIs(token.Slash)
-					lastIsSpecial := lastChar == '(' || lastChar == ')' || lastChar == '/'
-					if !currIsSpecial && !lastIsSpecial {
-						initTokens = append(initTokens, ' ')
-					}
-				}
-				// Append token literal - for operators, use String() if lit is empty
-				if len(p.current.lit) > 0 {
-					initTokens = append(initTokens, p.current.lit...)
-				} else {
-					// Operator tokens have empty lit, use token's string representation
-					initTokens = append(initTokens, []byte(p.current.tok.String())...)
-				}
-				p.nextToken()
-			}
-			entity.Initializer = string(initTokens)
+		case token.Slash:
+			entity.Init = p.parseExpression(0, token.Slash)
+		default:
+			p.addError("unexpected token in type declaration of " + entityName)
 		}
-
 		// Add entity to statement (now that all fields are populated)
-		entities = append(entities, entity)
-
-		// If this entity is a parameter, populate its type information
-		if paramMap != nil {
-			if param, exists := paramMap[entityName]; exists {
-				param.Type = ts
-				param.Intent = intentType
-				param.Attributes = append(param.Attributes, attributes...)
-				// Use entity array spec if present, otherwise DIMENSION attribute spec
-				if entityArraySpec != nil {
-					param.ArraySpec = entityArraySpec
-				} else if arraySpec != nil {
-					param.ArraySpec = arraySpec
-				}
-			}
-		}
-
-		if !p.currentTokenIs(token.Comma) {
-			break
-		}
-		p.nextToken()
-	}
-	stmt := &ast.TypeDeclaration{
-		Type:       ts,
-		Attributes: attributes,
-		Entities:   entities,
-		Position:   ast.Pos(start.Pos, p.current.start),
+		stmt.Entities = append(stmt.Entities, entity)
 	}
 	return stmt
 }
 
-func (p *Parser90) parseTypeAttributes() (attrs []token.Token, spec *ast.ArraySpec, intent ast.IntentType) {
+func (p *Parser90) currentTokenExpr() *ast.TokenExpr {
+	return &ast.TokenExpr{Token: p.current.tok, Position: p.currentAstPos()}
+}
+
+func (p *Parser90) parseTypeAttributes() (attrs []ast.TypeAttribute) {
 	for p.loopWhile(token.Comma) {
 		p.nextToken() // consume Comma.
 		if !p.current.tok.IsAttribute() {
 			p.addError("parsing type decl attributes: " + p.current.String())
 			break
 		}
-		attrs = append(attrs, p.current.tok)
+		attr := ast.TypeAttribute{Token: p.current.tok}
 		switch {
 		case p.consumeIf(token.INTENT):
 			p.expect(token.LParen, "INTENT attribute")
-			switch p.current.tok {
-			case token.IN:
-				intent = ast.IntentIn
-			case token.OUT:
-				intent = ast.IntentOut
-			case token.INOUT:
-				intent = ast.IntentInOut
-			}
+			attr.Expr = p.currentTokenExpr()
 			p.nextToken() // consume intent.
 			p.expect(token.RParen, "INTENT attribute")
 		case p.consumeIf(token.DIMENSION):
-			if p.currentTokenIs(token.LParen) {
-				spec = p.parseArraySpec()
-			}
-		case p.consumeIf(token.ALLOCATABLE):
-			// Just consume token, already in attributes slice
-		case p.consumeIf(token.POINTER):
-			// Just consume token
-		case p.consumeIf(token.TARGET):
-			// Just consume token
-		case p.consumeIf(token.OPTIONAL):
-			// Just consume token
-		case p.consumeIf(token.PARAMETER):
-			// Just consume token
-		case p.consumeIf(token.SAVE):
-			// Just consume token
-		case p.consumeIf(token.EXTERNAL):
-			// Just consume token
-		case p.consumeIf(token.INTRINSIC):
-			// Just consume token
-		case p.consumeIf(token.PUBLIC):
-			// Just consume token
-		case p.consumeIf(token.PRIVATE):
-			// Just consume token
-		case p.consumeIf(token.RECURSIVE):
-			// Just consume token
-		case p.consumeIf(token.ELEMENTAL):
-			// Just consume token
-		case p.consumeIf(token.PURE):
-			// Just consume token
+			attr.Dimension = p.parseArraySpec()
 		default:
-			p.addError("unexpected attribute: " + p.current.String())
-			p.nextToken() // Skip uknown tokens.
+			if p.current.tok.IsAttribute() {
+				attr.Expr = p.currentTokenExpr()
+			} else {
+				p.addError("unexpected attribute: " + p.current.String())
+			}
+			p.nextToken()
 		}
+		attrs = append(attrs, attr)
+
 	}
-	return attrs, spec, intent
+	return attrs
 }
 
 // parseArraySpec parses array dimension specification from DIMENSION(...) or entity declarator

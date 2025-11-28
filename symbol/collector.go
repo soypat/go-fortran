@@ -195,8 +195,8 @@ func (dc *DeclarationCollector) handleTypeDeclaration(decl *ast.TypeDeclaration)
 	for _, entity := range decl.Entities {
 		// Determine if this is a PARAMETER
 		isParameter := false
-		for _, attr := range decl.Attributes {
-			if attr == token.PARAMETER {
+		for _, attr := range decl.Type.Attributes {
+			if attr.Token == token.PARAMETER {
 				isParameter = true
 				break
 			}
@@ -204,18 +204,18 @@ func (dc *DeclarationCollector) handleTypeDeclaration(decl *ast.TypeDeclaration)
 
 		// Create resolved type
 		resolvedType := &ResolvedType{
-			BaseType: decl.Type.Token.String(),
+			BaseType: decl.Type.Type.Token.String(),
 		}
 
 		// Handle KIND parameter
-		if decl.Type.KindOrLen != nil {
+		if decl.Type.Type.KindOrLen != nil {
 			// For now, we just note that KIND exists
 			// Full evaluation would require constant expression evaluation
 			resolvedType.Kind = 0 // Placeholder
 		}
 
 		// Handle CHARACTER length
-		if decl.Type.Token.String() == "CHARACTER" && entity.CharLen != nil {
+		if decl.Type.Type.Token.String() == "CHARACTER" && entity.Type.Type.KindOrLen != nil {
 			// Similar to KIND, full evaluation requires expression evaluation
 			resolvedType.CharLen = 0 // Placeholder
 		}
@@ -225,7 +225,7 @@ func (dc *DeclarationCollector) handleTypeDeclaration(decl *ast.TypeDeclaration)
 		if existingSym != nil {
 			// Update existing symbol with more detailed type information
 			existingSym.SetType(resolvedType)
-			existingSym.SetAttributes(decl.Attributes)
+			existingSym.SetAttributes(decl.Type.Attributes)
 			existingSym.SetArraySpec(entity.ArraySpec)
 			existingSym.SetDeclNode(decl)
 			existingSym.setImplicit(false)
@@ -240,7 +240,7 @@ func (dc *DeclarationCollector) handleTypeDeclaration(decl *ast.TypeDeclaration)
 
 		sym := NewSymbol(entity.Name, kind)
 		sym.SetType(resolvedType)
-		sym.SetAttributes(decl.Attributes)
+		sym.SetAttributes(decl.Type.Attributes)
 		sym.SetArraySpec(entity.ArraySpec)
 		sym.SetDeclNode(decl)
 		sym.setImplicit(false)
@@ -312,7 +312,9 @@ func (dc *DeclarationCollector) handleCommonStmt(stmt *ast.CommonStmt) {
 		}
 
 		// Mark variable as being in common
-		sym.AddAttribute(token.COMMON)
+		sym.AddAttribute(ast.TypeAttribute{
+			Token: token.COMMON,
+		})
 	}
 }
 
@@ -332,7 +334,9 @@ func (dc *DeclarationCollector) handleExternalStmt(stmt *ast.ExternalStmt) {
 			// Mark existing symbol as external
 			// Note: We can't change the Kind after creation with current API
 			// This is a limitation we'll need to address if needed
-			sym.AddAttribute(token.EXTERNAL)
+			sym.AddAttribute(ast.TypeAttribute{
+				Token: token.EXTERNAL,
+			})
 		}
 	}
 }

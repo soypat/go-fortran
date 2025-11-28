@@ -793,10 +793,9 @@ func (ds *DataStmt) AppendString(dst []byte) []byte {
 //	REAL, PARAMETER :: PI = 3.14159
 //	CHARACTER(LEN=80), INTENT(IN) :: filename
 type TypeDeclaration struct {
-	Type       TypeSpec      // Type with optional KIND/LEN
-	Attributes []token.Token // e.g., PARAMETER, SAVE, INTENT, etc.
-	Entities   []DeclEntity  // Variables being declared
-	Label      string
+	Type     DeclType
+	Entities []DeclEntity // Variables being declared
+	Label    string
 	Position
 }
 
@@ -810,15 +809,6 @@ func (td *TypeDeclaration) AppendTokenLiteral(dst []byte) []byte {
 }
 func (td *TypeDeclaration) AppendString(dst []byte) []byte {
 	dst = td.Type.AppendString(dst)
-	if len(td.Attributes) > 0 {
-		dst = append(dst, ", "...)
-		for i, attr := range td.Attributes {
-			if i > 0 {
-				dst = append(dst, ", "...)
-			}
-			dst = append(dst, attr.String()...)
-		}
-	}
 	dst = append(dst, " :: "...)
 	for i, entity := range td.Entities {
 		if i > 0 {
@@ -863,18 +853,119 @@ type ArrayBound struct {
 	Upper Expression // Upper bound expression (nil for assumed shape, Identifier("*") for assumed size)
 }
 
+func (ab *ArrayBound) AppendString(dst []byte) []byte {
+	if id, ok := ab.Upper.(*Identifier); ok && id.Value == "*" {
+		return append(dst, '*')
+	}
+	if ab.Lower != nil {
+		dst = ab.Lower.AppendString(dst)
+	}
+	dst = append(dst, ':')
+	if ab.Upper != nil {
+		dst = ab.Upper.AppendString(dst)
+	}
+	return dst
+}
+
 // ArraySpec represents array dimension specification
 type ArraySpec struct {
 	Kind   ArraySpecKind
 	Bounds []ArrayBound // One bound per dimension
 }
 
-// DeclEntity represents a single entity in a type declaration
+func (as *ArraySpec) AppendString(dst []byte) []byte {
+	dst = append(dst, '(')
+	for i := range as.Bounds {
+		dst = as.Bounds[i].AppendString(dst)
+		if i != len(as.Bounds)-1 {
+			dst = append(dst, ',')
+		}
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
+type DeclType struct {
+	Type       TypeSpec
+	Attributes []TypeAttribute
+}
+
+func (te *DeclType) AppendString(dst []byte) []byte {
+	dst = te.Type.AppendString(dst)
+	if len(te.Attributes) > 0 {
+		dst = append(dst, ", "...)
+		for i := range te.Attributes {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = te.Attributes[i].AppendString(dst)
+		}
+	}
+	return dst
+}
+
+type TypeAttribute struct {
+	Token     token.Token
+	Expr      Expression
+	Dimension *ArraySpec
+}
+
+func (ta *TypeAttribute) AppendString(dst []byte) []byte {
+	dst = append(dst, ta.Token.String()...)
+	if ta.Expr != nil {
+		dst = append(dst, '(')
+		dst = ta.Expr.AppendString(dst)
+		dst = append(dst, ')')
+	} else if ta.Dimension != nil {
+		dst = ta.Dimension.AppendString(dst)
+	}
+	return dst
+}
+
+type TokenExpr struct {
+	Token token.Token
+	Position
+}
+
+var _ Expression = (*TokenExpr)(nil) // compile time check of interface implementation.
+
+func (te *TokenExpr) expressionNode() {}
+func (te *TokenExpr) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, te.Token.String()...)
+}
+func (te *TokenExpr) AppendString(dst []byte) []byte {
+	return te.AppendString(dst)
+}
+
+// DeclEntity represents a single entity in a type declaration.
+// Multiple entities can appear in one statement (e.g., "INTEGER :: i=1, j=2").
+//
+// Parsing edge cases:
+//   - F90: REAL, DIMENSION(3) :: field = (/ 0., 1., 2. /)  → ArraySpec + Initializer
+//   - F90: INTEGER :: i = 1, j = 2  → Multiple entities, each with own Initializer
+//   - F90: CHARACTER(LEN=*) :: str  → CharLen = Identifier("*")
+//   - F90: TYPE(t_pair) :: pair = t_pair(1, 0.5)  → Derived type with Initializer
+//   - F77: INTEGER I /2/, J /3/  → Multiple entities with DATA-style Initializer
+//   - F77: CHARACTER*80 NAME  → CharLen = IntegerLiteral("80")
+//
+// Note: Initializer is currently a string (becomes Expression in Phase 4).
 type DeclEntity struct {
-	Name        string
-	ArraySpec   *ArraySpec // Array dimensions if this is an array
-	Initializer string     // Initialization expression (will become Expression in Phase 4)
-	CharLen     Expression // CHARACTER length specification (nil if not specified or using type default)
+	Name      string
+	Type      *DeclType
+	ArraySpec *ArraySpec // Array dimensions if this is an array
+	Init      Expression
+}
+
+func (de *DeclEntity) AppendString(dst []byte) []byte {
+	dst = append(dst, de.Name...)
+	if de.ArraySpec != nil {
+		dst = de.ArraySpec.AppendString(dst)
+	}
+	if de.Init != nil {
+		dst = append(dst, ' ')
+		dst = de.Init.AppendString(dst)
+	}
+	return dst
 }
 
 // IntentType represents the INTENT attribute direction
@@ -912,11 +1003,11 @@ func (it IntentType) String() string {
 //	REAL, DIMENSION(:), INTENT(INOUT) :: array
 //	CHARACTER(LEN=*), OPTIONAL :: message
 type Parameter struct {
-	Name       string        // Parameter name
-	Type       TypeSpec      // Type with optional KIND/LEN
-	Intent     IntentType    // INTENT(IN/OUT/INOUT)
-	Attributes []token.Token // Other attributes (OPTIONAL, POINTER, TARGET, etc.)
-	ArraySpec  *ArraySpec    // Array dimensions if this is an array parameter
+	Name       string          // Parameter name
+	Type       TypeSpec        // Type with optional KIND/LEN
+	Intent     IntentType      // INTENT(IN/OUT/INOUT)
+	Attributes []TypeAttribute // Other attributes (OPTIONAL, POINTER, TARGET, etc.)
+	ArraySpec  *ArraySpec      // Array dimensions if this is an array parameter
 }
 
 // Identifier represents a variable name, function name, or other named entity
@@ -2421,7 +2512,7 @@ type DerivedTypeStmt struct {
 	Name       string
 	Components []ComponentDecl
 	Label      string
-	Attributes []token.Token
+	Attributes []TypeAttribute
 	Position
 }
 
