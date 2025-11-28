@@ -27,22 +27,13 @@ func (te transpileError) String() string {
 	return te.msg
 }
 
-// goKeywords is the set of reserved keywords in Go that cannot be used as identifiers
-var goKeywords = map[string]bool{
-	"break": true, "case": true, "chan": true, "const": true, "continue": true,
-	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true,
-	"func": true, "go": true, "goto": true, "if": true, "import": true,
-	"interface": true, "map": true, "package": true, "range": true, "return": true,
-	"select": true, "struct": true, "switch": true, "type": true, "var": true,
-}
-
 // sanitizeIdent returns a valid Go identifier by capitalizing the first letter if it's a Go keyword
 func sanitizeIdent(name string) string {
 	if name == "" {
 		return name
 	}
 	// Check if it's a Go keyword (case-insensitive since Fortran is case-insensitive)
-	if goKeywords[strings.ToLower(name)] {
+	if token.IsKeyword(strings.ToLower(name)) {
 		// Capitalize first letter
 		return strings.ToUpper(name[:1]) + name[1:]
 	}
@@ -61,6 +52,9 @@ type VarInfo struct {
 	// Array information
 	ArraySpec   *f90.ArraySpec // Dimension bounds (nil for non-arrays)
 	ElementType ast.Expr       // Element type for arrays (nil for scalars)
+
+	// Cray-style POINTER information
+	PointerVar string // For pointees: name of the pointer variable that owns this pointee
 
 	// CHARACTER information
 	CharLength int // For CHARACTER(LEN=n), stores n (0 for non-CHARACTER)
@@ -346,9 +340,9 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 			if param.Intent == f90.IntentOut || param.Intent == f90.IntentInOut {
 				v.Flags |= symbol.FlagPointerParam
 				v.Type = &ast.IndexExpr{
-				X:     _astTypePointer,
-				Index: tp,
-			}
+					X:     _astTypePointer,
+					Index: tp,
+				}
 			} else {
 				// INTENT(IN) or default intent - pass by value
 				v.Type = tp
@@ -977,6 +971,9 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) (gostmt ast.Stmt
 	case *f90.DimensionStmt:
 		// DIMENSION statements are processed in preScanCommonBlocks, no code generation in function body
 		return nil, nil
+	case *f90.PointerCrayStmt:
+		// Cray-style POINTER statements are processed in preScanCommonBlocks, no code generation in function body
+		return nil, nil
 	case *f90.DataStmt:
 		gostmt = tg.transformDataStmt(s)
 	case *f90.ArithmeticIfStmt:
@@ -1402,6 +1399,23 @@ func isArrayType(typ ast.Expr) bool {
 		return isArrayType(star.X)
 	}
 	return false
+}
+
+// astExprToString converts an AST expression to a string for comparison.
+// Used for comparing type expressions (e.g., checking if two Pointer[T] have same T).
+func astExprToString(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.SelectorExpr:
+		return astExprToString(e.X) + "." + e.Sel.Name
+	case *ast.StarExpr:
+		return "*" + astExprToString(e.X)
+	case *ast.IndexExpr:
+		return astExprToString(e.X) + "[" + astExprToString(e.Index) + "]"
+	default:
+		return fmt.Sprintf("%T", expr)
+	}
 }
 
 // transformCallStmt transforms a Fortran CALL statement to Go function call
@@ -2135,6 +2149,32 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 		return nil
 	}
 
+	// MALLOC type inference: inject type parameter from LHS
+	// Check if RHS is intrinsic.MALLOC call and LHS is a pointer variable
+	if callExpr, ok := rhs.(*ast.CallExpr); ok {
+		if selExpr, ok := callExpr.Fun.(*ast.SelectorExpr); ok {
+			if x, ok := selExpr.X.(*ast.Ident); ok && x.Name == "intrinsic" && selExpr.Sel.Name == "MALLOC" {
+				// This is an intrinsic.MALLOC call - inject type parameter from LHS
+				if lhsIdent, ok := lhs.(*ast.Ident); ok {
+					if v := tg.getVar(lhsIdent.Name); v != nil {
+						// Extract element type from Pointer[T]
+						if idxExpr, ok := v.Type.(*ast.IndexExpr); ok {
+							if selExpr, ok := idxExpr.X.(*ast.SelectorExpr); ok {
+								if selExpr.Sel.Name == "Pointer" {
+									// Found Pointer[T] - inject T as type parameter
+									callExpr.Fun = &ast.IndexExpr{
+										X:     callExpr.Fun,
+										Index: idxExpr.Index,
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Check if LHS is a pointer parameter (OUT/INOUT scalar) - need to dereference
 	if ident, ok := lhs.(*ast.Ident); ok {
 		// Check if this is a CHARACTER assignment - use SetFromString() method
@@ -2159,6 +2199,46 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 
 		// Track implicitly-typed variables (not in any declaration tracking map)
 		tg.trackImplicitVariable(ident.Name)
+
+		// Pointer type conversion: use Equivalence for different typed pointers
+		// Check if both LHS and RHS are Pointer types with different element types
+		lhsVar := tg.getVar(ident.Name)
+		if lhsVar != nil {
+			// Check if LHS is Pointer[T1]
+			if lhsIdx, ok := lhsVar.Type.(*ast.IndexExpr); ok {
+				if lhsSel, ok := lhsIdx.X.(*ast.SelectorExpr); ok && lhsSel.Sel.Name == "Pointer" {
+					// LHS is Pointer[T1] - check if RHS is also a Pointer
+					if rhsIdent, ok := rhs.(*ast.Ident); ok {
+						rhsVar := tg.getVar(rhsIdent.Name)
+						if rhsVar != nil {
+							if rhsIdx, ok := rhsVar.Type.(*ast.IndexExpr); ok {
+								if rhsSel, ok := rhsIdx.X.(*ast.SelectorExpr); ok && rhsSel.Sel.Name == "Pointer" {
+									// Both are Pointers - check if element types differ
+									// Compare element types by converting to string (simple but effective)
+									lhsElemType := astExprToString(lhsIdx.Index)
+									rhsElemType := astExprToString(rhsIdx.Index)
+									if lhsElemType != rhsElemType {
+										// Different element types - use Equivalence
+										// Generate: intrinsic.Equivalence[LhsType, RhsType](rhs)
+										tg.useImport("github.com/soypat/go-fortran/intrinsic")
+										rhs = &ast.CallExpr{
+											Fun: &ast.IndexListExpr{
+												X: &ast.SelectorExpr{
+													X:   ast.NewIdent("intrinsic"),
+													Sel: ast.NewIdent("Equivalence"),
+												},
+												Indices: []ast.Expr{lhsIdx.Index, rhsIdx.Index},
+											},
+											Args: []ast.Expr{rhsIdent},
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	return &ast.AssignStmt{
@@ -2242,7 +2322,41 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 		v, _ = tg.getVarFromCommon(ref.Name)
 	}
 	var arrayExpr ast.Expr
-	if v != nil && v.InCommonBlock != "" {
+	if v != nil && v.Flags&symbol.FlagPointee != 0 && v.PointerVar != "" {
+		// Pointee assignment - use pointer variable's Set() method
+		// Example: AA(10) = value where POINTER (NPAA, AA(1)) → NPAA.Set(10, value)
+		// Note: Pointer.Set() uses (index, value) order
+
+		// For now, only support 1D pointee arrays (typical case)
+		if len(ref.Subscripts) != 1 {
+			// Multi-dimensional pointees would need Array() conversion
+			return nil
+		}
+
+		// Transform subscript
+		index := tg.transformExpression(ref.Subscripts[0])
+		if index == nil {
+			return nil
+		}
+
+		// Generate: pointerVar.Set(int(index), value)
+		// Note: Set() takes (index, value) unlike Array.Set(value, indices...)
+		setCall := &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent(v.PointerVar),
+				Sel: ast.NewIdent("Set"),
+			},
+			Args: []ast.Expr{
+				&ast.CallExpr{
+					Fun:  ast.NewIdent("int"),
+					Args: []ast.Expr{index},
+				},
+				rhs,
+			},
+		}
+
+		return &ast.ExprStmt{X: setCall}
+	} else if v != nil && v.InCommonBlock != "" {
 		// Array is in COMMON block: BLOCKNAME.arrayname.Set(...)
 		blockName := v.InCommonBlock
 		block := tg.commonBlocks[blockName]
@@ -2406,8 +2520,42 @@ func (tg *TranspileToGo) transformArrayConstructor(ac *f90.ArrayConstructor) ast
 // transformArrayRef transforms a Fortran array reference to intrinsic.Array.At() call
 // Fortran indexing is preserved (1-based) since Array.At() handles it internally
 func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
-	// Check if this is a CHARACTER variable with substring operation
+	// Check if this is a pointee variable (Cray-style POINTER)
 	v := tg.getVar(ref.Name)
+	if v != nil && v.Flags&symbol.FlagPointee != 0 && v.PointerVar != "" {
+		// This is a pointee - access through the pointer variable
+		// Example: AA(10) where POINTER (NPAA, AA(1)) → NPAA.At(10)
+		// Note: Pointer has At() method for 1-based indexing (handles 1D arrays)
+
+		// For now, only support 1D pointee arrays (typical case)
+		if len(ref.Subscripts) != 1 {
+			// Multi-dimensional pointees would need Array() conversion
+			// Not implemented yet - fall through to error
+			return nil
+		}
+
+		// Transform subscript
+		index := tg.transformExpression(ref.Subscripts[0])
+		if index == nil {
+			return nil
+		}
+
+		// Generate: pointerVar.At(int(index))
+		return &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent(v.PointerVar),
+				Sel: ast.NewIdent("At"),
+			},
+			Args: []ast.Expr{
+				&ast.CallExpr{
+					Fun:  ast.NewIdent("int"),
+					Args: []ast.Expr{index},
+				},
+			},
+		}
+	}
+
+	// Check if this is a CHARACTER variable with substring operation
 	if v != nil && v.CharLength > 0 && len(ref.Subscripts) == 1 {
 		// Check if the subscript is a RangeExpr (substring operation)
 		if rangeExpr, isRange := ref.Subscripts[0].(*f90.RangeExpr); isRange {
@@ -2502,6 +2650,63 @@ func (tg *TranspileToGo) transformBinaryExpr(expr *f90.BinaryExpr) ast.Expr {
 
 	if left == nil || right == nil {
 		return nil
+	}
+
+	// Special handling: Pointer nil checks (ptr == 0 or ptr != 0)
+	// Transform to ptr.Data() == nil or ptr.Data() != nil
+	if expr.Op == f90token.EQ || expr.Op == f90token.NE {
+		// Check if one side is a Pointer variable and the other is 0
+		var ptrExpr ast.Expr
+		var zeroSide *ast.BasicLit
+
+		if leftIdent, ok := left.(*ast.Ident); ok {
+			if rightLit, ok := right.(*ast.BasicLit); ok && rightLit.Value == "0" {
+				// Check if left is a Pointer type
+				if v := tg.getVar(leftIdent.Name); v != nil {
+					if idxExpr, ok := v.Type.(*ast.IndexExpr); ok {
+						if selExpr, ok := idxExpr.X.(*ast.SelectorExpr); ok && selExpr.Sel.Name == "Pointer" {
+							ptrExpr = left
+							zeroSide = rightLit
+						}
+					}
+				}
+			}
+		} else if rightIdent, ok := right.(*ast.Ident); ok {
+			if leftLit, ok := left.(*ast.BasicLit); ok && leftLit.Value == "0" {
+				// Check if right is a Pointer type
+				if v := tg.getVar(rightIdent.Name); v != nil {
+					if idxExpr, ok := v.Type.(*ast.IndexExpr); ok {
+						if selExpr, ok := idxExpr.X.(*ast.SelectorExpr); ok && selExpr.Sel.Name == "Pointer" {
+							ptrExpr = right
+							zeroSide = leftLit
+						}
+					}
+				}
+			}
+		}
+
+		if ptrExpr != nil && zeroSide != nil {
+			// Generate: ptr.Data() == nil or ptr.Data() != nil
+			dataCall := &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   ptrExpr,
+					Sel: ast.NewIdent("Data"),
+				},
+				Args: []ast.Expr{},
+			}
+
+			nilIdent := ast.NewIdent("nil")
+			op := token.EQL
+			if expr.Op == f90token.NE {
+				op = token.NEQ
+			}
+
+			return &ast.BinaryExpr{
+				X:  dataCall,
+				Op: op,
+				Y:  nilIdent,
+			}
+		}
 	}
 
 	// Map Fortran operator to Go operator
@@ -3260,6 +3465,32 @@ func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
 						v.Flags |= symbol.FlagImplicit
 					}
 				}
+			}
+		} else if ptrStmt, ok := stmt.(*f90.PointerCrayStmt); ok {
+			// Handle Cray-style POINTER statement
+			// POINTER (ptr_var, pointee) declares ptr_var as intrinsic.Pointer[T]
+			// and pointee as the variable accessed through that pointer
+			for _, pair := range ptrStmt.Pointers {
+				// Infer element type from pointee name using IMPLICIT rules
+				elemType := getImplicitType(pair.Pointee)
+
+				// Create VarInfo for the pointer variable
+				ptrVar := tg.getOrMakeVar(pair.PointerVar)
+				ptrVar.Type = &ast.IndexExpr{
+					X:     _astTypePointer,
+					Index: elemType,
+				}
+				ptrVar.Flags |= symbol.FlagImplicit
+
+				// Track the pointee - it's not a separate variable, but a name
+				// that references memory through the pointer
+				// We need to track which pointer variable it corresponds to
+				pointeeVar := tg.getOrMakeVar(pair.Pointee)
+				pointeeVar.Flags |= symbol.FlagPointee
+				pointeeVar.PointerVar = pair.PointerVar // Track the corresponding pointer
+				pointeeVar.ArraySpec = pair.ArraySpec   // Store array spec if present
+				pointeeVar.ElementType = elemType       // Element type from IMPLICIT rules
+				pointeeVar.Type = elemType              // Set Type so v.Type != nil check passes
 			}
 		} else if commonStmt, ok := stmt.(*f90.CommonStmt); ok {
 			blockName := commonStmt.BlockName

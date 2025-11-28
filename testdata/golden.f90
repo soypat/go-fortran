@@ -745,7 +745,7 @@
   800      END DO
   900      END DO
 
-          PRINT *, 'LEVEL 29: MALLOC returned', NPAA
+          PRINT *, 'LEVEL 29: AA(2) ', AA(2) 
           PRINT *, 'LEVEL 29: Initialized', MAXMUM - M + 1, 'elements'
       END SUBROUTINE LEVEL29
 

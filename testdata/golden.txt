@@ -102,6 +102,6 @@
  LEVEL 28: MATRIX(5,10) =   42.5000000    
  LEVEL 28: COUNTS(50) =          42
  LEVEL 29: Advanced features test
- LEVEL 29: MALLOC returned       94283955317184
+ LEVEL 29: AA(2)    1.0844641954813119E-272
  LEVEL 29: Initialized      -32668 elements
 STOP 0

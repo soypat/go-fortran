@@ -2677,6 +2677,8 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 		return p.parseCommonStmt()
 	case token.DIMENSION:
 		return p.parseDimensionStmt()
+	case token.POINTER:
+		return p.parsePointerCrayStmt()
 	case token.EXTERNAL:
 		return p.parseExternalStmt()
 	case token.INTRINSIC:
@@ -4188,6 +4190,77 @@ func (p *Parser90) parseIntrinsicStmt() ast.Statement {
 		p.nextToken()
 
 		// Check for comma (more names) or end of statement
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	stmt.Position = ast.Pos(startPos, p.current.start)
+	return stmt
+}
+
+// parsePointerCrayStmt parses a Cray-style POINTER statement (Fortran 77 extension)
+// Precondition: current token is POINTER
+// Syntax: POINTER (pointer_var, pointee), (ptr2, pointee2), ...
+// Example: POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1))
+func (p *Parser90) parsePointerCrayStmt() ast.Statement {
+	startPos := p.current.start
+	p.expect(token.POINTER, "")
+
+	stmt := &ast.PointerCrayStmt{}
+
+	// Parse comma-separated list of (pointer_var, pointee) pairs
+	for {
+		if !p.currentTokenIs(token.LParen) {
+			p.addError("expected '(' in POINTER statement")
+			break
+		}
+		p.nextToken() // consume '('
+
+		// Parse pointer variable name
+		if !p.canUseAsIdentifier() {
+			p.addError("expected pointer variable name in POINTER statement")
+			break
+		}
+		ptrVar := string(p.current.lit)
+		p.nextToken()
+
+		// Expect comma between pointer_var and pointee
+		if !p.currentTokenIs(token.Comma) {
+			p.addError("expected ',' between pointer variable and pointee in POINTER statement")
+			break
+		}
+		p.nextToken() // consume ','
+
+		// Parse pointee name
+		if !p.canUseAsIdentifier() {
+			p.addError("expected pointee name in POINTER statement")
+			break
+		}
+		pointee := string(p.current.lit)
+		p.nextToken()
+
+		// Parse optional array spec for pointee
+		var arraySpec *ast.ArraySpec
+		if p.currentTokenIs(token.LParen) {
+			arraySpec = p.parseArraySpec()
+		}
+
+		// Expect closing ')'
+		if !p.currentTokenIs(token.RParen) {
+			p.addError("expected ')' to close POINTER pair")
+			break
+		}
+		p.nextToken() // consume ')'
+
+		// Add the pointer pair to statement
+		stmt.Pointers = append(stmt.Pointers, ast.PointerCrayPair{
+			PointerVar: ptrVar,
+			Pointee:    pointee,
+			ArraySpec:  arraySpec,
+		})
+
+		// Check for comma (more pairs) or end of statement
 		if !p.consumeIf(token.Comma) {
 			break
 		}

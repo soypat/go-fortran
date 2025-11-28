@@ -632,6 +632,75 @@ func (ds *DimensionStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// PointerCrayStmt declares Cray-style pointers (Fortran 77 extension).
+// This is distinct from modern F90+ POINTER attribute declarations.
+//
+// Cray-style syntax:
+//
+//	POINTER (pointer_var, pointee), (ptr2, pointee2), ...
+//
+// where pointer_var is an INTEGER holding a memory address and pointee
+// is the variable accessed through that address.
+//
+// Example:
+//
+//	POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1))
+type PointerCrayStmt struct {
+	Pointers []PointerCrayPair
+	Label    string
+	Position
+}
+
+// PointerCrayPair represents a single (pointer_var, pointee) pair.
+type PointerCrayPair struct {
+	PointerVar string     // e.g., "NPAA" - holds memory address
+	Pointee    string     // e.g., "AA" - variable accessed through pointer
+	ArraySpec  *ArraySpec // e.g., "(1)" from AA(1), often a placeholder dimension
+}
+
+var _ Statement = (*PointerCrayStmt)(nil) // compile time check
+
+func (ps *PointerCrayStmt) GetLabel() string { return ps.Label }
+
+func (ps *PointerCrayStmt) statementNode() {}
+
+func (ps *PointerCrayStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "POINTER"...)
+}
+
+func (ps *PointerCrayStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "POINTER"...)
+	for i, pair := range ps.Pointers {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		} else {
+			dst = append(dst, ' ')
+		}
+		dst = append(dst, '(')
+		dst = append(dst, pair.PointerVar...)
+		dst = append(dst, ", "...)
+		dst = append(dst, pair.Pointee...)
+		if pair.ArraySpec != nil {
+			dst = append(dst, '(')
+			for j, bound := range pair.ArraySpec.Bounds {
+				if j > 0 {
+					dst = append(dst, ',')
+				}
+				if bound.Lower != nil {
+					dst = bound.Lower.AppendString(dst)
+					dst = append(dst, ':')
+				}
+				if bound.Upper != nil {
+					dst = bound.Upper.AppendString(dst)
+				}
+			}
+			dst = append(dst, ')')
+		}
+		dst = append(dst, ')')
+	}
+	return dst
+}
+
 // DataStmt initializes variables with specified values in Fortran 77 style.
 // DATA statements can use implied DO loops for array initialization.
 //

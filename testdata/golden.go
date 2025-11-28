@@ -7,7 +7,7 @@ var HOLDRT = struct {
 	SUMXRQ *intrinsic.Array[float32]
 	YMNRT  *intrinsic.Array[float32]
 	MATRIX *intrinsic.Array[float32]
-}{YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20)}
+}{YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20), YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512)}
 var SHARED struct {
 	X int32
 	Y int32
@@ -615,9 +615,9 @@ func LEVEL28() {
 	intrinsic.Print("LEVEL 28: COUNTS(50) =", STATS.COUNTS.At(int(50)))
 }
 func LEVEL29() {
-	var NPAA int32
-	var NPII int32
-	var NPLL int32
+	var NPAA intrinsic.Pointer[float64]
+	var NPII intrinsic.Pointer[int32]
+	var NPLL intrinsic.Pointer[bool]
 	var (
 		N      int32
 		M      int32
@@ -630,21 +630,21 @@ func LEVEL29() {
 	I_DEFALT.Set(125269879, int(2))
 	intrinsic.Print("LEVEL 29: Advanced features test")
 	MAXDM1 = 100
-	NPAA = intrinsic.MALLOC(MAXDM1 * 8)
-	if NPAA == 0 {
+	NPAA = intrinsic.MALLOC[float64](MAXDM1 * 8)
+	if NPAA.Data() == nil {
 		intrinsic.Exit(69)
 	}
-	NPII = NPAA
-	NPLL = NPII
+	NPII = intrinsic.Equivalence[int32, float64](NPAA)
+	NPLL = intrinsic.Equivalence[bool, int32](NPII)
 	M = 1
 	MAXDEF = intrinsic.MIN[int32](200000, MAXDM1)
 	for M = 1; M <= MAXDEF; M += 32768 {
 		MAXMUM = intrinsic.MIN[int32](M+32767, MAXDEF)
 		for N = M; N <= MAXMUM; N += 1 {
-			AA(N) = DEFALT
+			NPAA.Set(int(N), DEFALT)
 		}
 	}
-	intrinsic.Print("LEVEL 29: MALLOC returned", NPAA)
+	intrinsic.Print("LEVEL 29: AA(2) ", NPAA.At(int(2)))
 	intrinsic.Print("LEVEL 29: Initialized", MAXMUM-M+1, "elements")
 }
 func SIMPLE_SUB() {

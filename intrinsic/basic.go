@@ -172,9 +172,9 @@ func (p Pointer[T]) View(startOff, endOff int) Pointer[T] {
 //	ptr := intrinsic.MALLOC[float64](100 * 8)
 //	arr := ptr.Array()
 //	arr.At(50)  // Access 50th element as Array
-func (p Pointer[T]) Array() Array[T] {
+func (p Pointer[T]) Array() *Array[T] {
 	n := p.Len()
-	return Array[T]{
+	return &Array[T]{
 		data:   p.Slice(),
 		shape:  []int{n},
 		lower:  []int{1},
@@ -263,7 +263,7 @@ func UnsafePointerData[I integer, T any](p Pointer[T]) I {
 //	// Now intPtr.At(1) and intPtr.At(2) access the low/high 32 bits of Pi
 //	low := intPtr.At(1)   // Low 32 bits of float64 representation
 //	high := intPtr.At(2)  // High 32 bits of float64 representation
-func Equivalence[S any, D any](src Pointer[S]) (dst Pointer[D]) {
+func Equivalence[D any, S any](src Pointer[S]) (dst Pointer[D]) {
 	szS := src.SizeElement()
 	szD := dst.SizeElement()
 	if szS == szD {
