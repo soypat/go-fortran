@@ -2675,6 +2675,8 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 		return p.parseDataStmt()
 	case token.COMMON:
 		return p.parseCommonStmt()
+	case token.DIMENSION:
+		return p.parseDimensionStmt()
 	case token.EXTERNAL:
 		return p.parseExternalStmt()
 	case token.INTRINSIC:
@@ -4103,6 +4105,37 @@ func (p *Parser90) parseCommonStmt() ast.Statement {
 			arraySpec = p.parseArraySpec()
 		}
 		stmt.ArraySpecs = append(stmt.ArraySpecs, arraySpec)
+
+		// Check for comma (more variables) or end of statement
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	stmt.Position = ast.Pos(startPos, p.current.start)
+	return stmt
+}
+
+// parseDimensionStmt parses a DIMENSION statement
+// Precondition: current token is DIMENSION
+// Example: DIMENSION AA(100), BB(10,20), CC(5)
+func (p *Parser90) parseDimensionStmt() ast.Statement {
+	startPos := p.current.start
+	p.expect(token.DIMENSION, "")
+
+	stmt := &ast.DimensionStmt{}
+	// Parse comma-separated variable list with array specs
+	for p.canUseAsIdentifier() {
+		varName := string(p.current.lit)
+		stmt.Variables = append(stmt.Variables, varName)
+		p.nextToken()
+
+		// Array specification is required for DIMENSION statement
+		if p.currentTokenIs(token.LParen) {
+			stmt.ArraySpecs = append(stmt.ArraySpecs, p.parseArraySpec())
+		} else {
+			p.addError("expected array dimension specification after variable in DIMENSION statement")
+		}
 
 		// Check for comma (more variables) or end of statement
 		if !p.consumeIf(token.Comma) {

@@ -7,7 +7,7 @@ var HOLDRT = struct {
 	SUMXRQ *intrinsic.Array[float32]
 	YMNRT  *intrinsic.Array[float32]
 	MATRIX *intrinsic.Array[float32]
-}{YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20)}
+}{MATRIX: intrinsic.NewArray[float32](10, 20), YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3)}
 var SHARED struct {
 	X int32
 	Y int32
@@ -45,6 +45,7 @@ func main() {
 	LEVEL26()
 	LEVEL27()
 	LEVEL28()
+	LEVEL29()
 	LEVEL22()
 	intrinsic.Exit(0)
 }
@@ -613,6 +614,30 @@ func LEVEL28() {
 	intrinsic.Print("LEVEL 28: YMNRT(2) =", HOLDRT.YMNRT.At(int(2)))
 	intrinsic.Print("LEVEL 28: MATRIX(5,10) =", HOLDRT.MATRIX.At(int(5), int(10)))
 	intrinsic.Print("LEVEL 28: COUNTS(50) =", STATS.COUNTS.At(int(50)))
+}
+func LEVEL29() {
+	var DEFALT float64
+	var AA = intrinsic.NewArray[float64](10)
+	var I_DEFALT = intrinsic.NewArray[int32](2)
+	var (
+		N      int32
+		M      int32
+		MAXMUM int32
+		MAXDM1 int32
+		NPAA   int32
+	)
+	I_DEFALT.Set(125269879, int(1))
+	I_DEFALT.Set(125269879, int(2))
+	intrinsic.Print("LEVEL 29: Advanced features test")
+	MAXDM1 = 100
+	NPAA = intrinsic.MALLOC(MAXDM1 * 8)
+	intrinsic.Print("LEVEL 29: MALLOC returned", NPAA)
+	M = 1
+	MAXMUM = 10
+	for N = M; N <= MAXMUM; N += 1 {
+		AA.Set(DEFALT, int(N))
+	}
+	intrinsic.Print("LEVEL 29: Initialized", MAXMUM-M+1, "elements")
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")

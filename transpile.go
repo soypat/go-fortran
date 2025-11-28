@@ -226,18 +226,72 @@ func (tg *TranspileToGo) prependImplicitVarDecls(stmts []ast.Stmt) []ast.Stmt {
 	var varDecls []ast.Stmt
 	for _, name := range names {
 		v := tg.getVar(name)
-		decl := &ast.DeclStmt{
-			Decl: &ast.GenDecl{
-				Tok: token.VAR,
-				Specs: []ast.Spec{
-					&ast.ValueSpec{
-						Names: []*ast.Ident{ast.NewIdent(name)},
-						Type:  v.Type,
+
+		// Check if this is an array from DIMENSION statement
+		if v.ArraySpec != nil {
+			// Array needs NewArray call, not just type declaration
+			// Determine element type from v.Type or use implicit typing
+			elemType := v.Type
+			if elemType == nil {
+				elemType = getImplicitType(name)
+			}
+
+			// Get dimensions (sizes) from array bounds
+			var dims []ast.Expr
+			for _, bound := range v.ArraySpec.Bounds {
+				size := tg.transformExpression(bound.Upper)
+				if size == nil {
+					// If we can't determine size, skip this array
+					continue
+				}
+				dims = append(dims, size)
+			}
+
+			if len(dims) == 0 {
+				// Can't create array without dimensions, skip
+				continue
+			}
+
+			// Generate: var NAME = intrinsic.NewArray[elemType](dims...)
+			tg.useImport("github.com/soypat/go-fortran/intrinsic")
+			init := &ast.CallExpr{
+				Fun: &ast.IndexExpr{
+					X: &ast.SelectorExpr{
+						X:   ast.NewIdent("intrinsic"),
+						Sel: ast.NewIdent("NewArray"),
+					},
+					Index: elemType,
+				},
+				Args: dims,
+			}
+
+			decl := &ast.DeclStmt{
+				Decl: &ast.GenDecl{
+					Tok: token.VAR,
+					Specs: []ast.Spec{
+						&ast.ValueSpec{
+							Names:  []*ast.Ident{ast.NewIdent(name)},
+							Values: []ast.Expr{init},
+						},
 					},
 				},
-			},
+			}
+			varDecls = append(varDecls, decl)
+		} else {
+			// Regular scalar variable
+			decl := &ast.DeclStmt{
+				Decl: &ast.GenDecl{
+					Tok: token.VAR,
+					Specs: []ast.Spec{
+						&ast.ValueSpec{
+							Names: []*ast.Ident{ast.NewIdent(name)},
+							Type:  v.Type,
+						},
+					},
+				},
+			}
+			varDecls = append(varDecls, decl)
 		}
-		varDecls = append(varDecls, decl)
 	}
 
 	// Prepend declarations to statements
@@ -831,17 +885,25 @@ func (tg *TranspileToGo) transformStatements(stmts []f90.Statement) (goStmts []a
 	for _, stmt := range stmts {
 		var goStmt ast.Stmt
 		goStmt, err = tg.transformStatement(stmt)
-		if goStmt != nil {
-			// Check if the Fortran statement has a label (e.g., "100" in "100 CONTINUE")
-			if label := stmt.GetLabel(); label != "" {
-				// Wrap the Go statement with a label: labelN:
-				goStmt = &ast.LabeledStmt{
-					Label: ast.NewIdent("label" + label),
-					Stmt:  goStmt,
-				}
+
+		// Check if the Fortran statement has a label (e.g., "100" in "100 CONTINUE")
+		if label := stmt.GetLabel(); label != "" {
+			// Even if goStmt is nil (e.g., FORMAT, COMMON statements), we need to
+			// generate a label for goto targets. Use empty statement as placeholder.
+			if goStmt == nil {
+				goStmt = &ast.EmptyStmt{}
+			}
+			// Wrap the Go statement with a label: labelN:
+			goStmt = &ast.LabeledStmt{
+				Label: ast.NewIdent("label" + label),
+				Stmt:  goStmt,
 			}
 			goStmts = append(goStmts, goStmt)
+		} else if goStmt != nil {
+			// No label, but statement exists
+			goStmts = append(goStmts, goStmt)
 		}
+
 		if err != nil {
 			tg.addError(err.Error())
 		}
@@ -904,6 +966,9 @@ func (tg *TranspileToGo) transformStatement(stmt f90.Statement) (gostmt ast.Stmt
 		gostmt = tg.transformSelectCaseStmt(s)
 	case *f90.CommonStmt:
 		// COMMON blocks are processed separately, no code generation in function body
+		return nil, nil
+	case *f90.DimensionStmt:
+		// DIMENSION statements are processed in preScanCommonBlocks, no code generation in function body
 		return nil, nil
 	case *f90.DataStmt:
 		gostmt = tg.transformDataStmt(s)
@@ -1694,11 +1759,21 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 			continue
 		}
 
-		// Check if this is an array
-		if entity.ArraySpec != nil {
+		// Check if this is an array from either:
+		// 1. Array spec in the type declaration (REAL, DIMENSION(10) :: arr)
+		// 2. Separate DIMENSION statement (DIMENSION arr(10) before this type decl)
+		arraySpec := entity.ArraySpec
+		if arraySpec == nil && v.ArraySpec != nil {
+			// Use array spec from DIMENSION statement
+			arraySpec = v.ArraySpec
+		}
+
+		if arraySpec != nil {
 			if isAllocatable {
 				// Mark as allocatable and generate uninitialized pointer declaration
 				v.Flags |= symbol.FlagAllocatable
+				// Clear implicit flag if it was set by DIMENSION statement
+				v.Flags &^= symbol.FlagImplicit
 
 				// Track in unified vars map (Phase 2 migration)
 				// Array type: *intrinsic.Array[elemType]
@@ -1726,10 +1801,14 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 					},
 				}
 				v.Type = arrayType
-				v.ArraySpec = entity.ArraySpec
+				v.ArraySpec = arraySpec
 				v.ElementType = goType
 
-				spec := tg.transformArrayDeclaration(entity.Name, goType, entity.ArraySpec)
+				// If array was already marked as implicit by DIMENSION statement,
+				// clear that flag since we're explicitly declaring it now
+				v.Flags &^= symbol.FlagImplicit
+
+				spec := tg.transformArrayDeclaration(entity.Name, goType, arraySpec)
 				specs = append(specs, spec)
 			}
 			continue
@@ -2763,6 +2842,25 @@ func (tg *TranspileToGo) transformFunctionCall(call *f90.FunctionCall) ast.Expr 
 			Args: []ast.Expr{methodCall},
 		}
 
+	case "MALLOC":
+		// MALLOC(size) → intrinsic.MALLOC(size)
+		// External memory allocation function (typically from C library)
+		if len(call.Args) != 1 {
+			return nil
+		}
+		arg := tg.transformExpression(call.Args[0])
+		if arg == nil {
+			return nil
+		}
+		tg.useImport("github.com/soypat/go-fortran/intrinsic")
+		return &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent("intrinsic"),
+				Sel: ast.NewIdent("MALLOC"),
+			},
+			Args: []ast.Expr{arg},
+		}
+
 	default:
 		// For other functions, assume they're user-defined and call directly
 		// Transform arguments
@@ -3032,13 +3130,39 @@ func (tg *TranspileToGo) transformStopStmt(stmt *f90.StopStmt) ast.Stmt {
 	}
 }
 
-// preScanCommonBlocks scans statements for COMMON blocks before processing type declarations.
-// This allows us to know which variables are in COMMON blocks before we generate declarations.
+// preScanCommonBlocks scans statements for COMMON and DIMENSION statements before processing type declarations.
+// This allows us to know which variables are in COMMON blocks and array dimensions before we generate declarations.
 func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
 	// Note: COMMON variable tracking is now done via the unified vars map (VarInfo.InCommonBlock)
 	// No need to clear a separate commonVars map
 	for _, stmt := range stmts {
-		if commonStmt, ok := stmt.(*f90.CommonStmt); ok {
+		if dimStmt, ok := stmt.(*f90.DimensionStmt); ok {
+			// Handle DIMENSION statement
+			for i, varName := range dimStmt.Variables {
+				var arraySpec *f90.ArraySpec
+				if i < len(dimStmt.ArraySpecs) {
+					arraySpec = dimStmt.ArraySpecs[i]
+				}
+				if arraySpec != nil {
+					// Track array in unified vars map
+					v := tg.getOrMakeVar(varName)
+					v.ArraySpec = arraySpec
+
+					// Set element type from IMPLICIT rules if not already set
+					if v.ElementType == nil {
+						v.ElementType = getImplicitType(varName)
+					}
+
+					// Mark as implicit so it gets declared
+					// Even though this is an array, we still need v.Type set for detection
+					// in transformAssignment (it checks v.Type != nil)
+					if v.Type == nil {
+						v.Type = getImplicitType(varName) // Element type (for detection)
+						v.Flags |= symbol.FlagImplicit
+					}
+				}
+			}
+		} else if commonStmt, ok := stmt.(*f90.CommonStmt); ok {
 			blockName := commonStmt.BlockName
 			if blockName == "" {
 				blockName = "__blank__"

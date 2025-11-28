@@ -31,6 +31,7 @@
       CALL LEVEL26()
       CALL LEVEL27()
       CALL LEVEL28()
+      CALL LEVEL29()
       CALL LEVEL22()
       STOP 0
       CONTAINS
@@ -709,6 +710,36 @@
           PRINT *, 'LEVEL 28: MATRIX(5,10) =', MATRIX(5,10)
           PRINT *, 'LEVEL 28: COUNTS(50) =', COUNTS(50)
       END SUBROUTINE LEVEL28
+
+      SUBROUTINE LEVEL29()
+          ! Test advanced features: DIMENSION, MALLOC, DATA with hex, labeled DO
+          DOUBLE PRECISION :: DEFALT
+          DOUBLE PRECISION :: AA
+          DIMENSION AA(10)
+          INTEGER,DIMENSION(2) :: I_DEFALT
+          INTEGER :: N, M, MAXMUM, MAXDM1, NPAA
+
+          ! Initialize with hex values (Cray-style hex literals)
+          DATA I_DEFALT(1) /Z'7777777'/
+          DATA I_DEFALT(2) /Z'7777777'/
+
+          PRINT *, 'LEVEL 29: Advanced features test'
+
+          ! Test MALLOC intrinsic
+          MAXDM1 = 100
+          NPAA = MALLOC(MAXDM1 * 8)
+
+          PRINT *, 'LEVEL 29: MALLOC returned', NPAA
+
+          ! Initialize array using labeled DO loop
+          M = 1
+          MAXMUM = 10
+          DO 800 N = M, MAXMUM
+              AA(N) = DEFALT
+  800     END DO
+
+          PRINT *, 'LEVEL 29: Initialized', MAXMUM - M + 1, 'elements'
+      END SUBROUTINE LEVEL29
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

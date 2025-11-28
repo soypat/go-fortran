@@ -582,6 +582,56 @@ func (is *IntrinsicStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// DimensionStmt declares array dimensions for variables using IMPLICIT typing.
+// Standalone DIMENSION statements are common in F77 code.
+//
+// Example:
+//
+//	DIMENSION AA(100), BB(10,20), CC(5)
+type DimensionStmt struct {
+	Variables  []string     // Variable names
+	ArraySpecs []*ArraySpec // Array dimensions for each variable
+	Label      string
+	Position
+}
+
+var _ Statement = (*DimensionStmt)(nil) // compile time check of interface implementation.
+
+func (ds *DimensionStmt) GetLabel() string { return ds.Label }
+
+func (ds *DimensionStmt) statementNode() {}
+func (ds *DimensionStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "DIMENSION"...)
+}
+func (ds *DimensionStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "DIMENSION"...)
+	for i, v := range ds.Variables {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		} else {
+			dst = append(dst, ' ')
+		}
+		dst = append(dst, v...)
+		if ds.ArraySpecs[i] != nil {
+			dst = append(dst, '(')
+			for j, bound := range ds.ArraySpecs[i].Bounds {
+				if j > 0 {
+					dst = append(dst, ',')
+				}
+				if bound.Lower != nil {
+					dst = bound.Lower.AppendString(dst)
+					dst = append(dst, ':')
+				}
+				if bound.Upper != nil {
+					dst = bound.Upper.AppendString(dst)
+				}
+			}
+			dst = append(dst, ')')
+		}
+	}
+	return dst
+}
+
 // DataStmt initializes variables with specified values in Fortran 77 style.
 // DATA statements can use implied DO loops for array initialization.
 //
