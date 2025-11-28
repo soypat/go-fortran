@@ -40,243 +40,6 @@ func sanitizeIdent(name string) string {
 	return name
 }
 
-// AST Helper Methods - Create common Go AST patterns concisely
-
-// astMethodCall creates: receiver.methodName(args...)
-func (tg *TranspileToGo) astMethodCall(receiver, methodName string, args ...ast.Expr) *ast.CallExpr {
-	return &ast.CallExpr{
-		Fun: &ast.SelectorExpr{
-			X:   ast.NewIdent(sanitizeIdent(receiver)),
-			Sel: ast.NewIdent(methodName),
-		},
-		Args: args,
-	}
-}
-
-// astPkgCall creates: pkgName.fnName(args...)
-func (tg *TranspileToGo) astPkgCall(pkgName, fnName string, args ...ast.Expr) *ast.CallExpr {
-	return &ast.CallExpr{
-		Fun: &ast.SelectorExpr{
-			X:   ast.NewIdent(pkgName),
-			Sel: ast.NewIdent(fnName),
-		},
-		Args: args,
-	}
-}
-
-// astIntrinsicCall creates: intrinsic.fnName(args...) with auto-import
-func (tg *TranspileToGo) astIntrinsicCall(fnName string, args ...ast.Expr) *ast.CallExpr {
-	// tg.useImport("github.com/soypat/go-fortran/intrinsic") // intrinsic package imported on TranspileToGo initialization.
-	return tg.astPkgCall("intrinsic", fnName, args...)
-}
-
-// astGenericCall creates: pkgName.fnName[T](args...)
-func (tg *TranspileToGo) astGenericCall(pkgName, fnName string, typeParam ast.Expr, args ...ast.Expr) *ast.CallExpr {
-	return &ast.CallExpr{
-		Fun: &ast.IndexExpr{
-			X: &ast.SelectorExpr{
-				X:   ast.NewIdent(pkgName),
-				Sel: ast.NewIdent(fnName),
-			},
-			Index: typeParam,
-		},
-		Args: args,
-	}
-}
-
-// astGenericCall2 creates: pkgName.fnName[T1, T2](args...)
-func (tg *TranspileToGo) astGenericCall2(pkgName, fnName string, t1, t2 ast.Expr, args ...ast.Expr) *ast.CallExpr {
-	return &ast.CallExpr{
-		Fun: &ast.IndexListExpr{
-			X: &ast.SelectorExpr{
-				X:   ast.NewIdent(pkgName),
-				Sel: ast.NewIdent(fnName),
-			},
-			Indices: []ast.Expr{t1, t2},
-		},
-		Args: args,
-	}
-}
-
-// astIntLit creates: 42
-func (tg *TranspileToGo) astIntLit(value int) *ast.BasicLit {
-	return &ast.BasicLit{
-		Kind:  token.INT,
-		Value: strconv.Itoa(value),
-	}
-}
-
-// astIntrinsicGeneric creates: intrinsic.fnName[T](args...) with auto-import
-func (tg *TranspileToGo) astIntrinsicGeneric(fnName string, typeParam ast.Expr, args ...ast.Expr) *ast.CallExpr {
-	// tg.useImport("github.com/soypat/go-fortran/intrinsic") // intrinsic package imported on TranspileToGo initialization.
-	return tg.astGenericCall("intrinsic", fnName, typeParam, args...)
-}
-
-// astIntrinsicGeneric2 creates: intrinsic.fnName[T1, T2](args...) with auto-import
-func (tg *TranspileToGo) astIntrinsicGeneric2(fnName string, t1, t2 ast.Expr, args ...ast.Expr) *ast.CallExpr {
-	// tg.useImport("github.com/soypat/go-fortran/intrinsic") // intrinsic package imported on TranspileToGo initialization.
-	return tg.astGenericCall2("intrinsic", fnName, t1, t2, args...)
-}
-
-// Array method helpers
-
-// astArrayAt creates: arrayExpr.At(indices...)
-func (tg *TranspileToGo) astArrayAt(arrayExpr ast.Expr, indices ...ast.Expr) *ast.CallExpr {
-	return &ast.CallExpr{
-		Fun: &ast.SelectorExpr{
-			X:   arrayExpr,
-			Sel: ast.NewIdent("At"),
-		},
-		Args: indices,
-	}
-}
-
-// astArraySet creates: arrayExpr.Set(value, indices...)
-func (tg *TranspileToGo) astArraySet(arrayExpr ast.Expr, value ast.Expr, indices ...ast.Expr) *ast.CallExpr {
-	return &ast.CallExpr{
-		Fun: &ast.SelectorExpr{
-			X:   arrayExpr,
-			Sel: ast.NewIdent("Set"),
-		},
-		Args: append([]ast.Expr{value}, indices...),
-	}
-}
-
-// Type casting helpers
-
-// astTypeCast creates: typeName(expr)
-func (tg *TranspileToGo) astTypeCast(typeName string, expr ast.Expr) *ast.CallExpr {
-	return &ast.CallExpr{
-		Fun:  ast.NewIdent(typeName),
-		Args: []ast.Expr{expr},
-	}
-}
-
-// astIntCast creates: int(expr)
-func (tg *TranspileToGo) astIntCast(expr ast.Expr) *ast.CallExpr {
-	return tg.astTypeCast("int", expr)
-}
-
-// astInt32Cast creates: int32(expr)
-func (tg *TranspileToGo) astInt32Cast(expr ast.Expr) *ast.CallExpr {
-	return tg.astTypeCast("int32", expr)
-}
-
-// astFloat64Cast creates: float64(expr)
-func (tg *TranspileToGo) astFloat64Cast(expr ast.Expr) *ast.CallExpr {
-	return tg.astTypeCast("float64", expr)
-}
-
-// Pointer-to-generic type helpers
-
-// astPointerToGeneric creates: *baseType[typeParam]
-func (tg *TranspileToGo) astPointerToGeneric(baseType, typeParam ast.Expr) *ast.StarExpr {
-	return &ast.StarExpr{
-		X: &ast.IndexExpr{
-			X:     baseType,
-			Index: typeParam,
-		},
-	}
-}
-
-// astPointerToArray creates: *intrinsic.Array[elemType]
-func (tg *TranspileToGo) astPointerToArray(elemType ast.Expr) *ast.StarExpr {
-	return tg.astPointerToGeneric(_astTypeArray, elemType)
-}
-
-// Binary expression helpers
-
-// astBinaryExpr creates: left op right
-func (tg *TranspileToGo) astBinaryExpr(left ast.Expr, op token.Token, right ast.Expr) *ast.BinaryExpr {
-	return &ast.BinaryExpr{
-		X:  left,
-		Op: op,
-		Y:  right,
-	}
-}
-
-// Unary expression helpers
-
-// astUnaryExpr creates: op expr
-func (tg *TranspileToGo) astUnaryExpr(op token.Token, expr ast.Expr) *ast.UnaryExpr {
-	return &ast.UnaryExpr{
-		Op: op,
-		X:  expr,
-	}
-}
-
-// astAddressOf creates: &expr
-func (tg *TranspileToGo) astAddressOf(expr ast.Expr) *ast.UnaryExpr {
-	return tg.astUnaryExpr(token.AND, expr)
-}
-
-// Expression statement helper
-
-// astExprStmt creates: &ast.ExprStmt{X: expr}
-func (tg *TranspileToGo) astExprStmt(expr ast.Expr) *ast.ExprStmt {
-	return &ast.ExprStmt{X: expr}
-}
-
-// astCommonFieldRef creates a COMMON block field reference: blockVarName.FIELDNAME
-// Used for accessing variables stored in COMMON blocks as struct fields.
-func (tg *TranspileToGo) astCommonFieldRef(blockVarName, fieldName string) *ast.SelectorExpr {
-	return &ast.SelectorExpr{
-		X:   ast.NewIdent(blockVarName),
-		Sel: ast.NewIdent(strings.ToUpper(fieldName)),
-	}
-}
-
-// Type extraction helpers - flatten deeply nested type assertions
-
-// extractTypeParam extracts T from generic types like Pointer[T], Array[T], or CharArray[T]
-// Returns (elemType, true) if successful, (nil, false) otherwise
-func extractTypeParam(typ ast.Expr) (ast.Expr, bool) {
-	idx, ok := typ.(*ast.IndexExpr)
-	if !ok {
-		return nil, false
-	}
-	return idx.Index, true
-}
-
-// extractPointerElementType extracts T from intrinsic.Pointer[T]
-// Returns (T, true) if typ is Pointer[T], (nil, false) otherwise
-func extractPointerElementType(typ ast.Expr) (ast.Expr, bool) {
-	idx, ok := typ.(*ast.IndexExpr)
-	if !ok {
-		return nil, false
-	}
-	sel, ok := idx.X.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != "Pointer" {
-		return nil, false
-	}
-	return idx.Index, true
-}
-
-// extractArrayElementType extracts T from intrinsic.Array[T] or *intrinsic.Array[T]
-// Returns (T, true) if typ is Array[T] or *Array[T], (nil, false) otherwise
-func extractArrayElementType(typ ast.Expr) (ast.Expr, bool) {
-	// Handle *intrinsic.Array[T]
-	if star, ok := typ.(*ast.StarExpr); ok {
-		typ = star.X
-	}
-
-	idx, ok := typ.(*ast.IndexExpr)
-	if !ok {
-		return nil, false
-	}
-	sel, ok := idx.X.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != "Array" {
-		return nil, false
-	}
-	return idx.Index, true
-}
-
-// isPointerType checks if typ is intrinsic.Pointer[T] for any T
-func isPointerType(typ ast.Expr) bool {
-	_, ok := extractPointerElementType(typ)
-	return ok
-}
-
 // VarInfo tracks all information about a variable in the current scope
 type VarInfo struct {
 	// Core metadata
@@ -2498,6 +2261,23 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 		return nil
 	}
 
+	// Type conversion: Fortran allows implicit type conversions in assignments
+	// Get LHS type for conversion
+	var lhsType ast.Expr
+	if ident, ok := assign.Target.(*f90.Identifier); ok {
+		if v := tg.getVar(ident.Value); v != nil {
+			lhsType = v.Type
+		}
+	}
+
+	// Infer RHS type (best effort)
+	rhsType := tg.inferExpressionType(assign.Value)
+
+	// Wrap RHS with type conversion if needed
+	if lhsType != nil && rhsType != nil {
+		rhs = tg.wrapWithTypeConversion(lhsType, rhsType, rhs)
+	}
+
 	// MALLOC type inference: inject type parameter from LHS
 	// Check if RHS is intrinsic.MALLOC call and LHS is a pointer variable
 	if callExpr, ok := rhs.(*ast.CallExpr); ok {
@@ -2595,8 +2375,27 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 		return nil
 	}
 
-	// Check if this is a CHARACTER variable with substring assignment
+	// Type conversion: Get array element type and wrap RHS if needed
 	v := tg.getVar(ref.Name)
+	if v != nil {
+		// Get array element type
+		elemType := v.ElementType
+		if elemType == nil {
+			if extracted, ok := tg.extractArrayElementType(v.Type); ok {
+				elemType = extracted
+			}
+		}
+
+		// Infer RHS type
+		rhsType := tg.inferExpressionType(value)
+
+		// Wrap with conversion if needed
+		if elemType != nil && rhsType != nil {
+			rhs = tg.wrapWithTypeConversion(elemType, rhsType, rhs)
+		}
+	}
+
+	// Check if this is a CHARACTER variable with substring assignment
 	if v != nil && v.CharLength > 0 && len(ref.Subscripts) == 1 {
 		// Check if the subscript is a RangeExpr (substring assignment)
 		if rangeExpr, isRange := ref.Subscripts[0].(*f90.RangeExpr); isRange {
@@ -4006,6 +3805,368 @@ func (tg *TranspileToGo) evalBinaryOp(left ast.Expr, op token.Token, right ast.E
 		Kind:  token.FLOAT,
 		Value: strconv.FormatFloat(result, 'e', -1, 64),
 	}, true
+}
+
+// Type extraction helpers - flatten deeply nested type assertions
+
+// extractTypeParam extracts T from generic types like Pointer[T], Array[T], or CharArray[T]
+// Returns (elemType, true) if successful, (nil, false) otherwise
+func (tg *TranspileToGo) extractTypeParam(typ ast.Expr) (ast.Expr, bool) {
+	idx, ok := typ.(*ast.IndexExpr)
+	if !ok {
+		return nil, false
+	}
+	return idx.Index, true
+}
+
+// extractPointerElementType extracts T from intrinsic.Pointer[T]
+// Returns (T, true) if typ is Pointer[T], (nil, false) otherwise
+func (tg *TranspileToGo) extractPointerElementType(typ ast.Expr) (ast.Expr, bool) {
+	idx, ok := typ.(*ast.IndexExpr)
+	if !ok {
+		return nil, false
+	}
+	sel, ok := idx.X.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Pointer" {
+		return nil, false
+	}
+	return idx.Index, true
+}
+
+// extractArrayElementType extracts T from intrinsic.Array[T] or *intrinsic.Array[T]
+// Returns (T, true) if typ is Array[T] or *Array[T], (nil, false) otherwise
+func (tg *TranspileToGo) extractArrayElementType(typ ast.Expr) (ast.Expr, bool) {
+	// Handle *intrinsic.Array[T]
+	if star, ok := typ.(*ast.StarExpr); ok {
+		typ = star.X
+	}
+
+	idx, ok := typ.(*ast.IndexExpr)
+	if !ok {
+		return nil, false
+	}
+	sel, ok := idx.X.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Array" {
+		return nil, false
+	}
+	return idx.Index, true
+}
+
+// isPointerType checks if typ is intrinsic.Pointer[T] for any T
+func (tg *TranspileToGo) isPointerType(typ ast.Expr) bool {
+	_, ok := tg.extractPointerElementType(typ)
+	return ok
+}
+
+// Type conversion helpers for implicit Fortran type conversions
+
+// extractTypeName gets the base type name from an ast.Expr type representation.
+// Handles Ident, IndexExpr (for generics like Array[T]), and StarExpr (for pointers).
+func (tg *TranspileToGo) extractTypeName(typ ast.Expr) string {
+	switch t := typ.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.IndexExpr:
+		// Handle intrinsic.Array[T], intrinsic.Pointer[T]
+		if elem, ok := tg.extractTypeParam(typ); ok {
+			return tg.extractTypeName(elem)
+		}
+	case *ast.StarExpr:
+		// Handle *intrinsic.Array[T]
+		return tg.extractTypeName(t.X)
+	}
+	return ""
+}
+
+// isIntegerType checks if a type name represents an integer type
+func (tg *TranspileToGo) isIntegerType(name string) bool {
+	return name == "int8" || name == "int16" || name == "int32" || name == "int64"
+}
+
+// isNumericType checks if a type name represents a numeric type (integer or float)
+func (tg *TranspileToGo) isNumericType(name string) bool {
+	return tg.isIntegerType(name) || name == "float32" || name == "float64"
+}
+
+// isComplexType checks if a type is a wrapper type (Pointer, Array) that should not
+// undergo type conversion. These types have their own element types and should not be
+// converted as if they were primitives.
+func (tg *TranspileToGo) isComplexType(typ ast.Expr) bool {
+	switch t := typ.(type) {
+	case *ast.IndexExpr:
+		// Check if this is intrinsic.Pointer[T] or intrinsic.Array[T]
+		if sel, ok := t.X.(*ast.SelectorExpr); ok {
+			typeName := sel.Sel.Name
+			return typeName == "Pointer" || typeName == "Array"
+		}
+	case *ast.StarExpr:
+		// Handle *intrinsic.Array[T] or *intrinsic.Pointer[T]
+		return tg.isComplexType(t.X)
+	}
+	return false
+}
+
+// typeNeedsConversion checks if assignment from srcType to dstType requires conversion
+func (tg *TranspileToGo) typeNeedsConversion(dstType, srcType ast.Expr) bool {
+	// Don't convert complex types (Pointer, Array)
+	if tg.isComplexType(dstType) || tg.isComplexType(srcType) {
+		return false
+	}
+	dstName := tg.extractTypeName(dstType)
+	srcName := tg.extractTypeName(srcType)
+	return dstName != "" && srcName != "" && dstName != srcName
+}
+
+// wrapWithTypeConversion wraps rhs expression with type conversion if needed.
+// Implements Fortran's implicit type conversion rules.
+func (tg *TranspileToGo) wrapWithTypeConversion(dstType, srcType ast.Expr, rhs ast.Expr) ast.Expr {
+	if !tg.typeNeedsConversion(dstType, srcType) {
+		return rhs
+	}
+
+	dstName := tg.extractTypeName(dstType)
+	srcName := tg.extractTypeName(srcType)
+
+	// INTEGER ↔ LOGICAL conversions use intrinsic functions
+	if dstName == "bool" && tg.isIntegerType(srcName) {
+		return tg.astIntrinsicGeneric("Int2Bool", ast.NewIdent(srcName), rhs)
+	}
+	if srcName == "bool" && tg.isIntegerType(dstName) {
+		return tg.astIntrinsicGeneric("Bool2Int", ast.NewIdent(dstName), rhs)
+	}
+
+	// Numeric conversions use Go type casts
+	if tg.isNumericType(dstName) && tg.isNumericType(srcName) {
+		return &ast.CallExpr{
+			Fun:  ast.NewIdent(dstName),
+			Args: []ast.Expr{rhs},
+		}
+	}
+
+	return rhs
+}
+
+// AST Helper Methods - Create common Go AST patterns concisely
+
+// astMethodCall creates: receiver.methodName(args...)
+func (tg *TranspileToGo) astMethodCall(receiver, methodName string, args ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   ast.NewIdent(sanitizeIdent(receiver)),
+			Sel: ast.NewIdent(methodName),
+		},
+		Args: args,
+	}
+}
+
+// astPkgCall creates: pkgName.fnName(args...)
+func (tg *TranspileToGo) astPkgCall(pkgName, fnName string, args ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   ast.NewIdent(pkgName),
+			Sel: ast.NewIdent(fnName),
+		},
+		Args: args,
+	}
+}
+
+// astIntrinsicCall creates: intrinsic.fnName(args...) with auto-import
+func (tg *TranspileToGo) astIntrinsicCall(fnName string, args ...ast.Expr) *ast.CallExpr {
+	// tg.useImport("github.com/soypat/go-fortran/intrinsic") // intrinsic package imported on TranspileToGo initialization.
+	return tg.astPkgCall("intrinsic", fnName, args...)
+}
+
+// astGenericCall creates: pkgName.fnName[T](args...)
+func (tg *TranspileToGo) astGenericCall(pkgName, fnName string, typeParam ast.Expr, args ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.IndexExpr{
+			X: &ast.SelectorExpr{
+				X:   ast.NewIdent(pkgName),
+				Sel: ast.NewIdent(fnName),
+			},
+			Index: typeParam,
+		},
+		Args: args,
+	}
+}
+
+// astGenericCall2 creates: pkgName.fnName[T1, T2](args...)
+func (tg *TranspileToGo) astGenericCall2(pkgName, fnName string, t1, t2 ast.Expr, args ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.IndexListExpr{
+			X: &ast.SelectorExpr{
+				X:   ast.NewIdent(pkgName),
+				Sel: ast.NewIdent(fnName),
+			},
+			Indices: []ast.Expr{t1, t2},
+		},
+		Args: args,
+	}
+}
+
+// astIntLit creates: 42
+func (tg *TranspileToGo) astIntLit(value int) *ast.BasicLit {
+	return &ast.BasicLit{
+		Kind:  token.INT,
+		Value: strconv.Itoa(value),
+	}
+}
+
+// astIntrinsicGeneric creates: intrinsic.fnName[T](args...) with auto-import
+func (tg *TranspileToGo) astIntrinsicGeneric(fnName string, typeParam ast.Expr, args ...ast.Expr) *ast.CallExpr {
+	// tg.useImport("github.com/soypat/go-fortran/intrinsic") // intrinsic package imported on TranspileToGo initialization.
+	return tg.astGenericCall("intrinsic", fnName, typeParam, args...)
+}
+
+// astIntrinsicGeneric2 creates: intrinsic.fnName[T1, T2](args...) with auto-import
+func (tg *TranspileToGo) astIntrinsicGeneric2(fnName string, t1, t2 ast.Expr, args ...ast.Expr) *ast.CallExpr {
+	// tg.useImport("github.com/soypat/go-fortran/intrinsic") // intrinsic package imported on TranspileToGo initialization.
+	return tg.astGenericCall2("intrinsic", fnName, t1, t2, args...)
+}
+
+// Array method helpers
+
+// astArrayAt creates: arrayExpr.At(indices...)
+func (tg *TranspileToGo) astArrayAt(arrayExpr ast.Expr, indices ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   arrayExpr,
+			Sel: ast.NewIdent("At"),
+		},
+		Args: indices,
+	}
+}
+
+// astArraySet creates: arrayExpr.Set(value, indices...)
+func (tg *TranspileToGo) astArraySet(arrayExpr ast.Expr, value ast.Expr, indices ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   arrayExpr,
+			Sel: ast.NewIdent("Set"),
+		},
+		Args: append([]ast.Expr{value}, indices...),
+	}
+}
+
+// Type casting helpers
+
+// astTypeCast creates: typeName(expr)
+func (tg *TranspileToGo) astTypeCast(typeName string, expr ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun:  ast.NewIdent(typeName),
+		Args: []ast.Expr{expr},
+	}
+}
+
+// astIntCast creates: int(expr)
+func (tg *TranspileToGo) astIntCast(expr ast.Expr) *ast.CallExpr {
+	return tg.astTypeCast("int", expr)
+}
+
+// astInt32Cast creates: int32(expr)
+func (tg *TranspileToGo) astInt32Cast(expr ast.Expr) *ast.CallExpr {
+	return tg.astTypeCast("int32", expr)
+}
+
+// astFloat64Cast creates: float64(expr)
+func (tg *TranspileToGo) astFloat64Cast(expr ast.Expr) *ast.CallExpr {
+	return tg.astTypeCast("float64", expr)
+}
+
+// inferExpressionType attempts to determine the Go type of a Fortran expression.
+// Returns nil if type cannot be inferred (caller should fall back to no conversion).
+func (tg *TranspileToGo) inferExpressionType(expr f90.Expression) ast.Expr {
+	switch e := expr.(type) {
+	case *f90.Identifier:
+		if v := tg.getVar(e.Value); v != nil {
+			return v.Type
+		}
+	case *f90.IntegerLiteral:
+		return ast.NewIdent("int32")
+	case *f90.RealLiteral:
+		// Check for D exponent (DOUBLE PRECISION literal)
+		if strings.Contains(e.Raw, "D") || strings.Contains(e.Raw, "d") {
+			return ast.NewIdent("float64")
+		}
+		return ast.NewIdent("float32")
+	case *f90.LogicalLiteral:
+		return ast.NewIdent("bool")
+	case *f90.BinaryExpr:
+		// Infer from operands (use LHS type for type promotion)
+		return tg.inferExpressionType(e.Left)
+	case *f90.FunctionCall:
+		// Check if it's a type conversion intrinsic
+		upper := strings.ToUpper(e.Name)
+		switch upper {
+		case "REAL":
+			return ast.NewIdent("float32")
+		case "DBLE":
+			return ast.NewIdent("float64")
+		case "INT", "INT32":
+			return ast.NewIdent("int32")
+		}
+		// TODO: Look up function return type in symbol table when available
+	}
+	return nil
+}
+
+// Pointer-to-generic type helpers
+
+// astPointerToGeneric creates: *baseType[typeParam]
+func (tg *TranspileToGo) astPointerToGeneric(baseType, typeParam ast.Expr) *ast.StarExpr {
+	return &ast.StarExpr{
+		X: &ast.IndexExpr{
+			X:     baseType,
+			Index: typeParam,
+		},
+	}
+}
+
+// astPointerToArray creates: *intrinsic.Array[elemType]
+func (tg *TranspileToGo) astPointerToArray(elemType ast.Expr) *ast.StarExpr {
+	return tg.astPointerToGeneric(_astTypeArray, elemType)
+}
+
+// Binary expression helpers
+
+// astBinaryExpr creates: left op right
+func (tg *TranspileToGo) astBinaryExpr(left ast.Expr, op token.Token, right ast.Expr) *ast.BinaryExpr {
+	return &ast.BinaryExpr{
+		X:  left,
+		Op: op,
+		Y:  right,
+	}
+}
+
+// Unary expression helpers
+
+// astUnaryExpr creates: op expr
+func (tg *TranspileToGo) astUnaryExpr(op token.Token, expr ast.Expr) *ast.UnaryExpr {
+	return &ast.UnaryExpr{
+		Op: op,
+		X:  expr,
+	}
+}
+
+// astAddressOf creates: &expr
+func (tg *TranspileToGo) astAddressOf(expr ast.Expr) *ast.UnaryExpr {
+	return tg.astUnaryExpr(token.AND, expr)
+}
+
+// Expression statement helper
+
+// astExprStmt creates: &ast.ExprStmt{X: expr}
+func (tg *TranspileToGo) astExprStmt(expr ast.Expr) *ast.ExprStmt {
+	return &ast.ExprStmt{X: expr}
+}
+
+// astCommonFieldRef creates a COMMON block field reference: blockVarName.FIELDNAME
+// Used for accessing variables stored in COMMON blocks as struct fields.
+func (tg *TranspileToGo) astCommonFieldRef(blockVarName, fieldName string) *ast.SelectorExpr {
+	return &ast.SelectorExpr{
+		X:   ast.NewIdent(blockVarName),
+		Sel: ast.NewIdent(strings.ToUpper(fieldName)),
+	}
 }
 
 // Common intrinsic identifiers.

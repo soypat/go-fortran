@@ -632,6 +632,59 @@ func (ds *DimensionStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// EquivalenceStmt declares that multiple variables share the same memory location.
+// This enables type punning and memory aliasing in Fortran, typically used for:
+// - Viewing the same memory as different types (e.g., REAL vs INTEGER)
+// - Overlaying arrays to save memory
+// - Interfacing with legacy code that uses memory tricks
+//
+// Syntax:
+//
+//	EQUIVALENCE (var1, var2, ...), (var3, var4, ...), ...
+//
+// Each parenthesized group is an "equivalence set" - all variables in the set
+// share the same storage location. Array subscripts may appear to specify offsets.
+//
+// Example:
+//
+//	DOUBLE PRECISION :: DEFALT
+//	INTEGER, DIMENSION(2) :: I_DEFALT
+//	EQUIVALENCE (DEFALT, I_DEFALT)
+//
+// This makes DEFALT and I_DEFALT(1) occupy the same 8 bytes of memory,
+// allowing the same memory to be viewed as either a float64 or two int32 values.
+type EquivalenceStmt struct {
+	Sets  [][]Expression // Each set is a list of variable names/refs that share memory
+	Label string
+	Position
+}
+
+var _ Statement = (*EquivalenceStmt)(nil) // compile time check of interface implementation.
+
+func (es *EquivalenceStmt) GetLabel() string { return es.Label }
+
+func (es *EquivalenceStmt) statementNode() {}
+func (es *EquivalenceStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "EQUIVALENCE"...)
+}
+func (es *EquivalenceStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "EQUIVALENCE"...)
+	for i, set := range es.Sets {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		dst = append(dst, " ("...)
+		for j, expr := range set {
+			if j > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = expr.AppendString(dst)
+		}
+		dst = append(dst, ')')
+	}
+	return dst
+}
+
 // PointerCrayStmt declares Cray-style pointers (Fortran 77 extension).
 // This is distinct from modern F90+ POINTER attribute declarations.
 //

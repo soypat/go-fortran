@@ -2677,6 +2677,8 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 		return p.parseCommonStmt()
 	case token.DIMENSION:
 		return p.parseDimensionStmt()
+	case token.EQUIVALENCE:
+		return p.parseEquivalenceStmt()
 	case token.POINTER:
 		return p.parsePointerCrayStmt()
 	case token.EXTERNAL:
@@ -4140,6 +4142,63 @@ func (p *Parser90) parseDimensionStmt() ast.Statement {
 		}
 
 		// Check for comma (more variables) or end of statement
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	stmt.Position = ast.Pos(startPos, p.current.start)
+	return stmt
+}
+
+// parseEquivalenceStmt parses an EQUIVALENCE statement
+// Precondition: current token is EQUIVALENCE
+// Example: EQUIVALENCE (A, B, C), (X, Y)
+func (p *Parser90) parseEquivalenceStmt() ast.Statement {
+	startPos := p.current.start
+	p.nextToken() // consume EQUIVALENCE
+
+	stmt := &ast.EquivalenceStmt{}
+
+	// Parse comma-separated equivalence sets: (var1, var2, ...), (var3, var4, ...), ...
+	for {
+		// Expect opening parenthesis for equivalence set
+		if !p.expect(token.LParen, "opening parenthesis in EQUIVALENCE set") {
+			break
+		}
+
+		// Parse variable list within this set
+		var set []ast.Expression
+		for {
+			// Parse variable (can be simple identifier or array reference)
+			if !p.canUseAsIdentifier() {
+				p.addError("expected variable name in EQUIVALENCE set")
+				break
+			}
+
+			// Parse as expression to handle both identifiers and array refs
+			expr := p.parsePrimaryExpr()
+			if expr != nil {
+				set = append(set, expr)
+			}
+
+			// Check for comma (more variables) or closing paren
+			if !p.consumeIf(token.Comma) {
+				break
+			}
+		}
+
+		// Add this set to the statement
+		if len(set) > 0 {
+			stmt.Sets = append(stmt.Sets, set)
+		}
+
+		// Expect closing parenthesis
+		if !p.expect(token.RParen, "closing parenthesis in EQUIVALENCE set") {
+			break
+		}
+
+		// Check for comma (more sets) or end of statement
 		if !p.consumeIf(token.Comma) {
 			break
 		}

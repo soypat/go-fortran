@@ -7,7 +7,7 @@ var HOLDRT = struct {
 	SUMXRQ *intrinsic.Array[float32]
 	YMNRT  *intrinsic.Array[float32]
 	MATRIX *intrinsic.Array[float32]
-}{YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20), YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512)}
+}{YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20)}
 var SHARED struct {
 	X int32
 	Y int32
@@ -561,10 +561,10 @@ func LEVEL25() {
 	var i8 int64
 	var r4 float32
 	var r8 float64
-	i1 = 127
-	i2 = 32767
+	i1 = int8(127)
+	i2 = int16(32767)
 	i4 = 2147483647
-	i8 = 9223372036854775807
+	i8 = int64(9223372036854775807)
 	r4 = 3.14159
 	r8 = 3.141592653589793e0
 	intrinsic.Print("LEVEL 25: i1 =", i1)
