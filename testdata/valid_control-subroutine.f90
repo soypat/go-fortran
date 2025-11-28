@@ -16,6 +16,7 @@ RECURSIVE SUBROUTINE fact(n, result)
 	END SUBROUTINE
 
 SUBROUTINE test_do
+	INTEGER :: i
 	DO i = 1, 10
 		IF (i > 5) THEN
 			PRINT *, i

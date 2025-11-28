@@ -3,15 +3,15 @@ package main
 import "github.com/soypat/go-fortran/intrinsic"
 
 var HOLDRT = struct {
-	YQR    *intrinsic.Array[float32]
-	SUMXRQ *intrinsic.Array[float32]
-	YMNRT  *intrinsic.Array[float32]
-	MATRIX *intrinsic.Array[float32]
-}{YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20)}
+	YQR	*intrinsic.Array[float32]
+	SUMXRQ	*intrinsic.Array[float32]
+	YMNRT	*intrinsic.Array[float32]
+	MATRIX	*intrinsic.Array[float32]
+}{MATRIX: intrinsic.NewArray[float32](10, 20), YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3)}
 var SHARED struct {
-	X int32
-	Y int32
-	Z float32
+	X	int32
+	Y	int32
+	Z	float32
 }
 var STATS = struct {
 	COUNTS *intrinsic.Array[int32]
@@ -66,14 +66,14 @@ func LEVEL02() {
 }
 func LEVEL03() {
 	var (
-		i int32
-		j int32
-		k int32
+		i	int32
+		j	int32
+		k	int32
 	)
 	var (
-		x float32
-		y float32
-		z float32
+		x	float32
+		y	float32
+		z	float32
 	)
 	i = 42
 	x = 3.14159
@@ -134,8 +134,8 @@ func LEVEL05() {
 }
 func LEVEL06() {
 	var (
-		i int32
-		j int32
+		i	int32
+		j	int32
 	)
 	var arr1 = intrinsic.NewArray[int32](5)
 	var sum_val int32
@@ -183,10 +183,10 @@ func LEVEL08() {
 }
 func LEVEL09() {
 	var (
-		i          int32
-		n          int32
-		fib_result int32
-		sum_val    int32
+		i		int32
+		n		int32
+		fib_result	int32
+		sum_val		int32
 	)
 	n = 7
 	fib_result = FIBONACCI(n)
@@ -201,21 +201,21 @@ func LEVEL09() {
 }
 func LEVEL10() {
 	var (
-		i int32
-		j int32
-		k int32
+		i	int32
+		j	int32
+		k	int32
 	)
 	var (
-		x           float32
-		y           float32
-		z           float32
-		expr_result float32
+		x		float32
+		y		float32
+		z		float32
+		expr_result	float32
 	)
 	var (
-		flag  bool
-		cond1 bool
-		cond2 bool
-		cond3 bool
+		flag	bool
+		cond1	bool
+		cond2	bool
+		cond3	bool
 	)
 	i = 11
 	j = 52
@@ -234,8 +234,8 @@ func LEVEL10() {
 }
 func LEVEL11() {
 	var (
-		str1 intrinsic.CharacterArray = intrinsic.NewCharacterArray(10)
-		str2 intrinsic.CharacterArray = intrinsic.NewCharacterArray(10)
+		str1	intrinsic.CharacterArray	= intrinsic.NewCharacterArray(10)
+		str2	intrinsic.CharacterArray	= intrinsic.NewCharacterArray(10)
 	)
 	var str3 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
 	str1.SetFromString("Hello")
@@ -245,17 +245,17 @@ func LEVEL11() {
 }
 func LEVEL12() {
 	var (
-		angle   float32
-		sin_val float32
-		cos_val float32
-		abs_val float32
+		angle	float32
+		sin_val	float32
+		cos_val	float32
+		abs_val	float32
 	)
 	var (
-		i       int32
-		j       int32
-		k       int32
-		max_val int32
-		min_val int32
+		i	int32
+		j	int32
+		k	int32
+		max_val	int32
+		min_val	int32
 	)
 	i = 11
 	j = 52
@@ -273,9 +273,9 @@ func LEVEL12() {
 }
 func LEVEL13() {
 	var (
-		i       int32
-		sum_val int32
-		count   int32
+		i	int32
+		sum_val	int32
+		count	int32
 	)
 	var arr = intrinsic.NewArray[int32](10)
 	arr.Set(5, int(1))
@@ -312,8 +312,8 @@ func LEVEL13() {
 }
 func LEVEL14() {
 	var (
-		x int32
-		y int32
+		x	int32
+		y	int32
 	)
 	goto label100
 	x = 999
@@ -331,8 +331,8 @@ label200:
 }
 func LEVEL15() {
 	var (
-		choice int32
-		result int32
+		choice	int32
+		result	int32
 	)
 	choice = 2
 	switch choice {
@@ -369,14 +369,14 @@ func LEVEL15() {
 }
 func LEVEL16() {
 	var (
-		str1 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
-		str2 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
-		str3 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		str1	intrinsic.CharacterArray	= intrinsic.NewCharacterArray(20)
+		str2	intrinsic.CharacterArray	= intrinsic.NewCharacterArray(20)
+		str3	intrinsic.CharacterArray	= intrinsic.NewCharacterArray(20)
 	)
 	var (
-		len_val      int32
-		len_trim_val int32
-		index_val    int32
+		len_val		int32
+		len_trim_val	int32
+		index_val	int32
 	)
 	str1.SetFromString("Hello")
 	len_val = int32(str1.Len())
@@ -403,13 +403,13 @@ func LEVEL17() {
 	var matrix = intrinsic.NewArray[int32](3, 4)
 	var vector = intrinsic.NewArray[int32](5)
 	var (
-		size_total int32
-		size_dim1  int32
-		size_dim2  int32
+		size_total	int32
+		size_dim1	int32
+		size_dim2	int32
 	)
 	var (
-		lb int32
-		ub int32
+		lb	int32
+		ub	int32
 	)
 	size_total = int32(matrix.Size())
 	intrinsic.Print("LEVEL 17: SIZE(matrix) =", size_total)
@@ -453,9 +453,15 @@ func LEVEL19() {
 	PRINT_COMMON_VALUES()
 }
 func SET_COMMON_VALUES() {
+	var SHARED.X float64
+	var SHARED.Y float64
+	var SHARED.Z float64
 	SHARED.X = 42
 	SHARED.Y = 99
 	SHARED.Z = 3.14159
+	_ = SHARED.X
+	_ = SHARED.Y
+	_ = SHARED.Z
 }
 func PRINT_COMMON_VALUES() {
 	intrinsic.Print("LEVEL 19: x =", SHARED.X)
@@ -464,13 +470,13 @@ func PRINT_COMMON_VALUES() {
 }
 func LEVEL20() {
 	var (
-		a int32
-		b int32
-		c int32
+		a	int32
+		b	int32
+		c	int32
 	)
 	var (
-		x float32
-		y float32
+		x	float32
+		y	float32
 	)
 	{
 		a = 10
@@ -489,8 +495,8 @@ func LEVEL20() {
 }
 func LEVEL21() {
 	var (
-		x      int32
-		choice int32
+		x	int32
+		choice	int32
 	)
 	x = -5
 	if x < 0 {
@@ -576,14 +582,14 @@ func LEVEL25() {
 }
 func LEVEL26() {
 	var (
-		hex_val int32
-		oct_val int32
-		bin_val int32
+		hex_val	int32
+		oct_val	int32
+		bin_val	int32
 	)
 	var (
-		d1 float64
-		d2 float64
-		d4 float64
+		d1	float64
+		d2	float64
+		d4	float64
 	)
 	hex_val = int32(255)
 	oct_val = int32(255)
@@ -629,13 +635,14 @@ func LEVEL29() {
 	var NPII intrinsic.Pointer[int32]
 	var NPLL intrinsic.Pointer[bool]
 	var (
-		N      int32
-		M      int32
-		MAXMUM int32
-		MAXDM1 int32
-		MAXDEF int32
+		N	int32
+		M	int32
+		MAXMUM	int32
+		MAXDM1	int32
+		MAXDEF	int32
 	)
 	var I_DEFALT = intrinsic.NewArray[int32](2)
+	var DEFALT = intrinsic.Equivalence[float64, int32](I_DEFALT.Pointer())
 	I_DEFALT.Set(125269879, int(1))
 	I_DEFALT.Set(125269879, int(2))
 	intrinsic.Print("LEVEL 29: Advanced features test")
@@ -651,11 +658,12 @@ func LEVEL29() {
 	for M = 1; M <= MAXDEF; M += 32768 {
 		MAXMUM = intrinsic.MIN[int32](M+32767, MAXDEF)
 		for N = M; N <= MAXMUM; N += 1 {
-			NPAA.Set(int(N), DEFALT)
+			NPAA.Set(int(N), DEFALT.At(1))
 		}
 	}
 	intrinsic.Print("LEVEL 29: AA(2) ", NPAA.At(int(2)))
 	intrinsic.Print("LEVEL 29: Initialized", MAXMUM-M+1, "elements")
+	_ = DEFALT
 	_ = I_DEFALT
 	_ = N
 	_ = NPLL
@@ -677,8 +685,8 @@ func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 }
 func FACTORIAL(n int32) int32 {
 	var (
-		i      int32
-		result int32
+		i	int32
+		result	int32
 	)
 	result = 1
 	for i = 1; i <= n; i += 1 {
@@ -691,10 +699,10 @@ func SQUARE_ROOT(x float32) float32 {
 }
 func FIBONACCI(n int32) int32 {
 	var (
-		a    int32
-		b    int32
-		temp int32
-		i    int32
+		a	int32
+		b	int32
+		temp	int32
+		i	int32
 	)
 	if n <= 1 {
 		return n
@@ -709,3 +717,5 @@ func FIBONACCI(n int32) int32 {
 	_ = i
 	return b
 }
+
+

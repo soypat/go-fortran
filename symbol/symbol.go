@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/soypat/go-fortran/ast"
-	"github.com/soypat/go-fortran/token"
 )
 
 // Flags
@@ -15,14 +14,14 @@ type Flags uint64
 
 const (
 	FlagImplicit     Flags = 1 << iota // Type inferred from IMPLICIT rules
-	FlagUsed                            // Symbol is referenced in code
-	FlagPointer                         // Has POINTER attribute
-	FlagTarget                          // Has TARGET attribute
-	FlagParameter                       // Is a function/subroutine parameter
-	FlagPointerParam                    // OUT/INOUT scalar parameter (needs dereference)
-	FlagAllocatable                     // Has ALLOCATABLE attribute
-	FlagCommon                          // Variable is in a COMMON block
-	FlagPointee                         // Cray-style pointee (accessed through pointer variable)
+	FlagUsed                           // Symbol is referenced in code
+	FlagPointer                        // Has POINTER attribute
+	FlagTarget                         // Has TARGET attribute
+	FlagParameter                      // Is a function/subroutine parameter
+	FlagPointerParam                   // OUT/INOUT scalar parameter (needs dereference)
+	FlagAllocatable                    // Has ALLOCATABLE attribute
+	FlagCommon                         // Variable is in a COMMON block
+	FlagPointee                        // Cray-style pointee (accessed through pointer variable)
 )
 
 func (f Flags) HasAny(hasBits Flags) bool { return f&hasBits != 0 }
@@ -37,13 +36,13 @@ func (f Flags) With(mask Flags, setBits bool) Flags {
 
 // Symbol represents a declared entity (variable, function, type, etc.)
 type Symbol struct {
-	name       string         // Symbol name (case-insensitive in Fortran)
-	typ        *ResolvedType  // Fully resolved type information
-	kind       SymbolKind     // What kind of symbol this is
-	attributes []token.Token  // SAVE, POINTER, TARGET, etc.
-	arraySpec  *ast.ArraySpec // Array dimensions (nil if not an array)
-	declNode   ast.Node       // Reference to declaration AST node
-	scope      *Scope         // Scope where this symbol is defined
+	name       string              // Symbol name (case-insensitive in Fortran)
+	typ        *ResolvedType       // Fully resolved type information
+	kind       SymbolKind          // What kind of symbol this is
+	attributes []ast.TypeAttribute // SAVE, POINTER, TARGET, etc.
+	arraySpec  *ast.ArraySpec      // Array dimensions (nil if not an array)
+	declNode   ast.Node            // Reference to declaration AST node
+	scope      *Scope              // Scope where this symbol is defined
 	flags      Flags
 }
 
@@ -71,7 +70,7 @@ func (s *Symbol) Kind() SymbolKind {
 }
 
 // Attributes returns the symbol attributes
-func (s *Symbol) Attributes() []token.Token {
+func (s *Symbol) Attributes() []ast.TypeAttribute {
 	return s.attributes
 }
 
@@ -106,12 +105,12 @@ func (s *Symbol) SetArraySpec(spec *ast.ArraySpec) {
 }
 
 // SetAttributes sets the symbol attributes
-func (s *Symbol) SetAttributes(attrs []token.Token) {
+func (s *Symbol) SetAttributes(attrs []ast.TypeAttribute) {
 	s.attributes = attrs
 }
 
 // AddAttribute adds an attribute to the symbol
-func (s *Symbol) AddAttribute(attr token.Token) {
+func (s *Symbol) AddAttribute(attr ast.TypeAttribute) {
 	s.attributes = append(s.attributes, attr)
 }
 
@@ -604,9 +603,9 @@ func loadIntrinsics() map[string]*Intrinsic {
 	add("UBOUND", "INTEGER")
 
 	// Logical array reduction functions
-	add("ALL", "LOGICAL")    // .TRUE. if all values are true
-	add("ANY", "LOGICAL")    // .TRUE. if any value is true
-	add("COUNT", "INTEGER")  // Count of .TRUE. elements
+	add("ALL", "LOGICAL")   // .TRUE. if all values are true
+	add("ANY", "LOGICAL")   // .TRUE. if any value is true
+	add("COUNT", "INTEGER") // Count of .TRUE. elements
 
 	// Array reduction functions
 	add("SUM", "REAL")       // Sum of array elements
@@ -627,20 +626,20 @@ func loadIntrinsics() map[string]*Intrinsic {
 	add("CSHIFT", "REAL")    // Circular shift
 
 	// Matrix operations
-	add("MATMUL", "REAL")       // Matrix multiplication
-	add("DOT_PRODUCT", "REAL")  // Dot product of vectors
+	add("MATMUL", "REAL")      // Matrix multiplication
+	add("DOT_PRODUCT", "REAL") // Dot product of vectors
 
 	// Character functions
-	add("ADJUSTL", "CHARACTER")  // Adjust left (remove leading spaces)
-	add("ADJUSTR", "CHARACTER")  // Adjust right (remove trailing spaces)
-	add("LEN_TRIM", "INTEGER")   // Length without trailing spaces
-	add("SCAN", "INTEGER")       // Scan for character set
-	add("VERIFY", "INTEGER")     // Verify character set
-	add("REPEAT", "CHARACTER")   // Repeat string
-	add("CHAR", "CHARACTER")     // Convert integer to character
-	add("ICHAR", "INTEGER")      // Convert character to integer
-	add("ACHAR", "CHARACTER")    // ASCII character (F90)
-	add("IACHAR", "INTEGER")     // ASCII integer code (F90)
+	add("ADJUSTL", "CHARACTER") // Adjust left (remove leading spaces)
+	add("ADJUSTR", "CHARACTER") // Adjust right (remove trailing spaces)
+	add("LEN_TRIM", "INTEGER")  // Length without trailing spaces
+	add("SCAN", "INTEGER")      // Scan for character set
+	add("VERIFY", "INTEGER")    // Verify character set
+	add("REPEAT", "CHARACTER")  // Repeat string
+	add("CHAR", "CHARACTER")    // Convert integer to character
+	add("ICHAR", "INTEGER")     // Convert character to integer
+	add("ACHAR", "CHARACTER")   // ASCII character (F90)
+	add("IACHAR", "INTEGER")    // ASCII integer code (F90)
 
 	// Bit manipulation (F90)
 	add("IAND", "INTEGER")   // Bitwise AND
@@ -678,18 +677,18 @@ func loadIntrinsics() map[string]*Intrinsic {
 	add("ATANH", "REAL") // Inverse hyperbolic tangent
 
 	// Kind and model inquiry functions
-	add("KIND", "INTEGER")              // Kind type parameter value
-	add("SELECTED_INT_KIND", "INTEGER") // Integer kind meeting range requirement
+	add("KIND", "INTEGER")               // Kind type parameter value
+	add("SELECTED_INT_KIND", "INTEGER")  // Integer kind meeting range requirement
 	add("SELECTED_REAL_KIND", "INTEGER") // Real kind meeting precision requirement
-	add("PRECISION", "INTEGER")         // Decimal precision
-	add("RANGE", "INTEGER")             // Decimal exponent range
-	add("RADIX", "INTEGER")             // Base of the model
-	add("DIGITS", "INTEGER")            // Number of significant digits
-	add("MINEXPONENT", "INTEGER")       // Minimum exponent
-	add("MAXEXPONENT", "INTEGER")       // Maximum exponent
-	add("EPSILON", "REAL")              // Machine epsilon
-	add("TINY", "REAL")                 // Smallest positive number
-	add("HUGE", "REAL")                 // Largest number
+	add("PRECISION", "INTEGER")          // Decimal precision
+	add("RANGE", "INTEGER")              // Decimal exponent range
+	add("RADIX", "INTEGER")              // Base of the model
+	add("DIGITS", "INTEGER")             // Number of significant digits
+	add("MINEXPONENT", "INTEGER")        // Minimum exponent
+	add("MAXEXPONENT", "INTEGER")        // Maximum exponent
+	add("EPSILON", "REAL")               // Machine epsilon
+	add("TINY", "REAL")                  // Smallest positive number
+	add("HUGE", "REAL")                  // Largest number
 
 	// Transfer and conversion
 	add("TRANSFER", "REAL") // Treat bit pattern as different type
