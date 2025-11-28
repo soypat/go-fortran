@@ -255,9 +255,12 @@ func UnsafePointerData[I integer, T any](p Pointer[T]) I {
 //	low := intPtr.At(1)   // Low 32 bits of float64 representation
 //	high := intPtr.At(2)  // High 32 bits of float64 representation
 func Equivalence[S any, D any](src Pointer[S]) (dst Pointer[D]) {
-	nS := src.Len()
 	szS := src.SizeElement()
 	szD := dst.SizeElement()
+	if szS == szD {
+		return Pointer[D](src) // simple case.
+	}
+	nS := src.Len()
 	// Calculate total bytes and new element count
 	totalBytes := nS * szS
 	// Check alignment compatibility

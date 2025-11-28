@@ -239,3 +239,8 @@ func (a *Array[T]) offset(indices []int) int {
 	}
 	return offset
 }
+
+// Pointer returns the pointer to the underlying flat buffer.
+func (a *Array[T]) Pointer() Pointer[T] {
+	return NewPointerFromSlice(a.data)
+}
