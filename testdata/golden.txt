@@ -1,0 +1,107 @@
+ LEVEL 1: Hello, World!
+ LEVEL 2: i =          42 , x =   3.14159012    
+ LEVEL 2: flag = T
+ LEVEL 2:Variables assigned  
+ LEVEL 3: j =          52 , k =          84
+ LEVEL 3: y =   6.28318024     , z =   45.1415901    
+ LEVEL 4: i is greater than 40
+ LEVEL 4: flag is true
+ LEVEL 4: 3.0 <= x < 4.0
+ LEVEL 5: arr1(1) =          10
+ LEVEL 5: arr1(3) =          30
+ LEVEL 5: arr1(5) =          50
+ LEVEL 5: matrix(1,1) =   1.00000000    
+ LEVEL 5: matrix(2,2) =   1.00000000    
+ LEVEL 6: sum of arr1 =         150
+ LEVEL 6: nested loop count =           9
+ LEVEL 7: Inside SIMPLE_SUB
+ LEVEL 7: Inside ADD_VALUES
+ LEVEL 7: ADD_VALUES(10, 20) =          30
+ LEVEL 7: Inside MODIFY_ARRAY
+ LEVEL 7: arr1 after modify:          20          40          60
+ LEVEL 8: FACTORIAL(5) =         120
+ LEVEL 8: SQUARE_ROOT(16.0) =   4.00000000    
+ LEVEL 9: FIBONACCI(7) =          13
+ LEVEL 9: sum 1 to 10 =          55
+ LEVEL 10: complex expr =   383.449127    
+ LEVEL 10: cond1 = T , cond2 = T
+ LEVEL 10: cond3 = F
+ LEVEL 11: concatenation:Hello      World    
+ LEVEL 12: SIN(0.5) =  0.479425550    
+ LEVEL 12: COS(0.5) =  0.877582550    
+ LEVEL 12: ABS(-5.5) =   5.50000000    
+ LEVEL 12: MAX =          84 , MIN =           5
+ LEVEL 13: sum of positive =          38
+ LEVEL 13: count before >7 =           4
+ LEVEL 13: last count =           3
+ LEVEL 14: x =          10 , y =           5
+ LEVEL 15: choice =           2 , result =          20
+ LEVEL 15: choice =           5 , result =         200
+ LEVEL 15: choice =          99 , result =         777
+ LEVEL 16: LEN =          20
+ LEVEL 16: LEN_TRIM =           5
+ LEVEL 16: TRIM =Hello               
+ LEVEL 16: INDEX =           7
+ LEVEL 16: ADJUSTL =Left                
+ LEVEL 16: ADJUSTR =               Right
+ LEVEL 16: str3 =bcd                 
+ LEVEL 17: SIZE(matrix) =          12
+ LEVEL 17: SIZE(matrix,1) =           3
+ LEVEL 17: SIZE(matrix,2) =           4
+ LEVEL 17: SIZE(vector) =           5
+ LEVEL 17: LBOUND(matrix,1) =           1
+ LEVEL 17: LBOUND(matrix,2) =           1
+ LEVEL 17: UBOUND(matrix,1) =           3
+ LEVEL 17: UBOUND(matrix,2) =           4
+ LEVEL 18: vec(1) =          10
+ LEVEL 18: vec(3) =          30
+ LEVEL 18: SIZE(vec) =           5
+ LEVEL 18: mat(1,1) =         100
+ LEVEL 18: mat(2,3) =         200
+ LEVEL 18: SIZE(mat) =           6
+ LEVEL 18: Arrays deallocated
+ LEVEL 19: x =          42
+ LEVEL 19: y =          99
+ LEVEL 19: z =   3.14159012    
+ LEVEL 20: a =          10
+ LEVEL 20: b =          20
+ LEVEL 20: c =          30
+ LEVEL 20: x =   3.14000010    
+ LEVEL 20: y =   2.71000004    
+ LEVEL 21: x is negative
+ LEVEL 21: Choice was 2
+ LEVEL 23: MAX_SIZE =         100
+ LEVEL 23: PI =   3.14159012    
+ LEVEL 23: TAU =   6.28318024    
+ LEVEL 24: vec1(1) =          10
+ LEVEL 24: vec1(2) =          20
+ LEVEL 24: vec1(3) =          30
+ LEVEL 24: vec2(1) =         100
+ LEVEL 24: vec2(5) =         500
+ LEVEL 25: i1 =  127
+ LEVEL 25: i2 =  32767
+ LEVEL 25: i4 =  2147483647
+ LEVEL 25: i8 =  9223372036854775807
+ LEVEL 25: r4 =   3.14159012    
+ LEVEL 25: r8 =   3.1415926535897931     
+ LEVEL 26: hex_val =         255
+ LEVEL 26: oct_val =         255
+ LEVEL 26: bin_val =         255
+ LEVEL 26: d1 =   1.0000000000000000     
+ LEVEL 26: d2 =   123.00000000000000     
+ LEVEL 26: d4 =   2.7182818279999998     
+ LEVEL 27: ncomp =           5
+ LEVEL 27: factor =   1.1574074074074073E-005
+ LEVEL 27: root3 =   1.7320508075688772     
+ LEVEL 27: PI =   3.1415926535897931     
+ LEVEL 27: result =   1.0023442173431002E-004
+ LEVEL 28: COMMON block arrays initialized
+ LEVEL 28: YQR(1) =   1.50000000    
+ LEVEL 28: SUMXRQ(512) =   99.9000015    
+ LEVEL 28: YMNRT(2) =   3.14000010    
+ LEVEL 28: MATRIX(5,10) =   42.5000000    
+ LEVEL 28: COUNTS(50) =          42
+ LEVEL 29: Advanced features test
+ LEVEL 29: MALLOC returned       94283955317184
+ LEVEL 29: Initialized      -32668 elements
+STOP 0

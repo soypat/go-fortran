@@ -32,7 +32,6 @@
       CALL LEVEL27()
       CALL LEVEL28()
       CALL LEVEL29()
-      CALL LEVEL22()
       STOP 0
       CONTAINS
 
@@ -713,31 +712,40 @@
 
       SUBROUTINE LEVEL29()
           ! Test advanced features: DIMENSION, MALLOC, DATA with hex, labeled DO
-          DOUBLE PRECISION :: DEFALT
-          DOUBLE PRECISION :: AA
-          DIMENSION AA(10)
-          INTEGER,DIMENSION(2) :: I_DEFALT
-          INTEGER :: N, M, MAXMUM, MAXDM1, NPAA
-
+        !   DOUBLE PRECISION ,ALLOCATABLE,  DIMENSION(:) :: AA
+        !   INTEGER   ,ALLOCATABLE,  DIMENSION(:) :: II
+        !   LOGICAL   ,ALLOCATABLE,  DIMENSION(:) :: LL  
+          IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L),INTEGER (I)
+          POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1)) ! cray style pointer, implicit initialization.  
+          INTEGER :: N, M, MAXMUM, MAXDM1, MAXDEF
+            
           ! Initialize with hex values (Cray-style hex literals)
+          DOUBLEPRECISION          :: DEFALT
+          INTEGER,DIMENSION(2)     :: I_DEFALT
           DATA I_DEFALT(1) /Z'7777777'/
           DATA I_DEFALT(2) /Z'7777777'/
-
+          EQUIVALENCE ( DEFALT, I_DEFALT )
           PRINT *, 'LEVEL 29: Advanced features test'
 
           ! Test MALLOC intrinsic
           MAXDM1 = 100
           NPAA = MALLOC(MAXDM1 * 8)
+          IF( NPAA .EQ. 0 ) THEN
+             STOP 69
+          ENDIF
+          NPII = NPAA
+          NPLL = NPII
+          M = 1
+          ! Initialize array using labeled DO loop
+           MAXDEF=MIN(200000,MAXDM1)
+           DO  900 M=1,MAXDEF,32768
+           MAXMUM=MIN(M+32767,MAXDEF)
+           DO  800 N=M,MAXMUM
+           AA(N)=DEFALT
+  800      END DO
+  900      END DO
 
           PRINT *, 'LEVEL 29: MALLOC returned', NPAA
-
-          ! Initialize array using labeled DO loop
-          M = 1
-          MAXMUM = 10
-          DO 800 N = M, MAXMUM
-              AA(N) = DEFALT
-  800     END DO
-
           PRINT *, 'LEVEL 29: Initialized', MAXMUM - M + 1, 'elements'
       END SUBROUTINE LEVEL29
 

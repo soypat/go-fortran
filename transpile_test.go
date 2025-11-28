@@ -6,10 +6,8 @@ import (
 	"go/ast"
 	"go/printer"
 	"go/token"
-	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -81,10 +79,11 @@ func TestTranspileGolden(t *testing.T) {
 	os.WriteFile(goFile, progSrc.Bytes(), 0777)
 	helperFormatGoSrc(t, goFile)
 
+	expectedFull := helperRunFortran(t, "testdata/golden.f90")
+	os.WriteFile("testdata/golden.txt", expectedFull, 0777)
 	output := helperRunGoFile(t, goFile)
-
 	// Read expected output and extract only the lines for implemented levels
-	expectedFull := helperRunFortran(t, strings.NewReader(goldensrc))
+
 	lvlStr := fmt.Sprintf("LEVEL %d:", maxLvl)
 	idx := bytes.LastIndex(expectedFull, []byte(lvlStr))
 	if idx < 0 {
@@ -119,20 +118,9 @@ func helperWriteGoAST(t *testing.T, w *bytes.Buffer, f ast.Node) {
 	w.WriteString("\n\n")
 }
 
-func helperRunFortran(t *testing.T, fsrc io.Reader) (output []byte) {
-	t.Helper()
-	tmpDir := t.TempDir()
-	srcBytes, err := io.ReadAll(fsrc)
-	if err != nil {
-		t.Fatalf("failed to read Go source: %v", err)
-	}
-	// Write source to temp file
-	srcFile := filepath.Join(tmpDir, "main.f90")
-	if err := os.WriteFile(srcFile, []byte(srcBytes), 0644); err != nil {
-		t.Fatalf("failed to write Fortran source: %v", err)
-	}
-	binFile := filepath.Join(tmpDir, "main.f90.bin")
-	cmd := exec.Command("gfortran", "-o", binFile, srcFile)
+func helperRunFortran(t *testing.T, filepath string) (output []byte) {
+	binFile := filepath + ".bin"
+	cmd := exec.Command("gfortran", "-fcray-pointer", "-o", binFile, filepath)
 	errMsg, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatal(string(errMsg), err)
