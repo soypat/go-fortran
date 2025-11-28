@@ -49,9 +49,9 @@ func NewPointerFromSlice[T any](v []T) Pointer[T] {
 	}
 }
 
-// NewPointerElemental creates a Pointer from a single element reference.
+// Ptr creates a Pointer from a single element reference.
 // Used for passing scalar variables by reference to OUT/INOUT parameters.
-func NewPointerElemental[T any](v *T) Pointer[T] {
+func Ptr[T any](v *T) Pointer[T] {
 	return Pointer[T]{
 		v:        unsafe.Pointer(v),
 		alloclen: 1,
@@ -133,14 +133,23 @@ func (p Pointer[T]) Slice() []T {
 //	ptr := intrinsic.MALLOC[float64](10 * 8)
 //	ptr.At(1)  // First element (Fortran: arr(1))
 //	ptr.At(10) // Last element (Fortran: arr(10))
-func (p Pointer[T]) At(v int) T {
-	return p.Slice()[v-1]
+func (p Pointer[T]) At(idx int) T {
+	return p.Slice()[idx-1]
+}
+
+func (p Pointer[T]) Set(idx int, v T) {
+	p.Slice()[idx-1] = v
 }
 
 // Data returns the underlying Go pointer (*T) to the first element.
 // Useful for passing to Go functions expecting native pointers.
 func (p Pointer[T]) Data() *T {
 	return (*T)(p.v)
+}
+
+// DataAt returns the underlying Go pointer (*T) to the idx'th element.
+func (p Pointer[T]) DataAt(idx int) *T {
+	return p.View(idx, idx+1).Data()
 }
 
 // View creates a sub-pointer viewing a range of the original allocation.
