@@ -118,6 +118,165 @@ func (tg *TranspileToGo) astIntrinsicGeneric2(fnName string, t1, t2 ast.Expr, ar
 	return tg.astGenericCall2("intrinsic", fnName, t1, t2, args...)
 }
 
+// Array method helpers
+
+// astArrayAt creates: arrayExpr.At(indices...)
+func (tg *TranspileToGo) astArrayAt(arrayExpr ast.Expr, indices ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   arrayExpr,
+			Sel: ast.NewIdent("At"),
+		},
+		Args: indices,
+	}
+}
+
+// astArraySet creates: arrayExpr.Set(value, indices...)
+func (tg *TranspileToGo) astArraySet(arrayExpr ast.Expr, value ast.Expr, indices ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   arrayExpr,
+			Sel: ast.NewIdent("Set"),
+		},
+		Args: append([]ast.Expr{value}, indices...),
+	}
+}
+
+// Type casting helpers
+
+// astTypeCast creates: typeName(expr)
+func (tg *TranspileToGo) astTypeCast(typeName string, expr ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun:  ast.NewIdent(typeName),
+		Args: []ast.Expr{expr},
+	}
+}
+
+// astIntCast creates: int(expr)
+func (tg *TranspileToGo) astIntCast(expr ast.Expr) *ast.CallExpr {
+	return tg.astTypeCast("int", expr)
+}
+
+// astInt32Cast creates: int32(expr)
+func (tg *TranspileToGo) astInt32Cast(expr ast.Expr) *ast.CallExpr {
+	return tg.astTypeCast("int32", expr)
+}
+
+// astFloat64Cast creates: float64(expr)
+func (tg *TranspileToGo) astFloat64Cast(expr ast.Expr) *ast.CallExpr {
+	return tg.astTypeCast("float64", expr)
+}
+
+// Pointer-to-generic type helpers
+
+// astPointerToGeneric creates: *baseType[typeParam]
+func (tg *TranspileToGo) astPointerToGeneric(baseType, typeParam ast.Expr) *ast.StarExpr {
+	return &ast.StarExpr{
+		X: &ast.IndexExpr{
+			X:     baseType,
+			Index: typeParam,
+		},
+	}
+}
+
+// astPointerToArray creates: *intrinsic.Array[elemType]
+func (tg *TranspileToGo) astPointerToArray(elemType ast.Expr) *ast.StarExpr {
+	return tg.astPointerToGeneric(_astTypeArray, elemType)
+}
+
+// Binary expression helpers
+
+// astBinaryExpr creates: left op right
+func (tg *TranspileToGo) astBinaryExpr(left ast.Expr, op token.Token, right ast.Expr) *ast.BinaryExpr {
+	return &ast.BinaryExpr{
+		X:  left,
+		Op: op,
+		Y:  right,
+	}
+}
+
+// Unary expression helpers
+
+// astUnaryExpr creates: op expr
+func (tg *TranspileToGo) astUnaryExpr(op token.Token, expr ast.Expr) *ast.UnaryExpr {
+	return &ast.UnaryExpr{
+		Op: op,
+		X:  expr,
+	}
+}
+
+// astAddressOf creates: &expr
+func (tg *TranspileToGo) astAddressOf(expr ast.Expr) *ast.UnaryExpr {
+	return tg.astUnaryExpr(token.AND, expr)
+}
+
+// Expression statement helper
+
+// astExprStmt creates: &ast.ExprStmt{X: expr}
+func (tg *TranspileToGo) astExprStmt(expr ast.Expr) *ast.ExprStmt {
+	return &ast.ExprStmt{X: expr}
+}
+
+// astCommonFieldRef creates a COMMON block field reference: blockVarName.FIELDNAME
+// Used for accessing variables stored in COMMON blocks as struct fields.
+func (tg *TranspileToGo) astCommonFieldRef(blockVarName, fieldName string) *ast.SelectorExpr {
+	return &ast.SelectorExpr{
+		X:   ast.NewIdent(blockVarName),
+		Sel: ast.NewIdent(strings.ToUpper(fieldName)),
+	}
+}
+
+// Type extraction helpers - flatten deeply nested type assertions
+
+// extractTypeParam extracts T from generic types like Pointer[T], Array[T], or CharArray[T]
+// Returns (elemType, true) if successful, (nil, false) otherwise
+func extractTypeParam(typ ast.Expr) (ast.Expr, bool) {
+	idx, ok := typ.(*ast.IndexExpr)
+	if !ok {
+		return nil, false
+	}
+	return idx.Index, true
+}
+
+// extractPointerElementType extracts T from intrinsic.Pointer[T]
+// Returns (T, true) if typ is Pointer[T], (nil, false) otherwise
+func extractPointerElementType(typ ast.Expr) (ast.Expr, bool) {
+	idx, ok := typ.(*ast.IndexExpr)
+	if !ok {
+		return nil, false
+	}
+	sel, ok := idx.X.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Pointer" {
+		return nil, false
+	}
+	return idx.Index, true
+}
+
+// extractArrayElementType extracts T from intrinsic.Array[T] or *intrinsic.Array[T]
+// Returns (T, true) if typ is Array[T] or *Array[T], (nil, false) otherwise
+func extractArrayElementType(typ ast.Expr) (ast.Expr, bool) {
+	// Handle *intrinsic.Array[T]
+	if star, ok := typ.(*ast.StarExpr); ok {
+		typ = star.X
+	}
+
+	idx, ok := typ.(*ast.IndexExpr)
+	if !ok {
+		return nil, false
+	}
+	sel, ok := idx.X.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Array" {
+		return nil, false
+	}
+	return idx.Index, true
+}
+
+// isPointerType checks if typ is intrinsic.Pointer[T] for any T
+func isPointerType(typ ast.Expr) bool {
+	_, ok := extractPointerElementType(typ)
+	return ok
+}
+
 // VarInfo tracks all information about a variable in the current scope
 type VarInfo struct {
 	// Core metadata
@@ -139,6 +298,46 @@ type VarInfo struct {
 
 	// Original name casing (for generating correct Go identifiers)
 	OriginalName string // Original name as it appeared in Fortran source (before uppercase normalization)
+}
+
+// VarInfo guard methods - provide readable type checks
+
+// isScalarPointerParam checks if variable is a scalar pointer parameter (not array).
+// Replaces: v != nil && v.Flags&symbol.FlagPointerParam != 0 && !isArrayType(v.Type)
+func (v *VarInfo) isScalarPointerParam() bool {
+	return v != nil && v.Flags&symbol.FlagPointerParam != 0 && !isArrayType(v.Type)
+}
+
+// isArrayPointerParam checks if variable is an array pointer parameter.
+// Replaces: v != nil && v.Flags&symbol.FlagPointerParam != 0 && isArrayType(v.Type)
+func (v *VarInfo) isArrayPointerParam() bool {
+	return v != nil && v.Flags&symbol.FlagPointerParam != 0 && isArrayType(v.Type)
+}
+
+// isInCommonBlock checks if variable is in a COMMON block.
+// Replaces: v != nil && v.InCommonBlock != ""
+func (v *VarInfo) isInCommonBlock() bool {
+	return v != nil && v.InCommonBlock != ""
+}
+
+// isPointee checks if variable is a pointee (accessed via Cray pointer).
+// Replaces: v != nil && v.Flags&symbol.FlagPointee != 0
+func (v *VarInfo) isPointee() bool {
+	return v != nil && v.Flags&symbol.FlagPointee != 0
+}
+
+// IsUndefined checks if the variable doesn't exist (nil pointer).
+// Used for checking if a variable lookup failed.
+func (v *VarInfo) IsUndefined() bool {
+	return v == nil
+}
+
+// IsTypeUnresolved checks if the variable is undefined OR its type hasn't been resolved yet.
+// Replaces: v == nil || v.Type == nil
+// Used primarily for COMMON block fallback logic: if a variable isn't in local scope
+// or hasn't had its type determined, we check COMMON blocks.
+func (v *VarInfo) IsTypeUnresolved() bool {
+	return v.IsUndefined() || v.Type == nil
 }
 
 // TranspileToGo transforms Fortran AST to Go AST
@@ -174,6 +373,27 @@ type commonBlockInfo struct {
 
 func (cbi commonBlockInfo) goVarname() string {
 	return cbi.Name
+}
+
+// findFieldByName finds a field in the COMMON block by variable name (case-insensitive).
+// Returns nil if not found.
+func (cbi *commonBlockInfo) findFieldByName(name string) *ast.Field {
+	upperName := strings.ToUpper(name)
+	for _, field := range cbi.Fields {
+		if len(field.Names) > 0 && field.Names[0].Name == upperName {
+			return field
+		}
+	}
+	return nil
+}
+
+// getFieldName safely extracts the field name from an ast.Field.
+// Returns empty string if the field has no names.
+func getFieldName(field *ast.Field) string {
+	if len(field.Names) > 0 {
+		return field.Names[0].Name
+	}
+	return ""
 }
 
 func (tg *TranspileToGo) getVar(name string) *VarInfo {
@@ -238,46 +458,6 @@ func (tg *TranspileToGo) getOrMakeVar(name string) *VarInfo {
 func (tg *TranspileToGo) hasVar(name string) bool {
 	_, ok := tg.vars[strings.ToUpper(name)]
 	return ok
-}
-
-// getVarFromCommon checks if a variable exists in any COMMON block and returns its info
-func (tg *TranspileToGo) getVarFromCommon(name string) (*VarInfo, string) {
-	upperName := strings.ToUpper(name)
-	for blockName, block := range tg.commonBlocks {
-		// Check if this variable is in this COMMON block (ArraySpecs uses uppercase keys)
-		if arraySpec, exists := block.ArraySpecs[upperName]; exists {
-			// Found it - create a VarInfo from the field
-			for _, field := range block.Fields {
-				if len(field.Names) > 0 && field.Names[0].Name == upperName {
-					// Extract type info from field
-					var elemType ast.Expr
-					if starExpr, ok := field.Type.(*ast.StarExpr); ok {
-						if indexExpr, ok := starExpr.X.(*ast.IndexExpr); ok {
-							elemType = indexExpr.Index
-						}
-					}
-					return &VarInfo{
-						Type:          field.Type,
-						ElementType:   elemType,
-						InCommonBlock: blockName,
-						ArraySpec:     arraySpec,
-						Flags:         symbol.FlagCommon,
-					}, blockName
-				}
-			}
-		}
-		// Also check scalar fields (fields use uppercase names)
-		for _, field := range block.Fields {
-			if len(field.Names) > 0 && field.Names[0].Name == upperName {
-				return &VarInfo{
-					Type:          field.Type,
-					InCommonBlock: blockName,
-					Flags:         symbol.FlagCommon,
-				}, blockName
-			}
-		}
-	}
-	return nil, ""
 }
 
 // getImplicitType returns the Go type for a name based on Fortran IMPLICIT rules
@@ -418,7 +598,7 @@ func (tg *TranspileToGo) appendUnusedVarSuppressions(stmts []ast.Stmt) []ast.Stm
 				continue
 			}
 			// Skip variables in COMMON blocks - they're fields, not local vars
-			if v.InCommonBlock != "" {
+			if v.isInCommonBlock() {
 				continue
 			}
 			// Skip pointees - they don't exist as separate Go variables
@@ -1629,7 +1809,7 @@ func (tg *TranspileToGo) transformCallStmt(call *f90.CallStmt) ast.Stmt {
 			var alreadyPointer bool
 			if ident, ok := arg.(*f90.Identifier); ok {
 				v := tg.getVar(ident.Value)
-				if v != nil && v.Flags&symbol.FlagPointerParam != 0 && !isArrayType(v.Type) {
+				if v.isScalarPointerParam() {
 					alreadyPointer = true
 				}
 			}
@@ -1941,7 +2121,7 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		v := tg.getOrMakeVar(entity.Name)
 
 		// If this variable is in a COMMON block, record its type
-		if v.InCommonBlock != "" {
+		if v.isInCommonBlock() {
 			blockName := v.InCommonBlock
 			if block, exists := tg.commonBlocks[blockName]; exists {
 				// Determine the field type
@@ -2252,10 +2432,6 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 	// Check for FunctionCall that's actually an array reference (parser ambiguity)
 	if funcCall, ok := assign.Target.(*f90.FunctionCall); ok {
 		v := tg.getVar(funcCall.Name)
-		// Also check COMMON blocks if not found in local vars
-		if v == nil || v.Type == nil {
-			v, _ = tg.getVarFromCommon(funcCall.Name)
-		}
 		// Check if it's an array - check both ArraySpec and ElementType
 		// (ALLOCATABLE arrays have ElementType but no ArraySpec until allocated)
 		isArray := v != nil && (v.ArraySpec != nil || v.ElementType != nil)
@@ -2348,7 +2524,7 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 		}
 		// Check if this is an array pointer parameter - need to dereference for assignment
 		// (Scalar pointer params are handled above with .Set() method)
-		if v != nil && v.Flags&symbol.FlagPointerParam != 0 && isArrayType(v.Type) {
+		if v.isArrayPointerParam() {
 			lhs = &ast.StarExpr{X: lhs}
 		}
 
@@ -2418,7 +2594,7 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 
 			// Generate CHARACTER array expression - check if in COMMON block
 			var charArrayExpr ast.Expr
-			if v.InCommonBlock != "" {
+			if v.isInCommonBlock() {
 				blockName := v.InCommonBlock
 				block := tg.commonBlocks[blockName]
 				charArrayExpr = &ast.SelectorExpr{
@@ -2435,8 +2611,8 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 					Sel: ast.NewIdent("SetRange"),
 				},
 				Args: []ast.Expr{
-					&ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{start}},
-					&ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{end}},
+					tg.astIntCast(start),
+					tg.astIntCast(end),
 					rhs,
 				},
 			}
@@ -2455,17 +2631,10 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 		}
 		// Cast to int for Array.Set() which expects int indices
 		// (Fortran INTEGER constants/variables map to int32, but array indices are int)
-		indices = append(indices, &ast.CallExpr{
-			Fun:  ast.NewIdent("int"),
-			Args: []ast.Expr{index},
-		})
+		indices = append(indices, tg.astIntCast(index))
 	}
 
 	// Generate array access expression - check if array is in COMMON block
-	// Also check COMMON blocks if not found in local vars
-	if v == nil || v.Type == nil {
-		v, _ = tg.getVarFromCommon(ref.Name)
-	}
 	var arrayExpr ast.Expr
 	if v != nil && v.Flags&symbol.FlagPointee != 0 && v.PointerVar != "" {
 		// Pointee assignment - use pointer variable's Set() method
@@ -2492,10 +2661,7 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 				Sel: ast.NewIdent("Set"),
 			},
 			Args: []ast.Expr{
-				&ast.CallExpr{
-					Fun:  ast.NewIdent("int"),
-					Args: []ast.Expr{index},
-				},
+				tg.astIntCast(index),
 				rhs,
 			},
 		}
@@ -2572,10 +2738,6 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 	case *f90.Identifier:
 		// Check if this identifier is in a COMMON block
 		v := tg.getVar(e.Value)
-		// Also check COMMON blocks if not found in local vars
-		if v == nil || v.Type == nil {
-			v, _ = tg.getVarFromCommon(e.Value)
-		}
 		if v != nil && v.InCommonBlock != "" {
 			blockName := v.InCommonBlock
 			block := tg.commonBlocks[blockName]
@@ -2586,7 +2748,7 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 		}
 		// Check if this is a scalar pointer parameter being read
 		// Need to generate x.At(1) instead of just x
-		if v != nil && v.Flags&symbol.FlagPointerParam != 0 && !isArrayType(v.Type) {
+		if v.isScalarPointerParam() {
 			return tg.astMethodCall(e.Value, "At", tg.astIntLit(1))
 		}
 		return ast.NewIdent(sanitizeIdent(e.Value))
@@ -2678,11 +2840,7 @@ func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
 		}
 
 		// Generate: pointerVar.At(int(index))
-		return tg.astMethodCall(v.PointerVar, "At",
-			&ast.CallExpr{
-				Fun:  ast.NewIdent("int"),
-				Args: []ast.Expr{index},
-			})
+		return tg.astMethodCall(v.PointerVar, "At", tg.astIntCast(index))
 	}
 
 	// Check if this is a CHARACTER variable with substring operation
@@ -2701,7 +2859,7 @@ func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
 
 			// Generate CHARACTER array expression - check if in COMMON block
 			var charArrayExpr ast.Expr
-			if v.InCommonBlock != "" {
+			if v.isInCommonBlock() {
 				blockName := v.InCommonBlock
 				block := tg.commonBlocks[blockName]
 				charArrayExpr = &ast.SelectorExpr{
@@ -3328,7 +3486,7 @@ func (tg *TranspileToGo) createDataAssignment(varExpr f90.Expression, valExpr f9
 	// Skip only if variable is not tracked at all (truly undeclared)
 	if ident, ok := varExpr.(*f90.Identifier); ok {
 		v := tg.getVar(ident.Value)
-		if v == nil || v.Type == nil {
+		if v.IsTypeUnresolved() {
 			// Untracked or implicitly-typed variable - skip DATA initialization
 			// (These should have explicit type declarations to use DATA)
 			return nil
@@ -3567,6 +3725,8 @@ func (tg *TranspileToGo) transformStopStmt(stmt *f90.StopStmt) ast.Stmt {
 // preScanCommonBlocks scans statements for COMMON and DIMENSION statements before processing type declarations.
 // This allows us to know which variables are in COMMON blocks and array dimensions before we generate declarations.
 func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
+	// Apply implicit typing to COMMON variables immediately on return.
+	defer tg.applyImplicitTypingToCommonVars()
 	// Note: COMMON variable tracking is now done via the unified vars map (VarInfo.InCommonBlock)
 	// No need to clear a separate commonVars map
 	for _, stmt := range stmts {
@@ -3670,6 +3830,40 @@ func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
 				if arraySpec, isArray := block.ArraySpecs[varName]; isArray {
 					v.ArraySpec = arraySpec
 					// Note: ElementType will be set when we see the type declaration
+				}
+			}
+		}
+	}
+}
+
+// applyImplicitTypingToCommonVars applies Fortran IMPLICIT typing rules to COMMON variables
+// that don't have explicit type declarations. Updates BOTH field.Type AND v.Type in tg.vars.
+func (tg *TranspileToGo) applyImplicitTypingToCommonVars() {
+	for _, block := range tg.commonBlocks {
+		for _, field := range block.Fields {
+			if field.Type == nil && len(field.Names) > 0 {
+				varName := field.Names[0].Name
+				elemType := getImplicitType(varName)
+
+				// Check if array
+				_, isArray := block.ArraySpecs[varName]
+				if isArray {
+					field.Type = &ast.StarExpr{
+						X: &ast.IndexExpr{
+							X:     _astTypeArray,
+							Index: elemType,
+						},
+					}
+				} else {
+					field.Type = elemType
+				}
+
+				// CRITICAL: Update tg.vars as well
+				if v := tg.getVar(varName); v != nil {
+					v.Type = field.Type
+					if isArray {
+						v.ElementType = elemType
+					}
 				}
 			}
 		}
@@ -3798,6 +3992,7 @@ func (tg *TranspileToGo) evalBinaryOp(left ast.Expr, op token.Token, right ast.E
 
 // Common intrinsic identifiers.
 var (
+	_astIntrinsic      = ast.NewIdent("intrinsic")
 	_astFnNewCharArray = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("NewCharacterArray"),
