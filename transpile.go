@@ -2151,7 +2151,7 @@ func (tg *TranspileToGo) fortranConstantToGoExpr(fortranExpr string) ast.Expr {
 // transformTypeDeclaration transforms a Fortran type declaration to Go var declaration
 func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast.Stmt {
 	// Map Fortran type to Go type, considering KIND parameter
-	goType := tg.fortranTypeToGoWithKind(decl.Type.Type)
+	goType := tg.fortranTypeToGoWithKind(decl.Type)
 	if goType == nil {
 		return nil
 	}
@@ -2310,9 +2310,9 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 				// Convert Fortran constant expression to Go expression
 				spec.Values = []ast.Expr{tg.fortranConstantToGoExpr(initStr)}
 			}
-		} else if decl.Type.Type.Token == f90token.CHARACTER && entity.Type.Type.KindOrLen != nil {
+		} else if decl.Type.Token == f90token.CHARACTER && entity.Type.KindOrLen != nil {
 			// For CHARACTER variables (not constants), initialize with CharacterArray
-			if length := tg.extractIntLiteral(entity.Type.Type.KindOrLen); length > 0 {
+			if length := tg.extractIntLiteral(entity.Type.KindOrLen); length > 0 {
 				// Track CHARACTER length in unified vars map
 				v.CharLength = length
 				// Initialize with intrinsic.NewCharacterArray(length)

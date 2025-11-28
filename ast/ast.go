@@ -53,11 +53,22 @@ type TypeSpec struct {
 	Name  string      // Is non-empty for TYPE specified.
 	// Optional kind parameter. Valid for token.INTEGER, token.REAL, token.COMPLEX, token.LOGICAL
 	// For CHARACTER type is required and is the LEN attribute.
-	KindOrLen Expression
+	KindOrLen  Expression
+	Attributes []TypeAttribute
 }
 
 func (ts TypeSpec) AppendString(dst []byte) []byte {
-	return appendTypenameOrTok(dst, ts.Name, ts.Token)
+	dst = appendTypenameOrTok(dst, ts.Name, ts.Token)
+	if len(ts.Attributes) > 0 {
+		dst = append(dst, ", "...)
+		for i := range ts.Attributes {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = ts.Attributes[i].AppendString(dst)
+		}
+	}
+	return dst
 }
 
 func appendTypenameOrTok(dst []byte, typename string, tok token.Token) []byte {
@@ -793,7 +804,7 @@ func (ds *DataStmt) AppendString(dst []byte) []byte {
 //	REAL, PARAMETER :: PI = 3.14159
 //	CHARACTER(LEN=80), INTENT(IN) :: filename
 type TypeDeclaration struct {
-	Type     DeclType
+	Type     TypeSpec
 	Entities []DeclEntity // Variables being declared
 	Label    string
 	Position
@@ -885,25 +896,6 @@ func (as *ArraySpec) AppendString(dst []byte) []byte {
 	return dst
 }
 
-type DeclType struct {
-	Type       TypeSpec
-	Attributes []TypeAttribute
-}
-
-func (te *DeclType) AppendString(dst []byte) []byte {
-	dst = te.Type.AppendString(dst)
-	if len(te.Attributes) > 0 {
-		dst = append(dst, ", "...)
-		for i := range te.Attributes {
-			if i > 0 {
-				dst = append(dst, ", "...)
-			}
-			dst = te.Attributes[i].AppendString(dst)
-		}
-	}
-	return dst
-}
-
 type TypeAttribute struct {
 	Token     token.Token
 	Expr      Expression
@@ -951,7 +943,7 @@ func (te *TokenExpr) AppendString(dst []byte) []byte {
 // Note: Initializer is currently a string (becomes Expression in Phase 4).
 type DeclEntity struct {
 	Name      string
-	Type      *DeclType
+	Type      *TypeSpec
 	ArraySpec *ArraySpec // Array dimensions if this is an array
 	Init      Expression
 }

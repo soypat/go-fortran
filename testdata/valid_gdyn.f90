@@ -13,7 +13,7 @@ PROGRAM GDYN2E
      &       B_HEI / 5.49D-3 / &
      &       C_HEI / 1.14D-3 /
       INTEGER ::  MAXDM1 =   6000000
-      INTEGER :: ISTATAA, IT
+      INTEGER :: ISTATAA, IT, I, k, J, i1
       use antphc_module
       POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1))
       COMMON/TRQANG/DTQDAN(3,3,2)
@@ -117,6 +117,7 @@ SUBROUTINE PASYAW(NCARDS)
 END SUBROUTINE
 
 FUNCTION NMF_H()
+   INTEGER :: J
    ! WRITE(A,1) I,(I3=1,3)
    ! END  =a(j)+d
    ! END FILE IUNTPF
@@ -135,6 +136,7 @@ END !
 
 
 PROGRAM GDYN2S
+         INTEGER :: I
          WRITE(1,1) s,END,t
          IF(CARD(1:4).EQ.'DATA'.OR.CARD(1:6).EQ.'ENDARC') THEN
          DO 40 I=1,80

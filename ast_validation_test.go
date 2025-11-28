@@ -386,7 +386,7 @@ END PROGRAM test
 						if entity.Name == exp.name {
 							found = true
 							actualInit = string(entity.Init.AppendString(nil))
-							actualCharLenExpr = entity.Type.Type.KindOrLen
+							actualCharLenExpr = entity.Type.KindOrLen
 							// Convert Expression to string for comparison if present
 							if actualCharLenExpr != nil {
 								actualCharLen = exprToString(actualCharLenExpr)
@@ -399,7 +399,7 @@ END PROGRAM test
 									if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
 										for _, e := range typeDecl.Entities {
 											if e.Name == entity.Name {
-												actualType = typeDecl.Type.Type.Token.String()
+												actualType = typeDecl.Type.Token.String()
 												break
 											}
 										}
@@ -410,7 +410,7 @@ END PROGRAM test
 									if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
 										for _, e := range typeDecl.Entities {
 											if e.Name == entity.Name {
-												actualType = typeDecl.Type.Type.Token.String()
+												actualType = typeDecl.Type.Token.String()
 												break
 											}
 										}
@@ -1046,15 +1046,15 @@ END PROGRAM`,
 
 			// Check KIND parameter
 			if tt.expectKind {
-				if typeDecl.Type.Type.KindOrLen == nil {
+				if typeDecl.Type.KindOrLen == nil {
 					t.Errorf("Expected KindParam to be non-nil")
 					return
 				}
 
 				if tt.kindIsLiteral {
-					lit, ok := typeDecl.Type.Type.KindOrLen.(*ast.IntegerLiteral)
+					lit, ok := typeDecl.Type.KindOrLen.(*ast.IntegerLiteral)
 					if !ok {
-						t.Errorf("Expected KIND to be IntegerLiteral, got %T", typeDecl.Type.Type.KindOrLen)
+						t.Errorf("Expected KIND to be IntegerLiteral, got %T", typeDecl.Type.KindOrLen)
 						return
 					}
 					if lit.Value != tt.kindValue {
@@ -1062,8 +1062,8 @@ END PROGRAM`,
 					}
 				}
 			} else {
-				if typeDecl.Type.Type.KindOrLen != nil {
-					t.Errorf("Expected KindOrLen to be nil for default kind, got %T", typeDecl.Type.Type.KindOrLen)
+				if typeDecl.Type.KindOrLen != nil {
+					t.Errorf("Expected KindOrLen to be nil for default kind, got %T", typeDecl.Type.KindOrLen)
 				}
 			}
 		})
@@ -1147,14 +1147,14 @@ END PROGRAM`,
 			entity := typeDecl.Entities[0]
 
 			if tt.expectLength {
-				if entity.Type.Type.KindOrLen == nil {
+				if entity.Type.KindOrLen == nil {
 					t.Errorf("Expected CharLen to be non-nil Expression")
 					return
 				}
 
-				lit, ok := entity.Type.Type.KindOrLen.(*ast.IntegerLiteral)
+				lit, ok := entity.Type.KindOrLen.(*ast.IntegerLiteral)
 				if !ok {
-					t.Errorf("Expected CharLen to be IntegerLiteral, got %T", entity.Type.Type.KindOrLen)
+					t.Errorf("Expected CharLen to be IntegerLiteral, got %T", entity.Type.KindOrLen)
 					return
 				}
 

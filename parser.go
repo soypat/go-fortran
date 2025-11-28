@@ -111,7 +111,7 @@ type Parser90 struct {
 }
 
 type varinfo struct {
-	Type    ast.TypeSpec
+	Type    *ast.TypeSpec
 	flags   symflags
 	sname   string
 	name    []byte // variable declaration name
@@ -132,9 +132,14 @@ func (p *Parser90) varResetAll() {
 	p.vars = p.vars[:0]
 }
 
-func (p *Parser90) varInit(name string) (vi *varinfo) {
+func (p *Parser90) varInit(name string, spec *ast.TypeSpec) (vi *varinfo) {
 	vi = p.varSGet(name)
 	if vi != nil {
+		if vi.flags.HasAny(flagParameter) && vi.Type == nil && spec != nil {
+			// Parameters in subroutine/function parameter list have no type.
+			vi.Type = spec
+			return vi
+		}
 		p.addError("double variable initialization with " + vi.declPos.String())
 		return vi
 	}
@@ -363,6 +368,7 @@ func (p *Parser90) parseTopLevelUnit() ast.ProgramUnit {
 // parseProgramBlock parses a PROGRAM...END PROGRAM block
 // Precondition: current token is PROGRAM
 func (p *Parser90) parseProgramBlock() ast.Statement {
+	p.varResetAll()
 	start := p.sourcePos()
 	block := &ast.ProgramBlock{}
 
@@ -807,7 +813,7 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 			p.addError(err.Error())
 			break
 		}
-		vi := p.varInit(param.Name)
+		vi := p.varInit(param.Name, nil) // parameters have no type.
 		vi.flags |= flagParameter
 		params = append(params, param)
 		if p.currentTokenIs(token.Comma) {
@@ -2599,7 +2605,7 @@ func (p *Parser90) skipToNextStatement() {
 func (p *Parser90) parseDerivedTypeStmt() *ast.DerivedTypeStmt {
 	startPos := p.sourcePos()
 	p.expect(token.TYPE, "parse derived type")
-	attrs := p.parseTypeAttributes()
+	attrs := p.parseTypeAttributess()
 	// if intent != 0 || spec != nil { // TODO: validate here?
 	// 	p.addError("derived type statement should not have array spec nor intent attribute")
 	// }
@@ -2651,7 +2657,7 @@ func (p *Parser90) parseDerivedTypeStmt() *ast.DerivedTypeStmt {
 //	integer, kind :: k = kind(0.0)
 func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	startPos := p.current.start
-	ts := p.expectTypeSpec()
+	ts := p.expectTypeSpec(false)
 	// KIND and LEN are allowed in component declarations (e.g., CHARACTER(LEN=50), REAL(KIND=8))
 	// Parse optional attributes
 	var attributes []token.Token
@@ -3146,7 +3152,7 @@ func (p *Parser90) expectTypeSpecIntrinsic() (ts ast.TypeSpec) {
 //   - REAL(KIND=8)      → TypeSpec{Token: REAL, KindOrLen: 8}
 //   - TYPE(person)      → TypeSpec{Token: TYPE, Name: "person"}
 //   - CHARACTER(LEN=20) → TypeSpec{Token: CHARACTER, KindOrLen: 20}
-func (p *Parser90) expectTypeSpec() (ts ast.TypeSpec) {
+func (p *Parser90) expectTypeSpec(withAttrs bool) (ts ast.TypeSpec) {
 	ts.Token = p.current.tok
 	if ts.Token == token.TYPE {
 		// Derived type: TYPE(typename)
@@ -3158,26 +3164,24 @@ func (p *Parser90) expectTypeSpec() (ts ast.TypeSpec) {
 		ts.Name = string(p.current.lit)
 		p.nextToken() // consume identifier
 		p.nextToken() // consume )
-		return ts     // tok=TYPE
+
+		return ts // tok=TYPE
+	} else {
+		ts = p.expectTypeSpecIntrinsic()
+	}
+	if withAttrs {
+		ts.Attributes = p.parseTypeAttributess()
 	}
 	// Intrinsic type
-	return p.expectTypeSpecIntrinsic()
+	return ts
 }
 
 // parseTypeDecl parses INTEGER :: x, y or REAL, PARAMETER :: pi = 3.14 or TYPE(typename) :: var
 // If paramMap is provided, it will populate type information for any parameters found
 func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Statement {
 	start := p.sourcePos()
-	ts := p.expectTypeSpec()
-
-	// Parse attributes (PARAMETER, INTENT, etc.)
-	attributes := p.parseTypeAttributes()
-
 	stmt := &ast.TypeDeclaration{
-		Type: ast.DeclType{
-			Type:       ts,
-			Attributes: attributes,
-		},
+		Type:     p.expectTypeSpec(true),
 		Position: ast.Pos(start.Pos, p.current.start),
 	}
 	// F77: INTEGER A, B, C (no ::)
@@ -3207,10 +3211,13 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 			}
 		case token.Slash:
 			entity.Init = p.parseExpression(0, token.Slash)
+		case token.NewLine, token.LineComment:
+			// End of type decl, append last declared variable.
 		default:
-			p.addError("unexpected token in type declaration of " + entityName)
+			p.addError("unexpected token in type declaration of " + entityName + ": " + p.current.String())
 		}
 		// Add entity to statement (now that all fields are populated)
+		p.varInit(entityName, &stmt.Type)
 		stmt.Entities = append(stmt.Entities, entity)
 	}
 	return stmt
@@ -3220,7 +3227,7 @@ func (p *Parser90) currentTokenExpr() *ast.TokenExpr {
 	return &ast.TokenExpr{Token: p.current.tok, Position: p.currentAstPos()}
 }
 
-func (p *Parser90) parseTypeAttributes() (attrs []ast.TypeAttribute) {
+func (p *Parser90) parseTypeAttributess() (attrs []ast.TypeAttribute) {
 	for p.loopWhile(token.Comma) {
 		p.nextToken() // consume Comma.
 		if !p.current.tok.IsAttribute() {

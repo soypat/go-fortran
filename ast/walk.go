@@ -63,8 +63,8 @@ func Walk(v Visitor, node Node) {
 	// Declaration statements
 	case *TypeDeclaration:
 
-		if n.Type.Type.KindOrLen != nil {
-			Walk(v, n.Type.Type.KindOrLen)
+		if n.Type.KindOrLen != nil {
+			Walk(v, n.Type.KindOrLen)
 		}
 		for _, entity := range n.Entities {
 			if entity.ArraySpec != nil {

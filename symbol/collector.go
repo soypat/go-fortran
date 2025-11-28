@@ -204,18 +204,18 @@ func (dc *DeclarationCollector) handleTypeDeclaration(decl *ast.TypeDeclaration)
 
 		// Create resolved type
 		resolvedType := &ResolvedType{
-			BaseType: decl.Type.Type.Token.String(),
+			BaseType: decl.Type.Token.String(),
 		}
 
 		// Handle KIND parameter
-		if decl.Type.Type.KindOrLen != nil {
+		if decl.Type.KindOrLen != nil {
 			// For now, we just note that KIND exists
 			// Full evaluation would require constant expression evaluation
 			resolvedType.Kind = 0 // Placeholder
 		}
 
 		// Handle CHARACTER length
-		if decl.Type.Type.Token.String() == "CHARACTER" && entity.Type.Type.KindOrLen != nil {
+		if decl.Type.Token.String() == "CHARACTER" && entity.Type.KindOrLen != nil {
 			// Similar to KIND, full evaluation requires expression evaluation
 			resolvedType.CharLen = 0 // Placeholder
 		}

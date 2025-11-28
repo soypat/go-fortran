@@ -32,7 +32,7 @@ PROGRAM implicit_none_placement
   ! matrix = 0.0  ! Would need dimensions to match
 
   ! Invalid: Multiple type specifications
-  INTEGER REAL :: confused  ! FUTURE ERROR: "expected ::"
+  INTEGER REAL :: confused  ! ERROR "::"
 
   ! Invalid: ALLOCATABLE with explicit shape
   REAL, ALLOCATABLE :: bad_alloc(10)  ! FUTURE ERROR: ALLOCATABLE must be deferred shape
