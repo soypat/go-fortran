@@ -345,7 +345,10 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, additionalParams
 			// Scalar OUT/INOUT parameters are pointers, need dereference in assignments
 			if param.Intent == f90.IntentOut || param.Intent == f90.IntentInOut {
 				v.Flags |= symbol.FlagPointerParam
-				v.Type = &ast.StarExpr{X: tp}
+				v.Type = &ast.IndexExpr{
+				X:     _astTypePointer,
+				Index: tp,
+			}
 			} else {
 				// INTENT(IN) or default intent - pass by value
 				v.Type = tp
@@ -862,7 +865,11 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 			// Scalar parameters: check INTENT
 			// INTENT(OUT) or INTENT(INOUT) require pointer
 			if param.Intent == f90.IntentOut || param.Intent == f90.IntentInOut {
-				goType = &ast.StarExpr{X: goType}
+				// Use intrinsic.Pointer[T] for scalar OUT/INOUT parameters
+				goType = &ast.IndexExpr{
+					X:     _astTypePointer,
+					Index: goType,
+				}
 			}
 			// INTENT(IN) or default intent use pass by value (no pointer)
 		}
@@ -1381,6 +1388,22 @@ func (tg *TranspileToGo) transformDoLoop(loop *f90.DoLoop) ast.Stmt {
 	}
 }
 
+// isArrayType checks if an AST type expression represents an Array type.
+// This is used to distinguish between scalar Pointer[T] and array *intrinsic.Array[T] types.
+func isArrayType(typ ast.Expr) bool {
+	// Check for intrinsic.Array[T]
+	if idx, ok := typ.(*ast.IndexExpr); ok {
+		if sel, ok := idx.X.(*ast.SelectorExpr); ok {
+			return sel.Sel.Name == "Array"
+		}
+	}
+	// Check for *intrinsic.Array[T] (unwrap pointer)
+	if star, ok := typ.(*ast.StarExpr); ok {
+		return isArrayType(star.X)
+	}
+	return false
+}
+
 // transformCallStmt transforms a Fortran CALL statement to Go function call
 // Fortran: CALL subname(arg1, arg2, ...)
 // Go:      subname(arg1, &arg2, ...)  (with & for OUT/INOUT parameters)
@@ -1424,10 +1447,41 @@ func (tg *TranspileToGo) transformCallStmt(call *f90.CallStmt) ast.Stmt {
 		}
 
 		if needsAddressOf {
-			// Wrap with & (address-of operator)
-			goArg = &ast.UnaryExpr{
-				Op: token.AND,
-				X:  goArg,
+			// Check if this is an array parameter or scalar parameter
+			isArray := i < len(params) && params[i].ArraySpec != nil
+
+			// Check if arg is already a pointer parameter (don't wrap again)
+			var alreadyPointer bool
+			if ident, ok := arg.(*f90.Identifier); ok {
+				v := tg.getVar(ident.Value)
+				if v != nil && v.Flags&symbol.FlagPointerParam != 0 && !isArrayType(v.Type) {
+					alreadyPointer = true
+				}
+			}
+
+			if alreadyPointer {
+				// Already Pointer[T], pass as-is (no wrapping needed)
+				// goArg = goArg (no change)
+			} else if isArray {
+				// Array: use & operator (unchanged)
+				goArg = &ast.UnaryExpr{
+					Op: token.AND,
+					X:  goArg,
+				}
+			} else {
+				// Scalar: wrap with intrinsic.Ptr(&arg)
+				goArg = &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent("intrinsic"),
+						Sel: ast.NewIdent("Ptr"),
+					},
+					Args: []ast.Expr{
+						&ast.UnaryExpr{
+							Op: token.AND,
+							X:  goArg,
+						},
+					},
+				}
 			}
 		}
 
@@ -2042,6 +2096,37 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 		}
 	}
 
+	// Early detection: check if this is a scalar pointer parameter assignment
+	// Need to generate param.Set(1, value) instead of *param = value
+	var needsSetMethod bool
+	var paramName string
+	if ident, ok := assign.Target.(*f90.Identifier); ok {
+		v := tg.getVar(ident.Value)
+		if v != nil && v.Flags&symbol.FlagPointerParam != 0 {
+			if !isArrayType(v.Type) {
+				needsSetMethod = true
+				paramName = ident.Value
+			}
+		}
+	}
+
+	if needsSetMethod {
+		// Generate: param.Set(1, rhs)
+		rhs := tg.transformExpression(assign.Value)
+		return &ast.ExprStmt{
+			X: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   ast.NewIdent(paramName),
+					Sel: ast.NewIdent("Set"),
+				},
+				Args: []ast.Expr{
+					&ast.BasicLit{Kind: token.INT, Value: "1"},
+					rhs,
+				},
+			},
+		}
+	}
+
 	// Regular assignment (not to array element)
 	lhs := tg.transformExpression(assign.Target)
 	rhs := tg.transformExpression(assign.Value)
@@ -2066,8 +2151,9 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 				},
 			}
 		}
-		// Check if this is a pointer parameter - need to dereference for assignment
-		if v != nil && v.Flags&symbol.FlagPointerParam != 0 {
+		// Check if this is an array pointer parameter - need to dereference for assignment
+		// (Scalar pointer params are handled above with .Set() method)
+		if v != nil && v.Flags&symbol.FlagPointerParam != 0 && isArrayType(v.Type) {
 			lhs = &ast.StarExpr{X: lhs}
 		}
 
@@ -2237,6 +2323,19 @@ func (tg *TranspileToGo) transformExpression(expr f90.Expression) ast.Expr {
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(block.goVarname()),
 				Sel: ast.NewIdent(strings.ToUpper(e.Value)), // Use uppercase for field access
+			}
+		}
+		// Check if this is a scalar pointer parameter being read
+		// Need to generate x.At(1) instead of just x
+		if v != nil && v.Flags&symbol.FlagPointerParam != 0 && !isArrayType(v.Type) {
+			return &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   ast.NewIdent(sanitizeIdent(e.Value)),
+					Sel: ast.NewIdent("At"),
+				},
+				Args: []ast.Expr{
+					&ast.BasicLit{Kind: token.INT, Value: "1"},
+				},
 			}
 		}
 		return ast.NewIdent(sanitizeIdent(e.Value))
@@ -3357,5 +3456,9 @@ var (
 	_astTypeArray = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("Array"),
+	}
+	_astTypePointer = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("Pointer"),
 	}
 )

@@ -7,7 +7,7 @@ var HOLDRT = struct {
 	SUMXRQ *intrinsic.Array[float32]
 	YMNRT  *intrinsic.Array[float32]
 	MATRIX *intrinsic.Array[float32]
-}{MATRIX: intrinsic.NewArray[float32](10, 20), YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3)}
+}{YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20)}
 var SHARED struct {
 	X int32
 	Y int32
@@ -165,7 +165,7 @@ func LEVEL07() {
 	arr1.Set(40, int(4))
 	arr1.Set(50, int(5))
 	SIMPLE_SUB()
-	ADD_VALUES(10, 20, &result)
+	ADD_VALUES(10, 20, intrinsic.Ptr(&result))
 	intrinsic.Print("LEVEL 7: ADD_VALUES(10, 20) =", result)
 	MODIFY_ARRAY(arr1, 5)
 	intrinsic.Print("LEVEL 7: arr1 after modify:", arr1.At(int(1)), arr1.At(int(2)), arr1.At(int(3)))
@@ -642,8 +642,8 @@ func LEVEL29() {
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
 }
-func ADD_VALUES(a int32, b int32, result *int32) {
-	*result = a + b
+func ADD_VALUES(a int32, b int32, result intrinsic.Pointer[int32]) {
+	result.Set(1, a+b)
 	intrinsic.Print("LEVEL 7: Inside ADD_VALUES")
 }
 func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
