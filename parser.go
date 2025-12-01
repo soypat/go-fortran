@@ -176,19 +176,16 @@ func (p *Parser90) varInit(name string, decl *ast.DeclEntity, initFlags symflags
 	vi = p.varSGet(name)
 	if vi != nil {
 		if initFlags&flagCommon != 0 {
-			vi.flags |= flagCommon
 			vi.common = namespace
-			return vi
+		} else if initFlags&flagPointer != 0 {
+			vi.pointee = namespace
 		}
-		const noSpecDecl = flagParameter | flagCommon
-		previouslyDefinedNoType := vi.decl == nil && vi.flags.HasAny(noSpecDecl)
-		canSetType := !initFlags.HasAny(noSpecDecl) && decl != nil
-		if previouslyDefinedNoType && canSetType {
+		if decl != nil && vi.decl != nil {
+			p.addError("double variable initialization with " + vi.declPos.String())
+		} else {
 			vi.decl = decl
-			vi.flags |= initFlags
-			return vi
 		}
-		p.addError("double variable initialization with " + vi.declPos.String())
+		vi.flags |= initFlags
 		return vi
 	}
 	p.vars = slices.Grow(p.vars, 1)
@@ -2749,20 +2746,18 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	}
 }
 
-// skipInterfaceBlock skips from INTERFACE to END INTERFACE
-func (p *Parser90) skipInterfaceBlock() {
-	p.expect(token.INTERFACE, "skip") // Skip INTERFACE
+func (p *Parser90) skipConstruct(keyword, endComposed token.Token) {
+	if !p.expect(keyword, "skip") {
+		panic("invalid skip")
+	}
 	depth := 1
 	for depth > 0 && !p.IsDone() {
-		if p.currentTokenIs(token.INTERFACE) {
+		if p.consumeIf(keyword) {
 			depth++
-			p.nextToken()
-		} else if p.currentTokenIs(token.END) && p.peekTokenIs(token.INTERFACE) {
-			p.nextToken() // consume END
-			p.nextToken() // consume INTERFACE
+		} else if p.consumeIf(endComposed) || p.consumeIf2(token.END, keyword) {
 			depth--
 			if depth == 0 {
-				// Consume optional interface name after END INTERFACE
+				// Consume optional name after END <keyword>
 				p.consumeIf(token.Identifier)
 			}
 		} else {
@@ -2819,7 +2814,7 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool) ast.Statement 
 		}
 	case token.INTERFACE:
 		// INTERFACE block - skip entire block
-		p.skipInterfaceBlock()
+		p.skipConstruct(token.INTERFACE, token.ENDINTERFACE)
 		return &ast.InterfaceStmt{} // Return non-nil to indicate success
 	case token.DATA:
 		// DATA statement - skip to end of statement (complex to parse fully)
@@ -2901,7 +2896,6 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 		if !p.expect(token.Slash, "expected / before DATA values") {
 			return stmt
 		}
-
 		// Parse value list - use parseExpression with terminators
 		for p.loopUntil(token.Slash, token.NewLine) {
 			value := p.parseExpression(0, token.Slash, token.Comma)
@@ -2918,10 +2912,8 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 
 		// Expect closing slash
 		p.expect(token.Slash, "expected / after DATA values")
-
 		// Check for comma or another variable (continuation case)
 		p.consumeIf(token.Comma)
-
 		// If next token is not an identifier, we're done
 		if !p.canUseAsIdentifier() {
 			break
@@ -3306,6 +3298,25 @@ func (p *Parser90) parseTypeAttributess() (attrs []ast.TypeAttribute) {
 
 	}
 	return attrs
+}
+
+func (p *Parser90) parseArrayRef() *ast.ArrayRef {
+	var varname string
+	if !p.expectIdentifier(&varname, "array reference variable name") {
+		return nil
+	}
+	stmt := &ast.ArrayRef{Name: varname}
+	if p.consumeIf(token.LParen) {
+		for {
+			expr := p.parseExpression(0, token.Comma)
+			stmt.Subscripts = append(stmt.Subscripts, expr)
+			if !p.consumeIf(token.Comma) {
+				break
+			}
+		}
+		p.expect(token.RParen, "closing left parentheses")
+	}
+	return stmt
 }
 
 // parseArraySpec parses array dimension specification from DIMENSION(...) or entity declarator
@@ -4213,44 +4224,33 @@ func (p *Parser90) parseEquivalenceStmt() ast.Statement {
 		if !p.expect(token.LParen, "open EQUIVALENCE set") {
 			break
 		}
-
 		// Parse variable list within this set
-		var set []ast.Expression
+		var set []ast.ArrayRef
 		for {
 			// Parse variable (can be simple identifier or array reference)
-			if !p.canUseAsIdentifier() {
-				p.addError("expected variable name in EQUIVALENCE set")
+			ref := p.parseArrayRef()
+			if ref == nil {
 				break
 			}
-
-			// Parse as expression to handle both identifiers and array refs
-			expr := p.parsePrimaryExpr()
-			if expr != nil {
-				set = append(set, expr)
-			}
-
+			set = append(set, *ref)
 			// Check for comma (more variables) or closing paren
 			if !p.consumeIf(token.Comma) {
 				break
 			}
 		}
-
 		// Add this set to the statement
 		if len(set) > 0 {
 			stmt.Sets = append(stmt.Sets, set)
 		}
-
 		// Expect closing parenthesis
 		if !p.expect(token.RParen, "closing parenthesis in EQUIVALENCE set") {
 			break
 		}
-
 		// Check for comma (more sets) or end of statement
 		if !p.consumeIf(token.Comma) {
 			break
 		}
 	}
-
 	stmt.Position = ast.Pos(startPos, p.current.start)
 	return stmt
 }
@@ -4336,6 +4336,8 @@ func (p *Parser90) parsePointerCrayStmt() ast.Statement {
 			Pointee:          pointeeVar,
 			PointeeArraySpec: arraySpec,
 		})
+		p.varInit(ptrVar, nil, flagPointer, pointeeVar)
+		p.varInit(pointeeVar, nil, flagPointee, "")
 		// Check for comma (more pairs) or end of statement
 		if !ok || !p.consumeIf(token.Comma) {
 			break

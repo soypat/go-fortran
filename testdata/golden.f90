@@ -718,7 +718,11 @@
           IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L),INTEGER (I)
           POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1)) ! cray style pointer, implicit initialization.  
           INTEGER :: N, M, MAXMUM, MAXDM1, MAXDEF
-            
+          INTEGER :: MAT(2,2)
+          CHARACTER A, B
+          CHARACTER :: C(4)*4
+          EQUIVALENCE (A,B, MAT(1,2))
+          EQUIVALENCE (C, MAT(1,1))
           ! Initialize with hex values (Cray-style hex literals)
           DOUBLEPRECISION          :: DEFALT
           INTEGER,DIMENSION(2)     :: I_DEFALT
@@ -726,7 +730,7 @@
           DATA I_DEFALT(2) /Z'7777777'/
           EQUIVALENCE ( DEFALT, I_DEFALT )
           PRINT *, 'LEVEL 29: Advanced features test'
-
+          MAT(1,2) = 64;
           ! Test MALLOC intrinsic
           MAXDM1 = 100
           NPAA = MALLOC(MAXDM1 * 8)
@@ -744,8 +748,9 @@
            AA(N)=DEFALT
   800      END DO
   900      END DO
-
-          PRINT *, 'LEVEL 29: AA(2) ', AA(2) 
+          PRINT *, 'CHAR A,B:', A, B
+          PRINT *, 'CHAR C', C
+          PRINT *, 'LEVEL 29: AA(2) ', AA(2), 'MAT(1,2)', MAT(1,2)
           PRINT *, 'LEVEL 29: Initialized', MAXMUM - M + 1, 'elements'
       END SUBROUTINE LEVEL29
 

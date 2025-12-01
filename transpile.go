@@ -3939,23 +3939,24 @@ func (tg *TranspileToGo) preScanEquivalences(stmts []f90.Statement) {
 				// Extract variable names and get their VarInfo
 				var vars []*VarInfo
 				var varNames []string
-				for _, expr := range set {
-					var name string
-					switch e := expr.(type) {
-					case *f90.Identifier:
-						name = e.Value
-					case *f90.ArrayRef:
-						name = e.Name
-					default:
-						// Skip unsupported expression types
-						continue
-					}
-					if name != "" {
-						upperName := strings.ToUpper(name)
-						varNames = append(varNames, upperName)
-						vars = append(vars, tg.getOrMakeVar(upperName))
-					}
-				}
+				panic("UNSUPPORTED")
+				// for _, expr := range set {
+				// 	var name string
+				// 	switch e := expr.(type) {
+				// 	case *f90.Identifier:
+				// 		name = e.Value
+				// 	case *f90.ArrayRef:
+				// 		name = e.Name
+				// 	default:
+				// 		// Skip unsupported expression types
+				// 		continue
+				// 	}
+				// 	if name != "" {
+				// 		upperName := strings.ToUpper(name)
+				// 		varNames = append(varNames, upperName)
+				// 		vars = append(vars, tg.getOrMakeVar(upperName))
+				// 	}
+				// }
 
 				if len(vars) < 2 {
 					continue

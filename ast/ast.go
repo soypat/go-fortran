@@ -701,7 +701,8 @@ func (ds *DimensionStmt) AppendString(dst []byte) []byte {
 // This makes DEFALT and I_DEFALT(1) occupy the same 8 bytes of memory,
 // allowing the same memory to be viewed as either a float64 or two int32 values.
 type EquivalenceStmt struct {
-	Sets  [][]Expression // Each set is a list of variable names/refs that share memory
+	Sets [][]ArrayRef
+	// Sets  [][]Expression // Each set is a list of variable names/refs that share memory
 	Label string
 	Position
 }
@@ -720,12 +721,9 @@ func (es *EquivalenceStmt) AppendString(dst []byte) []byte {
 		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		dst = append(dst, " ("...)
-		for j, expr := range set {
-			if j > 0 {
-				dst = append(dst, ", "...)
-			}
-			dst = expr.AppendString(dst)
+		dst = append(dst, '(')
+		for _, ref := range set {
+			dst = ref.AppendString(dst)
 		}
 		dst = append(dst, ')')
 	}
@@ -1369,14 +1367,16 @@ func (ar *ArrayRef) AppendTokenLiteral(dst []byte) []byte {
 }
 func (ar *ArrayRef) AppendString(dst []byte) []byte {
 	dst = append(dst, ar.Name...)
-	dst = append(dst, '(')
-	for i, sub := range ar.Subscripts {
-		if i > 0 {
-			dst = append(dst, ", "...)
+	if len(ar.Subscripts) > 0 {
+		dst = append(dst, '(')
+		for i, sub := range ar.Subscripts {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = sub.AppendString(dst)
 		}
-		dst = sub.AppendString(dst)
+		dst = append(dst, ')')
 	}
-	dst = append(dst, ')')
 	return dst
 }
 
