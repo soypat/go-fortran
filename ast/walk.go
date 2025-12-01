@@ -345,10 +345,6 @@ func Walk(v Visitor, node Node) {
 		}
 
 	case *ArrayRef:
-		// n.Name is a string, not a Node
-		for _, subscript := range n.Subscripts {
-			Walk(v, subscript)
-		}
 
 	case *ArraySection:
 		// n.Name is a string, not a Node

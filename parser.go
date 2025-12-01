@@ -2858,7 +2858,9 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 	// Loop to handle all pairs
 	for p.loopUntil(token.NewLine) {
 		// Parse variable list: x, y, z OR (arr(i), i=1,n)
-		for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.NewLine) && !p.IsDone() {
+		for p.loopUntil(token.Slash, token.NewLine) {
+			var varName string
+			varStart := p.sourcePos()
 			if p.currentTokenIs(token.LParen) {
 				startPos := p.sourcePos()
 				p.nextToken()
@@ -2868,43 +2870,30 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 					return nil
 				}
 				stmt.Variables = append(stmt.Variables, impliedDoLoop)
-			} else if p.canUseAsIdentifier() {
-				varStart := p.sourcePos()
-				varName := string(p.current.lit)
-				p.nextToken()
-
+			} else if p.expectIdentifier(&varName, "DATA statement") {
 				// Array subscript: arr(1,2,3)
-				if p.currentTokenIs(token.LParen) {
-					p.nextToken() // consume (
-					var subscripts []ast.Expression
-					for p.loopUntil(token.RParen) {
-						expr := p.parseExpression(0, token.RParen, token.Comma)
+				var subscripts []ast.Expression
+				if p.consumeIf(token.LParen) {
+					parseExpr := func() (ast.Expression, error) {
+						expr := p.parseExpression(0)
 						if expr == nil {
-							p.addError("failed to parse array subscript in DATA statement")
-							return nil
+							return nil, errors.New("failed to parse DATA array reference")
 						}
-						subscripts = append(subscripts, expr)
-						if !p.consumeIf(token.Comma) {
-							break
-						}
+						return expr, nil
 					}
-					p.expect(token.RParen, "closing array subscript")
-
-					stmt.Variables = append(stmt.Variables, &ast.ArrayRef{
-						Name:       varName,
-						Subscripts: subscripts,
-						Position:   ast.Pos(varStart.Pos, p.currentAstPos().End()),
-					})
-				} else {
-					stmt.Variables = append(stmt.Variables, &ast.Identifier{
-						Value:    varName,
-						Position: ast.Pos(varStart.Pos, p.currentAstPos().Start()),
-					})
+					exprs, err := parseCommaSeparatedList(p, token.RParen, parseExpr)
+					if err != nil {
+						return nil
+					}
+					subscripts = exprs
+					p.expect(token.RParen, "closing parentheses for DATA array reference")
 				}
-			} else {
-				break
+				stmt.Variables = append(stmt.Variables, &ast.ArrayRef{
+					Name:       varName,
+					Subscripts: subscripts,
+					Position:   ast.Pos(varStart.Pos, p.currentAstPos().End()),
+				})
 			}
-
 			p.consumeIf(token.Comma)
 		}
 
@@ -2914,7 +2903,7 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 		}
 
 		// Parse value list - use parseExpression with terminators
-		for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.NewLine) && !p.IsDone() {
+		for p.loopUntil(token.Slash, token.NewLine) {
 			value := p.parseExpression(0, token.Slash, token.Comma)
 			if value != nil {
 				stmt.Values = append(stmt.Values, value)
@@ -4221,7 +4210,7 @@ func (p *Parser90) parseEquivalenceStmt() ast.Statement {
 	// Parse comma-separated equivalence sets: (var1, var2, ...), (var3, var4, ...), ...
 	for {
 		// Expect opening parenthesis for equivalence set
-		if !p.expect(token.LParen, "opening parenthesis in EQUIVALENCE set") {
+		if !p.expect(token.LParen, "open EQUIVALENCE set") {
 			break
 		}
 

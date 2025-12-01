@@ -920,6 +920,17 @@ type ArraySpec struct {
 	Bounds []ArrayBound // One bound per dimension
 }
 
+func (as *ArraySpec) CanExpr() bool {
+	return as.Expr() != nil
+}
+
+func (as *ArraySpec) Expr() Expression {
+	if len(as.Bounds) == 1 && as.Bounds[0].Lower != nil && as.Bounds[1].Upper == nil {
+		return as.Bounds[0].Lower
+	}
+	return nil
+}
+
 func (as *ArraySpec) AppendString(dst []byte) []byte {
 	dst = append(dst, '(')
 	for i := range as.Bounds {

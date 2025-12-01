@@ -1600,7 +1600,7 @@ func (tg *TranspileToGo) transformAllocateStmt(stmt *f90.AllocateStmt) ast.Stmt 
 		switch o := obj.(type) {
 		case *f90.ArrayRef:
 			name = o.Name
-			dimExprs = o.Subscripts
+			// dimExprs = o.Subscripts
 		case *f90.FunctionCall:
 			// Parser treats arr(5) as a function call
 			name = o.Name
@@ -2492,8 +2492,8 @@ func (tg *TranspileToGo) transformAssignment(assign *f90.AssignmentStmt) ast.Stm
 			// Convert to ArrayRef and generate .Set() or .SetRange() call
 			// (handles both array element and CHARACTER substring assignment)
 			arrayRef := &f90.ArrayRef{
-				Name:       funcCall.Name,
-				Subscripts: funcCall.Args,
+				Name: funcCall.Name,
+				// Subscripts: funcCall.Args, // TODO fix this.
 			}
 			return tg.transformArrayAssignment(arrayRef, assign.Value)
 		}
