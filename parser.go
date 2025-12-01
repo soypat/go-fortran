@@ -207,6 +207,7 @@ func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEnti
 	pud.vars = pud.vars[:len(pud.vars)+1]
 	vi = &pud.vars[len(pud.vars)-1]
 	vi.reset()
+	vi.decl = decl
 	vi.flags |= initFlags
 	vi.sname = name
 	vi.declPos = sp
@@ -3244,10 +3245,11 @@ func (p *Parser90) parseTypeDecl() ast.Statement {
 	var entityName string
 	for p.consumeIdentifier(&entityName, token.DATA) {
 		entFlags := specFlags
-		entity := ast.DeclEntity{
+		stmt.Entities = append(stmt.Entities, ast.DeclEntity{
 			Name: entityName,
 			Type: &stmt.Type,
-		}
+		})
+		entity := &stmt.Entities[len(stmt.Entities)-1]
 		if p.currentTokenIs(token.LParen) {
 			entity.ArraySpec = p.parseArraySpec()
 		}
@@ -3273,9 +3275,7 @@ func (p *Parser90) parseTypeDecl() ast.Statement {
 			p.addError("unexpected token in type declaration of " + entityName + ": " + p.current.String())
 		}
 		// Add entity to statement (now that all fields are populated)
-		stmt.Entities = append(stmt.Entities, entity)
-		decl := &stmt.Entities[len(stmt.Entities)-1]
-		p.varInit(entityName, decl, entFlags, "")
+		p.varInit(entityName, entity, entFlags, "")
 		// consume identifier separating comma.
 		p.consumeIf(token.Comma)
 	}

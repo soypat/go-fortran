@@ -4,13 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/token"
 
 	f90 "github.com/soypat/go-fortran/ast"
 	f90token "github.com/soypat/go-fortran/token"
 )
 
 type ToGo struct {
-	scope *ParserUnitData
+	scope *ParserUnitData // currentScope variable data.
 }
 
 func (tg *ToGo) enterProgramUnit(pu f90.ProgramUnit) error {
@@ -130,9 +131,11 @@ func (tg *ToGo) transformStatements(dst []ast.Stmt, stmts []f90.Statement) (_ []
 }
 
 func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclaration) (_ []ast.Stmt, err error) {
-	spec := make([]ast.Spec, len(stmt.Entities))
-	decl := &ast.GenDecl{}
-	for i := range spec {
+	decl := &ast.GenDecl{
+		Tok:   token.VAR,
+		Specs: make([]ast.Spec, 0, len(stmt.Entities)),
+	}
+	for i := range stmt.Entities {
 		ent := &stmt.Entities[i]
 		vi := tg.scope.varSGet(ent.Name)
 		if vi.decl == nil {
