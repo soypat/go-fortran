@@ -27,6 +27,7 @@ type Statement interface {
 type ProgramUnit interface {
 	Statement
 	programUnitNode()
+	UnitData() any
 }
 
 func Pos(start, end int) Position {
@@ -167,11 +168,14 @@ type ProgramBlock struct {
 	Contains []ProgramUnit // Internal procedures (CONTAINS section)
 	Label    string
 	Position
+	// Example: Parser result of variable resolved types and usage.
+	Data any
 }
 
 var _ ProgramUnit = (*ProgramBlock)(nil) // compile time check of interface implementation.
 
 func (pb *ProgramBlock) GetLabel() string { return pb.Label }
+func (pb *ProgramBlock) UnitData() any    { return pb.Data }
 
 func (pb *ProgramBlock) statementNode()   {}
 func (pb *ProgramBlock) programUnitNode() {}
@@ -209,11 +213,14 @@ type Subroutine struct {
 	Body       []Statement   // Specification and executable statements
 	Label      string
 	Position
+	// Example: Parser result of variable resolved types and usage.
+	Data any
 }
 
 var _ ProgramUnit = (*Subroutine)(nil) // compile time check of interface implementation.
 
 func (s *Subroutine) GetLabel() string { return s.Label }
+func (pb *Subroutine) UnitData() any   { return pb.Data }
 
 func (s *Subroutine) statementNode()   {}
 func (s *Subroutine) programUnitNode() {}
@@ -259,11 +266,14 @@ type Function struct {
 	Body           []Statement   // Specification and executable statements
 	Label          string
 	Position
+	// Example: Parser result of variable resolved types and usage.
+	Data any
 }
 
 var _ ProgramUnit = (*Function)(nil) // compile time check of interface implementation.
 
 func (f *Function) GetLabel() string { return f.Label }
+func (pb *Function) UnitData() any   { return pb.Data }
 
 func (f *Function) statementNode()   {}
 func (f *Function) programUnitNode() {}
@@ -314,11 +324,14 @@ type Module struct {
 	Contains []ProgramUnit // Procedures in CONTAINS section
 	Label    string
 	Position
+	// Example: Parser result of variable resolved types and usage.
+	Data any
 }
 
 var _ ProgramUnit = (*Module)(nil) // compile time check of interface implementation.
 
 func (m *Module) GetLabel() string { return m.Label }
+func (pb *Module) UnitData() any   { return pb.Data }
 
 func (m *Module) statementNode()   {}
 func (m *Module) programUnitNode() {}
@@ -353,11 +366,15 @@ type BlockData struct {
 	Body  []Statement
 	Label string
 	Position
+	// Data stores program unit data.
+	// Example: Parser result of variable resolved types and usage.
+	Data any
 }
 
 var _ ProgramUnit = (*BlockData)(nil) // compile time check of interface implementation.
 
 func (bd *BlockData) GetLabel() string { return bd.Label }
+func (pb *BlockData) UnitData() any    { return pb.Data }
 
 func (bd *BlockData) statementNode()   {}
 func (bd *BlockData) programUnitNode() {}
@@ -736,9 +753,9 @@ type PointerCrayStmt struct {
 
 // PointerCrayPair represents a single (pointer_var, pointee) pair.
 type PointerCrayPair struct {
-	PointerVar string     // e.g., "NPAA" - holds memory address
-	Pointee    string     // e.g., "AA" - variable accessed through pointer
-	ArraySpec  *ArraySpec // e.g., "(1)" from AA(1), often a placeholder dimension
+	PointerVar       string     // e.g., "NPAA" - holds memory address
+	Pointee          string     // e.g., "AA" - variable accessed through pointer
+	PointeeArraySpec *ArraySpec // e.g., "(1)" from AA(1), often a placeholder dimension
 }
 
 var _ Statement = (*PointerCrayStmt)(nil) // compile time check
@@ -763,9 +780,9 @@ func (ps *PointerCrayStmt) AppendString(dst []byte) []byte {
 		dst = append(dst, pair.PointerVar...)
 		dst = append(dst, ", "...)
 		dst = append(dst, pair.Pointee...)
-		if pair.ArraySpec != nil {
+		if pair.PointeeArraySpec != nil {
 			dst = append(dst, '(')
-			for j, bound := range pair.ArraySpec.Bounds {
+			for j, bound := range pair.PointeeArraySpec.Bounds {
 				if j > 0 {
 					dst = append(dst, ',')
 				}

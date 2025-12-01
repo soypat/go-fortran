@@ -14,7 +14,6 @@ import (
 	_ "embed"
 
 	f90 "github.com/soypat/go-fortran/ast"
-	"github.com/soypat/go-fortran/symbol"
 )
 
 //go:generate gfortran -o testdata/golden testdata/golden.f90
@@ -31,21 +30,11 @@ func TestTranspileGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	program := parser.ParseNextProgramUnit().(*f90.ProgramBlock)
-	progUnits := program.Contains
 	// Check for parser errors
 	helperPrintErrors(t, &parser)
 
-	// Collect symbols
-	syms, err := symbol.CollectFromProgram(&f90.Program{
-		Units: progUnits,
-		Label: program.Name,
-	})
-	if err != nil {
-		t.Fatalf("got errors collecting symbols in golden.f90: %v", err)
-	}
-
 	var tp TranspileToGo
-	err = tp.Reset(syms)
+	err = tp.Reset()
 	if err != nil {
 		t.Fatal(err)
 	}

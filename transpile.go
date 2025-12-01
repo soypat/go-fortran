@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	f90 "github.com/soypat/go-fortran/ast"
-	"github.com/soypat/go-fortran/symbol"
 	f90token "github.com/soypat/go-fortran/token"
 )
 
@@ -43,8 +42,8 @@ func sanitizeIdent(name string) string {
 // VarInfo tracks all information about a variable in the current scope
 type VarInfo struct {
 	// Core metadata
-	Type  ast.Expr     // Go type expression (e.g., ast.NewIdent("int32"))
-	Flags symbol.Flags // Variable flags (IsParameter, IsImplicit, IsAllocatable, etc.)
+	Type  ast.Expr // Go type expression (e.g., ast.NewIdent("int32"))
+	Flags symflags // Variable flags (IsParameter, IsImplicit, IsAllocatable, etc.)
 
 	// COMMON block membership
 	InCommonBlock string // Non-empty if variable is in a COMMON block (stores block name)
@@ -72,13 +71,13 @@ type VarInfo struct {
 // isScalarPointerParam checks if variable is a scalar pointer parameter (not array).
 // Replaces: v != nil && v.Flags&symbol.FlagPointerParam != 0 && !isArrayType(v.Type)
 func (v *VarInfo) isScalarPointerParam() bool {
-	return v != nil && v.Flags&symbol.FlagPointerParam != 0 && !isArrayType(v.Type)
+	return v != nil && v.Flags&flagPointerParam != 0 && !isArrayType(v.Type)
 }
 
 // isArrayPointerParam checks if variable is an array pointer parameter.
 // Replaces: v != nil && v.Flags&symbol.FlagPointerParam != 0 && isArrayType(v.Type)
 func (v *VarInfo) isArrayPointerParam() bool {
-	return v != nil && v.Flags&symbol.FlagPointerParam != 0 && isArrayType(v.Type)
+	return v != nil && v.Flags&flagPointerParam != 0 && isArrayType(v.Type)
 }
 
 // isInCommonBlock checks if variable is in a COMMON block.
@@ -88,9 +87,9 @@ func (v *VarInfo) isInCommonBlock() bool {
 }
 
 // isPointee checks if variable is a pointee (accessed via Cray pointer).
-// Replaces: v != nil && v.Flags&symbol.FlagPointee != 0
+// Replaces: v != nil && v.Flags&flagPointee != 0
 func (v *VarInfo) isPointee() bool {
-	return v != nil && v.Flags&symbol.FlagPointee != 0
+	return v != nil && v.Flags&flagPointee != 0
 }
 
 // IsUndefined checks if the variable doesn't exist (nil pointer).
@@ -109,7 +108,6 @@ func (v *VarInfo) IsTypeUnresolved() bool {
 
 // TranspileToGo transforms Fortran AST to Go AST
 type TranspileToGo struct {
-	symTable     *symbol.Table
 	imports      []string
 	vars         map[string]*VarInfo         // Unified variable tracking
 	commonBlocks map[string]*commonBlockInfo // COMMON block name -> info (file-level, not reset per procedure)
@@ -117,13 +115,12 @@ type TranspileToGo struct {
 }
 
 // Reset initializes the transpiler with a symbol table
-func (tg *TranspileToGo) Reset(symTable *symbol.Table) error {
+func (tg *TranspileToGo) Reset() error {
 	// Preserve or initialize commonBlocks (file-level scope)
 	if tg.commonBlocks == nil {
 		tg.commonBlocks = make(map[string]*commonBlockInfo)
 	}
 	*tg = TranspileToGo{
-		symTable:     symTable,
 		imports:      tg.imports[:0],
 		commonBlocks: tg.commonBlocks, // Preserve COMMON blocks across procedures
 		errors:       tg.errors[:0],
@@ -170,7 +167,7 @@ func (tg *TranspileToGo) getVar(name string) *VarInfo {
 // markVarUsed marks a variable as used (to suppress "declared and not used" warnings)
 func (tg *TranspileToGo) markVarUsed(name string) {
 	if v := tg.getVar(name); v != nil {
-		v.Flags |= symbol.FlagUsed
+		v.Flags |= flagUsed
 	}
 }
 
@@ -390,7 +387,7 @@ func (tg *TranspileToGo) trackImplicitVariable(name string) {
 
 	// Skip function result variables (marked as parameters but without type)
 	// In Fortran, assignments to function names are converted to return statements
-	if v.Flags&symbol.FlagParameter != 0 {
+	if v.Flags&flagParameter != 0 {
 		return // This is a function result variable, don't generate implicit declaration
 	}
 
@@ -399,7 +396,7 @@ func (tg *TranspileToGo) trackImplicitVariable(name string) {
 	if varType != nil {
 		// Track in unified vars map
 		v.Type = varType
-		v.Flags |= symbol.FlagImplicit
+		v.Flags |= flagImplicit
 	}
 }
 
@@ -409,7 +406,7 @@ func (tg *TranspileToGo) prependImplicitVarDecls(stmts []ast.Stmt) []ast.Stmt {
 	// Collect implicit variables from vars map
 	var names []string
 	for name, v := range tg.vars {
-		if v.Flags&symbol.FlagImplicit != 0 {
+		if v.Flags&flagImplicit != 0 {
 			names = append(names, name)
 		}
 	}
@@ -619,7 +616,7 @@ func (tg *TranspileToGo) generateEquivalenceDecls() []ast.Stmt {
 			decls = append(decls, decl)
 
 			// Mark equivalenced variable as declared (not implicit anymore)
-			eqVar.Flags &^= symbol.FlagImplicit
+			eqVar.Flags &^= flagImplicit
 		}
 	}
 
@@ -634,9 +631,9 @@ func (tg *TranspileToGo) appendUnusedVarSuppressions(stmts []ast.Stmt) []ast.Stm
 
 	// Find all variables that are not marked as FlagUsed
 	for name, v := range tg.vars {
-		if v.Flags&symbol.FlagUsed == 0 {
+		if v.Flags&flagUsed == 0 {
 			// Skip parameters - Go doesn't complain about unused parameters
-			if v.Flags&symbol.FlagParameter != 0 {
+			if v.Flags&flagParameter != 0 {
 				continue
 			}
 			// Skip variables in COMMON blocks - they're fields, not local vars
@@ -723,7 +720,7 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, body []f90.State
 
 		// Track in unified vars map
 		v := tg.getOrMakeVar(param.Name)
-		v.Flags |= symbol.FlagParameter
+		v.Flags |= flagParameter
 
 		// Track array parameters so array references work correctly
 		if param.Decl.ArraySpec != nil {
@@ -741,7 +738,7 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, body []f90.State
 			// Scalar parameter
 			// Scalar OUT/INOUT parameters are pointers, need dereference in assignments
 			if param.Decl.Type.Intent() == f90.IntentOut || param.Decl.Type.Intent() == f90.IntentInOut {
-				v.Flags |= symbol.FlagPointerParam
+				v.Flags |= flagPointerParam
 				v.Type = &ast.IndexExpr{
 					X:     _astTypePointer,
 					Index: tp,
@@ -756,7 +753,7 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, body []f90.State
 	// Mark additional parameters (e.g., function result variable)
 	for _, name := range additionalParams {
 		v := tg.getOrMakeVar(name)
-		v.Flags |= symbol.FlagParameter
+		v.Flags |= flagParameter
 		// Note: Type will be set when the variable is explicitly declared
 	}
 }
@@ -1824,15 +1821,6 @@ func (tg *TranspileToGo) transformCallStmt(call *f90.CallStmt) ast.Stmt {
 
 	// Look up the subroutine in the symbol table to get parameter INTENT info
 	var params []f90.Parameter
-	if tg.symTable != nil {
-		subSym := tg.symTable.GlobalScope().Lookup(call.Name)
-		if subSym != nil {
-			// Get the Subroutine AST node from the symbol
-			if subNode, ok := subSym.DeclNode().(*f90.Subroutine); ok {
-				params = subNode.Parameters
-			}
-		}
-	}
 
 	for i, arg := range call.Args {
 		// Mark variables in arguments as used
@@ -2223,7 +2211,7 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		}
 
 		// Skip parameters - they're already declared in function signature
-		if v.Flags&symbol.FlagParameter != 0 {
+		if v.Flags&flagParameter != 0 {
 			continue
 		}
 
@@ -2239,9 +2227,9 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 		if arraySpec != nil {
 			if isAllocatable {
 				// Mark as allocatable and generate uninitialized pointer declaration
-				v.Flags |= symbol.FlagAllocatable
+				v.Flags |= flagAllocatable
 				// Clear implicit flag if it was set by DIMENSION statement
-				v.Flags &^= symbol.FlagImplicit
+				v.Flags &^= flagImplicit
 
 				// Track in unified vars map (Phase 2 migration)
 				// Array type: *intrinsic.Array[elemType]
@@ -2274,7 +2262,7 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 
 				// If array was already marked as implicit by DIMENSION statement,
 				// clear that flag since we're explicitly declaring it now
-				v.Flags &^= symbol.FlagImplicit
+				v.Flags &^= flagImplicit
 
 				spec := tg.transformArrayDeclaration(entity.Name, goType, arraySpec)
 				specs = append(specs, spec)
@@ -2734,7 +2722,7 @@ func (tg *TranspileToGo) transformArrayAssignment(ref *f90.ArrayRef, value f90.E
 
 	// Generate array access expression - check if array is in COMMON block
 	var arrayExpr ast.Expr
-	if v != nil && v.Flags&symbol.FlagPointee != 0 && v.PointerVar != "" {
+	if v != nil && v.Flags&flagPointee != 0 && v.PointerVar != "" {
 		// Pointee assignment - use pointer variable's Set() method
 		// Example: AA(10) = value where POINTER (NPAA, AA(1)) → NPAA.Set(10, value)
 		// Note: Pointer.Set() uses (index, value) order
@@ -2910,7 +2898,7 @@ func (tg *TranspileToGo) transformArrayConstructor(ac *f90.ArrayConstructor) ast
 func (tg *TranspileToGo) transformArrayRef(ref *f90.ArrayRef) ast.Expr {
 	// Check if this is a pointee variable (Cray-style POINTER)
 	v := tg.getVar(ref.Name)
-	if v != nil && v.Flags&symbol.FlagPointee != 0 && v.PointerVar != "" {
+	if v != nil && v.Flags&flagPointee != 0 && v.PointerVar != "" {
 		// This is a pointee - access through the pointer variable
 		// Example: AA(10) where POINTER (NPAA, AA(1)) → NPAA.At(10)
 		// Note: Pointer has At() method for 1-based indexing (handles 1D arrays)
@@ -3841,7 +3829,7 @@ func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
 					// in transformAssignment (it checks v.Type != nil)
 					if v.Type == nil {
 						v.Type = getImplicitType(varName) // Element type (for detection)
-						v.Flags |= symbol.FlagImplicit
+						v.Flags |= flagImplicit
 					}
 				}
 			}
@@ -3859,17 +3847,17 @@ func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
 					X:     _astTypePointer,
 					Index: elemType,
 				}
-				ptrVar.Flags |= symbol.FlagImplicit
+				ptrVar.Flags |= flagImplicit
 
 				// Track the pointee - it's not a separate variable, but a name
 				// that references memory through the pointer
 				// We need to track which pointer variable it corresponds to
 				pointeeVar := tg.getOrMakeVar(pair.Pointee)
-				pointeeVar.Flags |= symbol.FlagPointee
-				pointeeVar.PointerVar = pair.PointerVar // Track the corresponding pointer
-				pointeeVar.ArraySpec = pair.ArraySpec   // Store array spec if present
-				pointeeVar.ElementType = elemType       // Element type from IMPLICIT rules
-				pointeeVar.Type = elemType              // Set Type so v.Type != nil check passes
+				pointeeVar.Flags |= flagPointee
+				pointeeVar.PointerVar = pair.PointerVar      // Track the corresponding pointer
+				pointeeVar.ArraySpec = pair.PointeeArraySpec // Store array spec if present
+				pointeeVar.ElementType = elemType            // Element type from IMPLICIT rules
+				pointeeVar.Type = elemType                   // Set Type so v.Type != nil check passes
 			}
 		} else if commonStmt, ok := stmt.(*f90.CommonStmt); ok {
 			blockName := commonStmt.BlockName
@@ -3913,7 +3901,7 @@ func (tg *TranspileToGo) preScanCommonBlocks(stmts []f90.Statement) {
 				// Track in unified vars map
 				v := tg.getOrMakeVar(varName)
 				v.InCommonBlock = blockName
-				v.Flags |= symbol.FlagCommon
+				v.Flags |= flagCommon
 
 				// If this variable is an array, register it in the unified vars map
 				if arraySpec, isArray := block.ArraySpecs[varName]; isArray {
