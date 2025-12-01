@@ -22,6 +22,36 @@ import (
 //go:embed testdata/golden.f90
 var goldensrc string
 
+func TestTranspileGolden2(t *testing.T) {
+	var parser Parser90
+	err := parser.Reset("testdata/golden.f90", strings.NewReader(goldensrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	program := parser.ParseNextProgramUnit().(*f90.ProgramBlock)
+	var tg ToGo
+	decls, err := tg.TransformProgram(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var progSrc bytes.Buffer
+	helperWriteGoAST(t, &progSrc, &ast.File{
+		Name: ast.NewIdent("main"),
+		Imports: []*ast.ImportSpec{
+			{
+				Path: &ast.BasicLit{
+					Kind:  token.STRING,
+					Value: fmt.Sprintf("%q", "github.com/soypat/go-fortran/intrinsic"),
+				},
+			},
+		},
+		Decls: decls,
+	})
+	const goFile = "testdata/golden.go"
+	os.WriteFile(goFile, progSrc.Bytes(), 0777)
+	helperFormatGoSrc(t, goFile)
+}
+
 func TestTranspileGolden(t *testing.T) {
 	return
 	var parser Parser90

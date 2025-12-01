@@ -2165,10 +2165,6 @@ func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast
 
 		// If this variable is in a COMMON block, record its type
 		if v.isInCommonBlock() {
-			// DEBUG
-			if entity.Name == "x" || entity.Name == "y" || entity.Name == "z" {
-				fmt.Printf("DEBUG Skipping %s (in COMMON block %s)\n", entity.Name, v.InCommonBlock)
-			}
 			blockName := v.InCommonBlock
 			if block, exists := tg.commonBlocks[blockName]; exists {
 				// Determine the field type

@@ -123,13 +123,14 @@ func (l *sourcePos) AppendString(b []byte) []byte {
 }
 
 type Parser90 struct {
-	l             Lexer90
-	current       toktuple
-	peek          toktuple
-	uberpeek      toktuple
-	stmtFns       map[token.Token]statementParseFn // Statement parsers
-	errors        []ParserError                    // Collected parsing errors
-	vars          []varinfo                        // variables defined in current scope.
+	l        Lexer90
+	current  toktuple
+	peek     toktuple
+	uberpeek toktuple
+	stmtFns  map[token.Token]statementParseFn // Statement parsers
+	errors   []ParserError                    // Collected parsing errors
+	vars     ParserUnitData
+	// vars          []varinfo // variables defined in current scope.
 	maxStatements int
 	maxErrs       int
 	nStatements   int
@@ -143,13 +144,73 @@ type Parser90 struct {
 }
 
 func (p *Parser90) makeUnitData(name string, token token.Token) *ParserUnitData {
-	return &ParserUnitData{name: name, tok: token, vars: slices.Clone(p.vars)}
+	return &ParserUnitData{name: name, tok: token, vars: slices.Clone(p.vars.vars)}
 }
 
 type ParserUnitData struct {
 	name string
 	tok  token.Token
 	vars []varinfo
+}
+
+func (p *ParserUnitData) resolveParameterTypes(params []ast.Parameter) error {
+	if len(params) > len(p.vars) {
+		return errors.New("too many parameters for varinfo size")
+	}
+	for i := range params {
+		vi := &p.vars[i]
+		if vi.sname != params[i].Name {
+			return fmt.Errorf("mismatched param/varinfo name")
+
+		}
+		params[i].Decl = vi.decl
+	}
+	return nil
+}
+
+func (p *ParserUnitData) varGet(name []byte) (vi *varinfo) {
+	return p.varSGet(unsafe.String(&name[0], len(name)))
+}
+
+func (p *ParserUnitData) varSGet(name string) (vi *varinfo) {
+	for i := range p.vars {
+		if strings.EqualFold(p.vars[i].sname, name) {
+			return &p.vars[i]
+		}
+	}
+	return nil
+}
+func (pud *ParserUnitData) reset() {
+	*pud = ParserUnitData{vars: pud.vars[:0]}
+}
+
+func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEntity, initFlags symflags, namespace string) (vi *varinfo, err error) {
+	if decl != nil && name != decl.Name {
+		panic("bad varInit name argument mismatch with decl")
+	}
+	vi = pud.varSGet(name)
+	if vi != nil {
+		if initFlags&flagCommon != 0 {
+			vi.common = namespace
+		} else if initFlags&flagPointer != 0 {
+			vi.pointee = namespace
+		}
+		if decl != nil && vi.decl != nil {
+			err = errors.New("double variable initialization with " + vi.declPos.String())
+		} else {
+			vi.decl = decl
+		}
+		vi.flags |= initFlags
+		return vi, err
+	}
+	pud.vars = slices.Grow(pud.vars, 1)
+	pud.vars = pud.vars[:len(pud.vars)+1]
+	vi = &pud.vars[len(pud.vars)-1]
+	vi.reset()
+	vi.flags |= initFlags
+	vi.sname = name
+	vi.declPos = sp
+	return vi, nil
 }
 
 type varinfo struct {
@@ -161,55 +222,18 @@ type varinfo struct {
 	declPos sourcePos
 }
 
-func (p *varinfo) reset() {
-	*p = varinfo{}
-}
-
-func (p *Parser90) varResetAll() {
-	p.vars = p.vars[:0]
-}
-
+func (p *varinfo) reset()                             { *p = varinfo{} }
+func (p *Parser90) varResetAll()                      { p.vars.reset() }
+func (p *Parser90) varGet(name []byte) (vi *varinfo)  { return p.vars.varGet(name) }
+func (p *Parser90) varSGet(name string) (vi *varinfo) { return p.vars.varSGet(name) }
 func (p *Parser90) varInit(name string, decl *ast.DeclEntity, initFlags symflags, namespace string) (vi *varinfo) {
-	if decl != nil && name != decl.Name {
-		panic("bad varInit name argument mismatch with decl")
+	vi, err := p.vars.varInit(p.sourcePos(), name, decl, initFlags, namespace)
+	if err != nil {
+		p.addError(err.Error())
 	}
-	vi = p.varSGet(name)
-	if vi != nil {
-		if initFlags&flagCommon != 0 {
-			vi.common = namespace
-		} else if initFlags&flagPointer != 0 {
-			vi.pointee = namespace
-		}
-		if decl != nil && vi.decl != nil {
-			p.addError("double variable initialization with " + vi.declPos.String())
-		} else {
-			vi.decl = decl
-		}
-		vi.flags |= initFlags
-		return vi
-	}
-	p.vars = slices.Grow(p.vars, 1)
-	p.vars = p.vars[:len(p.vars)+1]
-	vi = &p.vars[len(p.vars)-1]
-	vi.reset()
-	vi.flags |= initFlags
-	vi.sname = name
-	vi.declPos = p.sourcePos()
 	return vi
 }
 
-func (p *Parser90) varGet(name []byte) (vi *varinfo) {
-	return p.varSGet(unsafe.String(&name[0], len(name)))
-}
-
-func (p *Parser90) varSGet(name string) (vi *varinfo) {
-	for i := range p.vars {
-		if strings.EqualFold(p.vars[i].sname, name) {
-			return &p.vars[i]
-		}
-	}
-	return nil
-}
 func (p *Parser90) Reset(source string, r io.Reader) error {
 	err := p.l.Reset(source, r)
 	if err != nil {
@@ -229,7 +253,9 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 		maxStatements: p.maxStatements,
 		stmtFns:       p.stmtFns,
 		errors:        p.errors[:0], // Reuse slice, clear contents
+		vars:          p.vars,
 	}
+	p.vars.reset()
 	clear(p.stmtFns)
 
 	// Initialize token stream
@@ -871,20 +897,10 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 	return params
 }
 
-func (p *Parser90) resolveParameterTypes(params []ast.Parameter) {
-	for i := range params {
-		vi := &p.vars[i]
-		if vi.sname != params[i].Name {
-			p.addErrorFatal("mismatched param/varinfo name", 1)
-		}
-		params[i].Decl = vi.decl
-	}
-}
-
 // parseBody parses specification statements, then executable statements
 // If parameters are provided, it will populate their type information when type declarations are found
 func (p *Parser90) parseBody(params []ast.Parameter) []ast.Statement {
-	defer p.resolveParameterTypes(params)
+	defer p.vars.resolveParameterTypes(params)
 	var stmts []ast.Statement
 	var sawImplicit, sawDecl bool
 	// Create a map for quick parameter lookup
