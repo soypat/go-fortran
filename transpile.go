@@ -711,7 +711,7 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, body []f90.State
 		}
 
 		// Get element type
-		tp := tg.fortranTypeToGoWithKind(param.Type)
+		tp := tg.fortranTypeToGoWithKind(param.Decl.Type)
 		if tp == nil {
 			// If type is undefined, use implicit typing rules
 			// This handles cases like: SUBROUTINE FOO(X,Y) with no type declarations
@@ -726,7 +726,7 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, body []f90.State
 		v.Flags |= symbol.FlagParameter
 
 		// Track array parameters so array references work correctly
-		if param.ArraySpec != nil {
+		if param.Decl.ArraySpec != nil {
 			// Array type: *intrinsic.Array[elemType]
 			arrayType := &ast.StarExpr{
 				X: &ast.IndexExpr{
@@ -735,12 +735,12 @@ func (tg *TranspileToGo) enterProcedure(params []f90.Parameter, body []f90.State
 				},
 			}
 			v.Type = arrayType
-			v.ArraySpec = param.ArraySpec
+			v.ArraySpec = param.Decl.ArraySpec
 			v.ElementType = tp
 		} else {
 			// Scalar parameter
 			// Scalar OUT/INOUT parameters are pointers, need dereference in assignments
-			if param.Intent == f90.IntentOut || param.Intent == f90.IntentInOut {
+			if param.Decl.Type.Intent() == f90.IntentOut || param.Decl.Type.Intent() == f90.IntentInOut {
 				v.Flags |= symbol.FlagPointerParam
 				v.Type = &ast.IndexExpr{
 					X:     _astTypePointer,
@@ -1035,7 +1035,7 @@ func (tg *TranspileToGo) TransformFunction(fn *f90.Function) (*ast.FuncDecl, err
 	bodyStmts = tg.appendUnusedVarSuppressions(bodyStmts)
 
 	// Map Fortran result type to Go type, considering KIND parameter
-	resultType := tg.fortranTypeToGoWithKind(fn.Type)
+	resultType := tg.fortranTypeToGoWithKind(&fn.Type)
 	if resultType == nil {
 		if fn.Type.Token.String() != "<undefined>" {
 			return nil, fmt.Errorf("unknown fortran result type: %s", fn.Type.Token)
@@ -1224,11 +1224,11 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 		}
 
 		// Get the Go type for this parameter, considering KIND
-		goType := tg.fortranTypeToGoWithKind(param.Type)
+		goType := tg.fortranTypeToGoWithKind(param.Decl.Type)
 		if goType == nil {
-			tokenStr := param.Type.Token.String()
+			tokenStr := param.Decl.Type.Token.String()
 			if tokenStr != "<undefined>" && tokenStr != "TYPE" {
-				tg.addError(fmt.Sprintf("unhandled type parameter %s", param.Type.Token))
+				tg.addError(fmt.Sprintf("unhandled type parameter %s", param.Decl.Type.Token))
 				continue
 			}
 			// If type is undefined, use implicit typing rules
@@ -1239,7 +1239,7 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 			}
 		}
 		// Handle arrays - always use intrinsic.Array[T]
-		if param.ArraySpec != nil {
+		if param.Decl.ArraySpec != nil {
 			// Array parameters: *intrinsic.Array[T]
 			goType = &ast.StarExpr{
 				X: &ast.IndexExpr{
@@ -1250,7 +1250,7 @@ func (tg *TranspileToGo) transformParameters(params []f90.Parameter) []*ast.Fiel
 		} else {
 			// Scalar parameters: check INTENT
 			// INTENT(OUT) or INTENT(INOUT) require pointer
-			if param.Intent == f90.IntentOut || param.Intent == f90.IntentInOut {
+			if param.Decl.Type.Intent() == f90.IntentOut || param.Decl.Type.Intent() == f90.IntentInOut {
 				// Use intrinsic.Pointer[T] for scalar OUT/INOUT parameters
 				goType = &ast.IndexExpr{
 					X:     _astTypePointer,
@@ -1848,9 +1848,9 @@ func (tg *TranspileToGo) transformCallStmt(call *f90.CallStmt) ast.Stmt {
 		if i < len(params) {
 			param := params[i]
 			// Arrays are already pointers, don't add &
-			if param.ArraySpec == nil {
+			if param.Decl.ArraySpec == nil {
 				// Scalar parameters with INTENT(OUT) or INTENT(INOUT) need &
-				if param.Intent == f90.IntentOut || param.Intent == f90.IntentInOut {
+				if param.Decl.Type.Intent() == f90.IntentOut || param.Decl.Type.Intent() == f90.IntentInOut {
 					needsAddressOf = true
 				}
 			}
@@ -1858,7 +1858,7 @@ func (tg *TranspileToGo) transformCallStmt(call *f90.CallStmt) ast.Stmt {
 
 		if needsAddressOf {
 			// Check if this is an array parameter or scalar parameter
-			isArray := i < len(params) && params[i].ArraySpec != nil
+			isArray := i < len(params) && params[i].Decl != nil
 
 			// Check if arg is already a pointer parameter (don't wrap again)
 			var alreadyPointer bool
@@ -1927,7 +1927,7 @@ func (tg *TranspileToGo) transformExpressions(exprs []f90.Expression) []ast.Expr
 //	INTEGER(KIND=1) → int8, INTEGER(KIND=2) → int16
 //	INTEGER(KIND=4) → int32, INTEGER(KIND=8) → int64
 //	REAL(KIND=4) → float32, REAL(KIND=8) → float64
-func (tg *TranspileToGo) fortranTypeToGoWithKind(ft f90.TypeSpec) (goType ast.Expr) {
+func (tg *TranspileToGo) fortranTypeToGoWithKind(ft *f90.TypeSpec) (goType ast.Expr) {
 	// Extract KIND value if present
 	kindValue := tg.extractKindValue(ft.KindOrLen)
 
@@ -2151,7 +2151,7 @@ func (tg *TranspileToGo) fortranConstantToGoExpr(fortranExpr string) ast.Expr {
 // transformTypeDeclaration transforms a Fortran type declaration to Go var declaration
 func (tg *TranspileToGo) transformTypeDeclaration(decl *f90.TypeDeclaration) ast.Stmt {
 	// Map Fortran type to Go type, considering KIND parameter
-	goType := tg.fortranTypeToGoWithKind(decl.Type)
+	goType := tg.fortranTypeToGoWithKind(&decl.Type)
 	if goType == nil {
 		return nil
 	}
@@ -2361,7 +2361,7 @@ func (tg *TranspileToGo) transformDerivedType(deriv *f90.DerivedTypeStmt) ast.St
 	// Transform each component declaration to struct fields
 	for _, comp := range deriv.Components {
 		// Get Go type for this component
-		goType := tg.fortranTypeToGoWithKind(comp.Type)
+		goType := tg.fortranTypeToGoWithKind(&comp.Type)
 		if goType == nil {
 			continue // Skip components we can't translate
 		}

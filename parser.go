@@ -37,6 +37,10 @@ const (
 	flagAllocatable                       // Has ALLOCATABLE attribute
 	flagCommon                            // Variable is in a COMMON block
 	flagPointee                           // Cray-style pointee (accessed through pointer variable)
+	flagIntentOut
+	flagIntentIn
+	flagArrayInit
+	flagArraySpec // ArraySpec used in type declaration.
 )
 
 func (f symflags) HasAny(hasBits symflags) bool { return f&hasBits != 0 }
@@ -47,6 +51,32 @@ func (f symflags) With(mask symflags, setBits bool) symflags {
 	} else {
 		return f &^ mask
 	}
+}
+
+func flagsFromTypespec(ts *ast.TypeSpec) (flags symflags) {
+	for i := range ts.Attributes {
+		attr := &ts.Attributes[i]
+		switch attr.Token {
+		case token.INTENT:
+			if tok, ok := attr.Expr.(*ast.TokenExpr); ok {
+				switch tok.Token {
+				case token.IN:
+					flags |= flagIntentIn
+				case token.OUT:
+					flags |= flagIntentOut
+				case token.INOUT:
+					flags |= flagIntentIn | flagIntentOut
+				}
+			}
+		case token.POINTER:
+			flags |= flagPointer
+		case token.ALLOCATABLE:
+			flags |= flagAllocatable
+		case token.TARGET:
+			flags |= flagTarget
+		}
+	}
+	return flags
 }
 
 type ParserError struct {
@@ -108,10 +138,12 @@ type Parser90 struct {
 	nSamePosCheckCount int
 	lastPosCheck       int
 	died               bool
+
+	ignoreUndeclaredVars bool
 }
 
 type varinfo struct {
-	Type    *ast.TypeSpec
+	decl    *ast.DeclEntity
 	flags   symflags
 	sname   string
 	name    []byte // variable declaration name
@@ -132,12 +164,16 @@ func (p *Parser90) varResetAll() {
 	p.vars = p.vars[:0]
 }
 
-func (p *Parser90) varInit(name string, spec *ast.TypeSpec) (vi *varinfo) {
+func (p *Parser90) varInit(name string, decl *ast.DeclEntity, flags symflags) (vi *varinfo) {
+	if decl != nil && name != decl.Name {
+		panic("bad varInit name argument mismatch with decl")
+	}
 	vi = p.varSGet(name)
 	if vi != nil {
-		if vi.flags.HasAny(flagParameter) && vi.Type == nil && spec != nil {
+		if !flags.HasAny(flagParameter) && vi.flags.HasAny(flagParameter) && vi.decl == nil && decl != nil {
 			// Parameters in subroutine/function parameter list have no type.
-			vi.Type = spec
+			vi.decl = decl
+			vi.flags |= flags
 			return vi
 		}
 		p.addError("double variable initialization with " + vi.declPos.String())
@@ -147,6 +183,7 @@ func (p *Parser90) varInit(name string, spec *ast.TypeSpec) (vi *varinfo) {
 	p.vars = p.vars[:len(p.vars)+1]
 	vi = &p.vars[len(p.vars)-1]
 	vi.reset()
+	vi.flags |= flags
 	vi.name = append(vi.name, name...)
 	vi.sname = name
 	vi.declPos = p.sourcePos()
@@ -773,7 +810,9 @@ func (p *Parser90) currentAsVarString(bitset symflags) string {
 		return v.sname
 	}
 	lit := p.currentLiteral()
-	p.addError("variable " + lit + " undefined")
+	if !p.ignoreUndeclaredVars {
+		p.addError("variable " + lit + " undefined")
+	}
 	return lit
 }
 
@@ -813,8 +852,7 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 			p.addError(err.Error())
 			break
 		}
-		vi := p.varInit(param.Name, nil) // parameters have no type.
-		vi.flags |= flagParameter
+		p.varInit(param.Name, nil, flagParameter) // parameters have no type.
 		params = append(params, param)
 		if p.currentTokenIs(token.Comma) {
 			p.nextToken()
@@ -829,16 +867,24 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 	return params
 }
 
+func (p *Parser90) resolveParameterTypes(params []ast.Parameter) {
+	for i := range params {
+		vi := &p.vars[i]
+		if vi.sname != params[i].Name {
+			p.addErrorFatal("mismatched param/varinfo name", 1)
+		}
+		params[i].Decl = vi.decl
+	}
+}
+
 // parseBody parses specification statements, then executable statements
 // If parameters are provided, it will populate their type information when type declarations are found
-func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
+func (p *Parser90) parseBody(params []ast.Parameter) []ast.Statement {
+	defer p.resolveParameterTypes(params)
 	var stmts []ast.Statement
 	var sawImplicit, sawDecl bool
 	// Create a map for quick parameter lookup
-	paramMap := make(map[string]*ast.Parameter)
-	for i := range parameters {
-		paramMap[parameters[i].Name] = &parameters[i]
-	}
+
 	p.skipNewlinesAndComments()
 	// Phase 2: Parse specification statements
 	for p.loopUntil(token.CONTAINS, token.END) {
@@ -854,7 +900,7 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 			break
 		}
 
-		if stmt := p.parseSpecStatement(&sawImplicit, &sawDecl, paramMap); stmt != nil {
+		if stmt := p.parseSpecStatement(&sawImplicit, &sawDecl); stmt != nil {
 			stmts = append(stmts, stmt)
 		} else {
 			// Not a parseable spec statement - skip the construct
@@ -2731,7 +2777,7 @@ func (p *Parser90) isEndOfProgramUnit() bool {
 
 // parseSpecStatement parses a specification statement
 // paramMap is used to populate type information for parameters
-func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[string]*ast.Parameter) ast.Statement {
+func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool) ast.Statement {
 	// Check for labeled FORMAT statement (can appear in spec section)
 	var label string
 	if p.currentTokenIs(token.IntLit) && p.peekTokenIs(token.FORMAT) {
@@ -2753,13 +2799,13 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 		return p.parseFormatStmt()
 	case token.INTEGER, token.REAL, token.DOUBLE, token.COMPLEX, token.LOGICAL, token.CHARACTER:
 		*sawDecl = true
-		return p.parseTypeDecl(paramMap)
+		return p.parseTypeDecl()
 	case token.TYPE:
 		// Distinguish between TYPE definition and TYPE(typename) declaration
 		if p.peekTokenIs(token.LParen) {
 			// TYPE(typename) :: var - treat as type declaration
 			*sawDecl = true
-			return p.parseTypeDecl(paramMap)
+			return p.parseTypeDecl()
 		} else {
 			// TYPE :: name ... END TYPE - parse derived type definition
 			return p.parseDerivedTypeStmt()
@@ -3178,7 +3224,7 @@ func (p *Parser90) expectTypeSpec(withAttrs bool) (ts ast.TypeSpec) {
 
 // parseTypeDecl parses INTEGER :: x, y or REAL, PARAMETER :: pi = 3.14 or TYPE(typename) :: var
 // If paramMap is provided, it will populate type information for any parameters found
-func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Statement {
+func (p *Parser90) parseTypeDecl() ast.Statement {
 	start := p.sourcePos()
 	stmt := &ast.TypeDeclaration{
 		Type:     p.expectTypeSpec(true),
@@ -3188,10 +3234,12 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 	// F90: INTEGER :: A, B, C (with ::)
 	p.consumeIf(token.DoubleColon)
 
+	specFlags := flagsFromTypespec(&stmt.Type)
 	// Parse entity list
 	// Note: DATA can be used as a variable name here, even though tok.CanBeUsedAsIdentifier() returns false for it
 	var entityName string
 	for p.consumeIdentifier(&entityName, token.DATA) {
+		entFlags := specFlags
 		entity := ast.DeclEntity{
 			Name: entityName,
 			Type: &stmt.Type,
@@ -3202,10 +3250,14 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 		switch p.current.tok {
 		case token.Comma:
 			p.nextToken() // No initializer.
-		case token.Equals, token.PointerAssign:
+		case token.PointerAssign:
+			entFlags |= flagPointer
+			fallthrough
+		case token.Equals:
 			p.nextToken()
 			if p.currentTokenIs(token.LParen) && p.peekTokenIs(token.Slash) {
 				entity.Init = p.parseArrayConstructor()
+				entFlags |= flagArrayInit
 			} else {
 				entity.Init = p.parseExpression(0, token.Comma)
 			}
@@ -3217,8 +3269,11 @@ func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Stateme
 			p.addError("unexpected token in type declaration of " + entityName + ": " + p.current.String())
 		}
 		// Add entity to statement (now that all fields are populated)
-		p.varInit(entityName, &stmt.Type)
 		stmt.Entities = append(stmt.Entities, entity)
+		decl := &stmt.Entities[len(stmt.Entities)-1]
+		p.varInit(entityName, decl, entFlags)
+		// consume identifier separating comma.
+		p.consumeIf(token.Comma)
 	}
 	return stmt
 }

@@ -387,13 +387,13 @@ func (dc *DeclarationCollector) handleDerivedTypeStmt(stmt *ast.DerivedTypeStmt)
 func (dc *DeclarationCollector) defineParameter(param ast.Parameter) {
 	currentScope := dc.table.CurrentScope()
 	paramType := &ResolvedType{
-		BaseType: param.Type.Token.String(),
+		BaseType: param.Decl.Type.Token.String(),
 	}
 
 	sym := NewSymbol(param.Name, SymVariable)
 	sym.SetType(paramType)
-	sym.SetAttributes(param.Attributes)
-	sym.SetArraySpec(param.ArraySpec)
+	sym.SetAttributes(param.Decl.Type.Attributes)
+	sym.SetArraySpec(param.Decl.ArraySpec)
 
 	if err := currentScope.Define(sym); err != nil {
 		dc.addError(err)

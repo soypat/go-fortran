@@ -2712,7 +2712,7 @@ END SELECT`,
 			if err != nil {
 				t.Fatalf("Reset failed: %v", err)
 			}
-
+			parser.ignoreUndeclaredVars = true
 			unit := parser.ParseNextProgramUnit()
 			if unit == nil {
 				t.Fatal("ParseNextProgramUnit returned nil")

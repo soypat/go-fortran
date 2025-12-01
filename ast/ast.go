@@ -57,6 +57,25 @@ type TypeSpec struct {
 	Attributes []TypeAttribute
 }
 
+func (ts *TypeSpec) Intent() IntentType {
+	for i := range ts.Attributes {
+		attr := &ts.Attributes[i]
+		if tok, ok := attr.Expr.(*TokenExpr); attr.Token == token.INTENT && ok {
+			switch tok.Token {
+			case token.IN:
+				return IntentIn
+			case token.OUT:
+				return IntentOut
+			case token.INOUT:
+				return IntentInOut
+			default:
+				return intentDefault
+			}
+		}
+	}
+	return intentDefault
+}
+
 func (ts TypeSpec) AppendString(dst []byte) []byte {
 	dst = appendTypenameOrTok(dst, ts.Name, ts.Token)
 	if len(ts.Attributes) > 0 {
@@ -948,6 +967,19 @@ type DeclEntity struct {
 	Init      Expression
 }
 
+func (de *DeclEntity) Dimension() *ArraySpec {
+	if de.ArraySpec != nil {
+		return de.ArraySpec
+	}
+	for i := range de.Type.Attributes {
+		attr := &de.Type.Attributes[i]
+		if attr.Token == token.DIMENSION {
+			return attr.Dimension
+		}
+	}
+	return nil
+}
+
 func (de *DeclEntity) AppendString(dst []byte) []byte {
 	dst = append(dst, de.Name...)
 	if de.ArraySpec != nil {
@@ -995,11 +1027,8 @@ func (it IntentType) String() string {
 //	REAL, DIMENSION(:), INTENT(INOUT) :: array
 //	CHARACTER(LEN=*), OPTIONAL :: message
 type Parameter struct {
-	Name       string          // Parameter name
-	Type       TypeSpec        // Type with optional KIND/LEN
-	Intent     IntentType      // INTENT(IN/OUT/INOUT)
-	Attributes []TypeAttribute // Other attributes (OPTIONAL, POINTER, TARGET, etc.)
-	ArraySpec  *ArraySpec      // Array dimensions if this is an array parameter
+	Name string // Parameter name
+	Decl *DeclEntity
 }
 
 // Identifier represents a variable name, function name, or other named entity
@@ -1087,7 +1116,7 @@ func (il *IntegerLiteral) AppendTokenLiteral(dst []byte) []byte {
 }
 func (il *IntegerLiteral) AppendString(dst []byte) []byte {
 	// Convert int64 to string
-	return append(dst, []byte(string(rune(il.Value)))...)
+	return append(dst, il.Raw...)
 }
 
 // RealLiteral represents a floating-point constant in source code. Supports
