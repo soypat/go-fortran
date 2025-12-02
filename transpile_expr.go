@@ -42,7 +42,12 @@ func (tg *ToGo) transformExpression(vitgt *varinfo, expr f90.Expression) (result
 	case *f90.ArrayRef:
 		result, err = tg.transformArrayRef(vitgt, e)
 	case *f90.BinaryExpr:
-		result, err = tg.transformBinaryExpr(vitgt, e)
+		if e.Op == f90token.StringConcat {
+			err = tg.makeErrAtStmt("string concat special handling needed")
+		} else {
+			result, err = tg.transformBinaryExpr(vitgt, e)
+		}
+
 	case *f90.UnaryExpr:
 		result, err = tg.transformUnaryExpr(vitgt, e)
 	case *f90.ParenExpr:
@@ -182,9 +187,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 		op = token.LOR
 		needsPromotion = false
 	case f90token.StringConcat:
-		// String concatenation: a // b → a + b
-		op = token.ADD
-		needsPromotion = false
+		return nil, tg.makeErr(e, "string concat handled in transformExpression")
 	default:
 		return nil, tg.makeErr(e, fmt.Sprintf("unsupported binary operator %v", e.Op))
 	}
@@ -267,7 +270,6 @@ func (tg *ToGo) transformArrayRef(vitgt *varinfo, e *f90.ArrayRef) (result ast.E
 }
 
 func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs ast.Expr) (_ []ast.Stmt, err error) {
-
 	if fexpr.Base != nil {
 		return dst, tg.makeErr(fexpr, "chained ArrayRef assignment not yet implemented")
 	}
@@ -431,6 +433,8 @@ func (tg *ToGo) wrapConversion(targetType, sourceType *varinfo, expr ast.Expr) a
 		conv = "float64"
 	case f90token.INTEGER:
 		conv = "int32"
+	case f90token.LOGICAL:
+		return expr // bool → bool, no conversion needed
 	}
 	return &ast.CallExpr{
 		Fun:  ast.NewIdent(conv),

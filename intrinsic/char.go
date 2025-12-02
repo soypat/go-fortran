@@ -88,6 +88,19 @@ func (ch CharacterArray) SetConcat(toJoin ...CharacterArray) {
 	ch.setUnusedToSpace()
 }
 
+func (ch CharacterArray) SetConcatString(toJoin ...string) {
+	ch.data = ch.data[:cap(ch.data)]
+	off := 0
+	for i := range toJoin {
+		off += copy(ch.data[off:], toJoin[i])
+		if off >= len(ch.data) {
+			break
+		}
+	}
+	ch.data = ch.data[:off]
+	ch.setUnusedToSpace()
+}
+
 func (ch *CharacterArray) setUnusedToSpace() {
 	raw := ch.data[len(ch.data):cap(ch.data)]
 	for i := range raw {

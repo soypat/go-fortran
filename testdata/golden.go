@@ -211,8 +211,8 @@ func LEVEL10() {
 	z = 45.14159
 	flag = true
 	expr_result = (x+y)*z - float32(k)/2
-	cond1 = invalid((i > 5) && (j < 100))
-	cond2 = invalid((x >= 3) || (y <= 1))
+	cond1 = (i > 5) && (j < 100)
+	cond2 = (x >= 3) || (y <= 1)
 	cond3 = !flag
 }
 func LEVEL11() {
@@ -227,7 +227,7 @@ func LEVEL11() {
 	)
 	str1.SetFromString("Hello")
 	str2.SetFromString("World")
-	str3.SetFromString(str1 + " " + str2)
+	str3.SetConcatString(str2.String(), str1.String(), " ")
 }
 func LEVEL12() {
 	var (

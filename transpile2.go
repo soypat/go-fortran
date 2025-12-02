@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 
 	f90 "github.com/soypat/go-fortran/ast"
@@ -17,7 +18,6 @@ type ToGo struct {
 	scope       *ParserUnitData // currentScope variable data.
 	_extern     []*ParserUnitData
 	_contains   []*ParserUnitData
-	errors      []error
 	source      string
 	sourceFile  io.ReaderAt
 	currentStmt f90.Statement
@@ -455,6 +455,9 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	case *f90.Identifier:
 		targetVinfo = tg.scope.Var(tgt.Value)
 		lhs = tg.astIdent(tgt.Value)
+		if binop, ok := stmt.Value.(*f90.BinaryExpr); ok && binop.Op == f90token.StringConcat {
+			return tg.transformStringConcat(dst, targetVinfo._varname, binop)
+		}
 	case *f90.FunctionCall:
 		// FunctionCall as assignment target occurs for CHARACTER substring: str(1:5) = 'x'
 		targetVinfo = tg.scope.Var(tgt.Name)
@@ -578,6 +581,44 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType *ast.Ident
 		}
 	}
 	return goType
+}
+
+func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, remaining *f90.BinaryExpr) (_ []ast.Stmt, err error) {
+	var args []ast.Expr
+	addArg := func(expr f90.Expression) ast.Expr {
+		switch e := expr.(type) {
+		case *f90.StringLiteral:
+			return &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(e.Value)}
+		case *f90.Identifier:
+			return tg.astMethodCall(e.Value, "String")
+		}
+		err := tg.makeErr(expr, "unsupported expression for string concat")
+		panic(err)
+	}
+	var toDecompose = []*f90.BinaryExpr{remaining}
+	for len(toDecompose) > 0 {
+		got := toDecompose[len(toDecompose)-1]
+		toDecompose = toDecompose[:len(toDecompose)-1]
+		l := got.Left
+		split, lsplit := l.(*f90.BinaryExpr)
+		if lsplit {
+			toDecompose = append(toDecompose, split)
+		} else {
+			args = append(args, addArg(l))
+		}
+		r := got.Right
+		split, rsplit := r.(*f90.BinaryExpr)
+		if rsplit {
+			toDecompose = append(toDecompose, split)
+		} else {
+			args = append(args, addArg(r))
+		}
+	}
+	gstmt := &ast.ExprStmt{
+		X: tg.astMethodCall(receiver, "SetConcatString", args...),
+	}
+	dst = append(dst, gstmt)
+	return dst, nil
 }
 
 // astMethodCall creates: receiver.methodName(args...)
