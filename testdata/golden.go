@@ -591,7 +591,7 @@ func MODIFY_ARRAY(arr intrinsic.Array[int32], n int32) {
 		_ = i
 	)
 }
-func FACTORIAL(n int32) {
+func FACTORIAL(n int32) (FACTORIAL int32) {
 	var (
 		n int32
 		_ = n
@@ -604,14 +604,14 @@ func FACTORIAL(n int32) {
 	result = 1
 	FACTORIAL = result
 }
-func SQUARE_ROOT(x float32) {
+func SQUARE_ROOT(x float32) (SQUARE_ROOT float32) {
 	var (
 		x float32
 		_ = x
 	)
 	SQUARE_ROOT = intrinsic.SQRT(x)
 }
-func FIBONACCI(n int32) {
+func FIBONACCI(n int32) (FIBONACCI int32) {
 	var (
 		n int32
 		_ = n

@@ -180,24 +180,32 @@ func (tg *ToGo) TransformFunction(fn *f90.Function) (_ *ast.FuncDecl, err error)
 }
 
 func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.FuncDecl, err error) {
+	err = tg.enterProgramUnit(subroutineOrFunc)
+	if err != nil {
+		return nil, err
+	}
 	var body []f90.Statement
+	var returned *ast.FieldList
 	if fn, ok := subroutineOrFunc.(*f90.Function); ok {
 		body = fn.Body
+		field := tg.getReturnParam()
+		if field == nil {
+			return nil, fmt.Errorf("failed to acquire return parameter type for %s", fn.Name)
+		}
+		returned = &ast.FieldList{List: []*ast.Field{field}}
 	} else if sub, ok := subroutineOrFunc.(*f90.Subroutine); ok {
 		body = sub.Body
 	} else {
 		panic("unexpected argument")
 	}
-	err = tg.enterProgramUnit(subroutineOrFunc)
-	if err != nil {
-		return nil, err
-	}
+
 	fn := &ast.FuncDecl{
 		Name: ast.NewIdent(subroutineOrFunc.UnitName()),
 		Type: &ast.FuncType{
 			Params: &ast.FieldList{
 				List: tg.getScopeParams(nil),
 			},
+			Results: returned,
 		},
 		Body: &ast.BlockStmt{},
 	}
@@ -220,6 +228,20 @@ func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 		}
 	}
 	return dst
+}
+
+func (tg *ToGo) getReturnParam() *ast.Field {
+	for i := range tg.scope.vars {
+		vi := tg.scope.vars[i]
+		if vi.flags&flagReturned != 0 {
+			tp := tg.fortranTypeToGoWithKind(vi.decl)
+			return &ast.Field{
+				Type:  tp,
+				Names: []*ast.Ident{tg.astIdent(vi.decl.Name)},
+			}
+		}
+	}
+	return nil
 }
 
 func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("label" + f90Label) }
