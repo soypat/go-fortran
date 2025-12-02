@@ -156,8 +156,8 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 	case f90token.DoubleStar:
 		// Power operator: x ** y → math.Pow(x, y)
 		// math.Pow requires float64 arguments
-		left = wrapConversion(vitgt, leftType, left)
-		right = wrapConversion(vitgt, rightType, right)
+		left = tg.wrapConversion(vitgt, leftType, left)
+		right = tg.wrapConversion(vitgt, rightType, right)
 		sel := intrinsicSel("POW")
 		return &ast.CallExpr{
 			Fun:  sel(vitgt),
@@ -191,8 +191,8 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 
 	// Promote operands to common type for arithmetic/comparison ops
 	if needsPromotion {
-		left = wrapConversion(resultType, leftType, left)
-		right = wrapConversion(resultType, rightType, right)
+		left = tg.wrapConversion(resultType, leftType, left)
+		right = tg.wrapConversion(resultType, rightType, right)
 	}
 
 	return &ast.BinaryExpr{
@@ -381,8 +381,12 @@ func (tg *ToGo) inferExprType(vitgt *varinfo, expr f90.Expression) (vi *varinfo)
 		} else {
 			vi = tg.scope.Var(e.Name) // Maybe an ambiguous function call (COMMON array access)
 		}
+	case *f90.ArrayConstructor:
+		if len(e.Values) > 0 {
+			vi = tg.inferExprType(vitgt, e.Values[0])
+		}
 	}
-	if vi == nil {
+	if vi == nil || vi.decl == nil {
 		str := expr.AppendString(nil)
 		err := tg.makeErr(expr, fmt.Sprintf("could not infer type of expression %q", str))
 		panic(err.Error())
@@ -404,8 +408,19 @@ func promoteTypes(a, b *varinfo) *varinfo {
 }
 
 // wrapConversion wraps expr with a type conversion if targetType differs from sourceType.
-func wrapConversion(targetType, sourceType *varinfo, expr ast.Expr) ast.Expr {
-	if targetType.decl.Type.Token == sourceType.decl.Type.Token {
+func (tg *ToGo) wrapConversion(targetType, sourceType *varinfo, expr ast.Expr) ast.Expr {
+	var err error
+	if sourceType.decl == nil {
+		err = tg.makeErrAtStmt("nil decl source type for target type: " + string(targetType.decl.AppendString(nil)))
+	} else if targetType.decl == nil {
+		err = tg.makeErrAtStmt(fmt.Sprintf("nil decl target type for source type: %T", expr))
+	}
+	if err != nil {
+		panic(err.Error())
+	}
+	if targetType == nil || sourceType == nil ||
+		targetType.decl == nil || sourceType.decl == nil ||
+		targetType.decl.Type.Token == sourceType.decl.Type.Token {
 		return expr
 	}
 	conv := "invalid"

@@ -211,8 +211,8 @@ func LEVEL10() {
 	z = 45.14159
 	flag = true
 	expr_result = (x+y)*z - float32(k)/2
-	cond1 = bool((i > 5) && (j < 100))
-	cond2 = bool((x >= 3) || (y <= 1))
+	cond1 = invalid((i > 5) && (j < 100))
+	cond2 = invalid((x >= 3) || (y <= 1))
 	cond3 = !flag
 }
 func LEVEL11() {

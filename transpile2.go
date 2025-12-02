@@ -14,12 +14,13 @@ import (
 )
 
 type ToGo struct {
-	scope      *ParserUnitData // currentScope variable data.
-	_extern    []*ParserUnitData
-	_contains  []*ParserUnitData
-	errors     []error
-	source     string
-	sourceFile io.ReaderAt
+	scope       *ParserUnitData // currentScope variable data.
+	_extern     []*ParserUnitData
+	_contains   []*ParserUnitData
+	errors      []error
+	source      string
+	sourceFile  io.ReaderAt
+	currentStmt f90.Statement
 }
 
 func (tg *ToGo) SetSource(source string, r io.ReaderAt) {
@@ -203,6 +204,10 @@ func (tg *ToGo) TransformSubroutine(sub *f90.Subroutine) (_ *ast.FuncDecl, err e
 
 func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("label" + f90Label) }
 
+func (tg *ToGo) makeErrAtStmt(msg string) error {
+	return tg.makeErr(tg.currentStmt, msg)
+}
+
 func (tg *ToGo) makeErr(node f90.Node, msg string) error {
 	tok := node.AppendTokenLiteral(nil)
 	pos := node.SourcePos()
@@ -212,10 +217,11 @@ func (tg *ToGo) makeErr(node f90.Node, msg string) error {
 func (tg *ToGo) makeErrWithPos(pos f90.Position, msg string) error {
 	// If source is available, compute line:column
 	if tg.sourceFile != nil {
+		callStr := getCallStack(2)
 		var buf [1024]byte
 		line, col, _, err := pos.ToLineCol(tg.sourceFile, buf[:])
 		if err == nil && line > 0 {
-			return fmt.Errorf("%s:%d:%d: %s", tg.source, line, col, msg)
+			return fmt.Errorf("%s:%d:%d: %s\n%s", tg.source, line, col, msg, callStr)
 		}
 	}
 	return fmt.Errorf("%s @ %d", msg, pos.Start())
@@ -248,6 +254,9 @@ func (tg *ToGo) transformStatements(dst []ast.Stmt, stmts []f90.Statement) (_ []
 }
 
 func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.Stmt, err error) {
+	if stmt != nil {
+		tg.currentStmt = stmt
+	}
 	switch s := stmt.(type) {
 	case *f90.TypeDeclaration:
 		dst, err = tg.transformTypeDeclaration(dst, s)
@@ -414,6 +423,8 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		return nil, err
 	} else if targetVinfo == nil {
 		return nil, tg.makeErr(stmt.Target, "unknown identifier in target expression of assignment")
+	} else if targetVinfo.decl == nil {
+		return nil, tg.makeErr(stmt.Target, "identifier with no corresponding type declaration:"+targetVinfo.Identifier())
 	}
 	rhs, err := tg.transformExpression(targetVinfo, stmt.Value)
 	if err != nil {
@@ -421,7 +432,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	}
 	// Convert RHS to target type if needed
 	rhsType := tg.inferExprType(targetVinfo, stmt.Value)
-	rhs = wrapConversion(targetVinfo, rhsType, rhs)
+	rhs = tg.wrapConversion(targetVinfo, rhsType, rhs)
 
 	switch tgt := stmt.Target.(type) {
 	case *f90.ArrayRef:
