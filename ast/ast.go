@@ -467,6 +467,28 @@ type ImplicitRule struct {
 	LetterRanges []LetterRange // Letter ranges this rule applies to
 }
 
+func (ir *ImplicitRule) InRange(firstLetter byte) bool {
+	firstLetter = toUpper(firstLetter)
+	for _, letters := range ir.LetterRanges {
+		if firstLetter >= letters.Start && firstLetter <= letters.End {
+			return true
+		}
+	}
+	return false
+}
+
+func (lr *LetterRange) InRange(letter byte) bool {
+	letter = toUpper(letter)
+	return letter >= lr.Start && letter <= lr.End
+}
+
+func toUpper(b byte) byte {
+	if b >= 'a' && b <= 'z' {
+		b -= 'a' - 'A'
+	}
+	return b
+}
+
 // ImplicitStatement controls implicit typing rules for variables. IMPLICIT NONE
 // disables implicit typing, requiring all variables to be explicitly declared.
 // Without IMPLICIT NONE, Fortran uses default typing rules (I-N for INTEGER,
@@ -483,6 +505,19 @@ type ImplicitStatement struct {
 	Rules  []ImplicitRule // Custom type rules (empty if IsNone)
 	Label  string
 	Position
+}
+
+func (is *ImplicitStatement) ImplicitTypeFor(ident string) *TypeSpec {
+	if is.IsNone || len(ident) == 0 {
+		return nil
+	}
+	firstLetter := toUpper(ident[0])
+	for i := range is.Rules {
+		if is.Rules[i].InRange(firstLetter) {
+			return &is.Rules[i].Type
+		}
+	}
+	return nil
 }
 
 var _ Statement = (*ImplicitStatement)(nil) // compile time check of interface implementation.

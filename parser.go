@@ -145,7 +145,13 @@ type Parser90 struct {
 }
 
 func (p *Parser90) makeUnitData(name string, token token.Token) *ParserUnitData {
-	return &ParserUnitData{name: name, tok: token, vars: slices.Clone(p.vars.vars)}
+	return &ParserUnitData{
+		name:       name,
+		tok:        token,
+		vars:       slices.Clone(p.vars.vars),
+		implicits:  slices.Clone(p.vars.implicits),
+		returnType: p.vars.returnType,
+	}
 }
 
 type ParserUnitData struct {
@@ -153,6 +159,7 @@ type ParserUnitData struct {
 	tok        token.Token
 	vars       []varinfo
 	returnType *varinfo
+	implicits  []*ast.ImplicitStatement
 }
 
 // ProcedureParams returns the varinfos corresponding to parameters of the function, in order.
@@ -193,8 +200,64 @@ func (p *ParserUnitData) Var(name string) (vi *varinfo) {
 	return nil
 }
 func (pud *ParserUnitData) reset() {
-	*pud = ParserUnitData{vars: pud.vars[:0]}
+	*pud = ParserUnitData{
+		vars:      pud.vars[:0],
+		implicits: pud.implicits[:0],
+	}
 }
+
+// resolveImplicitTypes assigns types to variables with nil decl based on IMPLICIT rules.
+// Called after specification section is parsed, before executable section.
+func (pud *ParserUnitData) resolveImplicitTypes() {
+	for _, impl := range pud.implicits {
+		if impl.IsNone {
+			return // No type resolving.
+		}
+	}
+
+	for i := range pud.vars {
+		vi := &pud.vars[i]
+		if vi.decl != nil {
+			continue // Already has explicit type
+		}
+		ident := vi.Identifier()
+		for _, impl := range pud.implicits {
+			ts := impl.ImplicitTypeFor(ident)
+			if ts == nil {
+				continue
+			}
+			vi.decl = &ast.DeclEntity{
+				Name:     vi._varname,
+				Position: impl.Position,
+				Type:     ts,
+			}
+			vi.flags |= flagImplicit
+			break
+		}
+		if vi.decl == nil {
+			letter := ident[0]
+			if letter >= 'a' && letter <= 'z' {
+				letter -= 'a' - 'A'
+			}
+			if letter >= 'I' && letter <= 'N' {
+				vi.decl = _implicitInteger
+			} else {
+				vi.decl = _implicitReal
+			}
+		}
+	}
+}
+
+var (
+	_implicitInteger = &ast.DeclEntity{
+		Name: "IMPLICIT INTEGER(default)",
+		Type: &ast.TypeSpec{Token: token.INTEGER},
+	}
+	_implicitReal = &ast.DeclEntity{
+		Name: "IMPLICIT REAL(default)",
+		Type: &ast.TypeSpec{Token: token.REAL},
+	}
+)
 
 func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEntity, initFlags symflags, namespace string) (vi *varinfo, err error) {
 	if decl != nil && name != decl.Name {
@@ -927,9 +990,9 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 func (p *Parser90) parseBody(params []ast.Parameter) []ast.Statement {
 	defer p.vars.resolveParameterTypes(params)
 	var stmts []ast.Statement
-	var sawImplicit, sawDecl bool
+	var sawDecl bool
 	// Create a map for quick parameter lookup
-
+	p.vars.implicits = p.vars.implicits[:0] // TODO: shouldn't anytime vars is reset implicits also be reset? This seems like an edge case.
 	p.skipNewlinesAndComments()
 	// Phase 2: Parse specification statements
 	for p.loopUntil(token.CONTAINS, token.END) {
@@ -945,7 +1008,7 @@ func (p *Parser90) parseBody(params []ast.Parameter) []ast.Statement {
 			break
 		}
 
-		if stmt := p.parseSpecStatement(&sawImplicit, &sawDecl); stmt != nil {
+		if stmt := p.parseSpecStatement(&sawDecl); stmt != nil {
 			stmts = append(stmts, stmt)
 		} else {
 			// Not a parseable spec statement - skip the construct
@@ -954,6 +1017,7 @@ func (p *Parser90) parseBody(params []ast.Parameter) []ast.Statement {
 		p.skipNewlinesAndComments()
 	}
 	p.nStatements += len(stmts) // Add specification statements.
+	p.vars.resolveImplicitTypes()
 
 	// Phase 3: Parse executable statements
 	for !p.isEndOfProgramUnit() && p.loopUntil(token.CONTAINS) {
@@ -2821,7 +2885,7 @@ func (p *Parser90) isEndOfProgramUnit() bool {
 
 // parseSpecStatement parses a specification statement
 // paramMap is used to populate type information for parameters
-func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool) ast.Statement {
+func (p *Parser90) parseSpecStatement(sawDecl *bool) ast.Statement {
 	// Check for labeled FORMAT statement (can appear in spec section)
 	var label string
 	if p.currentTokenIs(token.IntLit) && p.peekTokenIs(token.FORMAT) {
@@ -2836,7 +2900,7 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool) ast.Statement 
 
 	switch p.current.tok {
 	case token.IMPLICIT:
-		return p.parseImplicit(sawImplicit, sawDecl)
+		return p.parseImplicit(sawDecl)
 	case token.USE:
 		return p.parseUse()
 	case token.FORMAT:
@@ -2977,20 +3041,20 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 //	IMPLICIT REAL (A-H, O-Z)
 //	IMPLICIT INTEGER (I-N)
 //	IMPLICIT REAL(KIND=8) (A-C, X-Z), INTEGER (I-N)
-func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
+func (p *Parser90) parseImplicit(sawDecl *bool) ast.Statement {
 	start := p.current.start
 	stmt := &ast.ImplicitStatement{}
 	p.expect(token.IMPLICIT, "")
-
+	sawImplicit := len(p.vars.implicits) > 0
 	// Check for IMPLICIT NONE
 	if p.currentTokenIs(token.Identifier) && strings.EqualFold(string(p.current.lit), "NONE") {
-		if *sawImplicit {
-			p.addError("duplicate IMPLICIT statement")
+		if sawImplicit {
+			p.addError("duplicate IMPLICIT statements" + fmt.Sprintf("%+v", p.vars.implicits[0]))
 		} else if *sawDecl {
 			p.addError("IMPLICIT NONE must appear before type declarations")
 		}
-		*sawImplicit = true
 		stmt.IsNone = true
+		p.vars.implicits = append(p.vars.implicits, stmt)
 		p.nextToken()
 		stmt.Position = ast.Pos(start, p.current.start)
 		return stmt
@@ -3117,10 +3181,11 @@ func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
 		}
 	}
 
-	if *sawImplicit {
+	if sawImplicit {
 		p.addError("duplicate IMPLICIT statement")
 	}
-	*sawImplicit = true
+
+	p.vars.implicits = append(p.vars.implicits, stmt)
 
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
