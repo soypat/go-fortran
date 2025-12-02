@@ -351,10 +351,6 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	for i := range stmt.Entities {
 		ent := &stmt.Entities[i]
 		vi := tg.scope.Var(ent.Name)
-		if vi.decl == nil {
-			fmt.Printf("nil declaration, skipping %s\n", ent.Name)
-			continue
-		}
 		tp := tg.fortranTypeToGoWithKind(vi.decl)
 		ident := ast.NewIdent(ent.Name)
 		spec := &ast.ValueSpec{

@@ -74,7 +74,7 @@ func LEVEL03() {
 	j = i + 10
 	k = i * 2
 	y = x * 2
-	z = REAL(i) + x
+	z = float32(i) + x
 }
 func LEVEL04() {
 	var (
@@ -210,7 +210,7 @@ func LEVEL10() {
 	y = 6.28318
 	z = 45.14159
 	flag = true
-	expr_result = (x+y)*z - REAL(k)/2
+	expr_result = (x+y)*z - float32(k)/2
 	cond1 = (i > 5) && (j < 100)
 	cond2 = (x >= 3) || (y <= 1)
 	cond3 = !flag
@@ -249,11 +249,11 @@ func LEVEL12() {
 	j = 52
 	k = 84
 	angle = 0.5
-	sin_val = SIN(angle)
-	cos_val = COS(angle)
-	abs_val = ABS(-5.5)
-	max_val = MAX(i, j, k)
-	min_val = MIN(10, 20, 5)
+	sin_val = intrinsic.SIN(angle)
+	cos_val = intrinsic.COS(angle)
+	abs_val = intrinsic.ABS(-5.5)
+	max_val = intrinsic.MAX(i, j, k)
+	min_val = intrinsic.MIN(10, 20, 5)
 }
 func LEVEL13() {
 	var (
@@ -322,18 +322,18 @@ func LEVEL16() {
 		_, _, _      = len_val, len_trim_val, index_val
 	)
 	str1 = "Hello"
-	len_val = LEN(str1)
-	len_trim_val = LEN_TRIM(str1)
-	str2 = TRIM(str1)
+	len_val = str1.Len()
+	len_trim_val = str1.LenTrim()
+	str2 = str1.Trim()
 	str1 = "Hello World"
-	index_val = INDEX(str1, "World")
+	index_val = str1.Index("World")
 	str1 = "   Left"
-	str2 = ADJUSTL(str1)
+	str2 = str1.AdjustL()
 	str1 = "Right   "
-	str3 = ADJUSTR(str1)
+	str3 = str1.AdjustR()
 	str1 = "abcdef"
 	str3 = str1.Substring(2, 4)
-	str1.SetSubstring("z", 2, 3)
+	str1.SetSubstring(2, 3, "z")
 }
 func LEVEL17() {
 	var (
@@ -355,14 +355,14 @@ func LEVEL17() {
 		ub   int32
 		_, _ = lb, ub
 	)
-	size_total = SIZE(matrix)
-	size_dim1 = SIZE(matrix, 1)
-	size_dim2 = SIZE(matrix, 2)
-	size_total = SIZE(vector)
-	lb = LBOUND(matrix, 1)
-	lb = LBOUND(matrix, 2)
-	ub = UBOUND(matrix, 1)
-	ub = UBOUND(matrix, 2)
+	size_total = matrix.Size()
+	size_dim1 = matrix.SizeDim(1)
+	size_dim2 = matrix.SizeDim(2)
+	size_total = vector.Size()
+	lb = matrix.LowerDim(1)
+	lb = matrix.LowerDim(2)
+	ub = matrix.UpperDim(1)
+	ub = matrix.UpperDim(2)
 }
 func LEVEL18() {
 	var (
@@ -517,9 +517,9 @@ func LEVEL26() {
 		d4      float32
 		_, _, _ = d1, d2, d4
 	)
-	hex_val = INT(255)
-	oct_val = INT(255)
-	bin_val = INT(255)
+	hex_val = int32(255)
+	oct_val = int32(255)
+	bin_val = int32(255)
 	d1 = 1
 	d2 = 123
 	d4 = 2.718281828
@@ -545,7 +545,7 @@ func LEVEL27() {
 		result float32
 		_      = result
 	)
-	result = factor * root3 * DBLE(ncomp)
+	result = factor * root3 * float64(ncomp)
 }
 func LEVEL28() {
 	YQR.Set(1.5, 1)
@@ -557,11 +557,11 @@ func LEVEL28() {
 func LEVEL29() {
 	MAT.Set(64, 1, 2)
 	MAXDM1 = 100
-	NPAA = MALLOC(MAXDM1 * 8)
+	NPAA = intrinsic.MALLOC(MAXDM1 * 8)
 	NPII = NPAA
 	NPLL = NPII
 	M = 1
-	MAXDEF = MIN(200000, MAXDM1)
+	MAXDEF = intrinsic.MIN(200000, MAXDM1)
 }
 func SIMPLE_SUB() {
 }

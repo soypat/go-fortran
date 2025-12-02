@@ -196,16 +196,15 @@ func (tg *ToGo) transformFunctionCall(vitgt *varinfo, e *f90.FunctionCall) (resu
 	}
 	fi := tg.ContainedOrExtern(e.Name)
 	if fi == nil {
-		for i := range intrinsics {
-			if strings.EqualFold(e.Name, intrinsics[i].name) {
-				expr, err := tg.intrinsicExpr(vitgt, &intrinsics[i], e.Args...)
-				if err != nil {
-					return nil, err
-				}
-				return expr, nil
-			}
+		fn := getIntrinsic(e.Name, len(e.Args))
+		if fn == nil {
+			return result, tg.makeErr(e, "function/intrinsic not found: "+e.Name)
 		}
-		return result, tg.makeErr(e, "function/intrinsic not found: "+e.Name)
+		expr, err := tg.intrinsicExpr(vitgt, fn, e.Args...)
+		if err != nil {
+			return nil, err
+		}
+		return expr, err
 	}
 
 	params := fi.ProcedureParams()
@@ -337,15 +336,25 @@ type intrinsicFn struct {
 	exprGeneric func(tp *varinfo) ast.Expr
 	method      string
 	params      []*varinfo
+	isVariadic  bool
 }
 
 func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expression) (call *ast.CallExpr, err error) {
-	if len(args) != len(fn.params) {
+	if fn.isVariadic {
+		if len(args) < len(fn.params) {
+			return nil, fmt.Errorf("intrinsic %s requires at least %d arguments, got %d", fn.name, len(fn.params), len(args))
+		}
+	} else if len(args) != len(fn.params) {
 		return nil, fmt.Errorf("intrinsic %s requires %d arguments, got %d", fn.name, len(fn.params), len(args))
 	}
 	var gargs []ast.Expr
 	for i := range args {
-		expr, err := tg.transformExpression(fn.params[i], args[i])
+		// For variadic, use the first param type for extra args
+		paramIdx := i
+		if paramIdx >= len(fn.params) {
+			paramIdx = 0
+		}
+		expr, err := tg.transformExpression(fn.params[paramIdx], args[i])
 		if err != nil {
 			return nil, err
 		}
@@ -362,7 +371,7 @@ func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expre
 		}
 	} else {
 		funcExpr := fn.expr
-		if funcExpr == nil && fn.expr != nil {
+		if funcExpr == nil && fn.exprGeneric != nil {
 			funcExpr = fn.exprGeneric(vitgt)
 		}
 		call = &ast.CallExpr{
@@ -373,33 +382,91 @@ func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expre
 	return call, nil
 }
 
-var intrinsics = []intrinsicFn{
-	{
-		name: "REAL",
-		expr: ast.NewIdent("float32"),
-		params: []*varinfo{
-			_tgtGenericFloat,
-		},
-	},
-	{
-		name: "SQRT",
-		exprGeneric: func(tp *varinfo) ast.Expr {
-			return &ast.SelectorExpr{
-				X:   _astIntrinsic,
-				Sel: ast.NewIdent("SQRT"),
+func getIntrinsic(name string, nargs int) *intrinsicFn {
+	for i := range intrinsics {
+		fn := &intrinsics[i]
+		if !strings.EqualFold(name, fn.name) {
+			continue
+		}
+		// Check arg count matches (for non-variadic) or meets minimum (for variadic)
+		if fn.isVariadic {
+			if nargs < len(fn.params) {
+				continue // try next entry
 			}
-		},
-		params: []*varinfo{
-			_tgtGenericFloat,
-		},
-	},
-	{
-		name:   "LEN_TRIM",
-		method: "LenTrim",
-		params: []*varinfo{
-			_tgtChar,
-		},
-	},
+		} else if nargs != len(fn.params) {
+			continue // try next entry with same name
+		}
+		return fn
+	}
+	return nil
+}
+
+// intrinsicSel creates a selector expression for intrinsic.NAME
+func intrinsicSel(name string) func(*varinfo) ast.Expr {
+	return func(tp *varinfo) ast.Expr {
+		return &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(name)}
+	}
+}
+
+var intrinsics = []intrinsicFn{
+	// Type conversions
+	{name: "REAL", expr: ast.NewIdent("float32"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "DBLE", expr: ast.NewIdent("float64"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "INT", expr: ast.NewIdent("int32"), params: []*varinfo{_tgtGenericInt}},
+	{name: "INT32", expr: ast.NewIdent("int32"), params: []*varinfo{_tgtGenericInt}},
+
+	// Math intrinsics - single float argument
+	{name: "SQRT", exprGeneric: intrinsicSel("SQRT"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "SIN", exprGeneric: intrinsicSel("SIN"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "COS", exprGeneric: intrinsicSel("COS"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "TAN", exprGeneric: intrinsicSel("TAN"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "ASIN", exprGeneric: intrinsicSel("ASIN"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "ACOS", exprGeneric: intrinsicSel("ACOS"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "ATAN", exprGeneric: intrinsicSel("ATAN"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "EXP", exprGeneric: intrinsicSel("EXP"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "LOG", exprGeneric: intrinsicSel("LOG"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "LOG10", exprGeneric: intrinsicSel("LOG10"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "SINH", exprGeneric: intrinsicSel("SINH"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "COSH", exprGeneric: intrinsicSel("COSH"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "TANH", exprGeneric: intrinsicSel("TANH"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "FLOOR", exprGeneric: intrinsicSel("FLOOR"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "CEILING", exprGeneric: intrinsicSel("CEILING"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "AINT", exprGeneric: intrinsicSel("AINT"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "ANINT", exprGeneric: intrinsicSel("ANINT"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "NINT", exprGeneric: intrinsicSel("NINT"), params: []*varinfo{_tgtGenericFloat}},
+
+	// Math intrinsics - two float arguments
+	{name: "ATAN2", exprGeneric: intrinsicSel("ATAN2"), params: []*varinfo{_tgtGenericFloat, _tgtGenericFloat}},
+
+	// Math intrinsics - signed/numeric
+	{name: "ABS", exprGeneric: intrinsicSel("ABS"), params: []*varinfo{_tgtGenericFloat}},
+	{name: "SIGN", exprGeneric: intrinsicSel("SIGN"), params: []*varinfo{_tgtGenericFloat, _tgtGenericFloat}},
+	{name: "MOD", exprGeneric: intrinsicSel("MOD"), params: []*varinfo{_tgtGenericInt, _tgtGenericInt}},
+	{name: "DIM", exprGeneric: intrinsicSel("DIM"), params: []*varinfo{_tgtGenericFloat, _tgtGenericFloat}},
+	{name: "DPROD", exprGeneric: intrinsicSel("DPROD"), params: []*varinfo{_tgtGenericFloat, _tgtGenericFloat}},
+
+	// Variadic intrinsics
+	{name: "MAX", exprGeneric: intrinsicSel("MAX"), params: []*varinfo{_tgtGenericFloat}, isVariadic: true},
+	{name: "MIN", exprGeneric: intrinsicSel("MIN"), params: []*varinfo{_tgtGenericFloat}, isVariadic: true},
+
+	// Character methods
+	{name: "LEN", method: "Len", params: []*varinfo{_tgtChar}},
+	{name: "LEN_TRIM", method: "LenTrim", params: []*varinfo{_tgtChar}},
+	{name: "TRIM", method: "Trim", params: []*varinfo{_tgtChar}},
+	{name: "ADJUSTL", method: "AdjustL", params: []*varinfo{_tgtChar}},
+	{name: "ADJUSTR", method: "AdjustR", params: []*varinfo{_tgtChar}},
+	{name: "INDEX", method: "Index", params: []*varinfo{_tgtChar, _tgtChar}},
+
+	// Array methods - 1 arg versions
+	{name: "SIZE", method: "Size", params: []*varinfo{_tgtArray}},
+	{name: "SHAPE", method: "Shape", params: []*varinfo{_tgtArray}},
+	// Array methods - 2 arg versions (with dimension)
+	{name: "SIZE", method: "SizeDim", params: []*varinfo{_tgtArray, _tgtInt}},
+	{name: "LBOUND", method: "LowerDim", params: []*varinfo{_tgtArray, _tgtInt}},
+	{name: "UBOUND", method: "UpperDim", params: []*varinfo{_tgtArray, _tgtInt}},
+
+	// Special
+	{name: "MALLOC", exprGeneric: intrinsicSel("MALLOC"), params: []*varinfo{_tgtInt}},
 }
 
 var (
@@ -419,7 +486,11 @@ var (
 		decl:     &f90.DeclEntity{Type: &f90.TypeSpec{Token: f90token.FloatLit}},
 	}
 	_tgtGenericInt = &varinfo{
-		_varname: "<default character>",
+		_varname: "<default int>",
 		decl:     &f90.DeclEntity{Type: &f90.TypeSpec{Token: f90token.IntLit}},
+	}
+	_tgtArray = &varinfo{
+		_varname: "<default array>",
+		decl:     &f90.DeclEntity{Type: &f90.TypeSpec{Token: f90token.INTEGER}},
 	}
 )

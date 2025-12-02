@@ -207,7 +207,7 @@ func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEnti
 		}
 		if decl != nil && vi.decl != nil {
 			err = errors.New("double variable initialization with " + vi.declPos.String())
-		} else {
+		} else if vi.decl == nil {
 			vi.decl = decl
 		}
 		vi.flags |= initFlags
