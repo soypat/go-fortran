@@ -74,7 +74,7 @@ func LEVEL03() {
 	j = i + 10
 	k = i * 2
 	y = x * 2
-	z = float32(i) + x
+	z = float32(float32(i)) + x
 }
 func LEVEL04() {
 	var (
@@ -210,7 +210,7 @@ func LEVEL10() {
 	y = 6.28318
 	z = 45.14159
 	flag = true
-	expr_result = (x+y)*z - float32(k)/2
+	expr_result = (x+y)*z - float32(float32(k))/2
 	cond1 = (i > 5) && (j < 100)
 	cond2 = (x >= 3) || (y <= 1)
 	cond3 = !flag
@@ -227,7 +227,7 @@ func LEVEL11() {
 	)
 	str1.SetFromString("Hello")
 	str2.SetFromString("World")
-	str3.SetConcatString(str2.String(), str1.String(), " ")
+	str3.SetConcatString(str1.String(), " ", str2.String())
 }
 func LEVEL12() {
 	var (
@@ -249,11 +249,11 @@ func LEVEL12() {
 	j = 52
 	k = 84
 	angle = 0.5
-	sin_val = intrinsic.SIN(angle)
-	cos_val = intrinsic.COS(angle)
-	abs_val = intrinsic.ABS(-5.5)
-	max_val = intrinsic.MAX(i, j, k)
-	min_val = intrinsic.MIN(10, 20, 5)
+	sin_val = float32(intrinsic.SIN(angle))
+	cos_val = float32(intrinsic.COS(angle))
+	abs_val = float32(intrinsic.ABS(-5.5))
+	max_val = int32(intrinsic.MAX(i, j, k))
+	min_val = int32(intrinsic.MIN(10, 20, 5))
 }
 func LEVEL13() {
 	var (
@@ -322,11 +322,11 @@ func LEVEL16() {
 		_, _, _      = len_val, len_trim_val, index_val
 	)
 	str1.SetFromString("Hello")
-	len_val = str1.Len()
-	len_trim_val = str1.LenTrim()
+	len_val = int32(str1.Len())
+	len_trim_val = int32(str1.LenTrim())
 	str2.SetFromString(str1.Trim())
 	str1.SetFromString("Hello World")
-	index_val = str1.Index("World")
+	index_val = int32(str1.Index("World"))
 	str1.SetFromString("   Left")
 	str2.SetFromString(str1.AdjustL())
 	str1.SetFromString("Right   ")
@@ -355,14 +355,14 @@ func LEVEL17() {
 		ub   int32
 		_, _ = lb, ub
 	)
-	size_total = matrix.Size()
-	size_dim1 = matrix.SizeDim(1)
-	size_dim2 = matrix.SizeDim(2)
-	size_total = vector.Size()
-	lb = matrix.LowerDim(1)
-	lb = matrix.LowerDim(2)
-	ub = matrix.UpperDim(1)
-	ub = matrix.UpperDim(2)
+	size_total = int32(matrix.Size())
+	size_dim1 = int32(matrix.SizeDim(1))
+	size_dim2 = int32(matrix.SizeDim(2))
+	size_total = int32(vector.Size())
+	lb = int32(matrix.LowerDim(1))
+	lb = int32(matrix.LowerDim(2))
+	ub = int32(matrix.UpperDim(1))
+	ub = int32(matrix.UpperDim(2))
 }
 func LEVEL18() {
 	var (
@@ -517,9 +517,9 @@ func LEVEL26() {
 		d4      float32
 		_, _, _ = d1, d2, d4
 	)
-	hex_val = int32(255)
-	oct_val = int32(255)
-	bin_val = int32(255)
+	hex_val = int32(int32(255))
+	oct_val = int32(int32(255))
+	bin_val = int32(int32(255))
 	d1 = float32(1)
 	d2 = float32(123)
 	d4 = float32(2.718281828)
@@ -545,7 +545,7 @@ func LEVEL27() {
 		result float32
 		_      = result
 	)
-	result = float32(float64(factor*root3) * float64(ncomp))
+	result = float32(float64(factor*root3) * float32(float64(ncomp)))
 }
 func LEVEL28() {
 	YQR.Set(1.5, 1)
@@ -557,11 +557,11 @@ func LEVEL28() {
 func LEVEL29() {
 	MAT.Set(64, 1, 2)
 	MAXDM1 = 100
-	NPAA = intrinsic.MALLOC(MAXDM1 * 8)
+	NPAA = int32(intrinsic.MALLOC(MAXDM1 * 8))
 	NPII = NPAA
 	NPLL = NPII
 	M = 1
-	MAXDEF = intrinsic.MIN(200000, MAXDM1)
+	MAXDEF = int32(intrinsic.MIN(200000, MAXDM1))
 }
 func SIMPLE_SUB() {
 }
@@ -609,7 +609,7 @@ func SQUARE_ROOT(x float32) (SQUARE_ROOT float32) {
 		x float32
 		_ = x
 	)
-	SQUARE_ROOT = intrinsic.SQRT(x)
+	SQUARE_ROOT = float32(intrinsic.SQRT(x))
 }
 func FIBONACCI(n int32) (FIBONACCI int32) {
 	var (

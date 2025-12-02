@@ -492,6 +492,13 @@ func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expre
 			Args: gargs,
 		}
 	}
+	// Wrap with target type conversion if needed (Go type inference from literals may differ)
+	if vitgt != nil && !isGenericVarinfo(vitgt) {
+		// conv := tg.baseGotype(vitgt.decl.Type.Token, vitgt.decl.Kind())
+		// if conv != nil {
+		// 	call = &ast.CallExpr{Fun: conv, Args: []ast.Expr{call}}
+		// }
+	}
 	return call, nil
 }
 
@@ -671,3 +678,7 @@ var (
 	_tgtGenericInt   = defaultVarinfo(f90token.IntLit)
 	_tgtArray        = defaultVarinfo(f90token.DIMENSION)
 )
+
+func isGenericVarinfo(vi *varinfo) bool {
+	return vi == _tgtGenericFloat || vi == _tgtGenericInt
+}

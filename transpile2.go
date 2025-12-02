@@ -583,40 +583,36 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType *ast.Ident
 	return goType
 }
 
-func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, remaining *f90.BinaryExpr) (_ []ast.Stmt, err error) {
+func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, root *f90.BinaryExpr) (_ []ast.Stmt, err error) {
+	// Flatten operands in left-to-right order (non-recursive)
+	var operands []f90.Expression
+	pending := []f90.Expression{root}
+	for len(pending) > 0 {
+		expr := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		bin, ok := expr.(*f90.BinaryExpr)
+		if !ok || bin.Op != f90token.StringConcat {
+			operands = append(operands, expr)
+			continue
+		}
+		// Push right first, then left (LIFO → left processed first)
+		pending = append(pending, bin.Right, bin.Left)
+	}
+
+	// Transform operands
 	var args []ast.Expr
-	addArg := func(expr f90.Expression) ast.Expr {
-		switch e := expr.(type) {
+	for _, op := range operands {
+		switch e := op.(type) {
 		case *f90.StringLiteral:
-			return &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(e.Value)}
+			args = append(args, &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(e.Value)})
 		case *f90.Identifier:
-			return tg.astMethodCall(e.Value, "String")
-		}
-		err := tg.makeErr(expr, "unsupported expression for string concat")
-		panic(err)
-	}
-	var toDecompose = []*f90.BinaryExpr{remaining}
-	for len(toDecompose) > 0 {
-		got := toDecompose[len(toDecompose)-1]
-		toDecompose = toDecompose[:len(toDecompose)-1]
-		l := got.Left
-		split, lsplit := l.(*f90.BinaryExpr)
-		if lsplit {
-			toDecompose = append(toDecompose, split)
-		} else {
-			args = append(args, addArg(l))
-		}
-		r := got.Right
-		split, rsplit := r.(*f90.BinaryExpr)
-		if rsplit {
-			toDecompose = append(toDecompose, split)
-		} else {
-			args = append(args, addArg(r))
+			args = append(args, tg.astMethodCall(e.Value, "String"))
+		default:
+			return dst, tg.makeErr(op, "unsupported expression for string concat")
 		}
 	}
-	gstmt := &ast.ExprStmt{
-		X: tg.astMethodCall(receiver, "SetConcatString", args...),
-	}
+
+	gstmt := &ast.ExprStmt{X: tg.astMethodCall(receiver, "SetConcatString", args...)}
 	dst = append(dst, gstmt)
 	return dst, nil
 }

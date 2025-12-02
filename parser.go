@@ -305,6 +305,9 @@ type varinfo struct {
 	declPos  sourcePos
 }
 
+func (p *varinfo) Charlen() ast.Expression            { return p.decl.Charlen() }
+func (p *varinfo) Kind() ast.Expression               { return p.decl.Kind() }
+func (p *varinfo) Dimensions() *ast.ArraySpec         { return p.decl.Dimension() }
 func (p *varinfo) Identifier() string                 { return p._varname }
 func (p *varinfo) reset()                             { *p = varinfo{} }
 func (p *Parser90) varResetAll()                      { p.vars.reset() }
