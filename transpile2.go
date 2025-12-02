@@ -73,10 +73,11 @@ func (tg *ToGo) enterProgramUnit(pu f90.ProgramUnit) error {
 	if !ok {
 		return errors.New("missing parser unit data")
 	}
+
 	tg.scope = data
 	tg.scope.vars = slices.Clone(tg.scope.vars)
 	for i := range tg.scope.vars {
-		tg.scope.vars[i].sname = sanitizeIdent(tg.scope.vars[i].sname)
+		tg.scope.vars[i]._varname = sanitizeIdent(tg.scope.vars[i]._varname)
 		tg.scope.vars[i].common = sanitizeIdent(tg.scope.vars[i].common)
 		tg.scope.vars[i].pointee = sanitizeIdent(tg.scope.vars[i].pointee)
 	}
@@ -386,7 +387,7 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 	}
 	for i := range stmt.Args {
 		info := &params[i]
-		goexpr, err := tg.transformExpression(info.decl, stmt.Args[i])
+		goexpr, err := tg.transformExpression(info, stmt.Args[i])
 		if err != nil {
 			return dst, err
 		}
@@ -418,7 +419,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	} else if targetVinfo == nil {
 		return nil, tg.makeErr(stmt.Target, "unknown identifier in target expression of assignment")
 	}
-	rhs, err := tg.transformExpression(targetVinfo.decl, stmt.Value)
+	rhs, err := tg.transformExpression(targetVinfo, stmt.Value)
 	if err != nil {
 		return dst, err
 	}
@@ -444,65 +445,6 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		Tok: token.ASSIGN,
 		Rhs: []ast.Expr{rhs},
 		Lhs: []ast.Expr{lhs},
-	}
-	dst = append(dst, gstmt)
-	return dst, nil
-}
-
-func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, setVal ast.Expr) (_ []ast.Stmt, err error) {
-	var name string
-	if fexpr.Base != nil {
-		return dst, tg.makeErr(fexpr, "chained ArrayRef assignment not yet implemented")
-	}
-	name = fexpr.Name
-
-	// Check if any subscript is a RangeExpr (substring/slice assignment)
-	var hasRange bool
-	for _, expr := range fexpr.Subscripts {
-		if _, ok := expr.(*f90.RangeExpr); ok {
-			hasRange = true
-			break
-		}
-	}
-
-	if hasRange && len(fexpr.Subscripts) == 1 {
-		// Substring assignment: str(2:3) = 'z' → str.SetSubstring(value, start, end)
-		rng := fexpr.Subscripts[0].(*f90.RangeExpr)
-		args := []ast.Expr{setVal}
-		if rng.Start != nil {
-			start, err := tg.transformExpression(_astTgtInt, rng.Start)
-			if err != nil {
-				return dst, err
-			}
-			args = append(args, start)
-		} else {
-			args = append(args, &ast.BasicLit{Kind: token.INT, Value: "1"})
-		}
-		if rng.End != nil {
-			end, err := tg.transformExpression(_astTgtInt, rng.End)
-			if err != nil {
-				return dst, err
-			}
-			args = append(args, end)
-		}
-		gstmt := &ast.ExprStmt{
-			X: tg.astMethodCall(name, "SetSubstring", args...),
-		}
-		dst = append(dst, gstmt)
-		return dst, nil
-	}
-
-	// Regular element assignment: arr(i) = v → arr.Set(value, indices...)
-	args := []ast.Expr{setVal}
-	for _, expr := range fexpr.Subscripts {
-		result, err := tg.transformExpression(_astTgtInt, expr)
-		if err != nil {
-			return dst, err
-		}
-		args = append(args, result)
-	}
-	gstmt := &ast.ExprStmt{
-		X: tg.astMethodCall(name, "Set", args...),
 	}
 	dst = append(dst, gstmt)
 	return dst, nil
@@ -589,6 +531,88 @@ func (tg *ToGo) astMethodCall(receiver, methodName string, args ...ast.Expr) *as
 	}
 }
 
+type intrinsicFn struct {
+	name   string
+	sel    *ast.SelectorExpr
+	method string
+	params []*varinfo
+}
+
+func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expression) (call *ast.CallExpr, err error) {
+	if len(args) != len(fn.params) {
+		return nil, fmt.Errorf("intrinsic %s requires %d arguments, got %d", fn.name, len(fn.params), len(args))
+	}
+	var gargs []ast.Expr
+	for i := range args {
+		expr, err := tg.transformExpression(fn.params[i], args[i])
+		if err != nil {
+			return nil, err
+		}
+		gargs = append(gargs, expr)
+	}
+
+	if fn.method != "" {
+		call = &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   gargs[0],
+				Sel: ast.NewIdent(fn.method),
+			},
+			Args: gargs[1:],
+		}
+	} else {
+		call = &ast.CallExpr{
+			Fun:  fn.sel,
+			Args: gargs,
+		}
+	}
+	return call, nil
+}
+
+var intrinsics = []intrinsicFn{
+	{
+		name: "SQRT",
+		sel: &ast.SelectorExpr{
+			X:   _astIntrinsic,
+			Sel: ast.NewIdent("SQRT"),
+		},
+		params: []*varinfo{
+			_tgtGenericFloat,
+		},
+	},
+	{
+		name:   "LEN_TRIM",
+		method: "LenTrim",
+		params: []*varinfo{
+			_tgtChar,
+		},
+	},
+}
+
+// Common intrinsic identifiers.
 var (
-	_astTgtInt = &f90.DeclEntity{}
+	_astIntrinsic      = ast.NewIdent("intrinsic")
+	_astFnNewCharArray = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewCharacterArray"),
+	}
+	_astFnNewArrayFromValues = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewArrayFromValues"),
+	}
+	_astFnNewArray = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewArray"),
+	}
+	_astTypeCharArray = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("CharacterArray"),
+	}
+	_astTypeArray = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("Array"),
+	}
+	_astTypePointer = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("Pointer"),
+	}
 )

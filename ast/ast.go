@@ -1451,6 +1451,23 @@ func (ar *ArrayRef) AppendString(dst []byte) []byte {
 	return dst
 }
 
+func (ar *ArrayRef) IsRanged() bool {
+	if IsRanged(ar.Base) {
+		return true
+	}
+	for i := range ar.Subscripts {
+		if IsRanged(ar.Subscripts[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func IsRanged(expr Expression) bool {
+	_, ok := expr.(*RangeExpr)
+	return ok
+}
+
 // ParenExpr represents an expression enclosed in parentheses for grouping or
 // to override operator precedence. The parentheses do not change the value
 // but may affect evaluation order.

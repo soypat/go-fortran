@@ -169,7 +169,7 @@ func (p *ParserUnitData) resolveParameterTypes(params []ast.Parameter) error {
 	}
 	for i := range params {
 		vi := &p.vars[i]
-		if vi.sname != params[i].Name {
+		if vi._varname != params[i].Name {
 			return fmt.Errorf("mismatched param/varinfo name")
 
 		}
@@ -184,7 +184,7 @@ func (p *ParserUnitData) Varb(name []byte) (vi *varinfo) {
 
 func (p *ParserUnitData) Var(name string) (vi *varinfo) {
 	for i := range p.vars {
-		if strings.EqualFold(p.vars[i].sname, name) {
+		if strings.EqualFold(p.vars[i]._varname, name) {
 			return &p.vars[i]
 		}
 	}
@@ -219,20 +219,21 @@ func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEnti
 	vi.reset()
 	vi.decl = decl
 	vi.flags |= initFlags
-	vi.sname = name
+	vi._varname = name
 	vi.declPos = sp
 	return vi, nil
 }
 
 type varinfo struct {
-	decl    *ast.DeclEntity
-	flags   symflags
-	sname   string
-	common  string // set to COMMON block name if found in COMMON statement
-	pointee string // the pointer alias this variable references in EQUIVALENCE or cray style POINTER statement.
-	declPos sourcePos
+	decl     *ast.DeclEntity
+	flags    symflags
+	_varname string
+	common   string // set to COMMON block name if found in COMMON statement
+	pointee  string // the pointer alias this variable references in EQUIVALENCE or cray style POINTER statement.
+	declPos  sourcePos
 }
 
+func (p *varinfo) Identifier() string                 { return p._varname }
 func (p *varinfo) reset()                             { *p = varinfo{} }
 func (p *Parser90) varResetAll()                      { p.vars.reset() }
 func (p *Parser90) varGet(name []byte) (vi *varinfo)  { return p.vars.Varb(name) }
@@ -848,7 +849,7 @@ func (p *Parser90) currentAsVarString(bitset symflags, common string) string {
 			v.common = common
 		}
 		v.flags |= bitset
-		return v.sname
+		return v._varname
 	}
 	lit := p.currentLiteral()
 	if !p.ignoreUndeclaredVars {

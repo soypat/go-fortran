@@ -4498,32 +4498,3 @@ func (tg *TranspileToGo) astCommonFieldRef(blockVarName, fieldName string) *ast.
 		Sel: ast.NewIdent(strings.ToUpper(fieldName)),
 	}
 }
-
-// Common intrinsic identifiers.
-var (
-	_astIntrinsic      = ast.NewIdent("intrinsic")
-	_astFnNewCharArray = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("NewCharacterArray"),
-	}
-	_astFnNewArrayFromValues = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("NewArrayFromValues"),
-	}
-	_astFnNewArray = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("NewArray"),
-	}
-	_astTypeCharArray = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("CharacterArray"),
-	}
-	_astTypeArray = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("Array"),
-	}
-	_astTypePointer = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("Pointer"),
-	}
-)
