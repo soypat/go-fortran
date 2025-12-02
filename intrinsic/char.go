@@ -65,7 +65,7 @@ func (ch CharacterArray) String() string {
 	return string(ch.data[:cap(ch.data)])
 }
 
-func (ch *CharacterArray) SetFromString(data string) {
+func (ch CharacterArray) SetFromString(data string) {
 	ch.data = ch.data[:cap(ch.data)] // Ensure full capacity for modification
 	n := copy(ch.data, data)
 	// Pad the rest with spaces
@@ -75,7 +75,7 @@ func (ch *CharacterArray) SetFromString(data string) {
 	// Keep data at full capacity (Fortran semantics)
 }
 
-func (ch *CharacterArray) SetConcat(toJoin ...CharacterArray) {
+func (ch CharacterArray) SetConcat(toJoin ...CharacterArray) {
 	ch.data = ch.data[:cap(ch.data)]
 	off := 0
 	for i := range toJoin {
@@ -86,37 +86,6 @@ func (ch *CharacterArray) SetConcat(toJoin ...CharacterArray) {
 	}
 	ch.data = ch.data[:off]
 	ch.setUnusedToSpace()
-}
-
-// SetRange sets a substring range (1-based indices) to the given value
-// Corresponds to Fortran: str(start:end) = value
-func (ch *CharacterArray) SetRange(start, end int, value string) {
-	// Ensure data slice is at full capacity for in-place modification
-	ch.data = ch.data[:cap(ch.data)]
-
-	// Convert 1-based Fortran indices to 0-based Go indices
-	startIdx := start - 1
-	endIdx := end
-
-	// Bounds checking
-	if startIdx < 0 {
-		startIdx = 0
-	}
-	if endIdx > cap(ch.data) {
-		endIdx = cap(ch.data)
-	}
-	if startIdx >= endIdx {
-		return
-	}
-
-	// Copy value into the range
-	rangeLen := endIdx - startIdx
-	n := copy(ch.data[startIdx:endIdx], value)
-
-	// Pad with spaces if value is shorter than range
-	for i := n; i < rangeLen; i++ {
-		ch.data[startIdx+i] = ' '
-	}
 }
 
 func (ch *CharacterArray) setUnusedToSpace() {

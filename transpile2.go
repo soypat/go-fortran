@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"io"
 	"slices"
+	"strings"
 
 	f90 "github.com/soypat/go-fortran/ast"
 	f90token "github.com/soypat/go-fortran/token"
@@ -14,6 +15,8 @@ import (
 
 type ToGo struct {
 	scope      *ParserUnitData // currentScope variable data.
+	extern     []*ParserUnitData
+	contains   []*ParserUnitData
 	errors     []error
 	source     string
 	sourceFile io.ReaderAt
@@ -22,6 +25,47 @@ type ToGo struct {
 func (tg *ToGo) SetSource(source string, r io.ReaderAt) {
 	tg.source = source
 	tg.sourceFile = r
+}
+
+func (tg *ToGo) AddExtern(pu []f90.ProgramUnit) error {
+	for i := range pu {
+		data, ok := pu[i].UnitData().(*ParserUnitData)
+		if !ok {
+			return fmt.Errorf("extern program unit %s has incompatible UnitData", pu[i].UnitName())
+		}
+		exists := tg.Extern(data.name) != nil
+		if exists {
+			return fmt.Errorf("extern program unit %s with namespace %s already added", pu[i].UnitName(), data.name)
+		}
+		tg.extern = append(tg.extern, data)
+	}
+	return nil
+}
+
+func (tg *ToGo) Extern(name string) *ParserUnitData {
+	for i := range tg.extern {
+		if strings.EqualFold(tg.extern[i].name, name) {
+			return tg.extern[i]
+		}
+	}
+	return nil
+}
+
+func (tg *ToGo) Contained(name string) *ParserUnitData {
+	for i := range tg.contains {
+		if strings.EqualFold(tg.contains[i].name, name) {
+			return tg.contains[i]
+		}
+	}
+	return nil
+}
+
+func (tg *ToGo) ContainedOrExtern(name string) *ParserUnitData {
+	data := tg.Contained(name)
+	if data == nil {
+		data = tg.Extern(name)
+	}
+	return data
 }
 
 func (tg *ToGo) enterProgramUnit(pu f90.ProgramUnit) error {
@@ -36,6 +80,29 @@ func (tg *ToGo) enterProgramUnit(pu f90.ProgramUnit) error {
 		tg.scope.vars[i].common = sanitizeIdent(tg.scope.vars[i].common)
 		tg.scope.vars[i].pointee = sanitizeIdent(tg.scope.vars[i].pointee)
 	}
+
+	var toAdd []f90.ProgramUnit
+	switch unit := pu.(type) {
+	case *f90.ProgramBlock:
+		toAdd = unit.Contains
+	case *f90.Module:
+		toAdd = unit.Contains
+	default:
+		return nil
+	}
+	// reset contains on Module or Program block.
+	tg.contains = tg.contains[:0]
+	for i := range toAdd {
+		pu, ok := toAdd[i].UnitData().(*ParserUnitData)
+		if !ok {
+			return fmt.Errorf("contains program unit %s incompatible unit data", toAdd[i].UnitName())
+		}
+		exists := tg.Contained(pu.name) != nil
+		if exists {
+			return fmt.Errorf("contains program unit %s duplicated", toAdd[i].UnitName())
+		}
+		tg.contains = append(tg.contains, pu)
+	}
 	return nil
 }
 
@@ -44,6 +111,7 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	mainBody, err := tg.transformStatements(nil, prog.Body)
 	// Create main function declaration
 	mainFunc := &ast.FuncDecl{
@@ -55,8 +123,17 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 			List: mainBody,
 		},
 	}
+
 	// Start with main function
-	decls := []ast.Decl{mainFunc}
+	decls := []ast.Decl{
+		&ast.GenDecl{
+			Tok: token.IMPORT,
+			Specs: []ast.Spec{&ast.ImportSpec{
+				Path: &ast.BasicLit{Value: fmt.Sprintf("%q", "github.com/soypat/go-fortran/intrinsic")},
+			}},
+		},
+		mainFunc,
+	}
 	if err != nil {
 		return decls, err
 	}
@@ -128,16 +205,19 @@ func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("labe
 func (tg *ToGo) makeErr(node f90.Node, msg string) error {
 	tok := node.AppendTokenLiteral(nil)
 	pos := node.SourcePos()
+	return tg.makeErrWithPos(pos, fmt.Sprintf("%s in %T %s", msg, node, tok))
+}
 
+func (tg *ToGo) makeErrWithPos(pos f90.Position, msg string) error {
 	// If source is available, compute line:column
 	if tg.sourceFile != nil {
 		var buf [1024]byte
 		line, col, _, err := pos.ToLineCol(tg.sourceFile, buf[:])
 		if err == nil && line > 0 {
-			return fmt.Errorf("%s:%d:%d: %s in %T %s", tg.source, line, col, msg, node, tok)
+			return fmt.Errorf("%s:%d:%d: %s", tg.source, line, col, msg)
 		}
 	}
-	return fmt.Errorf("%s in %T %s @ %d", msg, node, tok, pos.Start())
+	return fmt.Errorf("%s @ %d", msg, pos.Start())
 }
 
 func (tg *ToGo) transformStatements(dst []ast.Stmt, stmts []f90.Statement) (_ []ast.Stmt, err error) {
@@ -148,11 +228,16 @@ func (tg *ToGo) transformStatements(dst []ast.Stmt, stmts []f90.Statement) (_ []
 		} else {
 			var gstmts []ast.Stmt
 			gstmts, err = tg.transformStatement(nil, stmt)
+			lab := tg.astLabel(label)
+			useGoto := &ast.BranchStmt{
+				Label: lab,
+				Tok:   token.GOTO, // Use the goto label so compiler does not complain.
+			}
 			labelled := &ast.LabeledStmt{
-				Label: tg.astLabel(label),
+				Label: lab,
 				Stmt:  &ast.BlockStmt{List: gstmts},
 			}
-			dst = append(dst, labelled)
+			dst = append(dst, useGoto, labelled)
 		}
 		if err != nil {
 			return dst, err
@@ -169,14 +254,15 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	// 	gostmt = tg.transformDerivedType(s)
 	case *f90.AssignmentStmt:
 		dst, err = tg.transformAssignment(dst, s)
-	// case *f90.PrintStmt:
+	case *f90.CallStmt:
+		dst, err = tg.transformCallStmt(dst, s)
+	case *f90.PrintStmt:
 	// 	gostmt = tg.transformPrint(s)
-	// case *f90.IfStmt:
+	case *f90.IfStmt:
 	// 	gostmt = tg.transformIfStmt(s)
-	// case *f90.DoLoop:
+	case *f90.DoLoop:
 	// 	gostmt = tg.transformDoLoop(s)
-	// case *f90.CallStmt:
-	// 	gostmt = tg.transformCallStmt(s)
+
 	case *f90.ReturnStmt:
 		// RETURN statement in functions will be handled by convertFunctionResultToReturn
 		// For now, just generate empty return (will be filled with result value later)
@@ -249,70 +335,9 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		return nil, nil
 	default:
 		// For now, unsupported statements are skipped
-		// err = fmt.Errorf("unsupported transpile statement: %T", s)
+		err = tg.makeErr(s, "unsupported transpile statement")
 	}
 	return dst, err
-}
-
-// fortranTypeToGoWithKind converts Fortran type to Go type, considering KIND parameter
-// KIND mappings:
-//
-//	INTEGER(KIND=1) → int8, INTEGER(KIND=2) → int16
-//	INTEGER(KIND=4) → int32, INTEGER(KIND=8) → int64
-//	REAL(KIND=4) → float32, REAL(KIND=8) → float64
-func (tg *ToGo) fortranTypeToGoWithKind(decl *f90.DeclEntity) (goType ast.Expr) {
-	// Extract KIND value if present
-	var kindValue int64
-	if decl == nil {
-		panic("nil declaration")
-	}
-	ft := decl.Type
-	if kind, ok := ft.KindOrLen.(*f90.IntegerLiteral); ok {
-		kindValue = kind.Value
-	}
-	switch ft.Token {
-	default:
-		// Unknown type - skip with warning rather than fail
-		tokenStr := ft.Token.String()
-		if tokenStr != "<undefined>" && tokenStr != "TYPE" {
-			// tg.addError(fmt.Sprintf("unable to resolve token as go type: %s", tokenStr))
-		}
-		return nil // Skip this declaration
-	case f90token.TYPE:
-		// User-defined TYPE - use the type name as the Go struct name
-		if ft.Name != "" {
-			return ast.NewIdent(ft.Name)
-		}
-		return nil // TYPE without name - skip
-	case f90token.INTEGER:
-		switch kindValue {
-		case 1:
-			goType = ast.NewIdent("int8")
-		case 2:
-			goType = ast.NewIdent("int16")
-		case 8:
-			goType = ast.NewIdent("int64")
-		default: // 4 or unspecified
-			goType = ast.NewIdent("int32")
-		}
-	case f90token.REAL:
-		switch kindValue {
-		case 8:
-			goType = ast.NewIdent("float64")
-		default: // 4 or unspecified
-			goType = ast.NewIdent("float32")
-		}
-	case f90token.DOUBLEPRECISION:
-		goType = ast.NewIdent("float64")
-	case f90token.LOGICAL:
-		goType = ast.NewIdent("bool")
-	case f90token.CHARACTER:
-		// CHARACTER(LEN=n) maps to intrinsic.CharacterArray
-		goType = _astTypeCharArray
-		// CHARACTER(LEN=n) length is specified per-entity in entity.CharLen
-		// We'll handle initialization per-entity below
-	}
-	return goType
 }
 
 func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclaration) (_ []ast.Stmt, err error) {
@@ -347,6 +372,32 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	return dst, nil
 }
 
+func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.Stmt, err error) {
+	fninfo := tg.ContainedOrExtern(stmt.Name)
+	if fninfo == nil {
+		return dst, tg.makeErr(stmt, "subroutine not found: "+stmt.Name)
+	}
+	params := fninfo.ProcedureParams()
+	if len(params) != len(stmt.Args) {
+		return dst, tg.makeErr(stmt, "mismatched number of args with declaration")
+	}
+	gstmt := &ast.CallExpr{
+		Fun: tg.astIdent(fninfo.name),
+	}
+	for i := range stmt.Args {
+		info := &params[i]
+		goexpr, err := tg.transformExpression(info.decl, stmt.Args[i])
+		if err != nil {
+			return dst, err
+		}
+		gstmt.Args = append(gstmt.Args, goexpr)
+	}
+	dst = append(dst, &ast.ExprStmt{
+		X: gstmt,
+	})
+	return dst, nil
+}
+
 func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_ []ast.Stmt, err error) {
 	var targetVinfo *varinfo
 	var lhs ast.Expr
@@ -374,6 +425,15 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	switch tgt := stmt.Target.(type) {
 	case *f90.ArrayRef:
 		return tg.transformSetArrayRef(dst, tgt, rhs)
+	case *f90.FunctionCall:
+		// FunctionCall as target: COMMON block arrays or undeclared arrays
+		// Convert to ArrayRef-like handling
+		syntheticRef := &f90.ArrayRef{
+			Name:       tgt.Name,
+			Subscripts: tgt.Args,
+			Position:   tgt.Position,
+		}
+		return tg.transformSetArrayRef(dst, syntheticRef, rhs)
 	default:
 		if lhs == nil {
 			return dst, tg.makeErr(stmt.Target, "unsupported assignment target")
@@ -381,6 +441,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	}
 
 	gstmt := &ast.AssignStmt{
+		Tok: token.ASSIGN,
 		Rhs: []ast.Expr{rhs},
 		Lhs: []ast.Expr{lhs},
 	}
@@ -389,17 +450,50 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 }
 
 func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, setVal ast.Expr) (_ []ast.Stmt, err error) {
-	// vinfo := tg.scope.Var(fexpr.Name)
-	// decl := vinfo.decl
-	// dim := decl.Dimension()
-	// var kindOrCharlen f90.Expression
-	// tp := decl.Type.Token
-	// if tp == f90token.CHARACTER {
-	// 	kindOrCharlen = decl.Charlen()
-	// } else {
-	// 	kindOrCharlen = decl.Kind()
-	// }
-	var args []ast.Expr = []ast.Expr{setVal}
+	var name string
+	if fexpr.Base != nil {
+		return dst, tg.makeErr(fexpr, "chained ArrayRef assignment not yet implemented")
+	}
+	name = fexpr.Name
+
+	// Check if any subscript is a RangeExpr (substring/slice assignment)
+	var hasRange bool
+	for _, expr := range fexpr.Subscripts {
+		if _, ok := expr.(*f90.RangeExpr); ok {
+			hasRange = true
+			break
+		}
+	}
+
+	if hasRange && len(fexpr.Subscripts) == 1 {
+		// Substring assignment: str(2:3) = 'z' → str.SetSubstring(value, start, end)
+		rng := fexpr.Subscripts[0].(*f90.RangeExpr)
+		args := []ast.Expr{setVal}
+		if rng.Start != nil {
+			start, err := tg.transformExpression(_astTgtInt, rng.Start)
+			if err != nil {
+				return dst, err
+			}
+			args = append(args, start)
+		} else {
+			args = append(args, &ast.BasicLit{Kind: token.INT, Value: "1"})
+		}
+		if rng.End != nil {
+			end, err := tg.transformExpression(_astTgtInt, rng.End)
+			if err != nil {
+				return dst, err
+			}
+			args = append(args, end)
+		}
+		gstmt := &ast.ExprStmt{
+			X: tg.astMethodCall(name, "SetSubstring", args...),
+		}
+		dst = append(dst, gstmt)
+		return dst, nil
+	}
+
+	// Regular element assignment: arr(i) = v → arr.Set(value, indices...)
+	args := []ast.Expr{setVal}
 	for _, expr := range fexpr.Subscripts {
 		result, err := tg.transformExpression(_astTgtInt, expr)
 		if err != nil {
@@ -408,10 +502,80 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, setVal
 		args = append(args, result)
 	}
 	gstmt := &ast.ExprStmt{
-		X: tg.astMethodCall(fexpr.Name, "Set", setVal),
+		X: tg.astMethodCall(name, "Set", args...),
 	}
 	dst = append(dst, gstmt)
 	return dst, nil
+}
+
+// fortranTypeToGoWithKind converts Fortran type to Go type, considering KIND parameter
+// KIND mappings:
+//
+//	INTEGER(KIND=1) → int8, INTEGER(KIND=2) → int16
+//	INTEGER(KIND=4) → int32, INTEGER(KIND=8) → int64
+//	REAL(KIND=4) → float32, REAL(KIND=8) → float64
+func (tg *ToGo) fortranTypeToGoWithKind(decl *f90.DeclEntity) (goType ast.Expr) {
+	baseType := tg.baseGotype(decl.Type.Token, 0)
+	dim := decl.Dimension()
+	if baseType != nil && dim == nil {
+		return baseType
+	}
+	ft := decl.Type
+	switch ft.Token {
+	case f90token.INTEGER, f90token.REAL:
+		goType = &ast.IndexExpr{
+			X:     _astTypeArray,
+			Index: baseType,
+		}
+	case f90token.CHARACTER:
+		goType = _astTypeCharArray
+	case f90token.TYPE:
+		if ft.Name != "" {
+			goType = ast.NewIdent(ft.Name)
+		}
+	}
+	if goType == nil {
+		tg.makeErrWithPos(decl.SourcePos(), "unable to determine go type: "+decl.Name)
+		goType = ast.NewIdent("")
+	}
+	return goType
+}
+
+func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType *ast.Ident) {
+	switch tok {
+	default:
+		// Unknown type - skip with warning rather than fail
+		tokenStr := tok.String()
+		if tokenStr != "<undefined>" && tokenStr != "TYPE" {
+			// tg.addError(fmt.Sprintf("unable to resolve token as go type: %s", tokenStr))
+		}
+		return nil // Skip this declaration
+	case f90token.TYPE:
+		return nil // TYPE without name - skip
+	case f90token.INTEGER:
+		switch kindValue {
+		case 1:
+			goType = ast.NewIdent("int8")
+		case 2:
+			goType = ast.NewIdent("int16")
+		case 8:
+			goType = ast.NewIdent("int64")
+		default: // 4 or unspecified
+			goType = ast.NewIdent("int32")
+		}
+	case f90token.LOGICAL:
+		goType = ast.NewIdent("bool")
+	case f90token.DOUBLEPRECISION:
+		goType = ast.NewIdent("float64")
+	case f90token.REAL:
+		switch kindValue {
+		case 8:
+			goType = ast.NewIdent("float64")
+		default: // 4 or unspecified
+			goType = ast.NewIdent("float32")
+		}
+	}
+	return goType
 }
 
 // astMethodCall creates: receiver.methodName(args...)

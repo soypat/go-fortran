@@ -31,6 +31,7 @@ type Statement interface {
 type ProgramUnit interface {
 	Statement
 	programUnitNode()
+	UnitName() string
 	UnitData() any
 }
 
@@ -63,7 +64,7 @@ type TypeSpec struct {
 }
 
 func (ts *TypeSpec) Kind() Expression {
-	if ts.KindOrLen != nil {
+	if ts.Token != token.CHARACTER && ts.KindOrLen != nil {
 		return ts.KindOrLen
 	}
 	if attr := ts.Attr(token.KIND); attr != nil {
@@ -73,6 +74,9 @@ func (ts *TypeSpec) Kind() Expression {
 }
 
 func (ts *TypeSpec) Charlen() Expression {
+	if ts.Token != token.CHARACTER {
+		return nil
+	}
 	if ts.KindOrLen != nil {
 		return ts.KindOrLen
 	}
@@ -216,6 +220,7 @@ var _ ProgramUnit = (*ProgramBlock)(nil) // compile time check of interface impl
 
 func (pb *ProgramBlock) GetLabel() string { return pb.Label }
 func (pb *ProgramBlock) UnitData() any    { return pb.Data }
+func (pb *ProgramBlock) UnitName() string { return pb.Name }
 
 func (pb *ProgramBlock) statementNode()   {}
 func (pb *ProgramBlock) programUnitNode() {}
@@ -259,8 +264,9 @@ type Subroutine struct {
 
 var _ ProgramUnit = (*Subroutine)(nil) // compile time check of interface implementation.
 
-func (s *Subroutine) GetLabel() string { return s.Label }
-func (pb *Subroutine) UnitData() any   { return pb.Data }
+func (s *Subroutine) GetLabel() string  { return s.Label }
+func (pb *Subroutine) UnitData() any    { return pb.Data }
+func (pb *Subroutine) UnitName() string { return pb.Name }
 
 func (s *Subroutine) statementNode()   {}
 func (s *Subroutine) programUnitNode() {}
@@ -312,8 +318,9 @@ type Function struct {
 
 var _ ProgramUnit = (*Function)(nil) // compile time check of interface implementation.
 
-func (f *Function) GetLabel() string { return f.Label }
-func (pb *Function) UnitData() any   { return pb.Data }
+func (f *Function) GetLabel() string  { return f.Label }
+func (pb *Function) UnitData() any    { return pb.Data }
+func (pb *Function) UnitName() string { return pb.Name }
 
 func (f *Function) statementNode()   {}
 func (f *Function) programUnitNode() {}
@@ -370,8 +377,9 @@ type Module struct {
 
 var _ ProgramUnit = (*Module)(nil) // compile time check of interface implementation.
 
-func (m *Module) GetLabel() string { return m.Label }
-func (pb *Module) UnitData() any   { return pb.Data }
+func (m *Module) GetLabel() string  { return m.Label }
+func (pb *Module) UnitData() any    { return pb.Data }
+func (pb *Module) UnitName() string { return pb.Name }
 
 func (m *Module) statementNode()   {}
 func (m *Module) programUnitNode() {}
@@ -415,6 +423,7 @@ var _ ProgramUnit = (*BlockData)(nil) // compile time check of interface impleme
 
 func (bd *BlockData) GetLabel() string { return bd.Label }
 func (pb *BlockData) UnitData() any    { return pb.Data }
+func (pb *BlockData) UnitName() string { return pb.Name }
 
 func (bd *BlockData) statementNode()   {}
 func (bd *BlockData) programUnitNode() {}
@@ -1032,6 +1041,7 @@ type DeclEntity struct {
 	ArraySpec *ArraySpec // Array dimensions if this is an array. CHARACTER a(8,2) : array of characters of shape 8x2
 	KindOrLen Expression // Non-default kind or character length. Old F77 syntax. CHARACTER a*8 : character string of length 8.
 	Init      Expression
+	Position
 }
 
 func (de *DeclEntity) Kind() Expression {
@@ -1042,7 +1052,7 @@ func (de *DeclEntity) Kind() Expression {
 }
 
 func (de *DeclEntity) Charlen() Expression {
-	if de.KindOrLen != nil {
+	if de.Type.Token == token.CHARACTER && de.KindOrLen != nil {
 		return de.KindOrLen
 	}
 	return de.Type.Charlen()
@@ -1397,17 +1407,21 @@ func (fc *FunctionCall) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// ArrayRef represents a reference to a single element of an array using integer
-// subscripts. For array sections (ranges), use [ArraySection] instead.
+// ArrayRef represents array element access, array sections, or substrings.
+// Either Name or Base is set, not both:
+//   - Name: direct variable access like arr(i) or str(2:5)
+//   - Base: chained access like arr(i)(2:3) where Base is the preceding expression
 //
-// Example:
+// Subscripts can be integers (element access) or RangeExpr (section/substring).
 //
-//	<array-name>(<subscript-list>)
-//	arr(i)
-//	matrix(i, j)
-//	cube(x, y, z)
+// Examples:
+//
+//	arr(i)           → ArrayRef{Name: "arr", Subscripts: [i]}
+//	arr(1:5)         → ArrayRef{Name: "arr", Subscripts: [RangeExpr]}
+//	arr(i)(2:3)      → ArrayRef{Base: ArrayRef{...}, Subscripts: [RangeExpr]}
 type ArrayRef struct {
-	Name       string
+	Name       string     // Variable name (empty if Base is set)
+	Base       Expression // Preceding expression for chained access
 	Subscripts []Expression
 	Position
 }
@@ -1419,7 +1433,11 @@ func (ar *ArrayRef) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "ARRAYREF"...)
 }
 func (ar *ArrayRef) AppendString(dst []byte) []byte {
-	dst = append(dst, ar.Name...)
+	if ar.Base != nil {
+		dst = ar.Base.AppendString(dst)
+	} else {
+		dst = append(dst, ar.Name...)
+	}
 	if len(ar.Subscripts) > 0 {
 		dst = append(dst, '(')
 		for i, sub := range ar.Subscripts {

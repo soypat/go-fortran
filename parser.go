@@ -153,6 +153,16 @@ type ParserUnitData struct {
 	vars []varinfo
 }
 
+// ProcedureParams returns the varinfos corresponding to parameters of the function, in order.
+func (p *ParserUnitData) ProcedureParams() []varinfo {
+	for i := range p.vars {
+		if !p.vars[i].flags.HasAny(flagParameter) {
+			return p.vars[:i] // First varinfo are always function parameters.
+		}
+	}
+	return p.vars
+}
+
 func (p *ParserUnitData) resolveParameterTypes(params []ast.Parameter) error {
 	if len(params) > len(p.vars) {
 		return errors.New("too many parameters for varinfo size")
@@ -2740,7 +2750,8 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	var components []ast.DeclEntity
 	for p.canUseAsIdentifier() || p.currentTokenIs(token.DATA) {
 		entity := ast.DeclEntity{
-			Name: string(p.current.lit),
+			Name:     string(p.current.lit),
+			Position: p.currentAstPos(),
 		}
 		p.nextToken() // consume identifier.
 		if p.currentTokenIs(token.LParen) {
@@ -3246,8 +3257,9 @@ func (p *Parser90) parseTypeDecl() ast.Statement {
 	for p.consumeIdentifier(&entityName, token.DATA) {
 		entFlags := specFlags
 		stmt.Entities = append(stmt.Entities, ast.DeclEntity{
-			Name: entityName,
-			Type: &stmt.Type,
+			Name:     entityName,
+			Type:     &stmt.Type,
+			Position: p.currentAstPos(),
 		})
 		entity := &stmt.Entities[len(stmt.Entities)-1]
 		if p.currentTokenIs(token.LParen) {
@@ -3789,11 +3801,12 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 			}
 
 			if result == nil {
-				// Check if identifier is a declared variable with array dimensions
+				// Check if identifier is a declared variable (array or CHARACTER for substring)
 				vi := p.varSGet(name)
-				isArray := vi != nil && vi.decl != nil && vi.decl.Dimension() != nil
-
-				if isArray {
+				isDeclared := vi != nil && vi.decl != nil
+				isArray := isDeclared && vi.decl.Dimension() != nil
+				isChar := isDeclared && vi.decl.Charlen() != nil
+				if isArray || isChar {
 					result = &ast.ArrayRef{
 						Name:       name,
 						Subscripts: args,
@@ -3808,16 +3821,11 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 					}
 				}
 			} else {
-				// Subsequent (...) - substring/section of previous result
-				// Represent as nested FunctionCall where the previous result
-				// is the first (implicit) argument
-				// e.g., array(i)(1:5) becomes FunctionCall{Args: [i]}{Args: [1:5]}
-				// We prepend the base as arg[0] to maintain the chain
-				chainedArgs := append([]ast.Expression{result}, args...)
-				result = &ast.FunctionCall{
-					Name:     "", // Empty name indicates chained subscript/substring
-					Args:     chainedArgs,
-					Position: ast.Pos(startPos, endPos),
+				// Chained subscript/substring: arr(i)(2:3), func()(i), etc.
+				result = &ast.ArrayRef{
+					Base:       result,
+					Subscripts: args,
+					Position:   ast.Pos(startPos, endPos),
 				}
 			}
 		}

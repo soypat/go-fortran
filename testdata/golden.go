@@ -1,6 +1,36 @@
 package main
 
+import "github.com/soypat/go-fortran/intrinsic"
+
 func main() {
+	LEVEL01()
+	LEVEL02()
+	LEVEL03()
+	LEVEL04()
+	LEVEL05()
+	LEVEL06()
+	LEVEL07()
+	LEVEL08()
+	LEVEL09()
+	LEVEL10()
+	LEVEL11()
+	LEVEL12()
+	LEVEL13()
+	LEVEL14()
+	LEVEL15()
+	LEVEL16()
+	LEVEL17()
+	LEVEL18()
+	LEVEL19()
+	LEVEL20()
+	LEVEL21()
+	LEVEL23()
+	LEVEL24()
+	LEVEL25()
+	LEVEL26()
+	LEVEL27()
+	LEVEL28()
+	LEVEL29()
 }
 func LEVEL01() {
 }
@@ -21,6 +51,10 @@ func LEVEL02() {
 		message intrinsic.CharacterArray
 		_       = message
 	)
+	i = 42
+	x = 3.14159
+	flag = true
+	message = "Variables assigned"
 }
 func LEVEL03() {
 	var (
@@ -35,6 +69,12 @@ func LEVEL03() {
 		z       float32
 		_, _, _ = x, y, z
 	)
+	i = 42
+	x = 3.14159
+	j = i + 10
+	k = i * 2
+	y = x * 2
+	z = REAL(i) + x
 }
 func LEVEL04() {
 	var (
@@ -49,16 +89,33 @@ func LEVEL04() {
 		flag bool
 		_    = flag
 	)
+	i = 42
+	x = 3.14159
+	flag = true
 }
 func LEVEL05() {
 	var (
-		arr1 int32
+		arr1 intrinsic.Array[int32]
 		_    = arr1
 	)
 	var (
-		matrix float32
+		matrix intrinsic.Array[float32]
 		_      = matrix
 	)
+	arr1.Set(10, 1)
+	arr1.Set(20, 2)
+	arr1.Set(30, 3)
+	arr1.Set(40, 4)
+	arr1.Set(50, 5)
+	matrix.Set(1, 1, 1)
+	matrix.Set(0, 1, 2)
+	matrix.Set(0, 1, 3)
+	matrix.Set(0, 2, 1)
+	matrix.Set(1, 2, 2)
+	matrix.Set(0, 2, 3)
+	matrix.Set(0, 3, 1)
+	matrix.Set(0, 3, 2)
+	matrix.Set(1, 3, 3)
 }
 func LEVEL06() {
 	var (
@@ -67,23 +124,38 @@ func LEVEL06() {
 		_, _ = i, j
 	)
 	var (
-		arr1 int32
+		arr1 intrinsic.Array[int32]
 		_    = arr1
 	)
 	var (
 		sum_val int32
 		_       = sum_val
 	)
+	arr1.Set(10, 1)
+	arr1.Set(20, 2)
+	arr1.Set(30, 3)
+	arr1.Set(40, 4)
+	arr1.Set(50, 5)
+	sum_val = 0
+	sum_val = 0
 }
 func LEVEL07() {
 	var (
-		arr1 int32
+		arr1 intrinsic.Array[int32]
 		_    = arr1
 	)
 	var (
 		result int32
 		_      = result
 	)
+	arr1.Set(10, 1)
+	arr1.Set(20, 2)
+	arr1.Set(30, 3)
+	arr1.Set(40, 4)
+	arr1.Set(50, 5)
+	SIMPLE_SUB()
+	ADD_VALUES(10, 20, result)
+	MODIFY_ARRAY(arr1, 5)
 }
 func LEVEL08() {
 	var (
@@ -94,6 +166,8 @@ func LEVEL08() {
 		sqrt_result float32
 		_           = sqrt_result
 	)
+	fact_result = FACTORIAL(5)
+	sqrt_result = SQUARE_ROOT(16)
 }
 func LEVEL09() {
 	var (
@@ -103,6 +177,10 @@ func LEVEL09() {
 		sum_val    int32
 		_, _, _, _ = i, n, fib_result, sum_val
 	)
+	n = 7
+	fib_result = FIBONACCI(n)
+	i = 1
+	sum_val = 0
 }
 func LEVEL10() {
 	var (
@@ -125,6 +203,17 @@ func LEVEL10() {
 		cond3      bool
 		_, _, _, _ = flag, cond1, cond2, cond3
 	)
+	i = 11
+	j = 52
+	k = 84
+	x = 3.14159
+	y = 6.28318
+	z = 45.14159
+	flag = true
+	expr_result = (x+y)*z - REAL(k)/2
+	cond1 = (i > 5) && (j < 100)
+	cond2 = (x >= 3) || (y <= 1)
+	cond3 = !flag
 }
 func LEVEL11() {
 	var (
@@ -136,6 +225,9 @@ func LEVEL11() {
 		str3 intrinsic.CharacterArray
 		_    = str3
 	)
+	str1 = "Hello"
+	str2 = "World"
+	str3 = str1 + " " + str2
 }
 func LEVEL12() {
 	var (
@@ -153,6 +245,15 @@ func LEVEL12() {
 		min_val       int32
 		_, _, _, _, _ = i, j, k, max_val, min_val
 	)
+	i = 11
+	j = 52
+	k = 84
+	angle = 0.5
+	sin_val = SIN(angle)
+	cos_val = COS(angle)
+	abs_val = ABS(-5.5)
+	max_val = MAX(i, j, k)
+	min_val = MIN(10, 20, 5)
 }
 func LEVEL13() {
 	var (
@@ -162,9 +263,21 @@ func LEVEL13() {
 		_, _, _ = i, sum_val, count
 	)
 	var (
-		arr int32
+		arr intrinsic.Array[int32]
 		_   = arr
 	)
+	arr.Set(5, 1)
+	arr.Set(-3, 2)
+	arr.Set(7, 3)
+	arr.Set(-1, 4)
+	arr.Set(9, 5)
+	arr.Set(2, 6)
+	arr.Set(-4, 7)
+	arr.Set(6, 8)
+	arr.Set(8, 9)
+	arr.Set(1, 10)
+	sum_val = 0
+	count = 0
 }
 func LEVEL14() {
 	var (
@@ -172,9 +285,15 @@ func LEVEL14() {
 		y    int32
 		_, _ = x, y
 	)
+	x = 999
+	goto label100
 label100:
 	{
 	}
+	x = 10
+	y = 5
+	y = 999
+	goto label200
 label200:
 	{
 	}
@@ -185,6 +304,9 @@ func LEVEL15() {
 		result int32
 		_, _   = choice, result
 	)
+	choice = 2
+	choice = 5
+	choice = 99
 }
 func LEVEL16() {
 	var (
@@ -199,14 +321,27 @@ func LEVEL16() {
 		index_val    int32
 		_, _, _      = len_val, len_trim_val, index_val
 	)
+	str1 = "Hello"
+	len_val = LEN(str1)
+	len_trim_val = LEN_TRIM(str1)
+	str2 = TRIM(str1)
+	str1 = "Hello World"
+	index_val = INDEX(str1, "World")
+	str1 = "   Left"
+	str2 = ADJUSTL(str1)
+	str1 = "Right   "
+	str3 = ADJUSTR(str1)
+	str1 = "abcdef"
+	str3 = str1.Substring(2, 4)
+	str1.SetSubstring("z", 2, 3)
 }
 func LEVEL17() {
 	var (
-		matrix int32
+		matrix intrinsic.Array[int32]
 		_      = matrix
 	)
 	var (
-		vector int32
+		vector intrinsic.Array[int32]
 		_      = vector
 	)
 	var (
@@ -220,20 +355,38 @@ func LEVEL17() {
 		ub   int32
 		_, _ = lb, ub
 	)
+	size_total = SIZE(matrix)
+	size_dim1 = SIZE(matrix, 1)
+	size_dim2 = SIZE(matrix, 2)
+	size_total = SIZE(vector)
+	lb = LBOUND(matrix, 1)
+	lb = LBOUND(matrix, 2)
+	ub = UBOUND(matrix, 1)
+	ub = UBOUND(matrix, 2)
 }
 func LEVEL18() {
 	var (
-		vec int32
+		vec intrinsic.Array[int32]
 		_   = vec
 	)
 	var (
-		mat int32
+		mat intrinsic.Array[int32]
 		_   = mat
 	)
+	vec.Set(10, 1)
+	vec.Set(20, 2)
+	vec.Set(30, 3)
+	mat.Set(100, 1, 1)
+	mat.Set(200, 2, 3)
 }
 func LEVEL19() {
+	SET_COMMON_VALUES()
+	PRINT_COMMON_VALUES()
 }
 func SET_COMMON_VALUES() {
+	x = 42
+	y = 99
+	z = 3.14159
 }
 func PRINT_COMMON_VALUES() {
 }
@@ -256,27 +409,37 @@ func LEVEL21() {
 		choice int32
 		_, _   = x, choice
 	)
+	x = -5
+	goto label10
 label10:
 	{
 	}
+	goto label20
 label20:
 	{
 	}
+	goto label30
 label30:
 	{
 	}
+	goto label40
 label40:
 	{
+		choice = 2
 	}
+	goto label100
 label100:
 	{
 	}
+	goto label200
 label200:
 	{
 	}
+	goto label300
 label300:
 	{
 	}
+	goto label400
 label400:
 	{
 	}
@@ -299,21 +462,23 @@ func LEVEL23() {
 }
 func LEVEL24() {
 	var (
-		vec1 int32
+		vec1 intrinsic.Array[int32]
 		_    = vec1
 	)
 	var (
-		vec2 int32
+		vec2 intrinsic.Array[int32]
 		_    = vec2
 	)
+	vec1 = []int{10, 20, 30}
+	vec2 = []int{100, 200, 300, 400, 500}
 }
 func LEVEL25() {
 	var (
-		i1 int8
+		i1 int32
 		_  = i1
 	)
 	var (
-		i2 int16
+		i2 int32
 		_  = i2
 	)
 	var (
@@ -321,7 +486,7 @@ func LEVEL25() {
 		_  = i4
 	)
 	var (
-		i8 int64
+		i8 int32
 		_  = i8
 	)
 	var (
@@ -329,9 +494,15 @@ func LEVEL25() {
 		_  = r4
 	)
 	var (
-		r8 float64
+		r8 float32
 		_  = r8
 	)
+	i1 = 127
+	i2 = 32767
+	i4 = 2147483647
+	i8 = 9223372036854775807
+	r4 = 3.14159
+	r8 = 3.141592653589793
 }
 func LEVEL26() {
 	var (
@@ -341,11 +512,17 @@ func LEVEL26() {
 		_, _, _ = hex_val, oct_val, bin_val
 	)
 	var (
-		d1      float64
-		d2      float64
-		d4      float64
+		d1      float32
+		d2      float32
+		d4      float32
 		_, _, _ = d1, d2, d4
 	)
+	hex_val = INT(255)
+	oct_val = INT(255)
+	bin_val = INT(255)
+	d1 = 1
+	d2 = 123
+	d4 = 2.718281828
 }
 func LEVEL27() {
 	var (
@@ -353,25 +530,38 @@ func LEVEL27() {
 		_     = ncomp
 	)
 	var (
-		factor float64
+		factor float32
 		_      = factor
 	)
 	var (
-		root3 float64
+		root3 float32
 		_     = root3
 	)
 	var (
-		PI float64
+		PI float32
 		_  = PI
 	)
 	var (
-		result float64
+		result float32
 		_      = result
 	)
+	result = factor * root3 * DBLE(ncomp)
 }
 func LEVEL28() {
+	YQR.Set(1.5, 1)
+	SUMXRQ.Set(99.90000000000001, 512)
+	YMNRT.Set(3.14, 2)
+	MATRIX.Set(42.5, 5, 10)
+	COUNTS.Set(42, 50)
 }
 func LEVEL29() {
+	MAT.Set(64, 1, 2)
+	MAXDM1 = 100
+	NPAA = MALLOC(MAXDM1 * 8)
+	NPII = NPAA
+	NPLL = NPII
+	M = 1
+	MAXDEF = MIN(200000, MAXDM1)
 }
 func SIMPLE_SUB() {
 }
@@ -385,14 +575,15 @@ func ADD_VALUES(a int32, b int32, result int32) {
 		result int32
 		_      = result
 	)
+	result = a + b
 }
-func MODIFY_ARRAY(arr int32, n int32) {
+func MODIFY_ARRAY(arr intrinsic.Array[int32], n int32) {
 	var (
 		n int32
 		_ = n
 	)
 	var (
-		arr int32
+		arr intrinsic.Array[int32]
 		_   = arr
 	)
 	var (
