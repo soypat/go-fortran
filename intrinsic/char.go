@@ -32,6 +32,23 @@ func NewCharacterArray(len int) CharacterArray {
 	return ch
 }
 
+var _ pointer = CharacterArray{}
+
+// DataUnsafe implements [pointer] interface.
+func (ch CharacterArray) DataUnsafe() unsafe.Pointer {
+	return unsafe.Pointer(&ch.data[0])
+}
+
+// SizeElement returns the number of bytes per character. Always returns 1 in Go. Implements [pointer] interface.
+func (ch CharacterArray) SizeElement() int {
+	return 1
+}
+
+// LenBuffer returns length of flattened character buffer in characters (bytes). Implements [pointer] interface.
+func (ch CharacterArray) LenBuffer() int {
+	return cap(ch.data)
+}
+
 func (ch CharacterArray) At(i int) byte {
 	return ch.data[i-1]
 }
@@ -49,7 +66,7 @@ func (ch CharacterArray) String() string {
 }
 
 func (ch *CharacterArray) SetFromString(data string) {
-	ch.data = ch.data[:cap(ch.data)]  // Ensure full capacity for modification
+	ch.data = ch.data[:cap(ch.data)] // Ensure full capacity for modification
 	n := copy(ch.data, data)
 	// Pad the rest with spaces
 	for i := n; i < cap(ch.data); i++ {

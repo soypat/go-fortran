@@ -135,6 +135,8 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 		Tok:   token.VAR,
 		Specs: make([]ast.Spec, 0, len(stmt.Entities)),
 	}
+	var useSpecs ast.ValueSpec
+	nouse := tg.astIdent("_")
 	for i := range stmt.Entities {
 		ent := &stmt.Entities[i]
 		vi := tg.scope.varSGet(ent.Name)
@@ -143,12 +145,17 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 			continue
 		}
 		tp := tg.fortranTypeToGoWithKind(vi.decl)
+		ident := ast.NewIdent(ent.Name)
 		spec := &ast.ValueSpec{
-			Names: []*ast.Ident{ast.NewIdent(ent.Name)},
+			Names: []*ast.Ident{ident},
 			Type:  tp,
 		}
 		decl.Specs = append(decl.Specs, spec)
+		useSpecs.Names = append(useSpecs.Names, nouse)
+		// TODO: check usage flag.
+		useSpecs.Values = append(useSpecs.Values, ident)
 	}
+	decl.Specs = append(decl.Specs, &useSpecs)
 	dst = append(dst, &ast.DeclStmt{
 		Decl: decl,
 	})

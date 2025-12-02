@@ -16,6 +16,16 @@ func Bool2Int[T integer](v bool) T {
 	return 0
 }
 
+type pointer interface {
+	// DataUnsafe returns a pointer to the start of the backing buffer in memory.
+	DataUnsafe() unsafe.Pointer
+	// LenBuffer returns the length of the backing buffer in memory in elements.
+	// This is not in bytes. To obtain size of buffer in bytes do p.LenBuffer()*p.SizeElement().
+	LenBuffer() int
+	// SizeElement returns the size in bytes of the elements the pointer points to.
+	SizeElement() int
+}
+
 // MALLOC allocates memory for Fortran MALLOC calls (typically a C library function).
 // In transpiled code, actual memory allocation is handled by Go's garbage collector.
 //
@@ -101,9 +111,9 @@ type Pointer[T any] struct {
 	alloclen int // alloclen is length in quantity of allocated elements.
 }
 
-// Len returns the number of elements the pointer can access.
+// LenBuffer returns the number of elements the pointer can access.
 // For MALLOC allocations, this is the allocated size divided by element size.
-func (p Pointer[T]) Len() int {
+func (p Pointer[T]) LenBuffer() int {
 	return p.alloclen
 }
 
@@ -113,9 +123,9 @@ func (p Pointer[T]) SizeElement() int {
 	return int(unsafe.Sizeof(zero))
 }
 
-// LenBytes returns the total size in bytes of the pointed-to memory.
-func (p Pointer[T]) LenBytes() int {
-	return p.Len() * p.SizeElement()
+// Size returns the total size in bytes of the pointed-to memory.
+func (p Pointer[T]) Size() int {
+	return p.LenBuffer() * p.SizeElement()
 }
 
 // Slice returns a Go slice view of the pointed-to memory.
@@ -152,6 +162,10 @@ func (p Pointer[T]) DataAt(idx int) *T {
 	return p.View(idx, idx+1).Data()
 }
 
+func (p Pointer[T]) DataUnsafe() unsafe.Pointer {
+	return p.v
+}
+
 // View creates a sub-pointer viewing a range of the original allocation.
 // Uses Fortran 1-based indexing: View(1, 10) returns elements 1-10 inclusive.
 //
@@ -173,7 +187,7 @@ func (p Pointer[T]) View(startOff, endOff int) Pointer[T] {
 //	arr := ptr.Array()
 //	arr.At(50)  // Access 50th element as Array
 func (p Pointer[T]) Array() *Array[T] {
-	n := p.Len()
+	n := p.LenBuffer()
 	return &Array[T]{
 		data:   p.Slice(),
 		shape:  []int{n},
@@ -263,13 +277,15 @@ func UnsafePointerData[I integer, T any](p Pointer[T]) I {
 //	// Now intPtr.At(1) and intPtr.At(2) access the low/high 32 bits of Pi
 //	low := intPtr.At(1)   // Low 32 bits of float64 representation
 //	high := intPtr.At(2)  // High 32 bits of float64 representation
-func Equivalence[D any, S any](src Pointer[S]) (dst Pointer[D]) {
+func Equivalence[D any, S any](src pointer) (dst Pointer[D]) {
 	szS := src.SizeElement()
 	szD := dst.SizeElement()
+	nS := src.LenBuffer()
+	ptr := src.DataUnsafe()
 	if szS == szD {
-		return Pointer[D](src) // simple case.
+		return Pointer[D]{v: ptr, alloclen: nS}
 	}
-	nS := src.Len()
+
 	// Calculate total bytes and new element count
 	totalBytes := nS * szS
 	// Check alignment compatibility
@@ -280,7 +296,7 @@ func Equivalence[D any, S any](src Pointer[S]) (dst Pointer[D]) {
 
 	newSize := totalBytes / szD
 	return Pointer[D]{
-		v:        src.v,
+		v:        ptr,
 		alloclen: newSize,
 	}
 }
