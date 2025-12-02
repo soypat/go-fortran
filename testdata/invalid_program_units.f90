@@ -8,5 +8,5 @@ FUNCTION ! ERROR "expected function name"
 
 MODULE ! ERROR "expected module name"
 
-RECURSIVE ! ERROR "expected SUBROUTINE or FUNCTION"
+RECURSIVE ! ERROR "expected SUBROUTINE"
 

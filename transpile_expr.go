@@ -127,6 +127,11 @@ func (tg *ToGo) transformUnaryExpr(vitgt *varinfo, e *f90.UnaryExpr) (result ast
 }
 
 func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result ast.Expr, err error) {
+	// Infer types for type promotion
+	leftType := tg.inferExprType(vitgt, e.Left)
+	rightType := tg.inferExprType(vitgt, e.Right)
+	resultType := promoteTypes(leftType, rightType)
+
 	left, err := tg.transformExpression(vitgt, e.Left)
 	if err != nil {
 		return nil, err
@@ -138,6 +143,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 
 	// Map Fortran operator to Go operator
 	var op token.Token
+	needsPromotion := true // Most operators need type-matched operands
 	switch e.Op {
 	case f90token.Plus:
 		op = token.ADD
@@ -149,11 +155,12 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 		op = token.QUO
 	case f90token.DoubleStar:
 		// Power operator: x ** y → math.Pow(x, y)
+		// math.Pow requires float64 arguments
+		left = wrapConversion(vitgt, leftType, left)
+		right = wrapConversion(vitgt, rightType, right)
+		sel := intrinsicSel("POW")
 		return &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X:   ast.NewIdent("math"),
-				Sel: ast.NewIdent("Pow"),
-			},
+			Fun:  sel(vitgt),
 			Args: []ast.Expr{left, right},
 		}, nil
 	case f90token.EQ, f90token.EqEq:
@@ -170,13 +177,22 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 		op = token.GEQ
 	case f90token.AND:
 		op = token.LAND
+		needsPromotion = false // Logical ops don't need numeric promotion
 	case f90token.OR:
 		op = token.LOR
+		needsPromotion = false
 	case f90token.StringConcat:
 		// String concatenation: a // b → a + b
 		op = token.ADD
+		needsPromotion = false
 	default:
 		return nil, tg.makeErr(e, fmt.Sprintf("unsupported binary operator %v", e.Op))
+	}
+
+	// Promote operands to common type for arithmetic/comparison ops
+	if needsPromotion {
+		left = wrapConversion(resultType, leftType, left)
+		right = wrapConversion(resultType, rightType, right)
 	}
 
 	return &ast.BinaryExpr{
@@ -190,7 +206,7 @@ func (tg *ToGo) transformFunctionCall(vitgt *varinfo, e *f90.FunctionCall) (resu
 	vi := tg.scope.Var(e.Name)
 	if vi != nil {
 		// Check if this is a declared variable (COMMON block array access)
-		args, err := tg.transformExprSlice(_tgtInt, nil, e.Args)
+		args, err := tg.transformExprSlice(_tgtInt32, nil, e.Args)
 		// Treat as array element access: arr.At(indices...)
 		return tg.astMethodCall(e.Name, "At", args...), err
 	}
@@ -241,7 +257,7 @@ func (tg *ToGo) transformArrayRef(vitgt *varinfo, e *f90.ArrayRef) (result ast.E
 	// Regular element access: arr(i) → arr.At(indices...)
 	var args []ast.Expr
 	for _, expr := range e.Subscripts {
-		arg, err := tg.transformExpression(_tgtInt, expr)
+		arg, err := tg.transformExpression(_tgtInt32, expr)
 		if err != nil {
 			return nil, err
 		}
@@ -262,7 +278,7 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 	}
 
 	// Regular element assignment: arr(i) = v → arr.Set(value, indices...)
-	args, err := tg.transformExprSlice(_tgtInt, []ast.Expr{rhs}, fexpr.Subscripts)
+	args, err := tg.transformExprSlice(_tgtInt32, []ast.Expr{rhs}, fexpr.Subscripts)
 	if err != nil {
 		return dst, err
 	}
@@ -294,22 +310,22 @@ func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, 
 }
 
 func (tg *ToGo) transformRangeExprToArgs(rng *f90.RangeExpr, vi *varinfo) (_ []ast.Expr, err error) {
-	if vi == _tgtInt {
+	if vi == _tgtInt32 {
 		panic("misuse of varinfo")
 	}
 	var start, end ast.Expr = _astOne, nil
 	if rng.Start != nil {
-		start, err = tg.transformExpression(_tgtInt, rng.Start)
+		start, err = tg.transformExpression(_tgtInt32, rng.Start)
 	}
 	if err == nil && rng.End != nil {
-		end, err = tg.transformExpression(_tgtInt, rng.End)
+		end, err = tg.transformExpression(_tgtInt32, rng.End)
 		return []ast.Expr{start, end}, err
 	}
 	// Set default end size.
 	if err == nil && vi.decl.Type.Token == f90token.CHARACTER && vi.decl.Charlen() != nil {
-		end, err = tg.transformExpression(_tgtInt, vi.decl.Charlen())
+		end, err = tg.transformExpression(_tgtInt32, vi.decl.Charlen())
 	} else if err == nil && vi.decl.Dimension().CanExpr() {
-		end, err = tg.transformExpression(_tgtInt, vi.decl.Dimension().Expr())
+		end, err = tg.transformExpression(_tgtInt32, vi.decl.Dimension().Expr())
 	} else {
 		err = tg.makeErrWithPos(rng.Position, "unsupported variable dimension for assignment")
 	}
@@ -330,11 +346,89 @@ func (tg *ToGo) transformExprSlice(vitgt *varinfo, dst []ast.Expr, src []f90.Exp
 	return dst, nil
 }
 
+// inferExprType infers the Go type name of a Fortran expression (bottom-up).
+func (tg *ToGo) inferExprType(vitgt *varinfo, expr f90.Expression) (vi *varinfo) {
+	switch e := expr.(type) {
+	case *f90.StringLiteral:
+		vi = _tgtChar
+	case *f90.IntegerLiteral:
+		vi = _tgtInt32
+	case *f90.RealLiteral:
+		if strings.ContainsAny(e.Raw, "Dd") {
+			vi = _tgtFloat64
+		} else {
+			vi = _tgtFloat32
+		}
+	case *f90.LogicalLiteral:
+		vi = _tgtBool
+	case *f90.Identifier:
+		vi = tg.scope.Var(e.Value)
+	case *f90.BinaryExpr:
+		return promoteTypes(tg.inferExprType(vitgt, e.Left), tg.inferExprType(vitgt, e.Right))
+	case *f90.UnaryExpr:
+		return tg.inferExprType(vitgt, e.Operand)
+	case *f90.ParenExpr:
+		return tg.inferExprType(vitgt, e.Expr)
+	case *f90.ArrayRef:
+		vi = tg.scope.Var(e.Name)
+	case *f90.FunctionCall:
+		// Check user-defined functions first
+		fn := tg.ContainedOrExtern(e.Name)
+		if fn != nil {
+			vi = fn.returnType
+		} else if in := getIntrinsic(e.Name, len(e.Args)); in != nil {
+			vi = in.inferReturnType(vitgt)
+		} else {
+			vi = tg.scope.Var(e.Name) // Maybe an ambiguous function call (COMMON array access)
+		}
+	}
+	if vi == nil {
+		str := expr.AppendString(nil)
+		err := tg.makeErr(expr, fmt.Sprintf("could not infer type of expression %q", str))
+		panic(err.Error())
+	}
+	return vi
+}
+
+// promoteTypes returns the wider of two numeric types (Fortran type promotion).
+func promoteTypes(a, b *varinfo) *varinfo {
+	atok := a.decl.Type.Token
+	btok := b.decl.Type.Token
+	if atok == f90token.DOUBLEPRECISION || btok == f90token.DOUBLEPRECISION {
+		return _tgtFloat64
+	}
+	if atok == f90token.REAL || btok == f90token.REAL {
+		return _tgtFloat32
+	}
+	return a // both int or unknown
+}
+
+// wrapConversion wraps expr with a type conversion if targetType differs from sourceType.
+func wrapConversion(targetType, sourceType *varinfo, expr ast.Expr) ast.Expr {
+	if targetType.decl.Type.Token == sourceType.decl.Type.Token {
+		return expr
+	}
+	conv := "invalid"
+	switch targetType.decl.Type.Token {
+	case f90token.REAL:
+		conv = "float32"
+	case f90token.DOUBLEPRECISION:
+		conv = "float64"
+	case f90token.INTEGER:
+		conv = "int32"
+	}
+	return &ast.CallExpr{
+		Fun:  ast.NewIdent(conv),
+		Args: []ast.Expr{expr},
+	}
+}
+
 type intrinsicFn struct {
 	name        string
 	expr        ast.Expr
 	exprGeneric func(tp *varinfo) ast.Expr
 	method      string
+	returnType  *varinfo
 	params      []*varinfo
 	isVariadic  bool
 }
@@ -408,89 +502,153 @@ func intrinsicSel(name string) func(*varinfo) ast.Expr {
 	}
 }
 
+// makeIntrinsicFn creates an intrinsic that calls intrinsic.NAME (e.g., SQRT, SIN).
+// returnType is nil if return type matches first param.
+func makeIntrinsicFn(name string, returnType *varinfo, params ...*varinfo) intrinsicFn {
+	return intrinsicFn{
+		name:        name,
+		exprGeneric: intrinsicSel(name),
+		returnType:  returnType,
+		params:      params,
+	}
+}
+
+// makeIntrinsicVariadic creates a variadic intrinsic like MAX, MIN.
+func makeIntrinsicVariadic(name string, returnType *varinfo, variadicType *varinfo) intrinsicFn {
+	return intrinsicFn{
+		name:        name,
+		exprGeneric: intrinsicSel(name),
+		returnType:  returnType,
+		params:      []*varinfo{variadicType},
+		isVariadic:  true,
+	}
+}
+
+// makeIntrinsicCast creates a type cast intrinsic like REAL, INT, DBLE.
+func makeIntrinsicCast(name, goType string, returnType, paramType *varinfo) intrinsicFn {
+	return intrinsicFn{
+		name:       name,
+		expr:       ast.NewIdent(goType),
+		returnType: returnType,
+		params:     []*varinfo{paramType},
+	}
+}
+
+// makeIntrinsicMethod creates a method-call intrinsic like LEN, TRIM.
+func makeIntrinsicMethod(name, methodName string, returnType, receiverType *varinfo, params ...*varinfo) intrinsicFn {
+	allParams := make([]*varinfo, 0, 1+len(params))
+	allParams = append(allParams, receiverType)
+	allParams = append(allParams, params...)
+	return intrinsicFn{
+		name:       name,
+		method:     methodName,
+		returnType: returnType,
+		params:     allParams,
+	}
+}
+
+func (fn *intrinsicFn) inferReturnType(tgt *varinfo) (inferred *varinfo) {
+	if fn.returnType != nil {
+		inferred = fn.returnType
+	} else {
+		inferred = fn.params[0]
+	}
+	var dflt *varinfo
+	switch inferred {
+	case _tgtGenericFloat:
+		dflt = _tgtFloat32
+	case _tgtGenericInt:
+		dflt = _tgtInt32
+	}
+	if dflt != nil {
+		if tgt == nil {
+			inferred = dflt
+		} else {
+			inferred = tgt
+		}
+	}
+	return inferred
+}
+
 var intrinsics = []intrinsicFn{
 	// Type conversions
-	{name: "REAL", expr: ast.NewIdent("float32"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "DBLE", expr: ast.NewIdent("float64"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "INT", expr: ast.NewIdent("int32"), params: []*varinfo{_tgtGenericInt}},
-	{name: "INT32", expr: ast.NewIdent("int32"), params: []*varinfo{_tgtGenericInt}},
+	makeIntrinsicCast("REAL", "float32", _tgtFloat32, _tgtGenericFloat),
+	makeIntrinsicCast("DBLE", "float64", _tgtFloat64, _tgtGenericFloat),
+	makeIntrinsicCast("INT", "int32", _tgtInt32, _tgtGenericInt),
+	makeIntrinsicCast("INT32", "int32", _tgtInt32, _tgtGenericInt),
 
-	// Math intrinsics - single float argument
-	{name: "SQRT", exprGeneric: intrinsicSel("SQRT"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "SIN", exprGeneric: intrinsicSel("SIN"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "COS", exprGeneric: intrinsicSel("COS"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "TAN", exprGeneric: intrinsicSel("TAN"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "ASIN", exprGeneric: intrinsicSel("ASIN"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "ACOS", exprGeneric: intrinsicSel("ACOS"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "ATAN", exprGeneric: intrinsicSel("ATAN"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "EXP", exprGeneric: intrinsicSel("EXP"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "LOG", exprGeneric: intrinsicSel("LOG"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "LOG10", exprGeneric: intrinsicSel("LOG10"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "SINH", exprGeneric: intrinsicSel("SINH"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "COSH", exprGeneric: intrinsicSel("COSH"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "TANH", exprGeneric: intrinsicSel("TANH"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "FLOOR", exprGeneric: intrinsicSel("FLOOR"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "CEILING", exprGeneric: intrinsicSel("CEILING"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "AINT", exprGeneric: intrinsicSel("AINT"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "ANINT", exprGeneric: intrinsicSel("ANINT"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "NINT", exprGeneric: intrinsicSel("NINT"), params: []*varinfo{_tgtGenericFloat}},
+	// Math intrinsics - single float argument (return type matches input)
+	makeIntrinsicFn("SQRT", nil, _tgtGenericFloat),
+	makeIntrinsicFn("SIN", nil, _tgtGenericFloat),
+	makeIntrinsicFn("COS", nil, _tgtGenericFloat),
+	makeIntrinsicFn("TAN", nil, _tgtGenericFloat),
+	makeIntrinsicFn("ASIN", nil, _tgtGenericFloat),
+	makeIntrinsicFn("ACOS", nil, _tgtGenericFloat),
+	makeIntrinsicFn("ATAN", nil, _tgtGenericFloat),
+	makeIntrinsicFn("EXP", nil, _tgtGenericFloat),
+	makeIntrinsicFn("LOG", nil, _tgtGenericFloat),
+	makeIntrinsicFn("LOG10", nil, _tgtGenericFloat),
+	makeIntrinsicFn("SINH", nil, _tgtGenericFloat),
+	makeIntrinsicFn("COSH", nil, _tgtGenericFloat),
+	makeIntrinsicFn("TANH", nil, _tgtGenericFloat),
+	makeIntrinsicFn("FLOOR", nil, _tgtGenericFloat),
+	makeIntrinsicFn("CEILING", nil, _tgtGenericFloat),
+	makeIntrinsicFn("AINT", nil, _tgtGenericFloat),
+	makeIntrinsicFn("ANINT", nil, _tgtGenericFloat),
+	makeIntrinsicFn("NINT", _tgtInt32, _tgtGenericFloat), // NINT returns INTEGER
+	makeIntrinsicFn("POW", nil, _tgtGenericFloat, _tgtGenericFloat),
 
 	// Math intrinsics - two float arguments
-	{name: "ATAN2", exprGeneric: intrinsicSel("ATAN2"), params: []*varinfo{_tgtGenericFloat, _tgtGenericFloat}},
+	makeIntrinsicFn("ATAN2", nil, _tgtGenericFloat, _tgtGenericFloat),
 
 	// Math intrinsics - signed/numeric
-	{name: "ABS", exprGeneric: intrinsicSel("ABS"), params: []*varinfo{_tgtGenericFloat}},
-	{name: "SIGN", exprGeneric: intrinsicSel("SIGN"), params: []*varinfo{_tgtGenericFloat, _tgtGenericFloat}},
-	{name: "MOD", exprGeneric: intrinsicSel("MOD"), params: []*varinfo{_tgtGenericInt, _tgtGenericInt}},
-	{name: "DIM", exprGeneric: intrinsicSel("DIM"), params: []*varinfo{_tgtGenericFloat, _tgtGenericFloat}},
-	{name: "DPROD", exprGeneric: intrinsicSel("DPROD"), params: []*varinfo{_tgtGenericFloat, _tgtGenericFloat}},
+	makeIntrinsicFn("ABS", nil, _tgtGenericFloat),
+	makeIntrinsicFn("SIGN", nil, _tgtGenericFloat, _tgtGenericFloat),
+	makeIntrinsicFn("MOD", nil, _tgtGenericInt, _tgtGenericInt),
+	makeIntrinsicFn("DIM", nil, _tgtGenericFloat, _tgtGenericFloat),
+	makeIntrinsicFn("DPROD", _tgtFloat64, _tgtGenericFloat, _tgtGenericFloat), // DPROD returns DOUBLE
 
 	// Variadic intrinsics
-	{name: "MAX", exprGeneric: intrinsicSel("MAX"), params: []*varinfo{_tgtGenericFloat}, isVariadic: true},
-	{name: "MIN", exprGeneric: intrinsicSel("MIN"), params: []*varinfo{_tgtGenericFloat}, isVariadic: true},
+	makeIntrinsicVariadic("MAX", nil, _tgtGenericFloat),
+	makeIntrinsicVariadic("MIN", nil, _tgtGenericFloat),
 
 	// Character methods
-	{name: "LEN", method: "Len", params: []*varinfo{_tgtChar}},
-	{name: "LEN_TRIM", method: "LenTrim", params: []*varinfo{_tgtChar}},
-	{name: "TRIM", method: "Trim", params: []*varinfo{_tgtChar}},
-	{name: "ADJUSTL", method: "AdjustL", params: []*varinfo{_tgtChar}},
-	{name: "ADJUSTR", method: "AdjustR", params: []*varinfo{_tgtChar}},
-	{name: "INDEX", method: "Index", params: []*varinfo{_tgtChar, _tgtChar}},
+	makeIntrinsicMethod("LEN", "Len", _tgtInt32, _tgtChar),
+	makeIntrinsicMethod("LEN_TRIM", "LenTrim", _tgtInt32, _tgtChar),
+	makeIntrinsicMethod("TRIM", "Trim", _tgtChar, _tgtChar),
+	makeIntrinsicMethod("ADJUSTL", "AdjustL", _tgtChar, _tgtChar),
+	makeIntrinsicMethod("ADJUSTR", "AdjustR", _tgtChar, _tgtChar),
+	makeIntrinsicMethod("INDEX", "Index", _tgtInt32, _tgtChar, _tgtChar),
 
 	// Array methods - 1 arg versions
-	{name: "SIZE", method: "Size", params: []*varinfo{_tgtArray}},
-	{name: "SHAPE", method: "Shape", params: []*varinfo{_tgtArray}},
+	makeIntrinsicMethod("SIZE", "Size", _tgtInt32, _tgtArray),
+	makeIntrinsicMethod("SHAPE", "Shape", nil, _tgtArray), // returns array
 	// Array methods - 2 arg versions (with dimension)
-	{name: "SIZE", method: "SizeDim", params: []*varinfo{_tgtArray, _tgtInt}},
-	{name: "LBOUND", method: "LowerDim", params: []*varinfo{_tgtArray, _tgtInt}},
-	{name: "UBOUND", method: "UpperDim", params: []*varinfo{_tgtArray, _tgtInt}},
+	makeIntrinsicMethod("SIZE", "SizeDim", _tgtInt32, _tgtArray, _tgtInt32),
+	makeIntrinsicMethod("LBOUND", "LowerDim", _tgtInt32, _tgtArray, _tgtInt32),
+	makeIntrinsicMethod("UBOUND", "UpperDim", _tgtInt32, _tgtArray, _tgtInt32),
 
 	// Special
-	{name: "MALLOC", exprGeneric: intrinsicSel("MALLOC"), params: []*varinfo{_tgtInt}},
+	makeIntrinsicFn("MALLOC", nil, _tgtInt32),
+}
+
+func defaultVarinfo(tok f90token.Token) *varinfo {
+	return &varinfo{
+		_varname: fmt.Sprintf("<default %s varinfo>", tok.String()),
+		decl:     &f90.DeclEntity{Type: &f90.TypeSpec{Token: tok}},
+	}
 }
 
 var (
-	_astFalse = ast.NewIdent("false")
-	_astTrue  = ast.NewIdent("true")
-	_astOne   = &ast.BasicLit{Kind: token.INT, Value: "1"}
-	_tgtInt   = &varinfo{
-		_varname: "<default int varinfo>",
-		decl:     &f90.DeclEntity{Type: &f90.TypeSpec{Token: f90token.INTEGER}},
-	}
-	_tgtChar = &varinfo{
-		_varname: "<default character>",
-		decl:     &f90.DeclEntity{Type: &f90.TypeSpec{Token: f90token.CHARACTER}},
-	}
-	_tgtGenericFloat = &varinfo{
-		_varname: "<default character>",
-		decl:     &f90.DeclEntity{Type: &f90.TypeSpec{Token: f90token.FloatLit}},
-	}
-	_tgtGenericInt = &varinfo{
-		_varname: "<default int>",
-		decl:     &f90.DeclEntity{Type: &f90.TypeSpec{Token: f90token.IntLit}},
-	}
-	_tgtArray = &varinfo{
-		_varname: "<default array>",
-		decl:     &f90.DeclEntity{Type: &f90.TypeSpec{Token: f90token.INTEGER}},
-	}
+	_astFalse        = ast.NewIdent("false")
+	_astTrue         = ast.NewIdent("true")
+	_astOne          = &ast.BasicLit{Kind: token.INT, Value: "1"}
+	_tgtInt32        = defaultVarinfo(f90token.INTEGER)
+	_tgtFloat32      = defaultVarinfo(f90token.REAL)
+	_tgtBool         = defaultVarinfo(f90token.LOGICAL)
+	_tgtFloat64      = defaultVarinfo(f90token.DOUBLEPRECISION)
+	_tgtChar         = defaultVarinfo(f90token.CHARACTER)
+	_tgtGenericFloat = defaultVarinfo(f90token.FloatLit)
+	_tgtGenericInt   = defaultVarinfo(f90token.IntLit)
+	_tgtArray        = defaultVarinfo(f90token.DIMENSION)
 )

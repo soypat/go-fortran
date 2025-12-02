@@ -41,6 +41,7 @@ const (
 	flagIntentIn
 	flagArrayInit
 	flagArraySpec // ArraySpec used in type declaration.
+	flagReturned
 )
 
 func (f symflags) HasAny(hasBits symflags) bool { return f&hasBits != 0 }
@@ -148,9 +149,10 @@ func (p *Parser90) makeUnitData(name string, token token.Token) *ParserUnitData 
 }
 
 type ParserUnitData struct {
-	name string
-	tok  token.Token
-	vars []varinfo
+	name       string
+	tok        token.Token
+	vars       []varinfo
+	returnType *varinfo
 }
 
 // ProcedureParams returns the varinfos corresponding to parameters of the function, in order.
@@ -556,8 +558,9 @@ func (p *Parser90) parseFunction() ast.Statement {
 	p.varResetAll()
 	start := p.sourcePos()
 	fn := &ast.Function{}
-
-	p.expect(token.FUNCTION, "")
+	if !p.expect(token.FUNCTION, "") {
+		return nil
+	}
 
 	// Parse function name (can be Identifier, FormatSpec, or keyword used as identifier)
 	if !p.expectIdentifier(&fn.Name, "function name") {
@@ -569,11 +572,12 @@ func (p *Parser90) parseFunction() ast.Statement {
 	}
 
 	// Check for RESULT clause
+	hasResult := false
 	if p.consumeIf(token.RESULT) {
 		if p.expect(token.LParen, "RESULT open") {
-			if p.expectCurrent(token.Identifier) {
-				fn.ResultVariable = string(p.current.lit)
-				p.nextToken() // consume result variable name
+			if p.expectIdentifier(&fn.ResultVariable, "function RESULT variable specification") {
+				p.varInit(fn.ResultVariable, nil, flagReturned, "")
+				hasResult = true
 			}
 			p.expect(token.RParen, "RESULT close")
 		}
@@ -585,7 +589,16 @@ func (p *Parser90) parseFunction() ast.Statement {
 	p.expectEndProgramUnit(token.FUNCTION, token.ENDFUNCTION, start)
 	p.consumeIf(token.Identifier)
 	fn.Position = ast.Pos(start.Pos, p.current.start)
-	fn.Data = p.makeUnitData(fn.Name, token.FUNCTION)
+	pud := p.makeUnitData(fn.Name, token.FUNCTION)
+	fn.Data = pud
+	if hasResult {
+		for i := range pud.vars {
+			if pud.vars[i].flags.HasAny(flagReturned) {
+				pud.returnType = &pud.vars[i]
+				break
+			}
+		}
+	}
 	return fn
 }
 
@@ -3993,35 +4006,38 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 // parseTypePrefixedConstruct handles type-prefixed functions like "INTEGER FUNCTION foo()"
 func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 	// Save the type token
+	start := p.sourcePos()
 	ts := p.expectTypeSpecIntrinsic()
-	if ts.Token == 0 {
-		return nil
+	// Parse as function
+	fn := p.parseFunction().(*ast.Function)
+	fn.Type = ts
+	pud := p.makeUnitData(fn.Name, token.FUNCTION)
+	fn.Data = pud
+	if pud.returnType == nil {
+		// RESULT can set the return type, so check if already set.
+		pud.returnType = &varinfo{
+			decl: &ast.DeclEntity{
+				Type: &fn.Type,
+			},
+			flags:   flagReturned,
+			declPos: start,
+		}
 	}
-	// Check if this is a function
-	if p.currentTokenIs(token.FUNCTION) {
-		// Parse as function
-		fn := p.parseFunction().(*ast.Function)
-		fn.Type = ts
-		return fn
-	}
+	return fn
 
-	// Otherwise, this is a type declaration (Phase 2)
-	// For now, skip this line, stop at construct endings
-	p.addError("type declarations not yet supported in Phase 1")
-	for p.loopUntilEndElseOr(token.NewLine) {
-		p.nextToken()
-	}
-	return nil
 }
 
 // parseProcedureWithAttributes handles procedures with attributes like RECURSIVE, PURE, ELEMENTAL
 func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 	// Collect all attributes
 	attributes := []token.Token{}
-
 	for p.current.tok.IsAttributeKeyword() && !p.IsDone() {
 		attributes = append(attributes, p.current.tok)
 		p.nextToken()
+	}
+	if p.current.tok.IsTypeDeclaration() {
+		// Is a function.
+		return p.parseTypePrefixedConstruct()
 	}
 
 	// Now must be SUBROUTINE or FUNCTION
@@ -4036,30 +4052,8 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 		if fn, ok := stmt.(*ast.Function); ok {
 			fn.Attributes = attributes
 		}
-	} else if p.current.tok.IsTypeDeclaration() {
-		// Type-prefixed function with attributes
-		typeToken := p.current.tok
-		p.nextToken()
-
-		// Parse KIND if present (e.g., REAL*8 FUNCTION)
-		var kindParam ast.Expression
-		if p.currentTokenIs(token.Asterisk) || p.currentTokenIs(token.LParen) {
-			kindParam = p.parseKindSelector()
-		}
-
-		if p.currentTokenIs(token.FUNCTION) {
-			stmt = p.parseFunction()
-			if fn, ok := stmt.(*ast.Function); ok {
-				fn.Attributes = attributes
-				fn.Type.Token = typeToken
-				fn.Type.KindOrLen = kindParam
-			}
-		} else {
-			p.addError("expected FUNCTION after type keyword")
-			return nil
-		}
 	} else {
-		p.addError("expected SUBROUTINE or FUNCTION after attributes")
+		p.addError("expected SUBROUTINE after attributes")
 		return nil
 	}
 

@@ -15,8 +15,8 @@ import (
 
 type ToGo struct {
 	scope      *ParserUnitData // currentScope variable data.
-	extern     []*ParserUnitData
-	contains   []*ParserUnitData
+	_extern    []*ParserUnitData
+	_contains  []*ParserUnitData
 	errors     []error
 	source     string
 	sourceFile io.ReaderAt
@@ -37,24 +37,24 @@ func (tg *ToGo) AddExtern(pu []f90.ProgramUnit) error {
 		if exists {
 			return fmt.Errorf("extern program unit %s with namespace %s already added", pu[i].UnitName(), data.name)
 		}
-		tg.extern = append(tg.extern, data)
+		tg._extern = append(tg._extern, data)
 	}
 	return nil
 }
 
 func (tg *ToGo) Extern(name string) *ParserUnitData {
-	for i := range tg.extern {
-		if strings.EqualFold(tg.extern[i].name, name) {
-			return tg.extern[i]
+	for i := range tg._extern {
+		if strings.EqualFold(tg._extern[i].name, name) {
+			return tg._extern[i]
 		}
 	}
 	return nil
 }
 
 func (tg *ToGo) Contained(name string) *ParserUnitData {
-	for i := range tg.contains {
-		if strings.EqualFold(tg.contains[i].name, name) {
-			return tg.contains[i]
+	for i := range tg._contains {
+		if strings.EqualFold(tg._contains[i].name, name) {
+			return tg._contains[i]
 		}
 	}
 	return nil
@@ -92,7 +92,7 @@ func (tg *ToGo) enterProgramUnit(pu f90.ProgramUnit) error {
 		return nil
 	}
 	// reset contains on Module or Program block.
-	tg.contains = tg.contains[:0]
+	tg._contains = tg._contains[:0]
 	for i := range toAdd {
 		pu, ok := toAdd[i].UnitData().(*ParserUnitData)
 		if !ok {
@@ -102,7 +102,7 @@ func (tg *ToGo) enterProgramUnit(pu f90.ProgramUnit) error {
 		if exists {
 			return fmt.Errorf("contains program unit %s duplicated", toAdd[i].UnitName())
 		}
-		tg.contains = append(tg.contains, pu)
+		tg._contains = append(tg._contains, pu)
 	}
 	return nil
 }
@@ -419,6 +419,10 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	if err != nil {
 		return dst, err
 	}
+	// Convert RHS to target type if needed
+	rhsType := tg.inferExprType(targetVinfo, stmt.Value)
+	rhs = wrapConversion(targetVinfo, rhsType, rhs)
+
 	switch tgt := stmt.Target.(type) {
 	case *f90.ArrayRef:
 		return tg.transformSetArrayRef(dst, tgt, rhs)

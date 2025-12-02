@@ -211,8 +211,8 @@ func LEVEL10() {
 	z = 45.14159
 	flag = true
 	expr_result = (x+y)*z - float32(k)/2
-	cond1 = (i > 5) && (j < 100)
-	cond2 = (x >= 3) || (y <= 1)
+	cond1 = bool((i > 5) && (j < 100))
+	cond2 = bool((x >= 3) || (y <= 1))
 	cond3 = !flag
 }
 func LEVEL11() {
@@ -502,7 +502,7 @@ func LEVEL25() {
 	i4 = 2147483647
 	i8 = 9223372036854775807
 	r4 = 3.14159
-	r8 = 3.141592653589793
+	r8 = float32(3.141592653589793)
 }
 func LEVEL26() {
 	var (
@@ -520,9 +520,9 @@ func LEVEL26() {
 	hex_val = int32(255)
 	oct_val = int32(255)
 	bin_val = int32(255)
-	d1 = 1
-	d2 = 123
-	d4 = 2.718281828
+	d1 = float32(1)
+	d2 = float32(123)
+	d4 = float32(2.718281828)
 }
 func LEVEL27() {
 	var (
@@ -545,7 +545,7 @@ func LEVEL27() {
 		result float32
 		_      = result
 	)
-	result = factor * root3 * float64(ncomp)
+	result = float32(float64(factor*root3) * float64(ncomp))
 }
 func LEVEL28() {
 	YQR.Set(1.5, 1)
