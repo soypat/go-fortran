@@ -591,3 +591,39 @@ func MODIFY_ARRAY(arr intrinsic.Array[int32], n int32) {
 		_ = i
 	)
 }
+func FACTORIAL(n int32) {
+	var (
+		n int32
+		_ = n
+	)
+	var (
+		i      int32
+		result int32
+		_, _   = i, result
+	)
+	result = 1
+	FACTORIAL = result
+}
+func SQUARE_ROOT(x float32) {
+	var (
+		x float32
+		_ = x
+	)
+	SQUARE_ROOT = intrinsic.SQRT(x)
+}
+func FIBONACCI(n int32) {
+	var (
+		n int32
+		_ = n
+	)
+	var (
+		a          int32
+		b          int32
+		temp       int32
+		i          int32
+		_, _, _, _ = a, b, temp, i
+	)
+	a = 0
+	b = 1
+	FIBONACCI = b
+}

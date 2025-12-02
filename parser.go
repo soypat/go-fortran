@@ -42,6 +42,7 @@ const (
 	flagArrayInit
 	flagArraySpec // ArraySpec used in type declaration.
 	flagReturned
+	flagRecursive
 )
 
 func (f symflags) HasAny(hasBits symflags) bool { return f&hasBits != 0 }
@@ -75,6 +76,8 @@ func flagsFromTypespec(ts *ast.TypeSpec) (flags symflags) {
 			flags |= flagAllocatable
 		case token.TARGET:
 			flags |= flagTarget
+		case token.RECURSIVE:
+			flags |= flagRecursive
 		}
 	}
 	return flags
@@ -265,27 +268,31 @@ func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEnti
 	}
 	vi = pud.Var(name)
 	if vi != nil {
-		if initFlags&flagCommon != 0 {
-			vi.common = namespace
-		} else if initFlags&flagPointer != 0 {
-			vi.pointee = namespace
-		}
 		if decl != nil && vi.decl != nil {
 			err = errors.New("double variable initialization with " + vi.declPos.String())
-		} else if vi.decl == nil {
-			vi.decl = decl
+			return vi, err
 		}
-		vi.flags |= initFlags
-		return vi, err
+	} else {
+		pud.vars = slices.Grow(pud.vars, 1)
+		pud.vars = pud.vars[:len(pud.vars)+1]
+		vi = &pud.vars[len(pud.vars)-1]
+		vi.reset()
 	}
-	pud.vars = slices.Grow(pud.vars, 1)
-	pud.vars = pud.vars[:len(pud.vars)+1]
-	vi = &pud.vars[len(pud.vars)-1]
-	vi.reset()
-	vi.decl = decl
+	// Set fields.
 	vi.flags |= initFlags
-	vi._varname = name
-	vi.declPos = sp
+	if vi.decl == nil {
+		vi.decl = decl
+		vi._varname = name
+		vi.declPos = sp
+	}
+	if initFlags&flagCommon != 0 {
+		vi.common = namespace
+	} else if initFlags&flagPointer != 0 {
+		vi.pointee = namespace
+	} else if initFlags&flagReturned != 0 {
+		pud.returnType = vi
+	}
+
 	return vi, nil
 }
 
@@ -4079,14 +4086,20 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 	pud := p.makeUnitData(fn.Name, token.FUNCTION)
 	fn.Data = pud
 	if pud.returnType == nil {
-		// RESULT can set the return type, so check if already set.
-		pud.returnType = &varinfo{
-			decl: &ast.DeclEntity{
-				Type: &fn.Type,
-			},
-			flags:   flagReturned,
-			declPos: start,
+		decl := &ast.DeclEntity{
+			Name:     fn.Name,
+			Type:     &fn.Type,
+			Position: fn.Position,
 		}
+		var err error
+		vinfo := pud.Var(fn.Name)
+		if vinfo == nil {
+			vinfo, err = pud.varInit(start, fn.Name, decl, flagReturned, "")
+			if err != nil {
+				panic(err)
+			}
+		}
+		pud.returnType = vinfo
 	}
 	return fn
 
