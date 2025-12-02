@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"strconv"
+	"strings"
 
 	f90 "github.com/soypat/go-fortran/ast"
 	f90token "github.com/soypat/go-fortran/token"
@@ -193,16 +194,26 @@ func (tg *ToGo) transformFunctionCall(vitgt *varinfo, e *f90.FunctionCall) (resu
 		// Treat as array element access: arr.At(indices...)
 		return tg.astMethodCall(e.Name, "At", args...), err
 	}
-	// Transform args
-	var args []ast.Expr
 	fi := tg.ContainedOrExtern(e.Name)
 	if fi == nil {
-		return result, tg.makeErr(e, "function not found")
+		for i := range intrinsics {
+			if strings.EqualFold(e.Name, intrinsics[i].name) {
+				expr, err := tg.intrinsicExpr(vitgt, &intrinsics[i], e.Args...)
+				if err != nil {
+					return nil, err
+				}
+				return expr, nil
+			}
+		}
+		return result, tg.makeErr(e, "function/intrinsic not found: "+e.Name)
 	}
+
 	params := fi.ProcedureParams()
 	if len(e.Args) != len(params) {
 		return result, tg.makeErr(e, "parameter length mismatch")
 	}
+	// Transform args
+	var args []ast.Expr
 	for i, arg := range e.Args {
 		argExpr, err := tg.transformExpression(&params[i], arg)
 		if err != nil {
@@ -321,10 +332,11 @@ func (tg *ToGo) transformExprSlice(vitgt *varinfo, dst []ast.Expr, src []f90.Exp
 }
 
 type intrinsicFn struct {
-	name   string
-	sel    *ast.SelectorExpr
-	method string
-	params []*varinfo
+	name        string
+	expr        ast.Expr
+	exprGeneric func(tp *varinfo) ast.Expr
+	method      string
+	params      []*varinfo
 }
 
 func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expression) (call *ast.CallExpr, err error) {
@@ -349,8 +361,12 @@ func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expre
 			Args: gargs[1:],
 		}
 	} else {
+		funcExpr := fn.expr
+		if funcExpr == nil && fn.expr != nil {
+			funcExpr = fn.exprGeneric(vitgt)
+		}
 		call = &ast.CallExpr{
-			Fun:  fn.sel,
+			Fun:  funcExpr,
 			Args: gargs,
 		}
 	}
@@ -359,10 +375,19 @@ func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expre
 
 var intrinsics = []intrinsicFn{
 	{
+		name: "REAL",
+		expr: ast.NewIdent("float32"),
+		params: []*varinfo{
+			_tgtGenericFloat,
+		},
+	},
+	{
 		name: "SQRT",
-		sel: &ast.SelectorExpr{
-			X:   _astIntrinsic,
-			Sel: ast.NewIdent("SQRT"),
+		exprGeneric: func(tp *varinfo) ast.Expr {
+			return &ast.SelectorExpr{
+				X:   _astIntrinsic,
+				Sel: ast.NewIdent("SQRT"),
+			}
 		},
 		params: []*varinfo{
 			_tgtGenericFloat,

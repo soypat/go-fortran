@@ -531,63 +531,6 @@ func (tg *ToGo) astMethodCall(receiver, methodName string, args ...ast.Expr) *as
 	}
 }
 
-type intrinsicFn struct {
-	name   string
-	sel    *ast.SelectorExpr
-	method string
-	params []*varinfo
-}
-
-func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expression) (call *ast.CallExpr, err error) {
-	if len(args) != len(fn.params) {
-		return nil, fmt.Errorf("intrinsic %s requires %d arguments, got %d", fn.name, len(fn.params), len(args))
-	}
-	var gargs []ast.Expr
-	for i := range args {
-		expr, err := tg.transformExpression(fn.params[i], args[i])
-		if err != nil {
-			return nil, err
-		}
-		gargs = append(gargs, expr)
-	}
-
-	if fn.method != "" {
-		call = &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X:   gargs[0],
-				Sel: ast.NewIdent(fn.method),
-			},
-			Args: gargs[1:],
-		}
-	} else {
-		call = &ast.CallExpr{
-			Fun:  fn.sel,
-			Args: gargs,
-		}
-	}
-	return call, nil
-}
-
-var intrinsics = []intrinsicFn{
-	{
-		name: "SQRT",
-		sel: &ast.SelectorExpr{
-			X:   _astIntrinsic,
-			Sel: ast.NewIdent("SQRT"),
-		},
-		params: []*varinfo{
-			_tgtGenericFloat,
-		},
-	},
-	{
-		name:   "LEN_TRIM",
-		method: "LenTrim",
-		params: []*varinfo{
-			_tgtChar,
-		},
-	},
-}
-
 // Common intrinsic identifiers.
 var (
 	_astIntrinsic      = ast.NewIdent("intrinsic")
