@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"io"
 	"slices"
 
 	f90 "github.com/soypat/go-fortran/ast"
@@ -12,9 +13,15 @@ import (
 )
 
 type ToGo struct {
-	scope  *ParserUnitData // currentScope variable data.
-	errors []error
-	_      varinfo
+	scope      *ParserUnitData // currentScope variable data.
+	errors     []error
+	source     string
+	sourceFile io.ReaderAt
+}
+
+func (tg *ToGo) SetSource(source string, r io.ReaderAt) {
+	tg.source = source
+	tg.sourceFile = r
 }
 
 func (tg *ToGo) enterProgramUnit(pu f90.ProgramUnit) error {
@@ -121,6 +128,15 @@ func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("labe
 func (tg *ToGo) makeErr(node f90.Node, msg string) error {
 	tok := node.AppendTokenLiteral(nil)
 	pos := node.SourcePos()
+
+	// If source is available, compute line:column
+	if tg.sourceFile != nil {
+		var buf [1024]byte
+		line, col, _, err := pos.ToLineCol(tg.sourceFile, buf[:])
+		if err == nil && line > 0 {
+			return fmt.Errorf("%s:%d:%d: %s in %T %s", tg.source, line, col, msg, node, tok)
+		}
+	}
 	return fmt.Errorf("%s in %T %s @ %d", msg, node, tok, pos.Start())
 }
 
@@ -333,22 +349,82 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 
 func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_ []ast.Stmt, err error) {
 	var targetVinfo *varinfo
+	var lhs ast.Expr
 	switch tgt := stmt.Target.(type) {
 	case *f90.ArrayRef:
 		targetVinfo = tg.scope.Var(tgt.Name)
 	case *f90.Identifier:
 		targetVinfo = tg.scope.Var(tgt.Value)
+		lhs = tg.astIdent(tgt.Value)
+	case *f90.FunctionCall:
+		// FunctionCall as assignment target occurs for CHARACTER substring: str(1:5) = 'x'
+		targetVinfo = tg.scope.Var(tgt.Name)
 	default:
-		return dst, tg.makeErr(tgt, "unknown target expression")
+		err = tg.makeErr(tgt, "unknown target expression in assignment")
 	}
-	result, err := tg.transformExpression(targetVinfo.decl, stmt.Value)
+	if err != nil {
+		return nil, err
+	} else if targetVinfo == nil {
+		return nil, tg.makeErr(stmt.Target, "unknown identifier in target expression of assignment")
+	}
+	rhs, err := tg.transformExpression(targetVinfo.decl, stmt.Value)
 	if err != nil {
 		return dst, err
 	}
-	gstmt := &ast.AssignStmt{
-		Lhs: []ast.Expr{},
+	switch tgt := stmt.Target.(type) {
+	case *f90.ArrayRef:
+		return tg.transformSetArrayRef(dst, tgt, rhs)
+	default:
+		if lhs == nil {
+			return dst, tg.makeErr(stmt.Target, "unsupported assignment target")
+		}
 	}
-	_ = gstmt
-	_ = result
+
+	gstmt := &ast.AssignStmt{
+		Rhs: []ast.Expr{rhs},
+		Lhs: []ast.Expr{lhs},
+	}
+	dst = append(dst, gstmt)
 	return dst, nil
 }
+
+func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, setVal ast.Expr) (_ []ast.Stmt, err error) {
+	// vinfo := tg.scope.Var(fexpr.Name)
+	// decl := vinfo.decl
+	// dim := decl.Dimension()
+	// var kindOrCharlen f90.Expression
+	// tp := decl.Type.Token
+	// if tp == f90token.CHARACTER {
+	// 	kindOrCharlen = decl.Charlen()
+	// } else {
+	// 	kindOrCharlen = decl.Kind()
+	// }
+	var args []ast.Expr = []ast.Expr{setVal}
+	for _, expr := range fexpr.Subscripts {
+		result, err := tg.transformExpression(_astTgtInt, expr)
+		if err != nil {
+			return dst, err
+		}
+		args = append(args, result)
+	}
+	gstmt := &ast.ExprStmt{
+		X: tg.astMethodCall(fexpr.Name, "Set", setVal),
+	}
+	dst = append(dst, gstmt)
+	return dst, nil
+}
+
+// astMethodCall creates: receiver.methodName(args...)
+func (tg *ToGo) astMethodCall(receiver, methodName string, args ...ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   ast.NewIdent(sanitizeIdent(receiver)),
+			Sel: ast.NewIdent(methodName),
+		},
+		Args: args,
+	}
+}
+
+var (
+	_astTgtInt = &f90.DeclEntity{}
+)

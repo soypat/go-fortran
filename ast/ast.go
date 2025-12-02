@@ -1,6 +1,10 @@
 package ast
 
 import (
+	"bytes"
+	"errors"
+	"io"
+
 	"github.com/soypat/go-fortran/token"
 )
 
@@ -56,6 +60,42 @@ type TypeSpec struct {
 	// For CHARACTER type is required and is the LEN attribute.
 	KindOrLen  Expression
 	Attributes []TypeAttribute
+}
+
+func (ts *TypeSpec) Kind() Expression {
+	if ts.KindOrLen != nil {
+		return ts.KindOrLen
+	}
+	if attr := ts.Attr(token.KIND); attr != nil {
+		return attr.Expr
+	}
+	return nil
+}
+
+func (ts *TypeSpec) Charlen() Expression {
+	if ts.KindOrLen != nil {
+		return ts.KindOrLen
+	}
+	if attr := ts.Attr(token.LEN); attr != nil {
+		return attr.Expr
+	}
+	return nil
+}
+
+func (ts *TypeSpec) Dimension() *ArraySpec {
+	if attr := ts.Attr(token.DIMENSION); attr != nil {
+		return attr.Dimension
+	}
+	return nil
+}
+
+func (ts *TypeSpec) Attr(tok token.Token) *TypeAttribute {
+	for i := range ts.Attributes {
+		if ts.Attributes[i].Token == tok {
+			return &ts.Attributes[i]
+		}
+	}
+	return nil
 }
 
 func (ts *TypeSpec) Intent() IntentType {
@@ -989,21 +1029,30 @@ func (te *TokenExpr) AppendString(dst []byte) []byte {
 type DeclEntity struct {
 	Name      string
 	Type      *TypeSpec
-	ArraySpec *ArraySpec // Array dimensions if this is an array
+	ArraySpec *ArraySpec // Array dimensions if this is an array. CHARACTER a(8,2) : array of characters of shape 8x2
+	KindOrLen Expression // Non-default kind or character length. Old F77 syntax. CHARACTER a*8 : character string of length 8.
 	Init      Expression
+}
+
+func (de *DeclEntity) Kind() Expression {
+	if de.KindOrLen != nil {
+		return de.KindOrLen
+	}
+	return de.Type.Kind()
+}
+
+func (de *DeclEntity) Charlen() Expression {
+	if de.KindOrLen != nil {
+		return de.KindOrLen
+	}
+	return de.Type.Charlen()
 }
 
 func (de *DeclEntity) Dimension() *ArraySpec {
 	if de.ArraySpec != nil {
 		return de.ArraySpec
 	}
-	for i := range de.Type.Attributes {
-		attr := &de.Type.Attributes[i]
-		if attr.Token == token.DIMENSION {
-			return attr.Dimension
-		}
-	}
-	return nil
+	return de.Type.Dimension()
 }
 
 func (de *DeclEntity) AppendString(dst []byte) []byte {
@@ -1011,8 +1060,12 @@ func (de *DeclEntity) AppendString(dst []byte) []byte {
 	if de.ArraySpec != nil {
 		dst = de.ArraySpec.AppendString(dst)
 	}
+	if de.KindOrLen != nil {
+		dst = append(dst, '*')
+		dst = de.Type.KindOrLen.AppendString(dst)
+	}
 	if de.Init != nil {
-		dst = append(dst, ' ')
+		dst = append(dst, ' ', '=')
 		dst = de.Init.AppendString(dst)
 	}
 	return dst
@@ -2888,3 +2941,65 @@ func (ca *ComponentAccess) AppendString(dst []byte) []byte {
 // 	}
 // 	return nil
 // }
+
+// ToLineCol converts a byte offset to line:column.
+// Line and column are 1-indexed. Also returns the length of the line containing the offset.
+// aux is a scratch buffer used for reading; its size determines read chunk size (1024B recommended).
+func (pos Position) ToLineCol(r io.ReaderAt, aux []byte) (line, col, lineLength int, err error) {
+	offset := pos.Start()
+	if r == nil || offset < 0 {
+		return 0, 0, 0, errors.New("invalid reader or offset")
+	}
+
+	line = 1
+	lastNewlinePos := -1 // byte position of last newline seen (-1 means before start of file)
+
+	// Read source up to offset to count newlines
+	for readPos := 0; readPos < offset; {
+		toRead := min(len(aux), offset-readPos)
+		n, rerr := r.ReadAt(aux[:toRead], int64(readPos))
+		if n == 0 && rerr != nil {
+			return 0, 0, 0, rerr
+		}
+
+		// Count newlines and find last newline position in this chunk
+		chunk := aux[:n]
+		for {
+			idx := bytes.IndexByte(chunk, '\n')
+			if idx < 0 {
+				break
+			}
+			line++
+			lastNewlinePos = readPos + (n - len(chunk)) + idx
+			chunk = chunk[idx+1:]
+		}
+
+		readPos += n
+		if rerr == io.EOF {
+			break
+		}
+	}
+
+	col = offset - lastNewlinePos
+
+	// Find line length by reading until next newline or EOF
+	lineLength = col - 1 // at minimum, the portion before offset
+	for readPos := offset; ; {
+		n, rerr := r.ReadAt(aux[:], int64(readPos))
+		if n == 0 && rerr != nil {
+			break
+		}
+		idx := bytes.IndexByte(aux[:n], '\n')
+		if idx >= 0 {
+			lineLength = (readPos - lastNewlinePos - 1) + idx
+			break
+		}
+		readPos += n
+		if rerr == io.EOF {
+			lineLength = readPos - lastNewlinePos - 1
+			break
+		}
+	}
+
+	return line, col, lineLength, nil
+}

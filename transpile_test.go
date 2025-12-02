@@ -23,13 +23,15 @@ import (
 var goldensrc string
 
 func TestTranspileGolden2(t *testing.T) {
+	const filename = "testdata/golden.f90"
 	var parser Parser90
-	err := parser.Reset("testdata/golden.f90", strings.NewReader(goldensrc))
+	err := parser.Reset(filename, strings.NewReader(goldensrc))
 	if err != nil {
 		t.Fatal(err)
 	}
 	program := parser.ParseNextProgramUnit().(*f90.ProgramBlock)
 	var tg ToGo
+	tg.SetSource(filename, strings.NewReader(goldensrc))
 	decls, err := tg.TransformProgram(program)
 	if err != nil {
 		t.Fatal(err)

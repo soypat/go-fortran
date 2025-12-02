@@ -184,17 +184,10 @@ func (p Pointer[T]) View(startOff, endOff int) Pointer[T] {
 // Example:
 //
 //	ptr := intrinsic.MALLOC[float64](100 * 8)
-//	arr := ptr.Array()
-//	arr.At(50)  // Access 50th element as Array
-func (p Pointer[T]) Array() *Array[T] {
-	n := p.LenBuffer()
-	return &Array[T]{
-		data:   p.Slice(),
-		shape:  []int{n},
-		lower:  []int{1},
-		upper:  []int{n},
-		stride: []int{1},
-	}
+//	arr := ptr.Array(4,2,100)
+//	arr.At(3,1,89)  // Access element at offset 3,1,89.
+func (p Pointer[T]) Array(shape ...int) *Array[T] {
+	return NewArray(p.Slice(), shape...)
 }
 
 // UnsafePointerData converts a Pointer to an integer address, matching Fortran's

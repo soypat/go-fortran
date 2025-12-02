@@ -3253,6 +3253,11 @@ func (p *Parser90) parseTypeDecl() ast.Statement {
 		if p.currentTokenIs(token.LParen) {
 			entity.ArraySpec = p.parseArraySpec()
 		}
+		if p.currentTokenIs(token.Asterisk) {
+			// Character length or Kind, old F77
+			p.nextToken()
+			entity.KindOrLen = p.parseExpression(0, token.Comma, token.Equals, token.PointerAssign)
+		}
 		switch p.current.tok {
 		case token.Comma:
 			p.nextToken() // No initializer.
@@ -3784,11 +3789,23 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 			}
 
 			if result == nil {
-				// First (...) - create function call for identifier
-				result = &ast.FunctionCall{
-					Name:     name,
-					Args:     args,
-					Position: ast.Pos(startPos, endPos),
+				// Check if identifier is a declared variable with array dimensions
+				vi := p.varSGet(name)
+				isArray := vi != nil && vi.decl != nil && vi.decl.Dimension() != nil
+
+				if isArray {
+					result = &ast.ArrayRef{
+						Name:       name,
+						Subscripts: args,
+						Position:   ast.Pos(startPos, endPos),
+					}
+				} else {
+					// Function call or unknown identifier (external function)
+					result = &ast.FunctionCall{
+						Name:     name,
+						Args:     args,
+						Position: ast.Pos(startPos, endPos),
+					}
 				}
 			} else {
 				// Subsequent (...) - substring/section of previous result

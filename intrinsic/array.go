@@ -49,7 +49,7 @@ func NewArray[T any](data []T, dims ...int) *Array[T] {
 	for i, d := range dims {
 		shape[i], lower[i], upper[i] = d, 1, d
 	}
-	return NewArrayWithBounds[T](data, shape, lower, upper)
+	return NewArrayWithBounds(data, shape, lower, upper)
 }
 
 // NewArrayWithBounds creates an array with custom bounds for each dimension.

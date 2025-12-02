@@ -34,6 +34,7 @@ func (tg *ToGo) transformExpression(targetType *f90.DeclEntity, expr f90.Express
 		} else {
 			result = _astFalse
 		}
+
 	case *f90.Identifier:
 		result, err = tg.transformExprIdentifer(e)
 	case *f90.ArrayRef:
