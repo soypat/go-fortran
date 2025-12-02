@@ -54,7 +54,7 @@ func LEVEL02() {
 	i = 42
 	x = 3.14159
 	flag = true
-	message = "Variables assigned"
+	message.SetFromString("Variables assigned")
 }
 func LEVEL03() {
 	var (
@@ -225,9 +225,9 @@ func LEVEL11() {
 		str3 intrinsic.CharacterArray
 		_    = str3
 	)
-	str1 = "Hello"
-	str2 = "World"
-	str3 = str1 + " " + str2
+	str1.SetFromString("Hello")
+	str2.SetFromString("World")
+	str3.SetFromString(str1 + " " + str2)
 }
 func LEVEL12() {
 	var (
@@ -321,19 +321,19 @@ func LEVEL16() {
 		index_val    int32
 		_, _, _      = len_val, len_trim_val, index_val
 	)
-	str1 = "Hello"
+	str1.SetFromString("Hello")
 	len_val = str1.Len()
 	len_trim_val = str1.LenTrim()
-	str2 = str1.Trim()
-	str1 = "Hello World"
+	str2.SetFromString(str1.Trim())
+	str1.SetFromString("Hello World")
 	index_val = str1.Index("World")
-	str1 = "   Left"
-	str2 = str1.AdjustL()
-	str1 = "Right   "
-	str3 = str1.AdjustR()
-	str1 = "abcdef"
-	str3 = str1.Substring(2, 4)
-	str1.SetSubstring(2, 3, "z")
+	str1.SetFromString("   Left")
+	str2.SetFromString(str1.AdjustL())
+	str1.SetFromString("Right   ")
+	str3.SetFromString(str1.AdjustR())
+	str1.SetFromString("abcdef")
+	str3.SetFromString(str1.Substring(2, 4))
+	str1.SetFromString("z")
 }
 func LEVEL17() {
 	var (

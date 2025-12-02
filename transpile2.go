@@ -151,13 +151,13 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 				decls = append(decls, funcDecl)
 			}
 		case *f90.Function:
-		// 	funcDecl, err := tg.TransformFunction(c)
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// 	if funcDecl != nil {
-		// 		decls = append(decls, funcDecl)
-		// 	}
+			funcDecl, err := tg.TransformFunction(c)
+			if err != nil {
+				return nil, err
+			}
+			if funcDecl != nil {
+				decls = append(decls, funcDecl)
+			}
 		default:
 			return decls, fmt.Errorf("unknown CONTAINS declaration: %T", c)
 		}
@@ -171,35 +171,55 @@ func (tg *ToGo) astIdent(name string) *ast.Ident {
 
 // TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration
 func (tg *ToGo) TransformSubroutine(sub *f90.Subroutine) (_ *ast.FuncDecl, err error) {
-	err = tg.enterProgramUnit(sub)
+	return tg.transformProcedure(sub)
+}
+
+// TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration
+func (tg *ToGo) TransformFunction(fn *f90.Function) (_ *ast.FuncDecl, err error) {
+	return tg.transformProcedure(fn)
+}
+
+func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.FuncDecl, err error) {
+	var body []f90.Statement
+	if fn, ok := subroutineOrFunc.(*f90.Function); ok {
+		body = fn.Body
+	} else if sub, ok := subroutineOrFunc.(*f90.Subroutine); ok {
+		body = sub.Body
+	} else {
+		panic("unexpected argument")
+	}
+	err = tg.enterProgramUnit(subroutineOrFunc)
 	if err != nil {
 		return nil, err
 	}
 	fn := &ast.FuncDecl{
-		Name: ast.NewIdent(sub.Name),
+		Name: ast.NewIdent(subroutineOrFunc.UnitName()),
 		Type: &ast.FuncType{
 			Params: &ast.FieldList{
-				List: []*ast.Field{},
+				List: tg.getScopeParams(nil),
 			},
 		},
 		Body: &ast.BlockStmt{},
 	}
+	fn.Body.List, err = tg.transformStatements(nil, body)
+	if err != nil {
+		return fn, err
+	}
+	return fn, nil
+}
+
+func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 	for i := range tg.scope.vars {
 		vi := tg.scope.vars[i]
 		if vi.flags&flagParameter != 0 {
 			tp := tg.fortranTypeToGoWithKind(vi.decl)
-			fn.Type.Params.List = append(fn.Type.Params.List, &ast.Field{
+			dst = append(dst, &ast.Field{
 				Type:  tp,
 				Names: []*ast.Ident{tg.astIdent(vi.decl.Name)},
 			})
 		}
 	}
-
-	fn.Body.List, err = tg.transformStatements(nil, sub.Body)
-	if err != nil {
-		return fn, err
-	}
-	return fn, nil
+	return dst
 }
 
 func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("label" + f90Label) }
@@ -430,9 +450,13 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	if err != nil {
 		return dst, err
 	}
-	// Convert RHS to target type if needed
-	rhsType := tg.inferExprType(targetVinfo, stmt.Value)
-	rhs = tg.wrapConversion(targetVinfo, rhsType, rhs)
+	if targetVinfo != nil && targetVinfo.decl.Type.Token == f90token.CHARACTER {
+		stmt := &ast.ExprStmt{
+			X: tg.astMethodCall(targetVinfo.Identifier(), "SetFromString", rhs),
+		}
+		dst = append(dst, stmt)
+		return dst, nil
+	}
 
 	switch tgt := stmt.Target.(type) {
 	case *f90.ArrayRef:
@@ -452,6 +476,9 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		}
 	}
 
+	// Convert RHS to target type if needed
+	rhsType := tg.inferExprType(targetVinfo, stmt.Value)
+	rhs = tg.wrapConversion(targetVinfo, rhsType, rhs)
 	gstmt := &ast.AssignStmt{
 		Tok: token.ASSIGN,
 		Rhs: []ast.Expr{rhs},
