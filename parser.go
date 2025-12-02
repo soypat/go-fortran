@@ -168,11 +168,11 @@ func (p *ParserUnitData) resolveParameterTypes(params []ast.Parameter) error {
 	return nil
 }
 
-func (p *ParserUnitData) varGet(name []byte) (vi *varinfo) {
-	return p.varSGet(unsafe.String(&name[0], len(name)))
+func (p *ParserUnitData) Varb(name []byte) (vi *varinfo) {
+	return p.Var(unsafe.String(&name[0], len(name)))
 }
 
-func (p *ParserUnitData) varSGet(name string) (vi *varinfo) {
+func (p *ParserUnitData) Var(name string) (vi *varinfo) {
 	for i := range p.vars {
 		if strings.EqualFold(p.vars[i].sname, name) {
 			return &p.vars[i]
@@ -188,7 +188,7 @@ func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEnti
 	if decl != nil && name != decl.Name {
 		panic("bad varInit name argument mismatch with decl")
 	}
-	vi = pud.varSGet(name)
+	vi = pud.Var(name)
 	if vi != nil {
 		if initFlags&flagCommon != 0 {
 			vi.common = namespace
@@ -225,8 +225,8 @@ type varinfo struct {
 
 func (p *varinfo) reset()                             { *p = varinfo{} }
 func (p *Parser90) varResetAll()                      { p.vars.reset() }
-func (p *Parser90) varGet(name []byte) (vi *varinfo)  { return p.vars.varGet(name) }
-func (p *Parser90) varSGet(name string) (vi *varinfo) { return p.vars.varSGet(name) }
+func (p *Parser90) varGet(name []byte) (vi *varinfo)  { return p.vars.Varb(name) }
+func (p *Parser90) varSGet(name string) (vi *varinfo) { return p.vars.Var(name) }
 func (p *Parser90) varInit(name string, decl *ast.DeclEntity, initFlags symflags, namespace string) (vi *varinfo) {
 	vi, err := p.vars.varInit(p.sourcePos(), name, decl, initFlags, namespace)
 	if err != nil {
@@ -3823,9 +3823,15 @@ func (p *Parser90) tryParseFloatLit() *ast.RealLiteral {
 	if !p.currentTokenIs(token.FloatLit) {
 		return nil
 	}
+	rawStr := string(p.current.lit)
+	value, err := p.parseFloatValue(rawStr)
+	if err != nil {
+		p.addError(fmt.Sprintf("invalid float literal: %s", rawStr))
+		value = 0.0
+	}
 	lit := &ast.RealLiteral{
-		Value:    0.0, // Will need proper parsing
-		Raw:      string(p.current.lit),
+		Value:    value,
+		Raw:      rawStr,
 		Position: p.currentAstPos(),
 	}
 	p.nextToken()
@@ -4361,4 +4367,26 @@ func (p *Parser90) parsePointerCrayStmt() ast.Statement {
 	}
 	stmt.Position = ast.Pos(startPos, p.current.start)
 	return stmt
+}
+
+func (p *Parser90) parseFloatValue(v string) (float64, error) {
+	// Parse FORTRAN 77 and Fortran 90 formatted float literal to float64 value.
+	// Handles:
+	// - D/d exponent notation (double precision): 1.0D0, 2.5D-3
+	// - Q/q exponent notation (quad precision): 1.0Q0
+	// - Kind suffixes: 1.5_8, 2.0_REAL64
+	// - Standard E/e notation: 1.5E3, 2.0e-5
+
+	// Strip kind suffix: 1.5_8 → 1.5, 2.0_REAL64 → 2.0
+	if idx := strings.Index(v, "_"); idx >= 0 {
+		v = v[:idx]
+	}
+
+	// Replace D/d/Q/q exponent notation with e notation
+	v = strings.ReplaceAll(v, "D", "e")
+	v = strings.ReplaceAll(v, "d", "e")
+	v = strings.ReplaceAll(v, "Q", "e")
+	v = strings.ReplaceAll(v, "q", "e")
+
+	return strconv.ParseFloat(v, 64)
 }

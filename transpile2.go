@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"slices"
 
 	f90 "github.com/soypat/go-fortran/ast"
 	f90token "github.com/soypat/go-fortran/token"
 )
 
 type ToGo struct {
-	scope *ParserUnitData // currentScope variable data.
+	scope  *ParserUnitData // currentScope variable data.
+	errors []error
+	_      varinfo
 }
 
 func (tg *ToGo) enterProgramUnit(pu f90.ProgramUnit) error {
@@ -20,6 +23,12 @@ func (tg *ToGo) enterProgramUnit(pu f90.ProgramUnit) error {
 		return errors.New("missing parser unit data")
 	}
 	tg.scope = data
+	tg.scope.vars = slices.Clone(tg.scope.vars)
+	for i := range tg.scope.vars {
+		tg.scope.vars[i].sname = sanitizeIdent(tg.scope.vars[i].sname)
+		tg.scope.vars[i].common = sanitizeIdent(tg.scope.vars[i].common)
+		tg.scope.vars[i].pointee = sanitizeIdent(tg.scope.vars[i].pointee)
+	}
 	return nil
 }
 
@@ -109,6 +118,12 @@ func (tg *ToGo) TransformSubroutine(sub *f90.Subroutine) (_ *ast.FuncDecl, err e
 
 func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("label" + f90Label) }
 
+func (tg *ToGo) makeErr(node f90.Node, msg string) error {
+	tok := node.AppendTokenLiteral(nil)
+	pos := node.SourcePos()
+	return fmt.Errorf("%s in %T %s @ %d", msg, node, tok, pos.Start())
+}
+
 func (tg *ToGo) transformStatements(dst []ast.Stmt, stmts []f90.Statement) (_ []ast.Stmt, err error) {
 	for _, stmt := range stmts {
 		label := stmt.GetLabel()
@@ -130,46 +145,14 @@ func (tg *ToGo) transformStatements(dst []ast.Stmt, stmts []f90.Statement) (_ []
 	return dst, nil
 }
 
-func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclaration) (_ []ast.Stmt, err error) {
-	decl := &ast.GenDecl{
-		Tok:   token.VAR,
-		Specs: make([]ast.Spec, 0, len(stmt.Entities)),
-	}
-	var useSpecs ast.ValueSpec
-	nouse := tg.astIdent("_")
-	for i := range stmt.Entities {
-		ent := &stmt.Entities[i]
-		vi := tg.scope.varSGet(ent.Name)
-		if vi.decl == nil {
-			fmt.Printf("nil declaration, skipping %s\n", ent.Name)
-			continue
-		}
-		tp := tg.fortranTypeToGoWithKind(vi.decl)
-		ident := ast.NewIdent(ent.Name)
-		spec := &ast.ValueSpec{
-			Names: []*ast.Ident{ident},
-			Type:  tp,
-		}
-		decl.Specs = append(decl.Specs, spec)
-		useSpecs.Names = append(useSpecs.Names, nouse)
-		// TODO: check usage flag.
-		useSpecs.Values = append(useSpecs.Values, ident)
-	}
-	decl.Specs = append(decl.Specs, &useSpecs)
-	dst = append(dst, &ast.DeclStmt{
-		Decl: decl,
-	})
-	return dst, nil
-}
-
 func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.Stmt, err error) {
 	switch s := stmt.(type) {
 	case *f90.TypeDeclaration:
 		dst, err = tg.transformTypeDeclaration(dst, s)
 	// case *f90.DerivedTypeStmt:
 	// 	gostmt = tg.transformDerivedType(s)
-	// case *f90.AssignmentStmt:
-	// 	gostmt = tg.transformAssignment(s)
+	case *f90.AssignmentStmt:
+		dst, err = tg.transformAssignment(dst, s)
 	// case *f90.PrintStmt:
 	// 	gostmt = tg.transformPrint(s)
 	// case *f90.IfStmt:
@@ -314,4 +297,58 @@ func (tg *ToGo) fortranTypeToGoWithKind(decl *f90.DeclEntity) (goType ast.Expr) 
 		// We'll handle initialization per-entity below
 	}
 	return goType
+}
+
+func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclaration) (_ []ast.Stmt, err error) {
+	decl := &ast.GenDecl{
+		Tok:   token.VAR,
+		Specs: make([]ast.Spec, 0, len(stmt.Entities)),
+	}
+	var useSpecs ast.ValueSpec
+	nouse := tg.astIdent("_")
+	for i := range stmt.Entities {
+		ent := &stmt.Entities[i]
+		vi := tg.scope.Var(ent.Name)
+		if vi.decl == nil {
+			fmt.Printf("nil declaration, skipping %s\n", ent.Name)
+			continue
+		}
+		tp := tg.fortranTypeToGoWithKind(vi.decl)
+		ident := ast.NewIdent(ent.Name)
+		spec := &ast.ValueSpec{
+			Names: []*ast.Ident{ident},
+			Type:  tp,
+		}
+		decl.Specs = append(decl.Specs, spec)
+		useSpecs.Names = append(useSpecs.Names, nouse)
+		// TODO: check usage flag.
+		useSpecs.Values = append(useSpecs.Values, ident)
+	}
+	decl.Specs = append(decl.Specs, &useSpecs)
+	dst = append(dst, &ast.DeclStmt{
+		Decl: decl,
+	})
+	return dst, nil
+}
+
+func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_ []ast.Stmt, err error) {
+	var targetVinfo *varinfo
+	switch tgt := stmt.Target.(type) {
+	case *f90.ArrayRef:
+		targetVinfo = tg.scope.Var(tgt.Name)
+	case *f90.Identifier:
+		targetVinfo = tg.scope.Var(tgt.Value)
+	default:
+		return dst, tg.makeErr(tgt, "unknown target expression")
+	}
+	result, err := tg.transformExpression(targetVinfo.decl, stmt.Value)
+	if err != nil {
+		return dst, err
+	}
+	gstmt := &ast.AssignStmt{
+		Lhs: []ast.Expr{},
+	}
+	_ = gstmt
+	_ = result
+	return dst, nil
 }

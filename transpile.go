@@ -32,7 +32,7 @@ func sanitizeIdent(name string) string {
 		return name
 	}
 	// Check if it's a Go keyword (case-insensitive since Fortran is case-insensitive)
-	if token.IsKeyword(strings.ToLower(name)) {
+	if token.IsKeyword(name) {
 		// Capitalize first letter
 		return strings.ToUpper(name[:1]) + name[1:]
 	}
