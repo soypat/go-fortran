@@ -1,23 +1,18 @@
 package fortran
 
 import (
-	"errors"
 	"fmt"
 	"go/ast"
 	"go/token"
 	"io"
-	"slices"
 	"strconv"
-	"strings"
 
 	f90 "github.com/soypat/go-fortran/ast"
 	f90token "github.com/soypat/go-fortran/token"
 )
 
 type ToGo struct {
-	scope       *ParserUnitData // currentScope variable data.
-	_extern     []*ParserUnitData
-	_contains   []*ParserUnitData
+	repl        REPL
 	source      string
 	sourceFile  io.ReaderAt
 	currentStmt f90.Statement
@@ -29,87 +24,23 @@ func (tg *ToGo) SetSource(source string, r io.ReaderAt) {
 }
 
 func (tg *ToGo) AddExtern(pu []f90.ProgramUnit) error {
-	for i := range pu {
-		data, ok := pu[i].UnitData().(*ParserUnitData)
-		if !ok {
-			return fmt.Errorf("extern program unit %s has incompatible UnitData", pu[i].UnitName())
-		}
-		exists := tg.Extern(data.name) != nil
-		if exists {
-			return fmt.Errorf("extern program unit %s with namespace %s already added", pu[i].UnitName(), data.name)
-		}
-		tg._extern = append(tg._extern, data)
-	}
-	return nil
+	return tg.repl.AddExtern(pu)
 }
 
 func (tg *ToGo) Extern(name string) *ParserUnitData {
-	for i := range tg._extern {
-		if strings.EqualFold(tg._extern[i].name, name) {
-			return tg._extern[i]
-		}
-	}
-	return nil
+	return tg.repl.Extern(name)
 }
 
 func (tg *ToGo) Contained(name string) *ParserUnitData {
-	for i := range tg._contains {
-		if strings.EqualFold(tg._contains[i].name, name) {
-			return tg._contains[i]
-		}
-	}
-	return nil
+	return tg.repl.Contained(name)
 }
 
 func (tg *ToGo) ContainedOrExtern(name string) *ParserUnitData {
-	data := tg.Contained(name)
-	if data == nil {
-		data = tg.Extern(name)
-	}
-	return data
-}
-
-func (tg *ToGo) enterProgramUnit(pu f90.ProgramUnit) error {
-	data, ok := pu.UnitData().(*ParserUnitData)
-	if !ok {
-		return errors.New("missing parser unit data")
-	}
-
-	tg.scope = data
-	tg.scope.vars = slices.Clone(tg.scope.vars)
-	for i := range tg.scope.vars {
-		tg.scope.vars[i]._varname = sanitizeIdent(tg.scope.vars[i]._varname)
-		tg.scope.vars[i].common = sanitizeIdent(tg.scope.vars[i].common)
-		tg.scope.vars[i].pointee = sanitizeIdent(tg.scope.vars[i].pointee)
-	}
-
-	var toAdd []f90.ProgramUnit
-	switch unit := pu.(type) {
-	case *f90.ProgramBlock:
-		toAdd = unit.Contains
-	case *f90.Module:
-		toAdd = unit.Contains
-	default:
-		return nil
-	}
-	// reset contains on Module or Program block.
-	tg._contains = tg._contains[:0]
-	for i := range toAdd {
-		pu, ok := toAdd[i].UnitData().(*ParserUnitData)
-		if !ok {
-			return fmt.Errorf("contains program unit %s incompatible unit data", toAdd[i].UnitName())
-		}
-		exists := tg.Contained(pu.name) != nil
-		if exists {
-			return fmt.Errorf("contains program unit %s duplicated", toAdd[i].UnitName())
-		}
-		tg._contains = append(tg._contains, pu)
-	}
-	return nil
+	return tg.repl.ContainedOrExtern(name)
 }
 
 func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
-	err := tg.enterProgramUnit(prog)
+	err := tg.repl.SetScope(prog)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +111,7 @@ func (tg *ToGo) TransformFunction(fn *f90.Function) (_ *ast.FuncDecl, err error)
 }
 
 func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.FuncDecl, err error) {
-	err = tg.enterProgramUnit(subroutineOrFunc)
+	err = tg.repl.SetScope(subroutineOrFunc)
 	if err != nil {
 		return nil, err
 	}
@@ -217,31 +148,26 @@ func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.Fun
 }
 
 func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
-	for i := range tg.scope.vars {
-		vi := tg.scope.vars[i]
-		if vi.flags&flagParameter != 0 {
-			tp := tg.fortranTypeToGoWithKind(vi.decl)
-			dst = append(dst, &ast.Field{
-				Type:  tp,
-				Names: []*ast.Ident{tg.astIdent(vi.decl.Name)},
-			})
-		}
+	params := tg.repl.ScopeParams()
+	for i := range params {
+		vi := params[i]
+		tp := tg.fortranTypeToGoWithKind(vi.decl)
+		dst = append(dst, &ast.Field{
+			Type:  tp,
+			Names: []*ast.Ident{tg.astIdent(vi.decl.Name)},
+		})
 	}
 	return dst
 }
 
 func (tg *ToGo) getReturnParam() *ast.Field {
-	for i := range tg.scope.vars {
-		vi := tg.scope.vars[i]
-		if vi.flags&flagReturned != 0 {
-			tp := tg.fortranTypeToGoWithKind(vi.decl)
-			return &ast.Field{
-				Type:  tp,
-				Names: []*ast.Ident{tg.astIdent(vi.decl.Name)},
-			}
-		}
+	ret := tg.repl.scope.returnType
+	tp := tg.fortranTypeToGoWithKind(ret.decl)
+	return &ast.Field{
+		Type:  tp,
+		Names: []*ast.Ident{tg.astIdent(ret.Identifier())},
 	}
-	return nil
+
 }
 
 func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("label" + f90Label) }
@@ -401,9 +327,9 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	nouse := tg.astIdent("_")
 	for i := range stmt.Entities {
 		ent := &stmt.Entities[i]
-		vi := tg.scope.Var(ent.Name)
+		vi := tg.repl.Var(ent.Name)
 		tp := tg.fortranTypeToGoWithKind(vi.decl)
-		ident := ast.NewIdent(ent.Name)
+		ident := ast.NewIdent(vi.Identifier())
 		spec := &ast.ValueSpec{
 			Names: []*ast.Ident{ident},
 			Type:  tp,
@@ -451,16 +377,16 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	var lhs ast.Expr
 	switch tgt := stmt.Target.(type) {
 	case *f90.ArrayRef:
-		targetVinfo = tg.scope.Var(tgt.Name)
+		targetVinfo = tg.repl.Var(tgt.Name)
 	case *f90.Identifier:
-		targetVinfo = tg.scope.Var(tgt.Value)
+		targetVinfo = tg.repl.Var(tgt.Value)
 		lhs = tg.astIdent(tgt.Value)
 		if binop, ok := stmt.Value.(*f90.BinaryExpr); ok && binop.Op == f90token.StringConcat {
 			return tg.transformStringConcat(dst, targetVinfo._varname, binop)
 		}
 	case *f90.FunctionCall:
 		// FunctionCall as assignment target occurs for CHARACTER substring: str(1:5) = 'x'
-		targetVinfo = tg.scope.Var(tgt.Name)
+		targetVinfo = tg.repl.Var(tgt.Name)
 	default:
 		err = tg.makeErr(tgt, "unknown target expression in assignment")
 	}

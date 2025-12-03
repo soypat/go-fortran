@@ -208,6 +208,21 @@ func (pud *ParserUnitData) reset() {
 		implicits: pud.implicits[:0],
 	}
 }
+func (pud *ParserUnitData) clone() ParserUnitData {
+	copy := ParserUnitData{
+		name:      pud.name,
+		tok:       pud.tok,
+		vars:      slices.Clone(pud.vars),
+		implicits: slices.Clone(pud.implicits),
+	}
+	for i := range copy.vars {
+		if copy.vars[i].flags.HasAny(flagReturned) {
+			copy.returnType = &copy.vars[i]
+			break
+		}
+	}
+	return copy
+}
 
 // resolveImplicitTypes assigns types to variables with nil decl based on IMPLICIT rules.
 // Called after specification section is parsed, before executable section.
@@ -303,6 +318,7 @@ type varinfo struct {
 	common   string // set to COMMON block name if found in COMMON statement
 	pointee  string // the pointer alias this variable references in EQUIVALENCE or cray style POINTER statement.
 	declPos  sourcePos
+	val      Value // Runtime value for REPL evaluation
 }
 
 func (p *varinfo) Charlen() ast.Expression            { return p.decl.Charlen() }

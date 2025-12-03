@@ -78,7 +78,7 @@ func (tg *ToGo) transformExpression(vitgt *varinfo, expr f90.Expression) (result
 }
 
 func (tg *ToGo) transformExprIdentifer(vitgt *varinfo, e *f90.Identifier) (result ast.Expr, err error) {
-	vi := tg.scope.Var(e.Value)
+	vi := tg.repl.Var(e.Value)
 	if vi == nil {
 		err = tg.makeErr(e, "identifier not found")
 	}
@@ -206,7 +206,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 }
 
 func (tg *ToGo) transformFunctionCall(vitgt *varinfo, e *f90.FunctionCall) (result ast.Expr, err error) {
-	vi := tg.scope.Var(e.Name)
+	vi := tg.repl.Var(e.Name)
 	if vi != nil {
 		// Check if this is a declared variable (COMMON block array access)
 		args, err := tg.transformExprSlice(_tgtInt32, nil, e.Args)
@@ -253,10 +253,10 @@ func (tg *ToGo) transformArrayRef(vitgt *varinfo, e *f90.ArrayRef) (result ast.E
 	isRanged := e.IsRanged()
 	if isRanged && len(e.Subscripts) == 1 {
 		// Substring access: str(2:4) → str.Substring(start, end)
-		args, err := tg.transformRangeExprToArgs(e.Subscripts[0].(*f90.RangeExpr), tg.scope.Var(e.Name))
+		args, err := tg.transformRangeExprToArgs(e.Subscripts[0].(*f90.RangeExpr), tg.repl.Var(e.Name))
 		return tg.astMethodCall(e.Name, "Substring", args...), err
 	}
-	vi := tg.scope.Var(e.Name)
+	vi := tg.repl.Var(e.Name)
 	// Regular element access: arr(i) → arr.At(indices...)
 	var args []ast.Expr
 	for _, expr := range e.Subscripts {
@@ -273,7 +273,7 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 	if fexpr.Base != nil {
 		return dst, tg.makeErr(fexpr, "chained ArrayRef assignment not yet implemented")
 	}
-	vitgt := tg.scope.Var(fexpr.Name)
+	vitgt := tg.repl.Var(fexpr.Name)
 	switch vitgt.decl.Type.Token {
 	case f90token.CHARACTER:
 		return tg.transformSetCharacterArray(dst, fexpr, rhs)
@@ -292,7 +292,7 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 }
 
 func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs ast.Expr) (_ []ast.Stmt, err error) {
-	vi := tg.scope.Var(fexpr.Name)
+	vi := tg.repl.Var(fexpr.Name)
 	dim := vi.decl.Dimension()
 	isRanged := fexpr.IsRanged()
 	if dim != nil || isRanged && len(fexpr.Subscripts) > 1 || fexpr.Base != nil {
@@ -364,7 +364,7 @@ func (tg *ToGo) inferExprType(vitgt *varinfo, expr f90.Expression) (vi *varinfo)
 	case *f90.LogicalLiteral:
 		vi = _tgtBool
 	case *f90.Identifier:
-		vi = tg.scope.Var(e.Value)
+		vi = tg.repl.Var(e.Value)
 	case *f90.BinaryExpr:
 		return promoteTypes(tg.inferExprType(vitgt, e.Left), tg.inferExprType(vitgt, e.Right))
 	case *f90.UnaryExpr:
@@ -372,7 +372,7 @@ func (tg *ToGo) inferExprType(vitgt *varinfo, expr f90.Expression) (vi *varinfo)
 	case *f90.ParenExpr:
 		return tg.inferExprType(vitgt, e.Expr)
 	case *f90.ArrayRef:
-		vi = tg.scope.Var(e.Name)
+		vi = tg.repl.Var(e.Name)
 	case *f90.FunctionCall:
 		// Check user-defined functions first
 		fn := tg.ContainedOrExtern(e.Name)
@@ -381,7 +381,7 @@ func (tg *ToGo) inferExprType(vitgt *varinfo, expr f90.Expression) (vi *varinfo)
 		} else if in := getIntrinsic(e.Name, len(e.Args)); in != nil {
 			vi = in.inferReturnType(vitgt)
 		} else {
-			vi = tg.scope.Var(e.Name) // Maybe an ambiguous function call (COMMON array access)
+			vi = tg.repl.Var(e.Name) // Maybe an ambiguous function call (COMMON array access)
 		}
 	case *f90.ArrayConstructor:
 		if len(e.Values) > 0 {
