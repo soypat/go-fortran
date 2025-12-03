@@ -137,7 +137,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 	rightType := tg.inferExprType(vitgt, e.Right)
 	promotion := tg.repl.promote(leftType, rightType)
 	if promotion == 0 {
-		return nil, fmt.Errorf("cant promote %s to %s", leftType.val.tok, rightType.val.tok)
+		return nil, tg.makeErr(e, fmt.Sprintf("cant promote %s to %s %q", leftType.val.tok, rightType.val.tok, e.AppendString(nil)))
 	}
 
 	left, err := tg.transformExpression(vitgt, e.Left)

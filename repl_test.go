@@ -250,3 +250,50 @@ func minInt(vals ...int64) *f90.FunctionCall {
 func binLogical(op f90token.Token, l, r bool) *f90.BinaryExpr {
 	return &f90.BinaryExpr{Op: op, Left: &f90.LogicalLiteral{Value: l}, Right: &f90.LogicalLiteral{Value: r}}
 }
+
+func TestREPL_InferType(t *testing.T) {
+	tests := []struct {
+		expr f90.Expression
+		want f90token.Token
+	}{
+		// Literals
+		0: {exprInt(42), f90token.INTEGER},
+		1: {exprFloat(3.14), f90token.REAL},
+		2: {exprDouble(2.718), f90token.DOUBLEPRECISION},
+		3: {&f90.LogicalLiteral{Value: true}, f90token.LOGICAL},
+		4: {&f90.StringLiteral{Value: "hello"}, f90token.CHARACTER},
+		// Unary
+		5: {&f90.UnaryExpr{Op: f90token.Minus, Operand: exprInt(5)}, f90token.INTEGER},
+		6: {&f90.UnaryExpr{Op: f90token.NOT, Operand: &f90.LogicalLiteral{Value: true}}, f90token.LOGICAL},
+		// Binary arithmetic - type promotion
+		7:  {binInt(f90token.Plus, 1, 2), f90token.INTEGER},
+		8:  {binFloat(f90token.Plus, 1.0, 2.0), f90token.REAL},
+		9:  {binMixed(f90token.Plus, 1, 2.0), f90token.REAL},
+		10: {binDouble(f90token.Plus, 1.0, 2.0), f90token.DOUBLEPRECISION},
+		// Comparisons → LOGICAL
+		11: {binInt(f90token.EQ, 1, 2), f90token.LOGICAL},
+		12: {binInt(f90token.LT, 1, 2), f90token.LOGICAL},
+		13: {binFloat(f90token.GE, 1.0, 2.0), f90token.LOGICAL},
+		// Logical ops → LOGICAL
+		14: {binLogical(f90token.AND, true, false), f90token.LOGICAL},
+		// Intrinsics
+		15: {intrinsicF(4.0, "SQRT"), f90token.REAL},
+		16: {intrinsicF(4.0, "REAL"), f90token.REAL},
+		17: {intrinsicF(4.0, "DBLE"), f90token.DOUBLEPRECISION},
+		18: {intrinsicF(4.0, "INT"), f90token.INTEGER},
+		// Paren
+		19: {&f90.ParenExpr{Expr: exprInt(5)}, f90token.INTEGER},
+	}
+	var r REPL
+	for i, test := range tests {
+		var vi varinfo
+		err := r.InferType(&vi, test.expr)
+		if err != nil {
+			t.Fatalf("%d: %s", i, err)
+		}
+		got := vi.val.tok
+		if got != test.want {
+			t.Errorf("%d: got %v, want %v", i, got, test.want)
+		}
+	}
+}

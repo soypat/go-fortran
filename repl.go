@@ -183,6 +183,13 @@ func (repl *REPL) Eval(dst *varinfo, expr f90.Expression) (err error) {
 	return err
 }
 
+// InferType infers the type of expr without evaluating it.
+// Sets dst.decl to indicate the result type.
+func (repl *REPL) InferType(dst *varinfo, expr f90.Expression) error {
+	*dst = varinfo{}
+	return repl.Eval(dst, expr)
+}
+
 func (repl *REPL) evalUnary(dst *varinfo, e *f90.UnaryExpr) error {
 	err := repl.Eval(dst, e.Operand)
 	if err != nil {
@@ -406,7 +413,7 @@ func (repl *REPL) evalMin(dst *varinfo, args []f90.Expression) error {
 // Helper methods for creating varinfo with values
 func (repl *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
 	if dst.decl == nil {
-		dst.decl = src.decl
+		// Declaration of dst should remain unset. Conceptually it's declaration is ephemeral, part of a REPL evaluation.
 	} else if dst.decl.Type.Token != src.decl.Type.Token {
 		return fmt.Errorf("destination variable %q of type %s not assignable with type %s", dst.Identifier(), dst.decl.Type.Token.String(), src.decl.Type.Token.String())
 	}
@@ -417,6 +424,13 @@ func (repl *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
 // promote returns the resulting promoted type of a binary operation between two types.
 func (repl *REPL) promote(dst, src *varinfo) (promotion f90token.Token) {
 	switch dst.val.tok {
+	case 0:
+		// dst unset, use src type (prefer val.tok, fall back to decl)
+		if src.val.tok != 0 {
+			promotion = src.val.tok
+		} else if src.decl != nil {
+			promotion = src.decl.Type.Token
+		}
 	case f90token.DOUBLEPRECISION:
 		if src.val.IsInt() || src.val.Floatlike() {
 			promotion = f90token.DOUBLEPRECISION
