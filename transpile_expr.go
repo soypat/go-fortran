@@ -81,8 +81,20 @@ func (tg *ToGo) transformExprIdentifer(vitgt *varinfo, e *f90.Identifier) (resul
 	vi := tg.repl.Var(e.Value)
 	if vi == nil {
 		err = tg.makeErr(e, "identifier not found")
+		return nil, err
 	}
-	result = ast.NewIdent(vi.Identifier()) // TODO: transform identifier to target type if necessary.
+
+	// Check if this identifier is in a COMMON block
+	if vi.common != "" {
+		blockName := strings.ToUpper(vi.common)
+		varName := strings.ToUpper(vi.Identifier())
+		result = &ast.SelectorExpr{
+			X:   ast.NewIdent(blockName),
+			Sel: ast.NewIdent(varName),
+		}
+	} else {
+		result = ast.NewIdent(vi.Identifier())
+	}
 	return result, err
 }
 
@@ -258,13 +270,17 @@ func (tg *ToGo) transformArrayRef(vitgt *varinfo, e *f90.ArrayRef) (result ast.E
 	if e.Base != nil {
 		return nil, tg.makeErr(e, "chained ArrayRef expression not yet implemented")
 	}
+	vi := tg.repl.Var(e.Name)
 	isRanged := e.IsRanged()
 	if isRanged && len(e.Subscripts) == 1 {
 		// Substring access: str(2:4) → str.Substring(start, end)
-		args, err := tg.transformRangeExprToArgs(e.Subscripts[0].(*f90.RangeExpr), tg.repl.Var(e.Name))
-		return tg.astMethodCall(e.Name, "Substring", args...), err
+		args, err := tg.transformRangeExprToArgs(e.Subscripts[0].(*f90.RangeExpr), vi)
+		receiver := tg.astVarExpr(vi)
+		return &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("Substring")},
+			Args: args,
+		}, err
 	}
-	vi := tg.repl.Var(e.Name)
 	// Regular element access: arr(i) → arr.At(indices...)
 	var args []ast.Expr
 	for _, expr := range e.Subscripts {
@@ -274,7 +290,24 @@ func (tg *ToGo) transformArrayRef(vitgt *varinfo, e *f90.ArrayRef) (result ast.E
 		}
 		args = append(args, arg)
 	}
-	return tg.astMethodCall(vi.Identifier(), "At", args...), nil
+	receiver := tg.astVarExpr(vi)
+	return &ast.CallExpr{
+		Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("At")},
+		Args: args,
+	}, nil
+}
+
+// astVarExpr returns the AST expression for a variable, handling COMMON block access.
+func (tg *ToGo) astVarExpr(vi *varinfo) ast.Expr {
+	if vi.common != "" {
+		blockName := strings.ToUpper(vi.common)
+		varName := strings.ToUpper(vi.Identifier())
+		return &ast.SelectorExpr{
+			X:   ast.NewIdent(blockName),
+			Sel: ast.NewIdent(varName),
+		}
+	}
+	return ast.NewIdent(vi.Identifier())
 }
 
 func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs ast.Expr) (_ []ast.Stmt, err error) {
@@ -292,8 +325,12 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 	if err != nil {
 		return dst, err
 	}
+	receiver := tg.astVarExpr(vitgt)
 	gstmt := &ast.ExprStmt{
-		X: tg.astMethodCall(vitgt.Identifier(), "Set", args...),
+		X: &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("Set")},
+			Args: args,
+		},
 	}
 	dst = append(dst, gstmt)
 	return dst, nil
@@ -312,8 +349,12 @@ func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, 
 	}
 
 	args = append(args, rhs)
+	receiver := tg.astVarExpr(vi)
 	gstmt := &ast.ExprStmt{
-		X: tg.astMethodCall(vi.Identifier(), "SetSubstring", args...),
+		X: &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("SetSubstring")},
+			Args: args,
+		},
 	}
 	dst = append(dst, gstmt)
 	return dst, nil

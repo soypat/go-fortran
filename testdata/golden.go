@@ -384,9 +384,9 @@ func LEVEL19() {
 	PRINT_COMMON_VALUES()
 }
 func SET_COMMON_VALUES() {
-	x = 42
-	y = 99
-	z = 3.14159
+	SHARED.X = 42
+	SHARED.Y = 99
+	SHARED.Z = 3.14159
 }
 func PRINT_COMMON_VALUES() {
 }
@@ -548,11 +548,11 @@ func LEVEL27() {
 	result = float32(float64(factor*root3) * float64(ncomp))
 }
 func LEVEL28() {
-	YQR.Set(1.5, 1)
-	SUMXRQ.Set(99.90000000000001, 512)
-	YMNRT.Set(3.14, 2)
-	MATRIX.Set(42.5, 5, 10)
-	COUNTS.Set(42, 50)
+	HOLDRT.YQR.Set(1.5, 1)
+	HOLDRT.SUMXRQ.Set(99.90000000000001, 512)
+	HOLDRT.YMNRT.Set(3.14, 2)
+	HOLDRT.MATRIX.Set(42.5, 5, 10)
+	STATS.COUNTS.Set(42, 50)
 }
 func LEVEL29() {
 	MAT.Set(64, 1, 2)
@@ -627,3 +627,18 @@ func FIBONACCI(n int32) (FIBONACCI int32) {
 	b = 1
 	FIBONACCI = b
 }
+
+var HOLDRT = struct {
+	YQR    intrinsic.Array[float32]
+	SUMXRQ intrinsic.Array[float32]
+	YMNRT  intrinsic.Array[float32]
+	MATRIX intrinsic.Array[float32]
+}{YQR: intrinsic.NewArray[float32](nil, 256), SUMXRQ: intrinsic.NewArray[float32](nil, 512), YMNRT: intrinsic.NewArray[float32](nil, 3), MATRIX: intrinsic.NewArray[float32](nil, 10, 20)}
+var SHARED struct {
+	x int32
+	y int32
+	z float32
+}
+var STATS = struct {
+	COUNTS intrinsic.Array[int32]
+}{COUNTS: intrinsic.NewArray[int32](nil, 100)}

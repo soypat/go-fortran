@@ -58,7 +58,7 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 		},
 	}
 
-	// Start with main function
+	// Start with import and main function
 	decls := []ast.Decl{
 		&ast.GenDecl{
 			Tok: token.IMPORT,
@@ -71,6 +71,8 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 	if err != nil {
 		return decls, err
 	}
+	// Append COMMON block declarations at start.
+
 	// Transform contained procedures (CONTAINS section)
 	for _, contained := range prog.Contains {
 		switch c := contained.(type) {
@@ -94,6 +96,7 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 			return decls, fmt.Errorf("unknown CONTAINS declaration: %T", c)
 		}
 	}
+	decls = tg.AppendCommonDecls(decls)
 	return decls, nil
 }
 
@@ -116,6 +119,7 @@ func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.Fun
 	if err != nil {
 		return nil, err
 	}
+	// Collect COMMON blocks from this procedure's scope
 	var body []f90.Statement
 	var returned *ast.FieldList
 	if fn, ok := subroutineOrFunc.(*f90.Function); ok {
@@ -381,7 +385,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		targetVinfo = tg.repl.Var(tgt.Name)
 	case *f90.Identifier:
 		targetVinfo = tg.repl.Var(tgt.Value)
-		lhs = tg.astIdent(tgt.Value)
+		lhs = tg.astVarExpr(targetVinfo)
 		if binop, ok := stmt.Value.(*f90.BinaryExpr); ok && binop.Op == f90token.StringConcat {
 			return tg.transformStringConcat(dst, targetVinfo._varname, binop)
 		}
@@ -403,8 +407,12 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		return dst, err
 	}
 	if targetVinfo.decl.Type.Token == f90token.CHARACTER {
+		receiver := tg.astVarExpr(targetVinfo)
 		stmt := &ast.ExprStmt{
-			X: tg.astMethodCall(targetVinfo.Identifier(), "SetFromString", rhs),
+			X: &ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("SetFromString")},
+				Args: []ast.Expr{rhs},
+			},
 		}
 		dst = append(dst, stmt)
 		return dst, nil
@@ -474,6 +482,20 @@ func (tg *ToGo) fortranTypeToGoWithKind(decl *f90.DeclEntity) (goType ast.Expr) 
 		goType = ast.NewIdent("")
 	}
 	return goType
+}
+
+func (tg *ToGo) goType(v *varinfo) ast.Expr {
+	dim := v.Dimensions()
+	if dim == nil || len(dim.Bounds) == 0 {
+		goType := tg.baseGotype(v.typeToken(), tg.resolveKind(v))
+		if goType == nil {
+			tg.makeErrWithPos(v.decl.Position, "unable to determine goType from: "+v.decl.Name)
+			return nil
+		}
+		return goType
+	}
+	return intrinsicSelGeneric("Array")(v)
+
 }
 
 func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType *ast.Ident) {
@@ -598,4 +620,84 @@ func sanitizeIdent(name string) string {
 		return strings.ToUpper(name[:1]) + name[1:]
 	}
 	return name
+}
+
+// AppendCommonDecls appends COMMON block struct declarations to dst.
+// Should be called after all program units have been processed.
+func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
+	for _, block := range tg.repl.commonblocks {
+		// fmt.Println("DECL", block.Name)
+		if len(block.fields) == 0 {
+			continue
+		}
+		blockIdent := ast.NewIdent(block.Name)
+		var compositeLitElts []ast.Expr
+		structType := &ast.StructType{Fields: &ast.FieldList{}}
+		for i := range block.fields {
+			v := &block.fields[i]
+			goType := tg.goType(v) // TODO: needs to be a full array type.
+			elemType := tg.baseGotype(v.typeToken(), tg.resolveKind(v))
+			fieldIdent := ast.NewIdent(v.Identifier())
+			structType.Fields.List = append(structType.Fields.List, &ast.Field{
+				Names: []*ast.Ident{fieldIdent},
+				Type:  goType,
+			})
+
+			arrspec := v.Dimensions()
+			if arrspec == nil || len(arrspec.Bounds) == 0 {
+				continue
+			}
+			// goType = &ast.StarExpr{X: goType}
+			args := []ast.Expr{ast.NewIdent("nil")} // First argument is array initializer, we always initialize to zeroes.
+			for _, bound := range arrspec.Bounds {
+				if bound.Upper != nil {
+					size, err := tg.transformExpression(nil, bound.Upper)
+					if err != nil {
+						continue
+					}
+					args = append(args, size)
+				}
+			}
+			compositeLitElts = append(compositeLitElts, &ast.KeyValueExpr{
+				Key: fieldIdent,
+				Value: &ast.CallExpr{
+					Fun: &ast.IndexExpr{
+						X:     _astFnNewArray,
+						Index: elemType,
+					},
+					Args: args,
+				},
+			})
+		}
+		// Create variable declaration
+		var valueSpec *ast.ValueSpec
+		if len(compositeLitElts) > 0 {
+			// var BLOCKNAME = struct{...}{field: value, ...}
+			valueSpec = &ast.ValueSpec{
+				Names: []*ast.Ident{blockIdent},
+				Values: []ast.Expr{
+					&ast.CompositeLit{
+						Type: structType,
+						Elts: compositeLitElts,
+					},
+				},
+			}
+		} else {
+			// var BLOCKNAME struct{...}
+			valueSpec = &ast.ValueSpec{
+				Names: []*ast.Ident{blockIdent},
+				Type:  structType,
+			}
+		}
+		dst = append(dst, &ast.GenDecl{
+			Tok:   token.VAR,
+			Specs: []ast.Spec{valueSpec},
+		})
+	}
+
+	return dst
+}
+
+func (tg *ToGo) resolveKind(v *varinfo) int {
+	return 0
 }

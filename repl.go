@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	f90 "github.com/soypat/go-fortran/ast"
@@ -43,11 +44,68 @@ func (v *Value) Float() float64 {
 	return v.f64
 }
 
+// commonBlockInfo tracks variables in a COMMON block for transpilation.
+type commonBlockInfo struct {
+	Name   string // COMMON block name (empty string for blank COMMON)
+	fields []varinfo
+}
+
+func (cb *commonBlockInfo) getField(name string) *varinfo {
+	for i := range cb.fields {
+		if strings.EqualFold(cb.fields[i]._varname, name) {
+			return &cb.fields[i]
+		}
+	}
+	return nil
+}
+
+func (cb *commonBlockInfo) addField(v *varinfo) {
+	if cb.getField(v._varname) != nil {
+		panic("field already exists: " + v._varname)
+	}
+	cb.fields = append(cb.fields, *v)
+}
+
 type REPL struct {
 	scope             ParserUnitData // currentScope variable data.
 	_extern           []*ParserUnitData
 	_contains         []*ParserUnitData
-	noValueResolution bool // When true, Eval skips value computation (type inference only)
+	commonblocks      []commonBlockInfo // COMMON block name -> info (file-level, not reset per procedure)
+	noValueResolution bool              // When true, Eval skips value computation (type inference only)
+}
+
+// collectCommonBlocks scans program unit variables for COMMON block membership
+// and builds the commonBlocks map with field types and array specs.
+func (tg *REPL) collectCommonBlocks(vars []varinfo) {
+	for i := range vars {
+		v := &vars[i]
+		if !v.flags.HasAny(flagCommon) {
+			continue // Not in a COMMON block
+		}
+		block := tg.getCommon(v.common)
+		if block == nil {
+			tg.commonblocks = append(tg.commonblocks, commonBlockInfo{Name: v.common})
+			block = &tg.commonblocks[len(tg.commonblocks)-1]
+			block.addField(v)
+		} else {
+			field := block.getField(v.Identifier())
+			if field == nil {
+				block.addField(v)
+			}
+		}
+	}
+	slices.SortStableFunc(tg.commonblocks, func(a, b commonBlockInfo) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+}
+
+func (tg *REPL) getCommon(name string) *commonBlockInfo {
+	for i := range tg.commonblocks {
+		if strings.EqualFold(tg.commonblocks[i].Name, name) {
+			return &tg.commonblocks[i]
+		}
+	}
+	return nil
 }
 
 func (repl *REPL) Var(name string) *varinfo {
@@ -121,6 +179,7 @@ func (repl *REPL) SetScope(pu f90.ProgramUnit) error {
 		v.common = sanitizeIdent(v.common)
 		v.pointee = sanitizeIdent(v.pointee)
 	}
+	repl.collectCommonBlocks(repl.scope.vars)
 
 	var toAdd []f90.ProgramUnit
 	switch unit := pu.(type) {
@@ -144,6 +203,7 @@ func (repl *REPL) SetScope(pu f90.ProgramUnit) error {
 		}
 		repl._contains = append(repl._contains, pu)
 	}
+
 	return nil
 }
 
