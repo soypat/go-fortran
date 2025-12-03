@@ -26,6 +26,8 @@ func (v *Value) Token() f90token.Token { return v.tok }
 func (v *Value) StringValue() string   { return v.s }
 func (v *Value) Bool() bool            { return v.b }
 func (v *Value) Int() int64            { return v.i64 }
+func (v *Value) Floatlike() bool       { return v.tok == f90token.REAL || v.tok == f90token.DOUBLEPRECISION }
+func (v *Value) IsInt() bool           { return v.tok == f90token.INTEGER }
 func (v *Value) Float() float64 {
 	if v.tok == f90token.INTEGER {
 		return float64(v.i64)
@@ -135,21 +137,23 @@ func (tg *REPL) SetScope(pu f90.ProgramUnit) error {
 func (r *REPL) Eval(dst *varinfo, expr f90.Expression) (err error) {
 	switch e := expr.(type) {
 	case *f90.IntegerLiteral:
-		err = r.makeInt(dst, e.Value)
+		err = r.assignInt(dst, e.Value)
 	case *f90.RealLiteral:
 		if strings.ContainsAny(e.Raw, "Dd") {
-			err = r.makeFloat64(dst, e.Value)
+			err = r.assignFloat64(dst, e.Value)
 		} else {
-			err = r.makeFloat32(dst, e.Value)
+			err = r.assignFloat32(dst, e.Value)
 		}
 	case *f90.LogicalLiteral:
-		err = r.makeBool(dst, e.Value)
+		err = r.assignBool(dst, e.Value)
 	case *f90.StringLiteral:
-		err = r.makeString(dst, e.Value)
+		err = r.assignString(dst, e.Value)
 	case *f90.Identifier:
 		vi := r.Var(e.Value)
 		if vi == nil {
 			err = fmt.Errorf("var %s undefined", e.Value)
+		} else {
+			*dst = *vi
 		}
 	case *f90.UnaryExpr:
 		err = r.evalUnary(dst, e)
@@ -174,13 +178,13 @@ func (r *REPL) evalUnary(dst *varinfo, e *f90.UnaryExpr) error {
 	case f90token.Plus:
 		return nil // No-op.
 	case f90token.Minus:
-		if r.isInt(dst) {
-			err = r.makeInt(dst, -dst.val.i64)
+		if dst.val.IsInt() {
+			err = r.assignInt(dst, -dst.val.i64)
 		} else {
-			err = r.makeFloatLike(dst, dst, -dst.val.f64)
+			err = r.assignFloatLike(dst, dst, -dst.val.f64)
 		}
 	case f90token.NOT:
-		err = r.makeBool(dst, !dst.val.b)
+		err = r.assignBool(dst, !dst.val.b)
 	default:
 		err = fmt.Errorf("unsupported unary operator %q: %v", e.AppendString(nil), e.Op)
 	}
@@ -200,23 +204,23 @@ func (r *REPL) evalBinary(dst *varinfo, e *f90.BinaryExpr) error {
 	switch e.Op {
 	// Logical operations
 	case f90token.AND:
-		err = r.makeBool(dst, left.val.b && right.val.b)
+		err = r.assignBool(dst, left.val.b && right.val.b)
 	case f90token.OR:
-		err = r.makeBool(dst, left.val.b || right.val.b)
+		err = r.assignBool(dst, left.val.b || right.val.b)
 
 	// Comparison operations
 	case f90token.EQ, f90token.EqEq:
-		err = r.makeBool(dst, left.val.Float() == right.val.Float())
+		err = r.assignBool(dst, left.val.Float() == right.val.Float())
 	case f90token.NE, f90token.NotEquals:
-		err = r.makeBool(dst, left.val.Float() != right.val.Float())
+		err = r.assignBool(dst, left.val.Float() != right.val.Float())
 	case f90token.LT, f90token.Less:
-		err = r.makeBool(dst, left.val.Float() < right.val.Float())
+		err = r.assignBool(dst, left.val.Float() < right.val.Float())
 	case f90token.LE, f90token.LessEq:
-		err = r.makeBool(dst, left.val.Float() <= right.val.Float())
+		err = r.assignBool(dst, left.val.Float() <= right.val.Float())
 	case f90token.GT, f90token.Greater:
-		err = r.makeBool(dst, left.val.Float() > right.val.Float())
+		err = r.assignBool(dst, left.val.Float() > right.val.Float())
 	case f90token.GE, f90token.GreaterEq:
-		err = r.makeBool(dst, left.val.Float() >= right.val.Float())
+		err = r.assignBool(dst, left.val.Float() >= right.val.Float())
 	default:
 		// Integer arithmetic (both operands are integers)
 		if left.val.Token() == f90token.INTEGER && right.val.Token() == f90token.INTEGER {
@@ -250,7 +254,7 @@ func (r *REPL) evalIntBinary(dst *varinfo, l int64, op f90token.Token, ri int64)
 	default:
 		return fmt.Errorf("unsupported int op: %v", op)
 	}
-	return r.makeInt(dst, result)
+	return r.assignInt(dst, result)
 }
 
 func (r *REPL) evalFloatBinary(dst, typ *varinfo, l float64, op f90token.Token, rf float64) error {
@@ -272,7 +276,7 @@ func (r *REPL) evalFloatBinary(dst, typ *varinfo, l float64, op f90token.Token, 
 	default:
 		return fmt.Errorf("unsupported float op: %v", op)
 	}
-	return r.makeFloatLike(dst, typ, result)
+	return r.assignFloatLike(dst, typ, result)
 }
 
 func (r *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
@@ -316,21 +320,21 @@ func (r *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
 		isFn0 = false
 	}
 	if isFn0 {
-		return r.makeFloatLike(dst, &arg0, result)
+		return r.assignFloatLike(dst, &arg0, result)
 	}
 	switch name {
 	case "REAL":
-		err = r.makeFloat32(dst, f0)
+		err = r.assignFloat32(dst, f0)
 	case "DBLE":
-		err = r.makeFloat64(dst, f0)
+		err = r.assignFloat64(dst, f0)
 	case "INT":
-		err = r.makeInt(dst, int64(f0))
+		err = r.assignInt(dst, int64(f0))
 	case "NINT":
-		err = r.makeInt(dst, int64(math.Round(f0)))
+		err = r.assignInt(dst, int64(math.Round(f0)))
 	case "FLOOR":
-		err = r.makeFloatLike(dst, &arg0, math.Floor(f0))
+		err = r.assignFloatLike(dst, &arg0, math.Floor(f0))
 	case "CEILING":
-		err = r.makeFloatLike(dst, &arg0, math.Ceil(f0))
+		err = r.assignFloatLike(dst, &arg0, math.Ceil(f0))
 	case "MAX":
 		err = r.evalMax(dst, e.Args)
 	case "MIN":
@@ -396,7 +400,27 @@ func (r *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
 	return nil
 }
 
-func (r *REPL) makeInt(dst *varinfo, v int64) error {
+func (r *REPL) canAssign(dst, src *varinfo) (promotion f90token.Token) {
+	switch dst.val.tok {
+	case f90token.DOUBLEPRECISION:
+		if src.val.IsInt() || src.val.Floatlike() {
+			promotion = f90token.DOUBLEPRECISION
+		}
+	case f90token.REAL:
+		if src.val.IsInt() || src.val.tok == f90token.REAL {
+			promotion = f90token.REAL
+		} else if src.val.tok == f90token.DOUBLEPRECISION {
+			promotion = f90token.DOUBLEPRECISION
+		}
+	case f90token.INTEGER:
+		if src.val.IsInt() {
+			promotion = f90token.INTEGER
+		}
+	}
+	return promotion
+}
+
+func (r *REPL) assignInt(dst *varinfo, v int64) error {
 	err := r.prepAssignment(dst, _tgtInt32)
 	if err != nil {
 		return err
@@ -405,7 +429,7 @@ func (r *REPL) makeInt(dst *varinfo, v int64) error {
 	return nil
 }
 
-func (r *REPL) makeFloat32(dst *varinfo, v float64) error {
+func (r *REPL) assignFloat32(dst *varinfo, v float64) error {
 	err := r.prepAssignment(dst, _tgtFloat32)
 	if err != nil {
 		return err
@@ -414,7 +438,7 @@ func (r *REPL) makeFloat32(dst *varinfo, v float64) error {
 	return nil
 }
 
-func (r *REPL) makeFloat64(dst *varinfo, v float64) error {
+func (r *REPL) assignFloat64(dst *varinfo, v float64) error {
 	err := r.prepAssignment(dst, _tgtFloat64)
 	if err != nil {
 		return err
@@ -423,7 +447,7 @@ func (r *REPL) makeFloat64(dst *varinfo, v float64) error {
 	return nil
 }
 
-func (r *REPL) makeBool(dst *varinfo, v bool) error {
+func (r *REPL) assignBool(dst *varinfo, v bool) error {
 	err := r.prepAssignment(dst, _tgtBool)
 	if err != nil {
 		return err
@@ -432,7 +456,7 @@ func (r *REPL) makeBool(dst *varinfo, v bool) error {
 	return nil
 }
 
-func (r *REPL) makeString(dst *varinfo, v string) error {
+func (r *REPL) assignString(dst *varinfo, v string) error {
 	err := r.prepAssignment(dst, _tgtChar)
 	if err != nil {
 		return err
@@ -441,34 +465,13 @@ func (r *REPL) makeString(dst *varinfo, v string) error {
 	return nil
 }
 
-func (r *REPL) makeFloatLike(dst, template *varinfo, v float64) error {
-
-	vi := &varinfo{decl: template.decl}
-	vi.val.f64 = v
-	vi.val.tok = template.decl.Type.Token
+func (r *REPL) assignFloatLike(dst, template *varinfo, v float64) error {
+	dst.val.tok = r.canAssign(dst, template)
+	dst.val.f64 = v
 	return nil
 }
 
 // Type checking helpers
-
-func (r *REPL) isTok(vi *varinfo, tok f90token.Token) bool {
-	return vi != nil && vi.decl != nil && vi.decl.Type.Token == tok
-}
-
-func (r *REPL) isInt(vi *varinfo) bool {
-	return r.isTok(vi, f90token.INTEGER)
-}
-
-func (r *REPL) isFloat(vi *varinfo) bool {
-	return r.isTok(vi, f90token.REAL) || r.isTok(vi, f90token.DOUBLEPRECISION)
-}
-
-func (r *REPL) asFloat(vi *varinfo) float64 {
-	if r.isInt(vi) {
-		return float64(vi.val.i64)
-	}
-	return vi.val.f64
-}
 
 // promoteTypes returns the wider of two numeric types (Fortran type promotion).
 func (r *REPL) promoteTypes(a, b *varinfo) *varinfo {
