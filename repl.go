@@ -43,9 +43,10 @@ func (v *Value) Float() float64 {
 }
 
 type REPL struct {
-	scope     ParserUnitData // currentScope variable data.
-	_extern   []*ParserUnitData
-	_contains []*ParserUnitData
+	scope             ParserUnitData // currentScope variable data.
+	_extern           []*ParserUnitData
+	_contains         []*ParserUnitData
+	noValueResolution bool // When true, Eval skips value computation (type inference only)
 }
 
 func (repl *REPL) Var(name string) *varinfo {
@@ -177,6 +178,8 @@ func (repl *REPL) Eval(dst *varinfo, expr f90.Expression) (err error) {
 		err = repl.Eval(dst, e.Expr)
 	case *f90.FunctionCall:
 		err = repl.evalIntrinsic(dst, e)
+	case *f90.ArrayConstructor:
+		err = repl.evalArrayConstructor(dst, e)
 	default:
 		err = fmt.Errorf("unsupported expression: %T", expr)
 	}
@@ -184,10 +187,14 @@ func (repl *REPL) Eval(dst *varinfo, expr f90.Expression) (err error) {
 }
 
 // InferType infers the type of expr without evaluating it.
-// Sets dst.decl to indicate the result type.
+// Sets dst.val.tok to the result type.
 func (repl *REPL) InferType(dst *varinfo, expr f90.Expression) error {
 	*dst = varinfo{}
-	return repl.Eval(dst, expr)
+	prev := repl.noValueResolution
+	repl.noValueResolution = true
+	err := repl.Eval(dst, expr)
+	repl.noValueResolution = prev
+	return err
 }
 
 func (repl *REPL) evalUnary(dst *varinfo, e *f90.UnaryExpr) error {
@@ -257,6 +264,9 @@ func (repl *REPL) evalBinary(dst *varinfo, e *f90.BinaryExpr) error {
 }
 
 func (repl *REPL) evalIntBinary(dst *varinfo, l int64, op f90token.Token, ri int64) error {
+	if repl.noValueResolution {
+		return repl.assignInt(dst, 0)
+	}
 	var result int64
 	switch op {
 	case f90token.Plus:
@@ -279,6 +289,9 @@ func (repl *REPL) evalIntBinary(dst *varinfo, l int64, op f90token.Token, ri int
 }
 
 func (repl *REPL) evalFloatBinary(dst, typ *varinfo, l float64, op f90token.Token, rf float64) error {
+	if repl.noValueResolution {
+		return repl.assignFloatLike(dst, typ, 0)
+	}
 	var result float64
 	switch op {
 	case f90token.Plus:
@@ -303,7 +316,7 @@ func (repl *REPL) evalFloatBinary(dst, typ *varinfo, l float64, op f90token.Toke
 func (repl *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
 	name := strings.ToUpper(e.Name)
 	if len(e.Args) == 0 {
-		return fmt.Errorf("%s requires arguments", name)
+		return fmt.Errorf("%s intrinsic requires arguments", name)
 	}
 	var arg0 varinfo
 	err := repl.Eval(&arg0, e.Args[0])
@@ -312,36 +325,33 @@ func (repl *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
 	}
 
 	f0 := arg0.val.Float()
-	var result float64
-	isFn0 := true
+	var fn0 func(float64) float64
 	switch name {
 	case "SQRT":
-		result = math.Sqrt(f0)
+		fn0 = math.Sqrt
 	case "SIN":
-		result = math.Sin(f0)
+		fn0 = math.Sin
 	case "COS":
-		result = math.Cos(f0)
+		fn0 = math.Cos
 	case "TAN":
-		result = math.Tan(f0)
+		fn0 = math.Tan
 	case "ASIN":
-		result = math.Asin(f0)
+		fn0 = math.Asin
 	case "ACOS":
-		result = math.Acos(f0)
+		fn0 = math.Acos
 	case "ATAN":
-		result = math.Atan(f0)
+		fn0 = math.Atan
 	case "EXP":
-		result = math.Exp(f0)
+		fn0 = math.Exp
 	case "LOG":
-		result = math.Log(f0)
+		fn0 = math.Log
 	case "LOG10":
-		result = math.Log10(f0)
+		fn0 = math.Log10
 	case "ABS":
-		result = math.Abs(f0)
-	default:
-		isFn0 = false
+		fn0 = math.Abs
 	}
-	if isFn0 {
-		return repl.assignFloatLike(dst, &arg0, result)
+	if fn0 != nil {
+		return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(fn0, f0))
 	}
 	switch name {
 	case "REAL":
@@ -351,11 +361,11 @@ func (repl *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
 	case "INT":
 		err = repl.assignInt(dst, int64(f0))
 	case "NINT":
-		err = repl.assignInt(dst, int64(math.Round(f0)))
+		err = repl.assignInt(dst, int64(repl.evalFloatFn0(math.Round, f0)))
 	case "FLOOR":
-		err = repl.assignFloatLike(dst, &arg0, math.Floor(f0))
+		err = repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(math.Floor, f0))
 	case "CEILING":
-		err = repl.assignFloatLike(dst, &arg0, math.Ceil(f0))
+		err = repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(math.Ceil, f0))
 	case "MAX":
 		err = repl.evalMax(dst, e.Args)
 	case "MIN":
@@ -366,14 +376,23 @@ func (repl *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
 	return err
 }
 
+func (repl *REPL) evalFloatFn0(fn func(float64) float64, val float64) float64 {
+	if repl.noValueResolution {
+		return 0
+	}
+	return fn(val)
+}
+
 func (repl *REPL) evalMax(dst *varinfo, args []f90.Expression) error {
 	if len(args) == 0 {
 		return errors.New("MAX requires at least one argument")
 	}
-	maxSoFar := dst
-	err := repl.Eval(maxSoFar, args[0])
+	err := repl.Eval(dst, args[0])
 	if err != nil {
 		return err
+	}
+	if repl.noValueResolution {
+		return nil // Type determined from first arg
 	}
 	var next varinfo
 	for _, arg := range args[1:] {
@@ -381,8 +400,8 @@ func (repl *REPL) evalMax(dst *varinfo, args []f90.Expression) error {
 		if err != nil {
 			return err
 		}
-		if next.val.Float() > maxSoFar.val.Float() {
-			*maxSoFar = next
+		if next.val.Float() > dst.val.Float() {
+			*dst = next
 		}
 	}
 	return nil
@@ -392,10 +411,12 @@ func (repl *REPL) evalMin(dst *varinfo, args []f90.Expression) error {
 	if len(args) == 0 {
 		return errors.New("MIN requires at least one argument")
 	}
-	minSoFar := dst
-	err := repl.Eval(minSoFar, args[0])
+	err := repl.Eval(dst, args[0])
 	if err != nil {
 		return err
+	}
+	if repl.noValueResolution {
+		return nil // Type determined from first arg
 	}
 	var next varinfo
 	for _, arg := range args[1:] {
@@ -403,11 +424,20 @@ func (repl *REPL) evalMin(dst *varinfo, args []f90.Expression) error {
 		if err != nil {
 			return err
 		}
-		if next.val.Float() < minSoFar.val.Float() {
-			*minSoFar = next
+		if next.val.Float() < dst.val.Float() {
+			*dst = next
 		}
 	}
 	return nil
+}
+
+func (repl *REPL) evalArrayConstructor(dst *varinfo, e *f90.ArrayConstructor) error {
+	if len(e.Values) == 0 {
+		dst.val.tok = f90token.INTEGER // Default to integer for empty array
+		return nil
+	}
+	// Infer element type from first element
+	return repl.Eval(dst, e.Values[0])
 }
 
 // Helper methods for creating varinfo with values
@@ -423,34 +453,46 @@ func (repl *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
 
 // promote returns the resulting promoted type of a binary operation between two types.
 func (repl *REPL) promote(dst, src *varinfo) (promotion f90token.Token) {
-	switch dst.val.tok {
+	dtok := dst.typeToken()
+	stok := src.typeToken()
+	switch dtok {
 	case 0:
-		// dst unset, use src type (prefer val.tok, fall back to decl)
-		if src.val.tok != 0 {
-			promotion = src.val.tok
-		} else if src.decl != nil {
-			promotion = src.decl.Type.Token
-		}
+		promotion = stok
 	case f90token.DOUBLEPRECISION:
-		if src.val.IsInt() || src.val.Floatlike() {
+		if stok == f90token.INTEGER || stok == f90token.REAL || stok == f90token.DOUBLEPRECISION {
 			promotion = f90token.DOUBLEPRECISION
 		}
 	case f90token.REAL:
-		if src.val.IsInt() || src.val.tok == f90token.REAL {
+		if stok == f90token.INTEGER || stok == f90token.REAL {
 			promotion = f90token.REAL
-		} else if src.val.tok == f90token.DOUBLEPRECISION {
+		} else if stok == f90token.DOUBLEPRECISION {
 			promotion = f90token.DOUBLEPRECISION
 		}
 	case f90token.INTEGER:
-		if src.val.IsInt() {
+		if stok == f90token.INTEGER {
 			promotion = f90token.INTEGER
+		} else if stok == f90token.REAL {
+			promotion = f90token.REAL
+		} else if stok == f90token.DOUBLEPRECISION {
+			promotion = f90token.DOUBLEPRECISION
 		}
 	default:
-		if src.val.tok == dst.val.tok {
-			promotion = src.val.tok
+		if stok == dtok {
+			promotion = stok
 		}
 	}
 	return promotion
+}
+
+// typeToken returns the effective type token (prefers val.tok, falls back to decl).
+func (v *varinfo) typeToken() f90token.Token {
+	if v.val.tok != 0 {
+		return v.val.tok
+	}
+	if v.decl != nil {
+		return v.decl.Type.Token
+	}
+	return 0
 }
 
 func (repl *REPL) assignInt(dst *varinfo, v int64) error {

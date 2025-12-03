@@ -133,9 +133,14 @@ func (tg *ToGo) transformUnaryExpr(vitgt *varinfo, e *f90.UnaryExpr) (result ast
 
 func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result ast.Expr, err error) {
 	// Infer types for type promotion
-	leftType := tg.inferExprType(vitgt, e.Left)
-	rightType := tg.inferExprType(vitgt, e.Right)
-	promotion := tg.repl.promote(leftType, rightType)
+	var leftType, rightType varinfo
+	if err := tg.repl.InferType(&leftType, e.Left); err != nil {
+		return nil, err
+	}
+	if err := tg.repl.InferType(&rightType, e.Right); err != nil {
+		return nil, err
+	}
+	promotion := tg.repl.promote(&leftType, &rightType)
 	if promotion == 0 {
 		return nil, tg.makeErr(e, fmt.Sprintf("cant promote %s to %s %q", leftType.val.tok, rightType.val.tok, e.AppendString(nil)))
 	}
@@ -164,8 +169,8 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 	case f90token.DoubleStar:
 		// Power operator: x ** y → math.Pow(x, y)
 		// math.Pow requires float64 arguments
-		left = tg.wrapConversion(vitgt.decl.Type.Token, leftType, left)
-		right = tg.wrapConversion(vitgt.decl.Type.Token, rightType, right)
+		left = tg.wrapConversion(vitgt.decl.Type.Token, &leftType, left)
+		right = tg.wrapConversion(vitgt.decl.Type.Token, &rightType, right)
 		sel := intrinsicSel("POW")
 		return &ast.CallExpr{
 			Fun:  sel(vitgt),
@@ -197,8 +202,8 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 
 	// Promote operands to common type for arithmetic/comparison ops
 	if needsPromotion {
-		left = tg.wrapConversion(promotion, leftType, left)
-		right = tg.wrapConversion(promotion, rightType, right)
+		left = tg.wrapConversion(promotion, &leftType, left)
+		right = tg.wrapConversion(promotion, &rightType, right)
 	}
 
 	return &ast.BinaryExpr{
@@ -351,75 +356,15 @@ func (tg *ToGo) transformExprSlice(vitgt *varinfo, dst []ast.Expr, src []f90.Exp
 	return dst, nil
 }
 
-// inferExprType infers the Go type name of a Fortran expression (bottom-up).
-func (tg *ToGo) inferExprType(vitgt *varinfo, expr f90.Expression) (vi *varinfo) {
-	switch e := expr.(type) {
-	case *f90.StringLiteral:
-		vi = _tgtChar
-	case *f90.IntegerLiteral:
-		vi = _tgtInt32
-	case *f90.RealLiteral:
-		if strings.ContainsAny(e.Raw, "Dd") {
-			vi = _tgtFloat64
-		} else {
-			vi = _tgtFloat32
-		}
-	case *f90.LogicalLiteral:
-		vi = _tgtBool
-	case *f90.Identifier:
-		vi = tg.repl.Var(e.Value)
-	case *f90.BinaryExpr:
-		return promoteTypes(tg.inferExprType(vitgt, e.Left), tg.inferExprType(vitgt, e.Right))
-	case *f90.UnaryExpr:
-		return tg.inferExprType(vitgt, e.Operand)
-	case *f90.ParenExpr:
-		return tg.inferExprType(vitgt, e.Expr)
-	case *f90.ArrayRef:
-		vi = tg.repl.Var(e.Name)
-	case *f90.FunctionCall:
-		// Check user-defined functions first
-		fn := tg.ContainedOrExtern(e.Name)
-		if fn != nil {
-			vi = fn.returnType
-		} else if in := getIntrinsic(e.Name, len(e.Args)); in != nil {
-			vi = in.inferReturnType(vitgt)
-		} else {
-			vi = tg.repl.Var(e.Name) // Maybe an ambiguous function call (COMMON array access)
-		}
-	case *f90.ArrayConstructor:
-		if len(e.Values) > 0 {
-			vi = tg.inferExprType(vitgt, e.Values[0])
-		}
-	}
-	if vi == nil || vi.decl == nil {
-		str := expr.AppendString(nil)
-		err := tg.makeErr(expr, fmt.Sprintf("could not infer type of expression %q", str))
-		panic(err.Error())
-	}
-	return vi
-}
-
-// promoteTypes returns the wider of two numeric types (Fortran type promotion).
-func promoteTypes(a, b *varinfo) *varinfo {
-	atok := a.decl.Type.Token
-	btok := b.decl.Type.Token
-	if atok == f90token.DOUBLEPRECISION || btok == f90token.DOUBLEPRECISION {
-		return _tgtFloat64
-	}
-	if atok == f90token.REAL || btok == f90token.REAL {
-		return _tgtFloat32
-	}
-	return a // both int or unknown
-}
-
 // wrapConversion wraps expr with a type conversion if targetType differs from sourceType.
 func (tg *ToGo) wrapConversion(targetType f90token.Token, sourceType *varinfo, expr ast.Expr) ast.Expr {
-	var err error
-	if sourceType.decl == nil {
-		err = tg.makeErrAtStmt("nil decl source type for target type: " + string(targetType.String()))
-	}
-	if err != nil {
+	srcType := sourceType.typeToken()
+	if srcType == 0 {
+		err := tg.makeErrAtStmt("undefined source type for target type: " + targetType.String())
 		panic(err.Error())
+	}
+	if srcType == targetType {
+		return expr // No conversion needed
 	}
 	conv := "invalid"
 	switch targetType {

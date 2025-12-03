@@ -429,8 +429,11 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	}
 
 	// Convert RHS to target type if needed
-	rhsType := tg.inferExprType(targetVinfo, stmt.Value)
-	rhs = tg.wrapConversion(targetVinfo.decl.Type.Token, rhsType, rhs)
+	var rhsType varinfo
+	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
+		return dst, err
+	}
+	rhs = tg.wrapConversion(targetVinfo.decl.Type.Token, &rhsType, rhs)
 	gstmt := &ast.AssignStmt{
 		Tok: token.ASSIGN,
 		Rhs: []ast.Expr{rhs},
