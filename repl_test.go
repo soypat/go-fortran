@@ -22,7 +22,8 @@ func TestREPL_EvalResultTypes(t *testing.T) {
 	}
 	var r REPL
 	for i, test := range tests {
-		vi, err := r.Eval(test.expr)
+		var vi varinfo
+		err := r.Eval(&vi, test.expr)
 		if err != nil {
 			t.Fatalf("%d: %s", i, err)
 		}
@@ -44,12 +45,12 @@ func TestREPL_EvalLogicalExpressions(t *testing.T) {
 		2: {&f90.UnaryExpr{Op: f90token.NOT, Operand: &f90.LogicalLiteral{Value: true}}, false},
 		3: {&f90.UnaryExpr{Op: f90token.NOT, Operand: &f90.LogicalLiteral{Value: false}}, true},
 		// Binary logical
-		4: {binLogical(f90token.AND, true, true), true},
-		5: {binLogical(f90token.AND, true, false), false},
-		6: {binLogical(f90token.AND, false, true), false},
-		7: {binLogical(f90token.AND, false, false), false},
-		8: {binLogical(f90token.OR, true, true), true},
-		9: {binLogical(f90token.OR, true, false), true},
+		4:  {binLogical(f90token.AND, true, true), true},
+		5:  {binLogical(f90token.AND, true, false), false},
+		6:  {binLogical(f90token.AND, false, true), false},
+		7:  {binLogical(f90token.AND, false, false), false},
+		8:  {binLogical(f90token.OR, true, true), true},
+		9:  {binLogical(f90token.OR, true, false), true},
 		10: {binLogical(f90token.OR, false, true), true},
 		11: {binLogical(f90token.OR, false, false), false},
 		// Comparisons
@@ -70,7 +71,8 @@ func TestREPL_EvalLogicalExpressions(t *testing.T) {
 	}
 	var r REPL
 	for i, test := range tests {
-		vi, err := r.Eval(test.expr)
+		var vi varinfo
+		err := r.Eval(&vi, test.expr)
 		if err != nil {
 			t.Fatalf("%d: %s", i, err)
 		}
@@ -93,7 +95,8 @@ func TestREPL_EvalStringExpressions(t *testing.T) {
 	}
 	var r REPL
 	for i, test := range tests {
-		vi, err := r.Eval(test.expr)
+		var vi varinfo
+		err := r.Eval(&vi, test.expr)
 		if err != nil {
 			t.Fatalf("%d: %s", i, err)
 		}
@@ -109,15 +112,16 @@ func TestREPL_EvalErrors(t *testing.T) {
 	tests := []struct {
 		expr f90.Expression
 	}{
-		0: {binInt(f90token.Slash, 5, 0)},                                           // division by zero int
-		1: {binFloat(f90token.Slash, 5.0, 0.0)},                                     // division by zero float
-		2: {&f90.Identifier{Value: "UNDEFINED"}},                                    // undefined variable
+		0: {binInt(f90token.Slash, 5, 0)},                                                // division by zero int
+		1: {binFloat(f90token.Slash, 5.0, 0.0)},                                          // division by zero float
+		2: {&f90.Identifier{Value: "UNDEFINED"}},                                         // undefined variable
 		3: {&f90.FunctionCall{Name: "NOTAFUNCTION", Args: []f90.Expression{exprInt(1)}}}, // unknown intrinsic
 		4: {&f90.FunctionCall{Name: "SQRT", Args: []f90.Expression{}}},                   // intrinsic no args
 	}
 	var r REPL
 	for i, test := range tests {
-		_, err := r.Eval(test.expr)
+		var vi varinfo
+		err := r.Eval(&vi, test.expr)
 		if err == nil {
 			t.Errorf("%d: expected error for %q", i, test.expr.AppendString(nil))
 		}
@@ -178,7 +182,8 @@ func TestREPL_ConstantNumericExpressions(t *testing.T) {
 	const tol = 1e-10
 	var r REPL
 	for i, test := range tests {
-		v, err := r.Eval(test.expr)
+		var v varinfo
+		err := r.Eval(&v, test.expr)
 		if err != nil {
 			t.Fatalf("%d %s: %q", i, err, test.expr.AppendString(nil))
 		}

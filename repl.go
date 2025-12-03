@@ -13,21 +13,21 @@ import (
 // Value holds a runtime Fortran value for REPL evaluation.
 // Type info comes from varinfo.decl.Type.Token (INTEGER, REAL, LOGICAL, CHARACTER, etc.)
 type Value struct {
-	tok   f90token.Token
-	i64   int64   // INTEGER (all sizes)
-	f64   float64 // REAL/DOUBLE PRECISION
-	b     bool    // LOGICAL
-	s     string  // CHARACTER
-	arr   []Value // Array elements (flattened, row-major)
-	shape []int   // Array dimensions
-	set   bool    // true if value has been set
+	tok   f90token.Token // Token. Can be used to check if set in REPL.
+	i64   int64          // INTEGER (all sizes)
+	f64   float64        // REAL/DOUBLE PRECISION
+	b     bool           // LOGICAL
+	s     string         // CHARACTER
+	arr   []Value        // Array elements (flattened, row-major)
+	shape []int          // Array dimensions
 }
 
 func (v *Value) Token() f90token.Token { return v.tok }
 func (v *Value) StringValue() string   { return v.s }
 func (v *Value) Bool() bool            { return v.b }
+func (v *Value) Int() int64            { return v.i64 }
 func (v *Value) Float() float64 {
-	if v.i64 != 0 {
+	if v.tok == f90token.INTEGER {
 		return float64(v.i64)
 	}
 	return v.f64
@@ -132,104 +132,106 @@ func (tg *REPL) SetScope(pu f90.ProgramUnit) error {
 }
 
 // Eval evaluates a Fortran expression and returns a varinfo with the result.
-func (r *REPL) Eval(expr f90.Expression) (vi *varinfo, err error) {
+func (r *REPL) Eval(dst *varinfo, expr f90.Expression) (err error) {
 	switch e := expr.(type) {
 	case *f90.IntegerLiteral:
-		vi = r.makeInt(e.Value)
+		err = r.makeInt(dst, e.Value)
 	case *f90.RealLiteral:
 		if strings.ContainsAny(e.Raw, "Dd") {
-			vi = r.makeFloat64(e.Value)
+			err = r.makeFloat64(dst, e.Value)
 		} else {
-			vi = r.makeFloat32(e.Value)
+			err = r.makeFloat32(dst, e.Value)
 		}
 	case *f90.LogicalLiteral:
-		vi = r.makeBool(e.Value)
+		err = r.makeBool(dst, e.Value)
 	case *f90.StringLiteral:
-		vi = r.makeString(e.Value)
+		err = r.makeString(dst, e.Value)
 	case *f90.Identifier:
 		vi := r.Var(e.Value)
 		if vi == nil {
 			err = fmt.Errorf("var %s undefined", e.Value)
 		}
 	case *f90.UnaryExpr:
-		vi, err = r.evalUnary(e)
+		err = r.evalUnary(dst, e)
 	case *f90.BinaryExpr:
-		vi, err = r.evalBinary(e)
+		err = r.evalBinary(dst, e)
 	case *f90.ParenExpr:
-		vi, err = r.Eval(e.Expr)
+		err = r.Eval(dst, e.Expr)
 	case *f90.FunctionCall:
-		vi, err = r.evalIntrinsic(e)
+		err = r.evalIntrinsic(dst, e)
 	default:
 		err = fmt.Errorf("unsupported expression: %T", expr)
 	}
-	if vi != nil && vi.decl != nil {
-		vi.val.tok = vi.decl.Type.Token
-	}
-	return vi, err
+	return err
 }
 
-func (r *REPL) evalUnary(e *f90.UnaryExpr) (*varinfo, error) {
-	operand, err := r.Eval(e.Operand)
+func (r *REPL) evalUnary(dst *varinfo, e *f90.UnaryExpr) error {
+	err := r.Eval(dst, e.Operand)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	switch e.Op {
 	case f90token.Plus:
-		return operand, nil
+		return nil // No-op.
 	case f90token.Minus:
-		if r.isInt(operand) {
-			return r.makeInt(-operand.val.i64), nil
+		if r.isInt(dst) {
+			err = r.makeInt(dst, -dst.val.i64)
+		} else {
+			err = r.makeFloatLike(dst, dst, -dst.val.f64)
 		}
-		return r.makeFloatLike(operand, -operand.val.f64), nil
 	case f90token.NOT:
-		return r.makeBool(!operand.val.b), nil
+		err = r.makeBool(dst, !dst.val.b)
+	default:
+		err = fmt.Errorf("unsupported unary operator %q: %v", e.AppendString(nil), e.Op)
 	}
-	return nil, fmt.Errorf("unsupported unary operator: %v", e.Op)
+	return err
 }
 
-func (r *REPL) evalBinary(e *f90.BinaryExpr) (*varinfo, error) {
-	left, err := r.Eval(e.Left)
+func (r *REPL) evalBinary(dst *varinfo, e *f90.BinaryExpr) error {
+	var left, right varinfo
+	err := r.Eval(&left, e.Left)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	right, err := r.Eval(e.Right)
+	err = r.Eval(&right, e.Right)
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	// Logical operations
 	switch e.Op {
+	// Logical operations
 	case f90token.AND:
-		return r.makeBool(left.val.b && right.val.b), nil
+		err = r.makeBool(dst, left.val.b && right.val.b)
 	case f90token.OR:
-		return r.makeBool(left.val.b || right.val.b), nil
-	}
+		err = r.makeBool(dst, left.val.b || right.val.b)
 
 	// Comparison operations
-	switch e.Op {
 	case f90token.EQ, f90token.EqEq:
-		return r.makeBool(r.asFloat(left) == r.asFloat(right)), nil
+		err = r.makeBool(dst, left.val.Float() == right.val.Float())
 	case f90token.NE, f90token.NotEquals:
-		return r.makeBool(r.asFloat(left) != r.asFloat(right)), nil
+		err = r.makeBool(dst, left.val.Float() != right.val.Float())
 	case f90token.LT, f90token.Less:
-		return r.makeBool(r.asFloat(left) < r.asFloat(right)), nil
+		err = r.makeBool(dst, left.val.Float() < right.val.Float())
 	case f90token.LE, f90token.LessEq:
-		return r.makeBool(r.asFloat(left) <= r.asFloat(right)), nil
+		err = r.makeBool(dst, left.val.Float() <= right.val.Float())
 	case f90token.GT, f90token.Greater:
-		return r.makeBool(r.asFloat(left) > r.asFloat(right)), nil
+		err = r.makeBool(dst, left.val.Float() > right.val.Float())
 	case f90token.GE, f90token.GreaterEq:
-		return r.makeBool(r.asFloat(left) >= r.asFloat(right)), nil
+		err = r.makeBool(dst, left.val.Float() >= right.val.Float())
+	default:
+		// Integer arithmetic (both operands are integers)
+		if left.val.Token() == f90token.INTEGER && right.val.Token() == f90token.INTEGER {
+			err = r.evalIntBinary(dst, left.val.i64, e.Op, right.val.i64)
+		} else {
+			err = r.evalFloatBinary(dst, r.promoteTypes(&left, &right), left.val.Float(), e.Op, right.val.Float())
+		}
 	}
-
-	// Integer arithmetic (both operands are integers)
-	if r.isInt(left) && r.isInt(right) {
-		return r.evalIntBinary(left.val.i64, e.Op, right.val.i64)
+	if err != nil {
+		return fmt.Errorf("binary operation %s failed: %w", e.AppendString(nil), err)
 	}
-	// Float arithmetic (promote if mixed)
-	return r.evalFloatBinary(r.asFloat(left), e.Op, r.asFloat(right), r.promoteTypes(left, right))
+	return nil
 }
 
-func (r *REPL) evalIntBinary(l int64, op f90token.Token, ri int64) (*varinfo, error) {
+func (r *REPL) evalIntBinary(dst *varinfo, l int64, op f90token.Token, ri int64) error {
 	var result int64
 	switch op {
 	case f90token.Plus:
@@ -240,18 +242,18 @@ func (r *REPL) evalIntBinary(l int64, op f90token.Token, ri int64) (*varinfo, er
 		result = l * ri
 	case f90token.Slash:
 		if ri == 0 {
-			return nil, errors.New("division by zero")
+			return errors.New("division by zero")
 		}
 		result = l / ri
 	case f90token.DoubleStar:
 		result = intPow(l, ri)
 	default:
-		return nil, fmt.Errorf("unsupported int op: %v", op)
+		return fmt.Errorf("unsupported int op: %v", op)
 	}
-	return r.makeInt(result), nil
+	return r.makeInt(dst, result)
 }
 
-func (r *REPL) evalFloatBinary(l float64, op f90token.Token, rf float64, typ *varinfo) (*varinfo, error) {
+func (r *REPL) evalFloatBinary(dst, typ *varinfo, l float64, op f90token.Token, rf float64) error {
 	var result float64
 	switch op {
 	case f90token.Plus:
@@ -262,29 +264,31 @@ func (r *REPL) evalFloatBinary(l float64, op f90token.Token, rf float64, typ *va
 		result = l * rf
 	case f90token.Slash:
 		if rf == 0 {
-			return nil, errors.New("division by zero")
+			return errors.New("division by zero")
 		}
 		result = l / rf
 	case f90token.DoubleStar:
 		result = math.Pow(l, rf)
 	default:
-		return nil, fmt.Errorf("unsupported float op: %v", op)
+		return fmt.Errorf("unsupported float op: %v", op)
 	}
-	return r.makeFloatLike(typ, result), nil
+	return r.makeFloatLike(dst, typ, result)
 }
 
-func (r *REPL) evalIntrinsic(e *f90.FunctionCall) (*varinfo, error) {
+func (r *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
 	name := strings.ToUpper(e.Name)
 	if len(e.Args) == 0 {
-		return nil, fmt.Errorf("%s requires arguments", name)
+		return fmt.Errorf("%s requires arguments", name)
 	}
-	arg0, err := r.Eval(e.Args[0])
+	var arg0 varinfo
+	err := r.Eval(&arg0, e.Args[0])
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	f0 := r.asFloat(arg0)
+	f0 := arg0.val.Float()
 	var result float64
+	isFn0 := true
 	switch name {
 	case "SQRT":
 		result = math.Sqrt(f0)
@@ -308,110 +312,141 @@ func (r *REPL) evalIntrinsic(e *f90.FunctionCall) (*varinfo, error) {
 		result = math.Log10(f0)
 	case "ABS":
 		result = math.Abs(f0)
-	case "REAL":
-		return r.makeFloat32(f0), nil
-	case "DBLE":
-		return r.makeFloat64(f0), nil
-	case "INT":
-		return r.makeInt(int64(f0)), nil
-	case "NINT":
-		return r.makeInt(int64(math.Round(f0))), nil
-	case "FLOOR":
-		return r.makeFloatLike(arg0, math.Floor(f0)), nil
-	case "CEILING":
-		return r.makeFloatLike(arg0, math.Ceil(f0)), nil
-	case "MAX":
-		return r.evalMax(e.Args)
-	case "MIN":
-		return r.evalMin(e.Args)
 	default:
-		return nil, fmt.Errorf("unknown intrinsic: %s", name)
+		isFn0 = false
 	}
-	return r.makeFloatLike(arg0, result), nil
+	if isFn0 {
+		return r.makeFloatLike(dst, &arg0, result)
+	}
+	switch name {
+	case "REAL":
+		err = r.makeFloat32(dst, f0)
+	case "DBLE":
+		err = r.makeFloat64(dst, f0)
+	case "INT":
+		err = r.makeInt(dst, int64(f0))
+	case "NINT":
+		err = r.makeInt(dst, int64(math.Round(f0)))
+	case "FLOOR":
+		err = r.makeFloatLike(dst, &arg0, math.Floor(f0))
+	case "CEILING":
+		err = r.makeFloatLike(dst, &arg0, math.Ceil(f0))
+	case "MAX":
+		err = r.evalMax(dst, e.Args)
+	case "MIN":
+		err = r.evalMin(dst, e.Args)
+	default:
+		err = fmt.Errorf("unknown intrinsic: %s", name)
+	}
+	return err
 }
 
-func (r *REPL) evalMax(args []f90.Expression) (*varinfo, error) {
+func (r *REPL) evalMax(dst *varinfo, args []f90.Expression) error {
 	if len(args) == 0 {
-		return nil, errors.New("MAX requires at least one argument")
+		return errors.New("MAX requires at least one argument")
 	}
-	result, err := r.Eval(args[0])
+	maxSoFar := dst
+	err := r.Eval(maxSoFar, args[0])
 	if err != nil {
-		return nil, err
+		return err
 	}
+	var next varinfo
 	for _, arg := range args[1:] {
-		v, err := r.Eval(arg)
+		err = r.Eval(&next, arg)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if r.asFloat(v) > r.asFloat(result) {
-			result = v
+		if next.val.Float() > maxSoFar.val.Float() {
+			*maxSoFar = next
 		}
 	}
-	return result, nil
+	return nil
 }
 
-func (r *REPL) evalMin(args []f90.Expression) (*varinfo, error) {
+func (r *REPL) evalMin(dst *varinfo, args []f90.Expression) error {
 	if len(args) == 0 {
-		return nil, errors.New("MIN requires at least one argument")
+		return errors.New("MIN requires at least one argument")
 	}
-	result, err := r.Eval(args[0])
+	minSoFar := dst
+	err := r.Eval(minSoFar, args[0])
 	if err != nil {
-		return nil, err
+		return err
 	}
+	var next varinfo
 	for _, arg := range args[1:] {
-		v, err := r.Eval(arg)
+		err := r.Eval(&next, arg)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if r.asFloat(v) < r.asFloat(result) {
-			result = v
+		if next.val.Float() < minSoFar.val.Float() {
+			*minSoFar = next
 		}
 	}
-	return result, nil
+	return nil
 }
 
 // Helper methods for creating varinfo with values
-
-func (r *REPL) makeInt(v int64) *varinfo {
-	vi := &varinfo{decl: _tgtInt32.decl}
-	vi.val.i64 = v
-	vi.val.set = true
-	return vi
+func (r *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
+	if dst.decl == nil {
+		dst.decl = src.decl
+	} else if dst.decl.Type.Token != src.decl.Type.Token {
+		return fmt.Errorf("destination variable %q of type %s not assignable with type %s", dst.Identifier(), dst.decl.Type.Token.String(), src.decl.Type.Token.String())
+	}
+	dst.val.tok = src.decl.Type.Token
+	return nil
 }
 
-func (r *REPL) makeFloat32(v float64) *varinfo {
-	vi := &varinfo{decl: _tgtFloat32.decl}
-	vi.val.f64 = v
-	vi.val.set = true
-	return vi
+func (r *REPL) makeInt(dst *varinfo, v int64) error {
+	err := r.prepAssignment(dst, _tgtInt32)
+	if err != nil {
+		return err
+	}
+	dst.val.i64 = v
+	return nil
 }
 
-func (r *REPL) makeFloat64(v float64) *varinfo {
-	vi := &varinfo{decl: _tgtFloat64.decl}
-	vi.val.f64 = v
-	vi.val.set = true
-	return vi
+func (r *REPL) makeFloat32(dst *varinfo, v float64) error {
+	err := r.prepAssignment(dst, _tgtFloat32)
+	if err != nil {
+		return err
+	}
+	dst.val.f64 = v
+	return nil
 }
 
-func (r *REPL) makeBool(v bool) *varinfo {
-	vi := &varinfo{decl: _tgtBool.decl}
-	vi.val.b = v
-	vi.val.set = true
-	return vi
+func (r *REPL) makeFloat64(dst *varinfo, v float64) error {
+	err := r.prepAssignment(dst, _tgtFloat64)
+	if err != nil {
+		return err
+	}
+	dst.val.f64 = v
+	return nil
 }
 
-func (r *REPL) makeString(v string) *varinfo {
-	vi := &varinfo{decl: _tgtChar.decl}
-	vi.val.s = v
-	vi.val.set = true
-	return vi
+func (r *REPL) makeBool(dst *varinfo, v bool) error {
+	err := r.prepAssignment(dst, _tgtBool)
+	if err != nil {
+		return err
+	}
+	dst.val.b = v
+	return nil
 }
 
-func (r *REPL) makeFloatLike(template *varinfo, v float64) *varinfo {
+func (r *REPL) makeString(dst *varinfo, v string) error {
+	err := r.prepAssignment(dst, _tgtChar)
+	if err != nil {
+		return err
+	}
+	dst.val.s = v
+	return nil
+}
+
+func (r *REPL) makeFloatLike(dst, template *varinfo, v float64) error {
+
 	vi := &varinfo{decl: template.decl}
 	vi.val.f64 = v
-	vi.val.set = true
-	return vi
+	vi.val.tok = template.decl.Type.Token
+	return nil
 }
 
 // Type checking helpers
