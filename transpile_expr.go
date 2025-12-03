@@ -383,6 +383,25 @@ func (tg *ToGo) wrapConversion(targetType f90token.Token, sourceType *varinfo, e
 	}
 }
 
+// wrapMethodIntrinsic wraps method intrinsic calls to match Fortran types.
+// Go methods return native types (int, CharacterArray) but Fortran expects specific types.
+func (tg *ToGo) wrapMethodIntrinsic(fn *intrinsicFn, call *ast.CallExpr) *ast.CallExpr {
+	if fn.returnType == nil {
+		return call
+	}
+	switch fn.returnType.typeToken() {
+	case f90token.INTEGER:
+		// Go method returns int, Fortran expects INTEGER (int32)
+		return &ast.CallExpr{Fun: ast.NewIdent("int32"), Args: []ast.Expr{call}}
+	case f90token.CHARACTER:
+		// Go method returns CharacterArray, convert to string via .String()
+		return &ast.CallExpr{
+			Fun: &ast.SelectorExpr{X: call, Sel: ast.NewIdent("String")},
+		}
+	}
+	return call
+}
+
 type intrinsicFn struct {
 	name        string
 	expr        ast.Expr
@@ -423,6 +442,8 @@ func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expre
 			},
 			Args: gargs[1:],
 		}
+		// Method intrinsics need type conversion: Go methods return native types
+		call = tg.wrapMethodIntrinsic(fn, call)
 	} else {
 		funcExpr := fn.expr
 		if funcExpr == nil && fn.exprGeneric != nil {
@@ -432,13 +453,6 @@ func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expre
 			Fun:  funcExpr,
 			Args: gargs,
 		}
-	}
-	// Wrap with target type conversion if needed (Go type inference from literals may differ)
-	if vitgt != nil && !isGenericVarinfo(vitgt) {
-		// conv := tg.baseGotype(vitgt.decl.Type.Token, vitgt.decl.Kind())
-		// if conv != nil {
-		// 	call = &ast.CallExpr{Fun: conv, Args: []ast.Expr{call}}
-		// }
 	}
 	return call, nil
 }
