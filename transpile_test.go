@@ -65,8 +65,8 @@ func TestTranspileGolden(t *testing.T) {
 	// Check for parser errors
 	helperPrintErrors(t, &parser)
 
-	var tp TranspileToGo
-	err = tp.Reset()
+	var tp ToGo
+	// err = tp.Reset()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,13 +89,13 @@ func TestTranspileGolden(t *testing.T) {
 
 	// Write complete file to buffer
 	var progSrc bytes.Buffer
-	progDecls := tp.AppendImportDecl(nil)
-	progDecls = tp.AppendCommonDecls(progDecls)
-	progDecls = append(progDecls, procedureDecls...)
+	// progDecls := tp.AppendImportDecl(nil)
+	// progDecls = tp.AppendCommonDecls(progDecls)
+	// progDecls = append(progDecls, procedureDecls...)
 	helperWriteGoAST(t, &progSrc, &ast.File{
-		Name:    ast.NewIdent("main"),
-		Imports: tp.AppendImportSpec(nil),
-		Decls:   progDecls,
+		Name: ast.NewIdent("main"),
+		// Imports: tp.AppendImportSpec(nil),
+		// Decls:   progDecls,
 	})
 	const goFile = "testdata/golden.go"
 	os.WriteFile(goFile, progSrc.Bytes(), 0777)

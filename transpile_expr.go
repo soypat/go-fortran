@@ -135,7 +135,10 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 	// Infer types for type promotion
 	leftType := tg.inferExprType(vitgt, e.Left)
 	rightType := tg.inferExprType(vitgt, e.Right)
-	resultType := promoteTypes(leftType, rightType)
+	promotion := tg.repl.promote(leftType, rightType)
+	if promotion == 0 {
+		return nil, fmt.Errorf("cant promote %s to %s", leftType.val.tok, rightType.val.tok)
+	}
 
 	left, err := tg.transformExpression(vitgt, e.Left)
 	if err != nil {
@@ -148,7 +151,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 
 	// Map Fortran operator to Go operator
 	var op token.Token
-	needsPromotion := true // Most operators need type-matched operands
+	needsPromotion := promotion != leftType.val.tok // Most operators need type-matched operands
 	switch e.Op {
 	case f90token.Plus:
 		op = token.ADD
@@ -161,8 +164,8 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 	case f90token.DoubleStar:
 		// Power operator: x ** y → math.Pow(x, y)
 		// math.Pow requires float64 arguments
-		left = tg.wrapConversion(vitgt, leftType, left)
-		right = tg.wrapConversion(vitgt, rightType, right)
+		left = tg.wrapConversion(vitgt.decl.Type.Token, leftType, left)
+		right = tg.wrapConversion(vitgt.decl.Type.Token, rightType, right)
 		sel := intrinsicSel("POW")
 		return &ast.CallExpr{
 			Fun:  sel(vitgt),
@@ -194,8 +197,8 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 
 	// Promote operands to common type for arithmetic/comparison ops
 	if needsPromotion {
-		left = tg.wrapConversion(resultType, leftType, left)
-		right = tg.wrapConversion(resultType, rightType, right)
+		left = tg.wrapConversion(promotion, leftType, left)
+		right = tg.wrapConversion(promotion, rightType, right)
 	}
 
 	return &ast.BinaryExpr{
@@ -410,23 +413,16 @@ func promoteTypes(a, b *varinfo) *varinfo {
 }
 
 // wrapConversion wraps expr with a type conversion if targetType differs from sourceType.
-func (tg *ToGo) wrapConversion(targetType, sourceType *varinfo, expr ast.Expr) ast.Expr {
+func (tg *ToGo) wrapConversion(targetType f90token.Token, sourceType *varinfo, expr ast.Expr) ast.Expr {
 	var err error
 	if sourceType.decl == nil {
-		err = tg.makeErrAtStmt("nil decl source type for target type: " + string(targetType.decl.AppendString(nil)))
-	} else if targetType.decl == nil {
-		err = tg.makeErrAtStmt(fmt.Sprintf("nil decl target type for source type: %T", expr))
+		err = tg.makeErrAtStmt("nil decl source type for target type: " + string(targetType.String()))
 	}
 	if err != nil {
 		panic(err.Error())
 	}
-	if targetType == nil || sourceType == nil ||
-		targetType.decl == nil || sourceType.decl == nil ||
-		targetType.decl.Type.Token == sourceType.decl.Type.Token {
-		return expr
-	}
 	conv := "invalid"
-	switch targetType.decl.Type.Token {
+	switch targetType {
 	case f90token.REAL:
 		conv = "float32"
 	case f90token.DOUBLEPRECISION:

@@ -11,9 +11,16 @@ import (
 )
 
 // Value holds a runtime Fortran value for REPL evaluation.
-// Type info comes from varinfo.decl.Type.Token (INTEGER, REAL, LOGICAL, CHARACTER, etc.)
+//
+// Two type concepts exist in varinfo:
+//   - val.tok (Value.Token): The evaluated result's runtime type
+//   - decl.Type.Token: The declared type from AST
+//
+// For declared variables both match. For ephemeral results (intermediates
+// like 2+3.0), decl comes from templates (_tgtFloat32 etc), val.tok tracks
+// the actual evaluated type after promotion.
 type Value struct {
-	tok   f90token.Token // Token. Can be used to check if set in REPL.
+	tok   f90token.Token // Evaluated type token. Can be used to check if set in REPL.
 	i64   int64          // INTEGER (all sizes)
 	f64   float64        // REAL/DOUBLE PRECISION
 	b     bool           // LOGICAL
@@ -41,71 +48,76 @@ type REPL struct {
 	_contains []*ParserUnitData
 }
 
-func (tg *REPL) Var(name string) *varinfo {
-	return tg.scope.Var(name)
+func (repl *REPL) Var(name string) *varinfo {
+	return repl.scope.Var(name)
 }
 
-func (tg *REPL) AddExtern(pu []f90.ProgramUnit) error {
+func (repl *REPL) AddExtern(pu []f90.ProgramUnit) error {
 	for i := range pu {
 		data, ok := pu[i].UnitData().(*ParserUnitData)
 		if !ok {
 			return fmt.Errorf("extern program unit %s has incompatible UnitData", pu[i].UnitName())
 		}
-		exists := tg.Extern(data.name) != nil
+		exists := repl.Extern(data.name) != nil
 		if exists {
 			return fmt.Errorf("extern program unit %s with namespace %s already added", pu[i].UnitName(), data.name)
 		}
-		tg._extern = append(tg._extern, data)
+		repl._extern = append(repl._extern, data)
 	}
 	return nil
 }
 
-func (tg *REPL) Extern(name string) *ParserUnitData {
-	for i := range tg._extern {
-		if strings.EqualFold(tg._extern[i].name, name) {
-			return tg._extern[i]
+func (repl *REPL) Extern(name string) *ParserUnitData {
+	for i := range repl._extern {
+		if strings.EqualFold(repl._extern[i].name, name) {
+			return repl._extern[i]
 		}
 	}
 	return nil
 }
 
-func (tg *REPL) Contained(name string) *ParserUnitData {
-	for i := range tg._contains {
-		if strings.EqualFold(tg._contains[i].name, name) {
-			return tg._contains[i]
+func (repl *REPL) Contained(name string) *ParserUnitData {
+	for i := range repl._contains {
+		if strings.EqualFold(repl._contains[i].name, name) {
+			return repl._contains[i]
 		}
 	}
 	return nil
 }
 
-func (tg *REPL) ContainedOrExtern(name string) *ParserUnitData {
-	data := tg.Contained(name)
+func (repl *REPL) ContainedOrExtern(name string) *ParserUnitData {
+	data := repl.Contained(name)
 	if data == nil {
-		data = tg.Extern(name)
+		data = repl.Extern(name)
 	}
 	return data
 }
 
-func (tg *REPL) ScopeParams() []varinfo {
-	for i, v := range tg.scope.vars {
+func (repl *REPL) ScopeParams() []varinfo {
+	for i, v := range repl.scope.vars {
 		if !v.flags.HasAny(flagParameter) {
-			return tg.scope.vars[:i]
+			return repl.scope.vars[:i]
 		}
 	}
-	return tg.scope.vars // all variables are parameters... or no variables.
+	return repl.scope.vars // all variables are parameters... or no variables.
 }
 
-func (tg *REPL) SetScope(pu f90.ProgramUnit) error {
+func (repl *REPL) SetScope(pu f90.ProgramUnit) error {
 	data, ok := pu.UnitData().(*ParserUnitData)
 	if !ok {
 		return errors.New("missing parser unit data")
 	}
 
-	tg.scope = data.clone()
-	for i := range tg.scope.vars {
-		tg.scope.vars[i]._varname = sanitizeIdent(tg.scope.vars[i]._varname)
-		tg.scope.vars[i].common = sanitizeIdent(tg.scope.vars[i].common)
-		tg.scope.vars[i].pointee = sanitizeIdent(tg.scope.vars[i].pointee)
+	repl.scope = data.clone()
+	for i := range repl.scope.vars {
+		v := &repl.scope.vars[i]
+		if v.decl == nil {
+			return fmt.Errorf("unresolved declaration for variable %s in %s", v.Identifier(), pu.UnitName())
+		}
+		v.val.tok = v.decl.Type.Token // Initialize repl value type.
+		v._varname = sanitizeIdent(v._varname)
+		v.common = sanitizeIdent(v.common)
+		v.pointee = sanitizeIdent(v.pointee)
 	}
 
 	var toAdd []f90.ProgramUnit
@@ -118,59 +130,61 @@ func (tg *REPL) SetScope(pu f90.ProgramUnit) error {
 		return nil
 	}
 	// reset contains on Module or Program block.
-	tg._contains = tg._contains[:0]
+	repl._contains = repl._contains[:0]
 	for i := range toAdd {
 		pu, ok := toAdd[i].UnitData().(*ParserUnitData)
 		if !ok {
 			return fmt.Errorf("contains program unit %s incompatible unit data", toAdd[i].UnitName())
 		}
-		exists := tg.Contained(pu.name) != nil
+		exists := repl.Contained(pu.name) != nil
 		if exists {
 			return fmt.Errorf("contains program unit %s duplicated", toAdd[i].UnitName())
 		}
-		tg._contains = append(tg._contains, pu)
+		repl._contains = append(repl._contains, pu)
 	}
 	return nil
 }
 
-// Eval evaluates a Fortran expression and returns a varinfo with the result.
-func (r *REPL) Eval(dst *varinfo, expr f90.Expression) (err error) {
+// Eval evaluates a Fortran expression into dst. Caller provides dst to avoid
+// allocations; dst can be reused across calls. On success dst.Value() holds
+// the result with val.tok set to the evaluated type.
+func (repl *REPL) Eval(dst *varinfo, expr f90.Expression) (err error) {
 	switch e := expr.(type) {
 	case *f90.IntegerLiteral:
-		err = r.assignInt(dst, e.Value)
+		err = repl.assignInt(dst, e.Value)
 	case *f90.RealLiteral:
 		if strings.ContainsAny(e.Raw, "Dd") {
-			err = r.assignFloat64(dst, e.Value)
+			err = repl.assignFloat64(dst, e.Value)
 		} else {
-			err = r.assignFloat32(dst, e.Value)
+			err = repl.assignFloat32(dst, e.Value)
 		}
 	case *f90.LogicalLiteral:
-		err = r.assignBool(dst, e.Value)
+		err = repl.assignBool(dst, e.Value)
 	case *f90.StringLiteral:
-		err = r.assignString(dst, e.Value)
+		err = repl.assignString(dst, e.Value)
 	case *f90.Identifier:
-		vi := r.Var(e.Value)
+		vi := repl.Var(e.Value)
 		if vi == nil {
 			err = fmt.Errorf("var %s undefined", e.Value)
 		} else {
 			*dst = *vi
 		}
 	case *f90.UnaryExpr:
-		err = r.evalUnary(dst, e)
+		err = repl.evalUnary(dst, e)
 	case *f90.BinaryExpr:
-		err = r.evalBinary(dst, e)
+		err = repl.evalBinary(dst, e)
 	case *f90.ParenExpr:
-		err = r.Eval(dst, e.Expr)
+		err = repl.Eval(dst, e.Expr)
 	case *f90.FunctionCall:
-		err = r.evalIntrinsic(dst, e)
+		err = repl.evalIntrinsic(dst, e)
 	default:
 		err = fmt.Errorf("unsupported expression: %T", expr)
 	}
 	return err
 }
 
-func (r *REPL) evalUnary(dst *varinfo, e *f90.UnaryExpr) error {
-	err := r.Eval(dst, e.Operand)
+func (repl *REPL) evalUnary(dst *varinfo, e *f90.UnaryExpr) error {
+	err := repl.Eval(dst, e.Operand)
 	if err != nil {
 		return err
 	}
@@ -179,54 +193,54 @@ func (r *REPL) evalUnary(dst *varinfo, e *f90.UnaryExpr) error {
 		return nil // No-op.
 	case f90token.Minus:
 		if dst.val.IsInt() {
-			err = r.assignInt(dst, -dst.val.i64)
+			err = repl.assignInt(dst, -dst.val.i64)
 		} else {
-			err = r.assignFloatLike(dst, dst, -dst.val.f64)
+			err = repl.assignFloatLike(dst, dst, -dst.val.f64)
 		}
 	case f90token.NOT:
-		err = r.assignBool(dst, !dst.val.b)
+		err = repl.assignBool(dst, !dst.val.b)
 	default:
 		err = fmt.Errorf("unsupported unary operator %q: %v", e.AppendString(nil), e.Op)
 	}
 	return err
 }
 
-func (r *REPL) evalBinary(dst *varinfo, e *f90.BinaryExpr) error {
+func (repl *REPL) evalBinary(dst *varinfo, e *f90.BinaryExpr) error {
 	var left, right varinfo
-	err := r.Eval(&left, e.Left)
+	err := repl.Eval(&left, e.Left)
 	if err != nil {
 		return err
 	}
-	err = r.Eval(&right, e.Right)
+	err = repl.Eval(&right, e.Right)
 	if err != nil {
 		return err
 	}
 	switch e.Op {
 	// Logical operations
 	case f90token.AND:
-		err = r.assignBool(dst, left.val.b && right.val.b)
+		err = repl.assignBool(dst, left.val.b && right.val.b)
 	case f90token.OR:
-		err = r.assignBool(dst, left.val.b || right.val.b)
+		err = repl.assignBool(dst, left.val.b || right.val.b)
 
 	// Comparison operations
 	case f90token.EQ, f90token.EqEq:
-		err = r.assignBool(dst, left.val.Float() == right.val.Float())
+		err = repl.assignBool(dst, left.val.Float() == right.val.Float())
 	case f90token.NE, f90token.NotEquals:
-		err = r.assignBool(dst, left.val.Float() != right.val.Float())
+		err = repl.assignBool(dst, left.val.Float() != right.val.Float())
 	case f90token.LT, f90token.Less:
-		err = r.assignBool(dst, left.val.Float() < right.val.Float())
+		err = repl.assignBool(dst, left.val.Float() < right.val.Float())
 	case f90token.LE, f90token.LessEq:
-		err = r.assignBool(dst, left.val.Float() <= right.val.Float())
+		err = repl.assignBool(dst, left.val.Float() <= right.val.Float())
 	case f90token.GT, f90token.Greater:
-		err = r.assignBool(dst, left.val.Float() > right.val.Float())
+		err = repl.assignBool(dst, left.val.Float() > right.val.Float())
 	case f90token.GE, f90token.GreaterEq:
-		err = r.assignBool(dst, left.val.Float() >= right.val.Float())
+		err = repl.assignBool(dst, left.val.Float() >= right.val.Float())
 	default:
 		// Integer arithmetic (both operands are integers)
 		if left.val.Token() == f90token.INTEGER && right.val.Token() == f90token.INTEGER {
-			err = r.evalIntBinary(dst, left.val.i64, e.Op, right.val.i64)
+			err = repl.evalIntBinary(dst, left.val.i64, e.Op, right.val.i64)
 		} else {
-			err = r.evalFloatBinary(dst, r.promoteTypes(&left, &right), left.val.Float(), e.Op, right.val.Float())
+			err = repl.evalFloatBinary(dst, repl.promoteTypes(&left, &right), left.val.Float(), e.Op, right.val.Float())
 		}
 	}
 	if err != nil {
@@ -235,7 +249,7 @@ func (r *REPL) evalBinary(dst *varinfo, e *f90.BinaryExpr) error {
 	return nil
 }
 
-func (r *REPL) evalIntBinary(dst *varinfo, l int64, op f90token.Token, ri int64) error {
+func (repl *REPL) evalIntBinary(dst *varinfo, l int64, op f90token.Token, ri int64) error {
 	var result int64
 	switch op {
 	case f90token.Plus:
@@ -254,10 +268,10 @@ func (r *REPL) evalIntBinary(dst *varinfo, l int64, op f90token.Token, ri int64)
 	default:
 		return fmt.Errorf("unsupported int op: %v", op)
 	}
-	return r.assignInt(dst, result)
+	return repl.assignInt(dst, result)
 }
 
-func (r *REPL) evalFloatBinary(dst, typ *varinfo, l float64, op f90token.Token, rf float64) error {
+func (repl *REPL) evalFloatBinary(dst, typ *varinfo, l float64, op f90token.Token, rf float64) error {
 	var result float64
 	switch op {
 	case f90token.Plus:
@@ -276,16 +290,16 @@ func (r *REPL) evalFloatBinary(dst, typ *varinfo, l float64, op f90token.Token, 
 	default:
 		return fmt.Errorf("unsupported float op: %v", op)
 	}
-	return r.assignFloatLike(dst, typ, result)
+	return repl.assignFloatLike(dst, typ, result)
 }
 
-func (r *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
+func (repl *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
 	name := strings.ToUpper(e.Name)
 	if len(e.Args) == 0 {
 		return fmt.Errorf("%s requires arguments", name)
 	}
 	var arg0 varinfo
-	err := r.Eval(&arg0, e.Args[0])
+	err := repl.Eval(&arg0, e.Args[0])
 	if err != nil {
 		return err
 	}
@@ -320,43 +334,43 @@ func (r *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
 		isFn0 = false
 	}
 	if isFn0 {
-		return r.assignFloatLike(dst, &arg0, result)
+		return repl.assignFloatLike(dst, &arg0, result)
 	}
 	switch name {
 	case "REAL":
-		err = r.assignFloat32(dst, f0)
+		err = repl.assignFloat32(dst, f0)
 	case "DBLE":
-		err = r.assignFloat64(dst, f0)
+		err = repl.assignFloat64(dst, f0)
 	case "INT":
-		err = r.assignInt(dst, int64(f0))
+		err = repl.assignInt(dst, int64(f0))
 	case "NINT":
-		err = r.assignInt(dst, int64(math.Round(f0)))
+		err = repl.assignInt(dst, int64(math.Round(f0)))
 	case "FLOOR":
-		err = r.assignFloatLike(dst, &arg0, math.Floor(f0))
+		err = repl.assignFloatLike(dst, &arg0, math.Floor(f0))
 	case "CEILING":
-		err = r.assignFloatLike(dst, &arg0, math.Ceil(f0))
+		err = repl.assignFloatLike(dst, &arg0, math.Ceil(f0))
 	case "MAX":
-		err = r.evalMax(dst, e.Args)
+		err = repl.evalMax(dst, e.Args)
 	case "MIN":
-		err = r.evalMin(dst, e.Args)
+		err = repl.evalMin(dst, e.Args)
 	default:
 		err = fmt.Errorf("unknown intrinsic: %s", name)
 	}
 	return err
 }
 
-func (r *REPL) evalMax(dst *varinfo, args []f90.Expression) error {
+func (repl *REPL) evalMax(dst *varinfo, args []f90.Expression) error {
 	if len(args) == 0 {
 		return errors.New("MAX requires at least one argument")
 	}
 	maxSoFar := dst
-	err := r.Eval(maxSoFar, args[0])
+	err := repl.Eval(maxSoFar, args[0])
 	if err != nil {
 		return err
 	}
 	var next varinfo
 	for _, arg := range args[1:] {
-		err = r.Eval(&next, arg)
+		err = repl.Eval(&next, arg)
 		if err != nil {
 			return err
 		}
@@ -367,18 +381,18 @@ func (r *REPL) evalMax(dst *varinfo, args []f90.Expression) error {
 	return nil
 }
 
-func (r *REPL) evalMin(dst *varinfo, args []f90.Expression) error {
+func (repl *REPL) evalMin(dst *varinfo, args []f90.Expression) error {
 	if len(args) == 0 {
 		return errors.New("MIN requires at least one argument")
 	}
 	minSoFar := dst
-	err := r.Eval(minSoFar, args[0])
+	err := repl.Eval(minSoFar, args[0])
 	if err != nil {
 		return err
 	}
 	var next varinfo
 	for _, arg := range args[1:] {
-		err := r.Eval(&next, arg)
+		err := repl.Eval(&next, arg)
 		if err != nil {
 			return err
 		}
@@ -390,7 +404,7 @@ func (r *REPL) evalMin(dst *varinfo, args []f90.Expression) error {
 }
 
 // Helper methods for creating varinfo with values
-func (r *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
+func (repl *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
 	if dst.decl == nil {
 		dst.decl = src.decl
 	} else if dst.decl.Type.Token != src.decl.Type.Token {
@@ -400,7 +414,8 @@ func (r *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
 	return nil
 }
 
-func (r *REPL) canAssign(dst, src *varinfo) (promotion f90token.Token) {
+// promote returns the resulting promoted type of a binary operation between two types.
+func (repl *REPL) promote(dst, src *varinfo) (promotion f90token.Token) {
 	switch dst.val.tok {
 	case f90token.DOUBLEPRECISION:
 		if src.val.IsInt() || src.val.Floatlike() {
@@ -416,12 +431,16 @@ func (r *REPL) canAssign(dst, src *varinfo) (promotion f90token.Token) {
 		if src.val.IsInt() {
 			promotion = f90token.INTEGER
 		}
+	default:
+		if src.val.tok == dst.val.tok {
+			promotion = src.val.tok
+		}
 	}
 	return promotion
 }
 
-func (r *REPL) assignInt(dst *varinfo, v int64) error {
-	err := r.prepAssignment(dst, _tgtInt32)
+func (repl *REPL) assignInt(dst *varinfo, v int64) error {
+	err := repl.prepAssignment(dst, _tgtInt32)
 	if err != nil {
 		return err
 	}
@@ -429,8 +448,8 @@ func (r *REPL) assignInt(dst *varinfo, v int64) error {
 	return nil
 }
 
-func (r *REPL) assignFloat32(dst *varinfo, v float64) error {
-	err := r.prepAssignment(dst, _tgtFloat32)
+func (repl *REPL) assignFloat32(dst *varinfo, v float64) error {
+	err := repl.prepAssignment(dst, _tgtFloat32)
 	if err != nil {
 		return err
 	}
@@ -438,8 +457,8 @@ func (r *REPL) assignFloat32(dst *varinfo, v float64) error {
 	return nil
 }
 
-func (r *REPL) assignFloat64(dst *varinfo, v float64) error {
-	err := r.prepAssignment(dst, _tgtFloat64)
+func (repl *REPL) assignFloat64(dst *varinfo, v float64) error {
+	err := repl.prepAssignment(dst, _tgtFloat64)
 	if err != nil {
 		return err
 	}
@@ -447,8 +466,8 @@ func (r *REPL) assignFloat64(dst *varinfo, v float64) error {
 	return nil
 }
 
-func (r *REPL) assignBool(dst *varinfo, v bool) error {
-	err := r.prepAssignment(dst, _tgtBool)
+func (repl *REPL) assignBool(dst *varinfo, v bool) error {
+	err := repl.prepAssignment(dst, _tgtBool)
 	if err != nil {
 		return err
 	}
@@ -456,8 +475,8 @@ func (r *REPL) assignBool(dst *varinfo, v bool) error {
 	return nil
 }
 
-func (r *REPL) assignString(dst *varinfo, v string) error {
-	err := r.prepAssignment(dst, _tgtChar)
+func (repl *REPL) assignString(dst *varinfo, v string) error {
+	err := repl.prepAssignment(dst, _tgtChar)
 	if err != nil {
 		return err
 	}
@@ -465,8 +484,8 @@ func (r *REPL) assignString(dst *varinfo, v string) error {
 	return nil
 }
 
-func (r *REPL) assignFloatLike(dst, template *varinfo, v float64) error {
-	dst.val.tok = r.canAssign(dst, template)
+func (repl *REPL) assignFloatLike(dst, template *varinfo, v float64) error {
+	dst.val.tok = repl.promote(dst, template)
 	dst.val.f64 = v
 	return nil
 }
@@ -474,7 +493,7 @@ func (r *REPL) assignFloatLike(dst, template *varinfo, v float64) error {
 // Type checking helpers
 
 // promoteTypes returns the wider of two numeric types (Fortran type promotion).
-func (r *REPL) promoteTypes(a, b *varinfo) *varinfo {
+func (repl *REPL) promoteTypes(a, b *varinfo) *varinfo {
 	if a == nil || a.decl == nil {
 		return b
 	}

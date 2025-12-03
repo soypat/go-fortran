@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"io"
 	"strconv"
+	"strings"
 
 	f90 "github.com/soypat/go-fortran/ast"
 	f90token "github.com/soypat/go-fortran/token"
@@ -429,7 +430,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 
 	// Convert RHS to target type if needed
 	rhsType := tg.inferExprType(targetVinfo, stmt.Value)
-	rhs = tg.wrapConversion(targetVinfo, rhsType, rhs)
+	rhs = tg.wrapConversion(targetVinfo.decl.Type.Token, rhsType, rhs)
 	gstmt := &ast.AssignStmt{
 		Tok: token.ASSIGN,
 		Rhs: []ast.Expr{rhs},
@@ -582,3 +583,16 @@ var (
 		Sel: ast.NewIdent("Pointer"),
 	}
 )
+
+// sanitizeIdent returns a valid Go identifier by capitalizing the first letter if it's a Go keyword
+func sanitizeIdent(name string) string {
+	if name == "" {
+		return name
+	}
+	// Check if it's a Go keyword (case-insensitive since Fortran is case-insensitive)
+	if token.IsKeyword(name) {
+		// Capitalize first letter
+		return strings.ToUpper(name[:1]) + name[1:]
+	}
+	return name
+}
