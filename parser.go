@@ -321,6 +321,7 @@ type varinfo struct {
 	val      Value // Runtime value for REPL evaluation
 }
 
+func (p *varinfo) Value() Value                       { return p.val }
 func (p *varinfo) Charlen() ast.Expression            { return p.decl.Charlen() }
 func (p *varinfo) Kind() ast.Expression               { return p.decl.Kind() }
 func (p *varinfo) Dimensions() *ast.ArraySpec         { return p.decl.Dimension() }

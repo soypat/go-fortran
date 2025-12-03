@@ -2,605 +2,246 @@ package fortran
 
 import (
 	"math"
+	"strconv"
 	"testing"
 
 	f90 "github.com/soypat/go-fortran/ast"
 	f90token "github.com/soypat/go-fortran/token"
 )
 
-func TestREPL_EvalLiterals(t *testing.T) {
-	r := &REPL{}
-
-	t.Run("integer", func(t *testing.T) {
-		vi, err := r.Eval(&f90.IntegerLiteral{Value: 42})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !r.isInt(vi) {
-			t.Error("expected INTEGER type")
-		}
-		if vi.val.i64 != 42 {
-			t.Errorf("got %d, want 42", vi.val.i64)
-		}
-	})
-
-	t.Run("real", func(t *testing.T) {
-		vi, err := r.Eval(&f90.RealLiteral{Value: 3.14, Raw: "3.14"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.decl.Type.Token != f90token.REAL {
-			t.Error("expected REAL type")
-		}
-		if vi.val.f64 != 3.14 {
-			t.Errorf("got %f, want 3.14", vi.val.f64)
-		}
-	})
-
-	t.Run("double", func(t *testing.T) {
-		vi, err := r.Eval(&f90.RealLiteral{Value: 2.718281828, Raw: "2.718281828D0"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.decl.Type.Token != f90token.DOUBLEPRECISION {
-			t.Error("expected DOUBLEPRECISION type")
-		}
-		if vi.val.f64 != 2.718281828 {
-			t.Errorf("got %f, want 2.718281828", vi.val.f64)
-		}
-	})
-
-	t.Run("logical true", func(t *testing.T) {
-		vi, err := r.Eval(&f90.LogicalLiteral{Value: true})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.decl.Type.Token != f90token.LOGICAL {
-			t.Error("expected LOGICAL type")
-		}
-		if !vi.val.b {
-			t.Error("expected true")
-		}
-	})
-
-	t.Run("logical false", func(t *testing.T) {
-		vi, err := r.Eval(&f90.LogicalLiteral{Value: false})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.val.b {
-			t.Error("expected false")
-		}
-	})
-
-	t.Run("string", func(t *testing.T) {
-		vi, err := r.Eval(&f90.StringLiteral{Value: "hello"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.decl.Type.Token != f90token.CHARACTER {
-			t.Error("expected CHARACTER type")
-		}
-		if vi.val.s != "hello" {
-			t.Errorf("got %q, want %q", vi.val.s, "hello")
-		}
-	})
-}
-
-func TestREPL_EvalUnary(t *testing.T) {
-	r := &REPL{}
-
-	t.Run("plus int", func(t *testing.T) {
-		vi, err := r.Eval(&f90.UnaryExpr{
-			Op:      f90token.Plus,
-			Operand: &f90.IntegerLiteral{Value: 5},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.val.i64 != 5 {
-			t.Errorf("got %d, want 5", vi.val.i64)
-		}
-	})
-
-	t.Run("minus int", func(t *testing.T) {
-		vi, err := r.Eval(&f90.UnaryExpr{
-			Op:      f90token.Minus,
-			Operand: &f90.IntegerLiteral{Value: 7},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.val.i64 != -7 {
-			t.Errorf("got %d, want -7", vi.val.i64)
-		}
-	})
-
-	t.Run("minus float", func(t *testing.T) {
-		vi, err := r.Eval(&f90.UnaryExpr{
-			Op:      f90token.Minus,
-			Operand: &f90.RealLiteral{Value: 2.5, Raw: "2.5"},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.val.f64 != -2.5 {
-			t.Errorf("got %f, want -2.5", vi.val.f64)
-		}
-	})
-
-	t.Run("not true", func(t *testing.T) {
-		vi, err := r.Eval(&f90.UnaryExpr{
-			Op:      f90token.NOT,
-			Operand: &f90.LogicalLiteral{Value: true},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.val.b {
-			t.Error("expected false")
-		}
-	})
-
-	t.Run("not false", func(t *testing.T) {
-		vi, err := r.Eval(&f90.UnaryExpr{
-			Op:      f90token.NOT,
-			Operand: &f90.LogicalLiteral{Value: false},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !vi.val.b {
-			t.Error("expected true")
-		}
-	})
-}
-
-func TestREPL_EvalBinaryArithmetic(t *testing.T) {
-	r := &REPL{}
-
-	intTests := []struct {
-		name   string
-		left   int64
-		op     f90token.Token
-		right  int64
-		expect int64
-	}{
-		{"add", 3, f90token.Plus, 4, 7},
-		{"sub", 10, f90token.Minus, 3, 7},
-		{"mul", 6, f90token.Asterisk, 7, 42},
-		{"div", 20, f90token.Slash, 4, 5},
-		{"pow", 2, f90token.DoubleStar, 10, 1024},
-		{"pow zero", 5, f90token.DoubleStar, 0, 1},
-	}
-
-	for _, tc := range intTests {
-		t.Run("int "+tc.name, func(t *testing.T) {
-			vi, err := r.Eval(&f90.BinaryExpr{
-				Left:  &f90.IntegerLiteral{Value: tc.left},
-				Op:    tc.op,
-				Right: &f90.IntegerLiteral{Value: tc.right},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !r.isInt(vi) {
-				t.Error("expected INTEGER result")
-			}
-			if vi.val.i64 != tc.expect {
-				t.Errorf("got %d, want %d", vi.val.i64, tc.expect)
-			}
-		})
-	}
-
-	floatTests := []struct {
-		name   string
-		left   float64
-		op     f90token.Token
-		right  float64
-		expect float64
-	}{
-		{"add", 1.5, f90token.Plus, 2.5, 4.0},
-		{"sub", 5.0, f90token.Minus, 1.5, 3.5},
-		{"mul", 2.0, f90token.Asterisk, 3.5, 7.0},
-		{"div", 7.0, f90token.Slash, 2.0, 3.5},
-		{"pow", 2.0, f90token.DoubleStar, 3.0, 8.0},
-	}
-
-	for _, tc := range floatTests {
-		t.Run("float "+tc.name, func(t *testing.T) {
-			vi, err := r.Eval(&f90.BinaryExpr{
-				Left:  &f90.RealLiteral{Value: tc.left, Raw: "x"},
-				Op:    tc.op,
-				Right: &f90.RealLiteral{Value: tc.right, Raw: "x"},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if vi.decl.Type.Token != f90token.REAL {
-				t.Error("expected REAL result")
-			}
-			if vi.val.f64 != tc.expect {
-				t.Errorf("got %f, want %f", vi.val.f64, tc.expect)
-			}
-		})
-	}
-}
-
-func TestREPL_EvalBinaryComparison(t *testing.T) {
-	r := &REPL{}
-
+func TestREPL_EvalResultTypes(t *testing.T) {
 	tests := []struct {
-		name   string
-		left   int64
-		op     f90token.Token
-		right  int64
-		expect bool
+		expr f90.Expression
+		want f90token.Token
 	}{
-		{"eq true", 5, f90token.EQ, 5, true},
-		{"eq false", 5, f90token.EQ, 6, false},
-		{"ne true", 5, f90token.NE, 6, true},
-		{"ne false", 5, f90token.NE, 5, false},
-		{"lt true", 3, f90token.LT, 5, true},
-		{"lt false", 5, f90token.LT, 3, false},
-		{"le true eq", 5, f90token.LE, 5, true},
-		{"le true lt", 3, f90token.LE, 5, true},
-		{"le false", 6, f90token.LE, 5, false},
-		{"gt true", 5, f90token.GT, 3, true},
-		{"gt false", 3, f90token.GT, 5, false},
-		{"ge true eq", 5, f90token.GE, 5, true},
-		{"ge true gt", 6, f90token.GE, 5, true},
-		{"ge false", 3, f90token.GE, 5, false},
+		0: {exprInt(42), f90token.INTEGER},
+		1: {exprFloat(3.14), f90token.REAL},
+		2: {exprDouble(2.718), f90token.DOUBLEPRECISION},
+		3: {&f90.LogicalLiteral{Value: true}, f90token.LOGICAL},
+		4: {&f90.StringLiteral{Value: "hello"}, f90token.CHARACTER},
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			vi, err := r.Eval(&f90.BinaryExpr{
-				Left:  &f90.IntegerLiteral{Value: tc.left},
-				Op:    tc.op,
-				Right: &f90.IntegerLiteral{Value: tc.right},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if vi.decl.Type.Token != f90token.LOGICAL {
-				t.Error("expected LOGICAL result")
-			}
-			if vi.val.b != tc.expect {
-				t.Errorf("got %v, want %v", vi.val.b, tc.expect)
-			}
-		})
+	var r REPL
+	for i, test := range tests {
+		vi, err := r.Eval(test.expr)
+		if err != nil {
+			t.Fatalf("%d: %s", i, err)
+		}
+		val := vi.Value()
+		got := val.Token()
+		if got != test.want {
+			t.Errorf("%d: got %v, want %v", i, got, test.want)
+		}
 	}
 }
 
-func TestREPL_EvalBinaryLogical(t *testing.T) {
-	r := &REPL{}
-
+func TestREPL_EvalLogicalExpressions(t *testing.T) {
 	tests := []struct {
-		name   string
-		left   bool
-		op     f90token.Token
-		right  bool
-		expect bool
+		expr f90.Expression
+		want bool
 	}{
-		{"and tt", true, f90token.AND, true, true},
-		{"and tf", true, f90token.AND, false, false},
-		{"and ft", false, f90token.AND, true, false},
-		{"and ff", false, f90token.AND, false, false},
-		{"or tt", true, f90token.OR, true, true},
-		{"or tf", true, f90token.OR, false, true},
-		{"or ft", false, f90token.OR, true, true},
-		{"or ff", false, f90token.OR, false, false},
+		0: {&f90.LogicalLiteral{Value: true}, true},
+		1: {&f90.LogicalLiteral{Value: false}, false},
+		2: {&f90.UnaryExpr{Op: f90token.NOT, Operand: &f90.LogicalLiteral{Value: true}}, false},
+		3: {&f90.UnaryExpr{Op: f90token.NOT, Operand: &f90.LogicalLiteral{Value: false}}, true},
+		// Binary logical
+		4: {binLogical(f90token.AND, true, true), true},
+		5: {binLogical(f90token.AND, true, false), false},
+		6: {binLogical(f90token.AND, false, true), false},
+		7: {binLogical(f90token.AND, false, false), false},
+		8: {binLogical(f90token.OR, true, true), true},
+		9: {binLogical(f90token.OR, true, false), true},
+		10: {binLogical(f90token.OR, false, true), true},
+		11: {binLogical(f90token.OR, false, false), false},
+		// Comparisons
+		12: {binInt(f90token.EQ, 5, 5), true},
+		13: {binInt(f90token.EQ, 5, 6), false},
+		14: {binInt(f90token.NE, 5, 6), true},
+		15: {binInt(f90token.NE, 5, 5), false},
+		16: {binInt(f90token.LT, 3, 5), true},
+		17: {binInt(f90token.LT, 5, 3), false},
+		18: {binInt(f90token.LE, 5, 5), true},
+		19: {binInt(f90token.LE, 3, 5), true},
+		20: {binInt(f90token.LE, 6, 5), false},
+		21: {binInt(f90token.GT, 5, 3), true},
+		22: {binInt(f90token.GT, 3, 5), false},
+		23: {binInt(f90token.GE, 5, 5), true},
+		24: {binInt(f90token.GE, 6, 5), true},
+		25: {binInt(f90token.GE, 3, 5), false},
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			vi, err := r.Eval(&f90.BinaryExpr{
-				Left:  &f90.LogicalLiteral{Value: tc.left},
-				Op:    tc.op,
-				Right: &f90.LogicalLiteral{Value: tc.right},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if vi.val.b != tc.expect {
-				t.Errorf("got %v, want %v", vi.val.b, tc.expect)
-			}
-		})
+	var r REPL
+	for i, test := range tests {
+		vi, err := r.Eval(test.expr)
+		if err != nil {
+			t.Fatalf("%d: %s", i, err)
+		}
+		val := vi.Value()
+		got := val.Bool()
+		if got != test.want {
+			t.Errorf("%d: got %v, want %v", i, got, test.want)
+		}
 	}
 }
 
-func TestREPL_EvalTypePromotion(t *testing.T) {
-	r := &REPL{}
-
-	t.Run("int + real = real", func(t *testing.T) {
-		vi, err := r.Eval(&f90.BinaryExpr{
-			Left:  &f90.IntegerLiteral{Value: 2},
-			Op:    f90token.Plus,
-			Right: &f90.RealLiteral{Value: 3.5, Raw: "3.5"},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.decl.Type.Token != f90token.REAL {
-			t.Error("expected REAL result from int+real")
-		}
-		if vi.val.f64 != 5.5 {
-			t.Errorf("got %f, want 5.5", vi.val.f64)
-		}
-	})
-
-	t.Run("real + double = double", func(t *testing.T) {
-		vi, err := r.Eval(&f90.BinaryExpr{
-			Left:  &f90.RealLiteral{Value: 1.0, Raw: "1.0"},
-			Op:    f90token.Plus,
-			Right: &f90.RealLiteral{Value: 2.0, Raw: "2.0D0"},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.decl.Type.Token != f90token.DOUBLEPRECISION {
-			t.Error("expected DOUBLEPRECISION result from real+double")
-		}
-	})
-}
-
-func TestREPL_EvalIntrinsics(t *testing.T) {
-	r := &REPL{}
-	const tol = 1e-10
-
-	mathTests := []struct {
-		name   string
-		arg    float64
-		expect float64
+func TestREPL_EvalStringExpressions(t *testing.T) {
+	tests := []struct {
+		expr f90.Expression
+		want string
 	}{
-		{"SQRT", 4.0, 2.0},
-		{"SIN", 0.0, 0.0},
-		{"COS", 0.0, 1.0},
-		{"TAN", 0.0, 0.0},
-		{"EXP", 0.0, 1.0},
-		{"LOG", 1.0, 0.0},
-		{"LOG10", 10.0, 1.0},
-		{"ABS", -5.0, 5.0},
-		{"ASIN", 0.0, 0.0},
-		{"ACOS", 1.0, 0.0},
-		{"ATAN", 0.0, 0.0},
+		0: {&f90.StringLiteral{Value: "hello"}, "hello"},
+		1: {&f90.StringLiteral{Value: ""}, ""},
+		2: {&f90.StringLiteral{Value: "hello world"}, "hello world"},
 	}
-
-	for _, tc := range mathTests {
-		t.Run(tc.name, func(t *testing.T) {
-			vi, err := r.Eval(&f90.FunctionCall{
-				Name: tc.name,
-				Args: []f90.Expression{&f90.RealLiteral{Value: tc.arg, Raw: "x"}},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if math.Abs(vi.val.f64-tc.expect) > tol {
-				t.Errorf("got %f, want %f", vi.val.f64, tc.expect)
-			}
-		})
-	}
-
-	t.Run("REAL", func(t *testing.T) {
-		vi, err := r.Eval(&f90.FunctionCall{
-			Name: "REAL",
-			Args: []f90.Expression{&f90.IntegerLiteral{Value: 42}},
-		})
+	var r REPL
+	for i, test := range tests {
+		vi, err := r.Eval(test.expr)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%d: %s", i, err)
 		}
-		if vi.decl.Type.Token != f90token.REAL {
-			t.Error("expected REAL type")
+		val := vi.Value()
+		got := val.StringValue()
+		if got != test.want {
+			t.Errorf("%d: got %q, want %q", i, got, test.want)
 		}
-		if vi.val.f64 != 42.0 {
-			t.Errorf("got %f, want 42.0", vi.val.f64)
-		}
-	})
-
-	t.Run("DBLE", func(t *testing.T) {
-		vi, err := r.Eval(&f90.FunctionCall{
-			Name: "DBLE",
-			Args: []f90.Expression{&f90.IntegerLiteral{Value: 42}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.decl.Type.Token != f90token.DOUBLEPRECISION {
-			t.Error("expected DOUBLEPRECISION type")
-		}
-	})
-
-	t.Run("INT", func(t *testing.T) {
-		vi, err := r.Eval(&f90.FunctionCall{
-			Name: "INT",
-			Args: []f90.Expression{&f90.RealLiteral{Value: 3.7, Raw: "3.7"}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !r.isInt(vi) {
-			t.Error("expected INTEGER type")
-		}
-		if vi.val.i64 != 3 {
-			t.Errorf("got %d, want 3", vi.val.i64)
-		}
-	})
-
-	t.Run("NINT", func(t *testing.T) {
-		vi, err := r.Eval(&f90.FunctionCall{
-			Name: "NINT",
-			Args: []f90.Expression{&f90.RealLiteral{Value: 3.7, Raw: "3.7"}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.val.i64 != 4 {
-			t.Errorf("got %d, want 4", vi.val.i64)
-		}
-	})
-
-	t.Run("FLOOR", func(t *testing.T) {
-		vi, err := r.Eval(&f90.FunctionCall{
-			Name: "FLOOR",
-			Args: []f90.Expression{&f90.RealLiteral{Value: 3.7, Raw: "3.7"}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.val.f64 != 3.0 {
-			t.Errorf("got %f, want 3.0", vi.val.f64)
-		}
-	})
-
-	t.Run("CEILING", func(t *testing.T) {
-		vi, err := r.Eval(&f90.FunctionCall{
-			Name: "CEILING",
-			Args: []f90.Expression{&f90.RealLiteral{Value: 3.2, Raw: "3.2"}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.val.f64 != 4.0 {
-			t.Errorf("got %f, want 4.0", vi.val.f64)
-		}
-	})
-}
-
-func TestREPL_EvalMaxMin(t *testing.T) {
-	r := &REPL{}
-
-	t.Run("MAX", func(t *testing.T) {
-		vi, err := r.Eval(&f90.FunctionCall{
-			Name: "MAX",
-			Args: []f90.Expression{
-				&f90.IntegerLiteral{Value: 3},
-				&f90.IntegerLiteral{Value: 7},
-				&f90.IntegerLiteral{Value: 2},
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.val.i64 != 7 {
-			t.Errorf("got %d, want 7", vi.val.i64)
-		}
-	})
-
-	t.Run("MIN", func(t *testing.T) {
-		vi, err := r.Eval(&f90.FunctionCall{
-			Name: "MIN",
-			Args: []f90.Expression{
-				&f90.IntegerLiteral{Value: 3},
-				&f90.IntegerLiteral{Value: 7},
-				&f90.IntegerLiteral{Value: 2},
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if vi.val.i64 != 2 {
-			t.Errorf("got %d, want 2", vi.val.i64)
-		}
-	})
-}
-
-func TestREPL_EvalParen(t *testing.T) {
-	r := &REPL{}
-
-	// (2 + 3) * 4 = 20
-	vi, err := r.Eval(&f90.BinaryExpr{
-		Left: &f90.ParenExpr{
-			Expr: &f90.BinaryExpr{
-				Left:  &f90.IntegerLiteral{Value: 2},
-				Op:    f90token.Plus,
-				Right: &f90.IntegerLiteral{Value: 3},
-			},
-		},
-		Op:    f90token.Asterisk,
-		Right: &f90.IntegerLiteral{Value: 4},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if vi.val.i64 != 20 {
-		t.Errorf("got %d, want 20", vi.val.i64)
 	}
 }
 
 func TestREPL_EvalErrors(t *testing.T) {
-	r := &REPL{}
-
-	t.Run("division by zero int", func(t *testing.T) {
-		_, err := r.Eval(&f90.BinaryExpr{
-			Left:  &f90.IntegerLiteral{Value: 5},
-			Op:    f90token.Slash,
-			Right: &f90.IntegerLiteral{Value: 0},
-		})
+	tests := []struct {
+		expr f90.Expression
+	}{
+		0: {binInt(f90token.Slash, 5, 0)},                                           // division by zero int
+		1: {binFloat(f90token.Slash, 5.0, 0.0)},                                     // division by zero float
+		2: {&f90.Identifier{Value: "UNDEFINED"}},                                    // undefined variable
+		3: {&f90.FunctionCall{Name: "NOTAFUNCTION", Args: []f90.Expression{exprInt(1)}}}, // unknown intrinsic
+		4: {&f90.FunctionCall{Name: "SQRT", Args: []f90.Expression{}}},                   // intrinsic no args
+	}
+	var r REPL
+	for i, test := range tests {
+		_, err := r.Eval(test.expr)
 		if err == nil {
-			t.Error("expected division by zero error")
+			t.Errorf("%d: expected error for %q", i, test.expr.AppendString(nil))
 		}
-	})
-
-	t.Run("division by zero float", func(t *testing.T) {
-		_, err := r.Eval(&f90.BinaryExpr{
-			Left:  &f90.RealLiteral{Value: 5.0, Raw: "5.0"},
-			Op:    f90token.Slash,
-			Right: &f90.RealLiteral{Value: 0.0, Raw: "0.0"},
-		})
-		if err == nil {
-			t.Error("expected division by zero error")
-		}
-	})
-
-	t.Run("undefined variable", func(t *testing.T) {
-		// Need a scope to test undefined variable (otherwise r.Var panics)
-		var rWithScope REPL
-		_, err := rWithScope.Eval(&f90.Identifier{Value: "UNDEFINED"})
-		if err == nil {
-			t.Error("expected undefined variable error")
-		}
-	})
-
-	t.Run("unknown intrinsic", func(t *testing.T) {
-		_, err := r.Eval(&f90.FunctionCall{
-			Name: "NOTAFUNCTION",
-			Args: []f90.Expression{&f90.IntegerLiteral{Value: 1}},
-		})
-		if err == nil {
-			t.Error("expected unknown intrinsic error")
-		}
-	})
-
-	t.Run("intrinsic no args", func(t *testing.T) {
-		_, err := r.Eval(&f90.FunctionCall{
-			Name: "SQRT",
-			Args: []f90.Expression{},
-		})
-		if err == nil {
-			t.Error("expected requires arguments error")
-		}
-	})
+	}
 }
 
-func TestREPL_IntPow(t *testing.T) {
+func TestREPL_ConstantNumericExpressions(t *testing.T) {
 	tests := []struct {
-		base, exp, want int64
+		expr f90.Expression
+		want float64
 	}{
-		{2, 0, 1},
-		{2, 1, 2},
-		{2, 10, 1024},
-		{3, 4, 81},
-		{5, 3, 125},
-		{2, -1, 0}, // negative exponent returns 0
-		{0, 0, 1},  // 0^0 = 1
-		{0, 5, 0},
+		// Integer arithmetic
+		0: {binInt(f90token.Plus, 3, 4), 7},
+		1: {binInt(f90token.Minus, 10, 3), 7},
+		2: {binInt(f90token.Asterisk, 6, 7), 42},
+		3: {binInt(f90token.Slash, 20, 4), 5},
+		4: {binInt(f90token.DoubleStar, 2, 10), 1024},
+		5: {binInt(f90token.DoubleStar, 5, 0), 1},
+		// Float arithmetic
+		6:  {binFloat(f90token.Plus, 1.5, 2.5), 4.0},
+		7:  {binFloat(f90token.Minus, 5.0, 1.5), 3.5},
+		8:  {binFloat(f90token.Asterisk, 2.0, 3.5), 7.0},
+		9:  {binFloat(f90token.Slash, 7.0, 2.0), 3.5},
+		10: {binFloat(f90token.DoubleStar, 2.0, 3.0), 8.0},
+		// Type promotion (int + real)
+		11: {binMixed(f90token.Plus, 2, 3.5), 5.5},
+		// Intrinsics
+		12: {intrinsicF(4.0, "SQRT"), 2.0},
+		13: {intrinsicF(0.0, "SIN"), 0.0},
+		14: {intrinsicF(0.0, "COS"), 1.0},
+		15: {intrinsicF(0.0, "TAN"), 0.0},
+		16: {intrinsicF(0.0, "EXP"), 1.0},
+		17: {intrinsicF(1.0, "LOG"), 0.0},
+		18: {intrinsicF(10.0, "LOG10"), 1.0},
+		19: {intrinsicF(-5.0, "ABS"), 5.0},
+		20: {intrinsicF(0.0, "ASIN"), 0.0},
+		21: {intrinsicF(1.0, "ACOS"), 0.0},
+		22: {intrinsicF(0.0, "ATAN"), 0.0},
+		23: {intrinsicF(3.7, "FLOOR"), 3.0},
+		24: {intrinsicF(3.2, "CEILING"), 4.0},
+		// MAX/MIN with integers
+		25: {maxInt(3, 7, 2), 7},
+		26: {minInt(3, 7, 2), 2},
+		// Parenthesized expression: (2+3)*4 = 20
+		27: {&f90.BinaryExpr{Left: &f90.ParenExpr{Expr: binInt(f90token.Plus, 2, 3)}, Op: f90token.Asterisk, Right: exprInt(4)}, 20},
+		// Unary numeric
+		28: {&f90.UnaryExpr{Op: f90token.Plus, Operand: exprInt(5)}, 5},
+		29: {&f90.UnaryExpr{Op: f90token.Minus, Operand: exprInt(7)}, -7},
+		30: {&f90.UnaryExpr{Op: f90token.Minus, Operand: exprFloat(2.5)}, -2.5},
+		// Type casts
+		31: {intrinsicF(3.7, "INT"), 3},
+		32: {intrinsicF(3.7, "NINT"), 4},
+		33: {intrinsicF(42, "REAL"), 42},
+		34: {intrinsicF(42, "DBLE"), 42},
+		// Type promotion real + double
+		35: {binDouble(f90token.Plus, 1.0, 2.0), 3.0},
 	}
-
-	for _, tc := range tests {
-		got := intPow(tc.base, tc.exp)
-		if got != tc.want {
-			t.Errorf("intPow(%d, %d) = %d, want %d", tc.base, tc.exp, got, tc.want)
+	const tol = 1e-10
+	var r REPL
+	for i, test := range tests {
+		v, err := r.Eval(test.expr)
+		if err != nil {
+			t.Fatalf("%d %s: %q", i, err, test.expr.AppendString(nil))
+		}
+		value := v.Value()
+		got := value.Float()
+		want := test.want
+		diff := math.Abs(got - want)
+		if want != 0 && diff/math.Abs(want) > tol {
+			t.Fatalf("%d got %f, want %f (diff %f)", i, got, want, diff)
+		} else if want == 0 && diff > tol {
+			t.Fatalf("%d got %f, want %f (diff %f)", i, got, want, diff)
 		}
 	}
+}
+
+func exprInt(v int64) *f90.IntegerLiteral {
+	return &f90.IntegerLiteral{Value: v, Raw: strconv.FormatInt(v, 10)}
+}
+
+func exprFloat(v float64) *f90.RealLiteral {
+	return &f90.RealLiteral{Value: v, Raw: strconv.FormatFloat(v, 'f', 16, 64)}
+}
+
+func binInt(op f90token.Token, l, r int64) *f90.BinaryExpr {
+	return &f90.BinaryExpr{Op: op, Left: exprInt(l), Right: exprInt(r)}
+}
+
+func binFloat(op f90token.Token, l, r float64) *f90.BinaryExpr {
+	return &f90.BinaryExpr{Op: op, Left: exprFloat(l), Right: exprFloat(r)}
+}
+
+func binMixed(op f90token.Token, l int64, r float64) *f90.BinaryExpr {
+	return &f90.BinaryExpr{Op: op, Left: exprInt(l), Right: exprFloat(r)}
+}
+
+func binDouble(op f90token.Token, l, r float64) *f90.BinaryExpr {
+	return &f90.BinaryExpr{Op: op, Left: exprFloat(l), Right: exprDouble(r)}
+}
+
+func exprDouble(v float64) *f90.RealLiteral {
+	return &f90.RealLiteral{Value: v, Raw: strconv.FormatFloat(v, 'f', 16, 64) + "D0"}
+}
+
+func intrinsicF(arg float64, name string) *f90.FunctionCall {
+	return &f90.FunctionCall{Name: name, Args: []f90.Expression{exprFloat(arg)}}
+}
+
+func maxInt(vals ...int64) *f90.FunctionCall {
+	args := make([]f90.Expression, len(vals))
+	for i, v := range vals {
+		args[i] = exprInt(v)
+	}
+	return &f90.FunctionCall{Name: "MAX", Args: args}
+}
+
+func minInt(vals ...int64) *f90.FunctionCall {
+	args := make([]f90.Expression, len(vals))
+	for i, v := range vals {
+		args[i] = exprInt(v)
+	}
+	return &f90.FunctionCall{Name: "MIN", Args: args}
+}
+
+func binLogical(op f90token.Token, l, r bool) *f90.BinaryExpr {
+	return &f90.BinaryExpr{Op: op, Left: &f90.LogicalLiteral{Value: l}, Right: &f90.LogicalLiteral{Value: r}}
 }

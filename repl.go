@@ -13,6 +13,7 @@ import (
 // Value holds a runtime Fortran value for REPL evaluation.
 // Type info comes from varinfo.decl.Type.Token (INTEGER, REAL, LOGICAL, CHARACTER, etc.)
 type Value struct {
+	tok   f90token.Token
 	i64   int64   // INTEGER (all sizes)
 	f64   float64 // REAL/DOUBLE PRECISION
 	b     bool    // LOGICAL
@@ -20,6 +21,16 @@ type Value struct {
 	arr   []Value // Array elements (flattened, row-major)
 	shape []int   // Array dimensions
 	set   bool    // true if value has been set
+}
+
+func (v *Value) Token() f90token.Token { return v.tok }
+func (v *Value) StringValue() string   { return v.s }
+func (v *Value) Bool() bool            { return v.b }
+func (v *Value) Float() float64 {
+	if v.i64 != 0 {
+		return float64(v.i64)
+	}
+	return v.f64
 }
 
 type REPL struct {
@@ -121,35 +132,40 @@ func (tg *REPL) SetScope(pu f90.ProgramUnit) error {
 }
 
 // Eval evaluates a Fortran expression and returns a varinfo with the result.
-func (r *REPL) Eval(expr f90.Expression) (*varinfo, error) {
+func (r *REPL) Eval(expr f90.Expression) (vi *varinfo, err error) {
 	switch e := expr.(type) {
 	case *f90.IntegerLiteral:
-		return r.makeInt(e.Value), nil
+		vi = r.makeInt(e.Value)
 	case *f90.RealLiteral:
 		if strings.ContainsAny(e.Raw, "Dd") {
-			return r.makeFloat64(e.Value), nil
+			vi = r.makeFloat64(e.Value)
+		} else {
+			vi = r.makeFloat32(e.Value)
 		}
-		return r.makeFloat32(e.Value), nil
 	case *f90.LogicalLiteral:
-		return r.makeBool(e.Value), nil
+		vi = r.makeBool(e.Value)
 	case *f90.StringLiteral:
-		return r.makeString(e.Value), nil
+		vi = r.makeString(e.Value)
 	case *f90.Identifier:
 		vi := r.Var(e.Value)
 		if vi == nil {
-			return nil, fmt.Errorf("var %s undefined", e.Value)
+			err = fmt.Errorf("var %s undefined", e.Value)
 		}
-		return vi, nil
 	case *f90.UnaryExpr:
-		return r.evalUnary(e)
+		vi, err = r.evalUnary(e)
 	case *f90.BinaryExpr:
-		return r.evalBinary(e)
+		vi, err = r.evalBinary(e)
 	case *f90.ParenExpr:
-		return r.Eval(e.Expr)
+		vi, err = r.Eval(e.Expr)
 	case *f90.FunctionCall:
-		return r.evalIntrinsic(e)
+		vi, err = r.evalIntrinsic(e)
+	default:
+		err = fmt.Errorf("unsupported expression: %T", expr)
 	}
-	return nil, fmt.Errorf("unsupported expression: %T", expr)
+	if vi != nil && vi.decl != nil {
+		vi.val.tok = vi.decl.Type.Token
+	}
+	return vi, err
 }
 
 func (r *REPL) evalUnary(e *f90.UnaryExpr) (*varinfo, error) {
