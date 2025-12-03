@@ -55,7 +55,7 @@ func TestTranspileGolden2(t *testing.T) {
 }
 
 func TestTranspileGolden(t *testing.T) {
-	return
+	t.Skip()
 	var parser Parser90
 	err := parser.Reset("testdata/golden.f90", strings.NewReader(goldensrc))
 	if err != nil {

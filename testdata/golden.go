@@ -251,9 +251,9 @@ func LEVEL12() {
 	angle = 0.5
 	sin_val = intrinsic.SIN(angle)
 	cos_val = intrinsic.COS(angle)
-	abs_val = intrinsic.ABS(-5.5)
-	max_val = intrinsic.MAX(i, j, k)
-	min_val = intrinsic.MIN(10, 20, 5)
+	abs_val = intrinsic.ABS[float32](-5.5)
+	max_val = intrinsic.MAX[int32](i, j, k)
+	min_val = intrinsic.MIN[int32](10, 20, 5)
 }
 func LEVEL13() {
 	var (
@@ -561,7 +561,7 @@ func LEVEL29() {
 	NPII = NPAA
 	NPLL = NPII
 	M = 1
-	MAXDEF = intrinsic.MIN(200000, MAXDM1)
+	MAXDEF = intrinsic.MIN[int32](200000, MAXDM1)
 }
 func SIMPLE_SUB() {
 }

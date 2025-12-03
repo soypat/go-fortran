@@ -402,7 +402,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	if err != nil {
 		return dst, err
 	}
-	if targetVinfo != nil && targetVinfo.decl.Type.Token == f90token.CHARACTER {
+	if targetVinfo.decl.Type.Token == f90token.CHARACTER {
 		stmt := &ast.ExprStmt{
 			X: tg.astMethodCall(targetVinfo.Identifier(), "SetFromString", rhs),
 		}

@@ -469,6 +469,49 @@ func intrinsicSel(name string) func(*varinfo) ast.Expr {
 	}
 }
 
+// intrinsicSelGeneric creates a type-parameterized selector: intrinsic.NAME[T]
+func intrinsicSelGeneric(name string) func(*varinfo) ast.Expr {
+	return func(tp *varinfo) ast.Expr {
+		sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(name)}
+		if tp == nil || isGenericVarinfo(tp) {
+			return sel
+		}
+		goType := goTypeBasic(tp.typeToken(), 0)
+		return &ast.IndexExpr{X: sel, Index: goType}
+	}
+}
+
+// goTypeBasic supports primitive type transformation from fortran to Go. Anything more complex requires being a method on [ToGo].
+func goTypeBasic(tok f90token.Token, kind int) (goType ast.Expr) {
+	switch tok {
+	case f90token.CHARACTER:
+		goType = _astTypeCharArray
+	case f90token.INTEGER:
+		switch kind {
+		case 1:
+			goType = ast.NewIdent("int8")
+		case 2:
+			goType = ast.NewIdent("int16")
+		case 8:
+			goType = ast.NewIdent("int64")
+		default:
+			goType = ast.NewIdent("int32")
+		}
+	case f90token.REAL:
+		switch kind {
+		case 8, 16:
+			goType = ast.NewIdent("float64")
+		default:
+			goType = ast.NewIdent("float32")
+		}
+	case f90token.DOUBLEPRECISION:
+		goType = ast.NewIdent("float64")
+	default:
+		panic("not a basic type")
+	}
+	return goType
+}
+
 // makeIntrinsicFn creates an intrinsic that calls intrinsic.NAME (e.g., SQRT, SIN).
 // returnType is nil if return type matches first param.
 func makeIntrinsicFn(name string, returnType *varinfo, params ...*varinfo) intrinsicFn {
@@ -485,6 +528,27 @@ func makeIntrinsicVariadic(name string, returnType *varinfo, variadicType *varin
 	return intrinsicFn{
 		name:        name,
 		exprGeneric: intrinsicSel(name),
+		returnType:  returnType,
+		params:      []*varinfo{variadicType},
+		isVariadic:  true,
+	}
+}
+
+// makeIntrinsicFnGeneric creates a generic intrinsic that emits intrinsic.NAME[T].
+func makeIntrinsicFnGeneric(name string, returnType *varinfo, params ...*varinfo) intrinsicFn {
+	return intrinsicFn{
+		name:        name,
+		exprGeneric: intrinsicSelGeneric(name),
+		returnType:  returnType,
+		params:      params,
+	}
+}
+
+// makeIntrinsicVariadicGeneric creates a variadic generic intrinsic like MAX, MIN.
+func makeIntrinsicVariadicGeneric(name string, returnType *varinfo, variadicType *varinfo) intrinsicFn {
+	return intrinsicFn{
+		name:        name,
+		exprGeneric: intrinsicSelGeneric(name),
 		returnType:  returnType,
 		params:      []*varinfo{variadicType},
 		isVariadic:  true,
@@ -569,15 +633,15 @@ var intrinsics = []intrinsicFn{
 	makeIntrinsicFn("ATAN2", nil, _tgtGenericFloat, _tgtGenericFloat),
 
 	// Math intrinsics - signed/numeric
-	makeIntrinsicFn("ABS", nil, _tgtGenericFloat),
+	makeIntrinsicFnGeneric("ABS", nil, _tgtGenericFloat),
 	makeIntrinsicFn("SIGN", nil, _tgtGenericFloat, _tgtGenericFloat),
 	makeIntrinsicFn("MOD", nil, _tgtGenericInt, _tgtGenericInt),
 	makeIntrinsicFn("DIM", nil, _tgtGenericFloat, _tgtGenericFloat),
 	makeIntrinsicFn("DPROD", _tgtFloat64, _tgtGenericFloat, _tgtGenericFloat), // DPROD returns DOUBLE
 
 	// Variadic intrinsics
-	makeIntrinsicVariadic("MAX", nil, _tgtGenericFloat),
-	makeIntrinsicVariadic("MIN", nil, _tgtGenericFloat),
+	makeIntrinsicVariadicGeneric("MAX", nil, _tgtGenericFloat),
+	makeIntrinsicVariadicGeneric("MIN", nil, _tgtGenericFloat),
 
 	// Character methods
 	makeIntrinsicMethod("LEN", "Len", _tgtInt32, _tgtChar),
