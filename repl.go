@@ -27,6 +27,7 @@ type Value struct {
 	s     string         // CHARACTER
 	arr   []Value        // Array elements (flattened, row-major)
 	shape []int          // Array dimensions
+	set   bool
 }
 
 func (v *Value) Token() f90token.Token { return v.tok }
@@ -362,6 +363,8 @@ func (repl *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
 		err = repl.assignInt(dst, int64(f0))
 	case "NINT":
 		err = repl.assignInt(dst, int64(repl.evalFloatFn0(math.Round, f0)))
+	case "FACTORIAL":
+		err = repl.assignInt(dst, repl.evalFactorial(arg0.val.Int()))
 	case "FLOOR":
 		err = repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(math.Floor, f0))
 	case "CEILING":
@@ -370,7 +373,25 @@ func (repl *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
 		err = repl.evalMax(dst, e.Args)
 	case "MIN":
 		err = repl.evalMin(dst, e.Args)
+	case "LEN", "LEN_TRIM", "INDEX", "ICHAR", "IACHAR", "SIZE", "LBOUND", "UBOUND", "MALLOC":
+		err = repl.assignInt(dst, int64(len(arg0.val.StringValue())))
+	case "TRIM", "ADJUSTL", "ADJUSTR", "CHAR", "ACHAR":
+		err = repl.assignString(dst, arg0.val.StringValue())
+	case "MOD":
+		if len(e.Args) < 2 {
+			return fmt.Errorf("MOD requires 2 arguments")
+		}
+		var arg1 varinfo
+		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
+			return err
+		}
+		err = repl.assignInt(dst, arg0.val.Int()%arg1.val.Int())
 	default:
+		// Check for user-defined functions
+		if fn := repl.ContainedOrExtern(e.Name); fn != nil && fn.returnType != nil {
+			dst.val.tok = fn.returnType.typeToken()
+			return nil
+		}
 		err = fmt.Errorf("unknown intrinsic: %s", name)
 	}
 	return err
@@ -448,6 +469,7 @@ func (repl *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
 		return fmt.Errorf("destination variable %q of type %s not assignable with type %s", dst.Identifier(), dst.decl.Type.Token.String(), src.decl.Type.Token.String())
 	}
 	dst.val.tok = src.decl.Type.Token
+	dst.val.set = true
 	return nil
 }
 
@@ -459,22 +481,21 @@ func (repl *REPL) promote(dst, src *varinfo) (promotion f90token.Token) {
 	case 0:
 		promotion = stok
 	case f90token.DOUBLEPRECISION:
-		if stok == f90token.INTEGER || stok == f90token.REAL || stok == f90token.DOUBLEPRECISION {
+		switch stok {
+		case f90token.INTEGER, f90token.REAL, f90token.DOUBLEPRECISION:
 			promotion = f90token.DOUBLEPRECISION
 		}
 	case f90token.REAL:
-		if stok == f90token.INTEGER || stok == f90token.REAL {
+		switch stok {
+		case f90token.INTEGER, f90token.REAL:
 			promotion = f90token.REAL
-		} else if stok == f90token.DOUBLEPRECISION {
+		case f90token.DOUBLEPRECISION:
 			promotion = f90token.DOUBLEPRECISION
 		}
 	case f90token.INTEGER:
-		if stok == f90token.INTEGER {
-			promotion = f90token.INTEGER
-		} else if stok == f90token.REAL {
-			promotion = f90token.REAL
-		} else if stok == f90token.DOUBLEPRECISION {
-			promotion = f90token.DOUBLEPRECISION
+		switch stok {
+		case f90token.INTEGER, f90token.REAL, f90token.DOUBLEPRECISION:
+			promotion = stok
 		}
 	default:
 		if stok == dtok {
@@ -579,6 +600,17 @@ func intPow(base, exp int64) int64 {
 		}
 		base *= base
 		exp >>= 1
+	}
+	return result
+}
+
+func (repl *REPL) evalFactorial(n int64) int64 {
+	if repl.noValueResolution || n <= 1 {
+		return 1
+	}
+	result := int64(1)
+	for i := int64(2); i <= n; i++ {
+		result *= i
 	}
 	return result
 }
