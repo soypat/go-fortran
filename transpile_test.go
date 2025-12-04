@@ -52,6 +52,27 @@ func TestTranspileGolden2(t *testing.T) {
 	const goFile = "testdata/golden.go"
 	os.WriteFile(goFile, progSrc.Bytes(), 0777)
 	helperFormatGoSrc(t, goFile)
+	expectedFull := helperRunFortran(t, "testdata/golden.f90")
+	os.WriteFile("testdata/golden.txt", expectedFull, 0777)
+	output := helperRunGoFile(t, goFile)
+	expected := expectedFull
+	misses := 0
+	for {
+		expectLine, remaining, okLine := bytes.Cut(expected, []byte{'\n'})
+		expected = remaining
+		gotLine, remaining, okGot := bytes.Cut(output, []byte{'\n'})
+		output = remaining
+		if !bytes.Equal(expectLine, gotLine) {
+			misses++
+			t.Errorf("output mismatch:\nExpected: %q\nGot:      %q", expectLine, gotLine)
+			if misses >= 4 {
+				t.Error("too many mismatches, end comparison")
+				break // too many errors.
+			}
+		} else if !okLine || !okGot {
+			break
+		}
+	}
 }
 
 func TestTranspileGolden(t *testing.T) {

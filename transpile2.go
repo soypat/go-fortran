@@ -244,7 +244,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	case *f90.CallStmt:
 		dst, err = tg.transformCallStmt(dst, s)
 	case *f90.PrintStmt:
-	// 	gostmt = tg.transformPrint(s)
+		dst, err = tg.transformPrintStmt(dst, s)
 	case *f90.IfStmt:
 	// 	gostmt = tg.transformIfStmt(s)
 	case *f90.DoLoop:
@@ -506,6 +506,25 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	return dst, nil
 }
 
+func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast.Stmt, err error) {
+	// Transform output list expressions to Go expressions
+	var args []ast.Expr
+	for _, expr := range stmt.OutputList {
+		goExpr, err := tg.transformExpression(nil, expr)
+		if err != nil {
+			return dst, err
+		}
+		args = append(args, goExpr)
+	}
+	// Generate: intrinsic.Print(args...)
+	callExpr := &ast.CallExpr{
+		Fun:  _astFnPrint,
+		Args: args,
+	}
+	dst = append(dst, &ast.ExprStmt{X: callExpr})
+	return dst, nil
+}
+
 // goType converts a varinfo to Go type, considering KIND parameter.
 // KIND mappings:
 //
@@ -650,6 +669,10 @@ var (
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("NewArray"),
 	}
+	_astFnPrint = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("Print"),
+	}
 	_astTypeCharArray = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("CharacterArray"),
@@ -664,14 +687,18 @@ var (
 	}
 )
 
-// sanitizeIdent returns a valid Go identifier by capitalizing the first letter if it's a Go keyword
+// sanitizeIdent returns a valid Go identifier.
+// Fortran is case-insensitive, so we normalize to lowercase.
+// If the result is a Go keyword, capitalize the first letter.
 func sanitizeIdent(name string) string {
 	if name == "" {
 		return name
 	}
-	// Check if it's a Go keyword (case-insensitive since Fortran is case-insensitive)
+	// Normalize to lowercase (Fortran is case-insensitive)
+	name = strings.ToLower(name)
+	// Check if it's a Go keyword
 	if token.IsKeyword(name) {
-		// Capitalize first letter
+		// Capitalize first letter to avoid conflict
 		return strings.ToUpper(name[:1]) + name[1:]
 	}
 	return name

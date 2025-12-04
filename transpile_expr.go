@@ -101,8 +101,8 @@ func (tg *ToGo) transformExprIdentifer(vitgt *varinfo, e *f90.Identifier) (resul
 
 	// Check if this identifier is in a COMMON block
 	if vi.common != "" {
-		blockName := strings.ToUpper(vi.common)
-		varName := strings.ToUpper(vi.Identifier())
+		blockName := vi.common      // Already sanitized (lowercase)
+		varName := vi.Identifier()  // Use sanitized name (matches struct field)
 		result = &ast.SelectorExpr{
 			X:   ast.NewIdent(blockName),
 			Sel: ast.NewIdent(varName),
