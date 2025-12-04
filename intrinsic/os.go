@@ -1,8 +1,13 @@
 package intrinsic
 
-import "os"
+import (
+	"os"
+	"strconv"
+)
 
-func Exit(code int) {
+func Stop(code int) {
+	buf := "STOP " + strconv.Itoa(code)
+	os.Stdout.WriteString(buf)
 	os.Stdout.Sync()
 	os.Exit(code)
 }

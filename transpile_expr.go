@@ -11,41 +11,35 @@ import (
 	f90token "github.com/soypat/go-fortran/token"
 )
 
-func goTypeFromToken(tok f90token.Token) string {
-	switch tok {
-	case f90token.INTEGER:
-		return "int32"
-	case f90token.REAL:
-		return "float32"
-	case f90token.DOUBLEPRECISION:
-		return "float64"
-	case f90token.LOGICAL:
-		return "bool"
-	default:
-		return ""
-	}
-}
-
 // transformExpression transforms a single Fortran expression to a Go expression
-func (tg *ToGo) transformExpression(vitgt *varinfo, expr f90.Expression) (result ast.Expr, err error) {
+func (tg *ToGo) transformExpression(vitgt *varinfo, expr f90.Expression) (result ast.Expr, resultType *varinfo, err error) {
 	switch e := expr.(type) {
 	case *f90.StringLiteral:
+		resultType = _tgtStringLit
 		result = &ast.BasicLit{
 			Kind:  token.STRING,
 			Value: fmt.Sprintf("%q", e.Value),
 		}
 	case *f90.IntegerLiteral:
+		resultType = _tgtGenericInt
 		result = &ast.BasicLit{
 			Kind:  token.INT,
 			Value: strconv.FormatInt(e.Value, 10),
 		}
 	case *f90.RealLiteral:
+		resultType = _tgtGenericFloat
+		// Format float - ensure it has a decimal point so Go recognizes it as float
+		floatStr := strconv.FormatFloat(e.Value, 'g', 16, 64)
+		if !strings.ContainsAny(floatStr, ".eE") {
+			floatStr += ".0"
+		}
 		result = &ast.BasicLit{
 			Kind:  token.FLOAT,
-			Value: strconv.FormatFloat(e.Value, 'g', 16, 64),
+			Value: floatStr,
 		}
 	case *f90.LogicalLiteral:
 		// .TRUE. → true, .FALSE. → false
+		resultType = _tgtBool
 		if e.Value {
 			result = _astTrue
 		} else {
@@ -53,28 +47,30 @@ func (tg *ToGo) transformExpression(vitgt *varinfo, expr f90.Expression) (result
 		}
 
 	case *f90.Identifier:
-		result, err = tg.transformExprIdentifer(vitgt, e)
+		result, resultType, err = tg.transformExprIdentifer(vitgt, e)
 	case *f90.ArrayRef:
 		result, err = tg.transformArrayRef(vitgt, e)
+		resultType = tg.repl.Var(e.Name)
 	case *f90.BinaryExpr:
 		if e.Op == f90token.StringConcat {
 			err = tg.makeErrAtStmt("string concat special handling needed")
 		} else {
-			result, err = tg.transformBinaryExpr(vitgt, e)
+			result, resultType, err = tg.transformBinaryExpr(vitgt, e)
 		}
 
 	case *f90.UnaryExpr:
-		result, err = tg.transformUnaryExpr(vitgt, e)
+		result, resultType, err = tg.transformUnaryExpr(vitgt, e)
 	case *f90.ParenExpr:
+		var inner ast.Expr
 		// Parentheses for grouping - transform the inner expression and wrap in parens
-		inner, err := tg.transformExpression(vitgt, e.Expr)
+		inner, resultType, err = tg.transformExpression(vitgt, e.Expr)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		result = &ast.ParenExpr{X: inner}
 	case *f90.FunctionCall:
 		// FunctionCall in expression: could be actual function or COMMON block array access
-		result, err = tg.transformFunctionCall(vitgt, e)
+		result, resultType, err = tg.transformFunctionCall(vitgt, e)
 
 	case *f90.ArrayConstructor:
 		result, err = tg.transformArrayConstructor(vitgt, e)
@@ -89,44 +85,40 @@ func (tg *ToGo) transformExpression(vitgt *varinfo, expr f90.Expression) (result
 	if result == nil && err == nil {
 		err = tg.makeErr(expr, "unhandled expression type, result is nil")
 	}
-	return result, err
+	if vitgt == _tgtInt {
+		result = tg.wrapConversion(vitgt, resultType, result)
+	}
+	return result, resultType, err
 }
 
-func (tg *ToGo) transformExprIdentifer(vitgt *varinfo, e *f90.Identifier) (result ast.Expr, err error) {
-	vi := tg.repl.Var(e.Value)
-	if vi == nil {
+func (tg *ToGo) transformExprIdentifer(vitgt *varinfo, e *f90.Identifier) (result ast.Expr, resultType *varinfo, err error) {
+	resultType = tg.repl.Var(e.Value)
+	if resultType == nil {
 		err = tg.makeErr(e, "identifier not found")
-		return nil, err
+		return nil, nil, err
 	}
-
 	// Check if this identifier is in a COMMON block
-	if vi.common != "" {
-		blockName := vi.common      // Already sanitized (lowercase)
-		varName := vi.Identifier()  // Use sanitized name (matches struct field)
+	if resultType.common != "" {
+		blockName := resultType.common     // Already sanitized (lowercase)
+		varName := resultType.Identifier() // Use sanitized name (matches struct field)
 		result = &ast.SelectorExpr{
 			X:   ast.NewIdent(blockName),
 			Sel: ast.NewIdent(varName),
 		}
 	} else {
-		result = ast.NewIdent(vi.Identifier())
+		result = ast.NewIdent(resultType.Identifier())
 	}
-	return result, err
+	return result, resultType, err
 }
 
 func (tg *ToGo) transformArrayConstructor(vitgt *varinfo, e *f90.ArrayConstructor) (result ast.Expr, err error) {
 	// Infer element type from target
-	elemType := "int32" // default
-	if vitgt != nil {
-		if t := goTypeFromToken(vitgt.typeToken()); t != "" {
-			elemType = t
-		}
-	}
-	elemIdent := ast.NewIdent(elemType)
+	elemIdent := tg.baseGotype(vitgt.val.tok, tg.resolveKind(vitgt))
 
 	// Transform values
 	var elts []ast.Expr
 	for _, val := range e.Values {
-		elt, err := tg.transformExpression(vitgt, val)
+		elt, _, err := tg.transformExpression(vitgt, val)
 		if err != nil {
 			return nil, err
 		}
@@ -147,57 +139,98 @@ func (tg *ToGo) transformArrayConstructor(vitgt *varinfo, e *f90.ArrayConstructo
 	}, nil
 }
 
-func (tg *ToGo) transformUnaryExpr(vitgt *varinfo, e *f90.UnaryExpr) (result ast.Expr, err error) {
-	operand, err := tg.transformExpression(vitgt, e.Operand)
+func (tg *ToGo) transformUnaryExpr(vitgt *varinfo, e *f90.UnaryExpr) (result ast.Expr, resultType *varinfo, err error) {
+	operand, resultType, err := tg.transformExpression(vitgt, e.Operand)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var op token.Token
 	switch e.Op {
 	case f90token.Plus:
 		// Unary plus: just return the operand
-		return operand, nil
+		return operand, resultType, nil
 	case f90token.Minus:
 		op = token.SUB
 	case f90token.NOT:
 		op = token.NOT
 	default:
-		return nil, tg.makeErr(e, fmt.Sprintf("unsupported unary operator %v", e.Op))
+		return nil, nil, tg.makeErr(e, fmt.Sprintf("unsupported unary operator %v", e.Op))
 	}
 
 	return &ast.UnaryExpr{
 		Op: op,
 		X:  operand,
-	}, nil
+	}, resultType, nil
 }
 
-func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result ast.Expr, err error) {
-	// Infer types for type promotion
-	var leftType, rightType varinfo
-	if err := tg.repl.InferType(&leftType, e.Left); err != nil {
-		return nil, err
+func (tg *ToGo) checkPromotion(left, right *varinfo) (lPromote, rPromote *varinfo, err error) {
+	if right == _tgtGenericFloat || right == _tgtGenericInt ||
+		left == _tgtGenericFloat || left == _tgtGenericInt {
+		return nil, nil, nil // Do not promote literals, go auto promotes them.
 	}
-	if err := tg.repl.InferType(&rightType, e.Right); err != nil {
-		return nil, err
-	}
-	promotion, promoteKind := tg.repl.promote(&leftType, &rightType)
-	if promotion == 0 {
-		return nil, tg.makeErr(e, fmt.Sprintf("cant promote %s to %s %q", leftType.val.tok, rightType.val.tok, e.AppendString(nil)))
-	}
-
-	left, err := tg.transformExpression(vitgt, e.Left)
+	ltok := left.typeToken()
+	rtok := right.typeToken()
+	lKind, err := tg.repl.getOrResolveKind(left)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	right, err := tg.transformExpression(vitgt, e.Right)
+	rKind, err := tg.repl.getOrResolveKind(right)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	ltok, lKind = normalizeTokenKind(ltok, lKind)
+	rtok, rKind = normalizeTokenKind(rtok, rKind)
+	if rtok == ltok {
+		if lKind > rKind {
+			return nil, left, nil
+		} else if lKind < rKind {
+			return right, nil, nil
+		}
+		return nil, nil, nil // Identical types.
+	}
+	if rtok == f90token.INTEGER && ltok == f90token.REAL {
+		return nil, left, nil
+	} else if ltok == f90token.INTEGER && rtok == f90token.REAL {
+		return right, nil, nil
+	}
+	return nil, nil, tg.makeErrAtStmt("unpromotable combo " + ltok.String() + " " + rtok.String())
+}
 
+// normalizeTokenKind sets kind to non-zero size and DOUBLEPRECISION becomes REAL.
+func normalizeTokenKind(tok f90token.Token, kind int) (f90token.Token, int) {
+	var defaultKind int
+	switch tok {
+	case f90token.DOUBLEPRECISION:
+		tok = f90token.REAL
+		defaultKind = 8
+	case f90token.REAL:
+		defaultKind = 4
+	case f90token.INTEGER:
+		defaultKind = 4
+	}
+	if kind == 0 {
+		kind = defaultKind
+	}
+	return tok, kind
+}
+
+func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result ast.Expr, resultType *varinfo, err error) {
+	left, leftType, err := tg.transformExpression(vitgt, e.Left)
+	if err != nil {
+		return nil, nil, err
+	}
+	right, rightType, err := tg.transformExpression(vitgt, e.Right)
+	if err != nil {
+		return nil, nil, err
+	}
+	lpromote, rpromote, err := tg.checkPromotion(leftType, rightType)
+	if err != nil {
+		return nil, nil, err
+	}
+	needsPromotion := lpromote != nil || rpromote != nil
 	// Map Fortran operator to Go operator
 	var op token.Token
-	needsPromotion := promotion != leftType.val.tok // Most operators need type-matched operands
 	switch e.Op {
 	case f90token.Plus:
 		op = token.ADD
@@ -208,15 +241,14 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 	case f90token.Slash:
 		op = token.QUO
 	case f90token.DoubleStar:
-		// Power operator: x ** y → math.Pow(x, y)
-		// math.Pow requires float64 arguments
-		left = tg.wrapConversion(vitgt, &leftType, left)
-		right = tg.wrapConversion(vitgt, &rightType, right)
+		// Power operator: x ** y → intrinsic.POW[float T](x, y)
+		left = tg.wrapConversion(vitgt, leftType, left)
+		right = tg.wrapConversion(vitgt, rightType, right)
 		sel := intrinsicSel("POW")
 		return &ast.CallExpr{
 			Fun:  sel(vitgt),
 			Args: []ast.Expr{left, right},
-		}, nil
+		}, vitgt, nil
 	case f90token.EQ, f90token.EqEq:
 		op = token.EQL
 	case f90token.NE, f90token.NotEquals:
@@ -231,60 +263,73 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 		op = token.GEQ
 	case f90token.AND:
 		op = token.LAND
-		needsPromotion = false // Logical ops don't need numeric promotion
+		needsPromotion = false
 	case f90token.OR:
 		op = token.LOR
 		needsPromotion = false
 	case f90token.StringConcat:
-		return nil, tg.makeErr(e, "string concat handled in transformExpression")
+		return nil, nil, tg.makeErr(e, "string concat handled in transformExpression")
 	default:
-		return nil, tg.makeErr(e, fmt.Sprintf("unsupported binary operator %v", e.Op))
+		return nil, nil, tg.makeErr(e, fmt.Sprintf("unsupported binary operator %v", e.Op))
 	}
 
 	// Promote operands to common type for arithmetic/comparison ops
+	resultType = leftType
 	if needsPromotion {
-		left = tg.wrapPromotedType(promotion, promoteKind, &leftType, left)
-		right = tg.wrapPromotedType(promotion, promoteKind, &rightType, right)
+		if lpromote != nil {
+			resultType = lpromote
+			left = tg.wrapConversion(lpromote, leftType, left)
+		} else if rpromote != nil {
+			resultType = rpromote
+			right = tg.wrapConversion(rpromote, rightType, right)
+		}
 	}
-
 	return &ast.BinaryExpr{
 		X:  left,
 		Op: op,
 		Y:  right,
-	}, nil
+	}, resultType, nil
 }
 
-func (tg *ToGo) transformFunctionCall(vitgt *varinfo, e *f90.FunctionCall) (result ast.Expr, err error) {
+func (tg *ToGo) transformFunctionCall(vitgt *varinfo, e *f90.FunctionCall) (result ast.Expr, resultType *varinfo, err error) {
 	vi := tg.repl.Var(e.Name)
 	if vi != nil {
 		// Check if this is a declared variable (COMMON block array access)
-		args, err := tg.transformExprSlice(_tgtInt32, nil, e.Args)
-		// Treat as array element access: arr.At(indices...)
-		return tg.astMethodCall(e.Name, "At", args...), err
+		// Wrap indices in int() for Go's array methods
+		var args []ast.Expr
+		for _, expr := range e.Args {
+			arg, _, err := tg.transformExpression(_tgtInt, expr)
+			if err != nil {
+				return nil, nil, err
+			}
+			args = append(args, arg)
+		}
+		// Treat as array element access: arr.At(int(indices)...)
+		return tg.astMethodCall(e.Name, "At", args...), vi, nil
 	}
 	fi := tg.ContainedOrExtern(e.Name)
 	if fi == nil {
 		fn := getIntrinsic(e.Name, len(e.Args))
 		if fn == nil {
-			return result, tg.makeErr(e, "function/intrinsic not found: "+e.Name)
+			return nil, nil, tg.makeErr(e, "function/intrinsic not found: "+e.Name)
 		}
-		expr, err := tg.intrinsicExpr(vitgt, fn, e.Args...)
+		expr, resultType, err := tg.intrinsicExpr(vitgt, fn, e.Args...)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return expr, err
+		return expr, resultType, err
 	}
 
 	params := fi.ProcedureParams()
 	if len(e.Args) != len(params) {
-		return result, tg.makeErr(e, "parameter length mismatch")
+		return nil, nil, tg.makeErr(e, "parameter length mismatch")
 	}
 	// Transform args
 	var args []ast.Expr
 	for i, arg := range e.Args {
-		argExpr, err := tg.transformExpression(&params[i], arg)
+		argExpr, _, err := tg.transformExpression(&params[i], arg)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		args = append(args, argExpr)
 	}
@@ -292,7 +337,7 @@ func (tg *ToGo) transformFunctionCall(vitgt *varinfo, e *f90.FunctionCall) (resu
 	return &ast.CallExpr{
 		Fun:  ast.NewIdent(fi.name),
 		Args: args,
-	}, nil
+	}, fi.returnType, nil
 }
 
 func (tg *ToGo) transformArrayRef(vitgt *varinfo, e *f90.ArrayRef) (result ast.Expr, err error) {
@@ -310,13 +355,14 @@ func (tg *ToGo) transformArrayRef(vitgt *varinfo, e *f90.ArrayRef) (result ast.E
 			Args: args,
 		}, err
 	}
-	// Regular element access: arr(i) → arr.At(indices...)
+	// Regular element access: arr(i) → arr.At(int(indices)...)
 	var args []ast.Expr
 	for _, expr := range e.Subscripts {
-		arg, err := tg.transformExpression(_tgtInt32, expr)
+		arg, _, err := tg.transformExpression(_tgtInt, expr)
 		if err != nil {
 			return nil, err
 		}
+		// Wrap in int() conversion for Go's array methods
 		args = append(args, arg)
 	}
 	receiver := tg.astVarExpr(vi)
@@ -347,10 +393,15 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 		return tg.transformSetCharacterArray(dst, fexpr, rhs)
 	}
 
-	// Regular element assignment: arr(i) = v → arr.Set(value, indices...)
-	args, err := tg.transformExprSlice(_tgtInt32, []ast.Expr{rhs}, fexpr.Subscripts)
-	if err != nil {
-		return dst, err
+	// Regular element assignment: arr(i) = v → arr.Set(value, int(indices)...)
+	args := []ast.Expr{rhs}
+	for _, expr := range fexpr.Subscripts {
+		arg, _, err := tg.transformExpression(_tgtInt, expr)
+		if err != nil {
+			return dst, err
+		}
+		// Wrap in int() conversion for Go's array methods
+		args = append(args, arg)
 	}
 	receiver := tg.astVarExpr(vitgt)
 	gstmt := &ast.ExprStmt{
@@ -388,22 +439,22 @@ func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, 
 }
 
 func (tg *ToGo) transformRangeExprToArgs(rng *f90.RangeExpr, vi *varinfo) (_ []ast.Expr, err error) {
-	if vi == _tgtInt32 {
+	if vi == _tgtInt32 || vi == _tgtInt {
 		panic("misuse of varinfo")
 	}
 	var start, end ast.Expr = _astOne, nil
 	if rng.Start != nil {
-		start, err = tg.transformExpression(_tgtInt32, rng.Start)
+		start, _, err = tg.transformExpression(_tgtInt, rng.Start)
 	}
 	if err == nil && rng.End != nil {
-		end, err = tg.transformExpression(_tgtInt32, rng.End)
+		end, _, err = tg.transformExpression(_tgtInt, rng.End)
 		return []ast.Expr{start, end}, err
 	}
 	// Set default end size.
 	if err == nil && vi.decl.Type.Token == f90token.CHARACTER && vi.decl.Charlen() != nil {
-		end, err = tg.transformExpression(_tgtInt32, vi.decl.Charlen())
+		end, _, err = tg.transformExpression(_tgtInt, vi.decl.Charlen())
 	} else if err == nil && vi.decl.Dimension().CanExpr() {
-		end, err = tg.transformExpression(_tgtInt32, vi.decl.Dimension().Expr())
+		end, _, err = tg.transformExpression(_tgtInt, vi.decl.Dimension().Expr())
 	} else {
 		err = tg.makeErrWithPos(rng.Position, "unsupported variable dimension for assignment")
 	}
@@ -415,7 +466,7 @@ func (tg *ToGo) transformRangeExprToArgs(rng *f90.RangeExpr, vi *varinfo) (_ []a
 
 func (tg *ToGo) transformExprSlice(vitgt *varinfo, dst []ast.Expr, src []f90.Expression) (_ []ast.Expr, err error) {
 	for i := range src {
-		expr, err := tg.transformExpression(vitgt, src[i])
+		expr, _, err := tg.transformExpression(vitgt, src[i])
 		if err != nil {
 			return dst, err
 		}
@@ -424,19 +475,14 @@ func (tg *ToGo) transformExprSlice(vitgt *varinfo, dst []ast.Expr, src []f90.Exp
 	return dst, nil
 }
 
-// wrapPromotedType wraps expr for binary operation type promotion (no KIND info).
-func (tg *ToGo) wrapPromotedType(targetType f90token.Token, targetKind int, sourceType *varinfo, expr ast.Expr) ast.Expr {
-	srcType := sourceType.typeToken()
-	if srcType == targetType {
-		return expr
-	}
-	conv := tg.baseGotype(targetType, targetKind)
-	return &ast.CallExpr{Fun: conv, Args: []ast.Expr{expr}}
-}
-
 // wrapConversion wraps expr with a type conversion if target type differs from sourceType.
 func (tg *ToGo) wrapConversion(target *varinfo, sourceType *varinfo, expr ast.Expr) ast.Expr {
 	if target == nil {
+		return expr
+	} else if target == _tgtInt {
+		if sourceType != _tgtInt && sourceType != _tgtGenericInt {
+			expr = &ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{expr}}
+		}
 		return expr
 	}
 	srcType := sourceType.typeToken()
@@ -480,13 +526,13 @@ type intrinsicFn struct {
 	isVariadic  bool
 }
 
-func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expression) (call *ast.CallExpr, err error) {
+func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expression) (call *ast.CallExpr, resultType *varinfo, err error) {
 	if fn.isVariadic {
 		if len(args) < len(fn.params) {
-			return nil, fmt.Errorf("intrinsic %s requires at least %d arguments, got %d", fn.name, len(fn.params), len(args))
+			return nil, nil, fmt.Errorf("intrinsic %s requires at least %d arguments, got %d", fn.name, len(fn.params), len(args))
 		}
 	} else if len(args) != len(fn.params) {
-		return nil, fmt.Errorf("intrinsic %s requires %d arguments, got %d", fn.name, len(fn.params), len(args))
+		return nil, nil, fmt.Errorf("intrinsic %s requires %d arguments, got %d", fn.name, len(fn.params), len(args))
 	}
 	var gargs []ast.Expr
 	for i := range args {
@@ -495,14 +541,15 @@ func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expre
 		if paramIdx >= len(fn.params) {
 			paramIdx = 0
 		}
-		expr, err := tg.transformExpression(fn.params[paramIdx], args[i])
+		expr, _, err := tg.transformExpression(fn.params[paramIdx], args[i])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		gargs = append(gargs, expr)
 	}
 
 	if fn.method != "" {
+		resultType = vitgt
 		call = &ast.CallExpr{
 			Fun: &ast.SelectorExpr{
 				X:   gargs[0],
@@ -513,16 +560,18 @@ func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expre
 		// Method intrinsics need type conversion: Go methods return native types
 		call = tg.wrapMethodIntrinsic(fn, call)
 	} else {
+		resultType = fn.returnType
 		funcExpr := fn.expr
 		if funcExpr == nil && fn.exprGeneric != nil {
 			funcExpr = fn.exprGeneric(vitgt)
+			resultType = vitgt
 		}
 		call = &ast.CallExpr{
 			Fun:  funcExpr,
 			Args: gargs,
 		}
 	}
-	return call, nil
+	return call, resultType, nil
 }
 
 func getIntrinsic(name string, nargs int) *intrinsicFn {
@@ -757,10 +806,12 @@ var (
 	_astTrue         = ast.NewIdent("true")
 	_astOne          = &ast.BasicLit{Kind: token.INT, Value: "1"}
 	_tgtInt32        = defaultVarinfo(f90token.INTEGER)
+	_tgtInt          = defaultVarinfo(f90token.INTEGER)
 	_tgtFloat32      = defaultVarinfo(f90token.REAL)
 	_tgtBool         = defaultVarinfo(f90token.LOGICAL)
 	_tgtFloat64      = defaultVarinfo(f90token.DOUBLEPRECISION)
 	_tgtChar         = defaultVarinfo(f90token.CHARACTER)
+	_tgtStringLit    = defaultVarinfo(f90token.StringLit)
 	_tgtGenericFloat = defaultVarinfo(f90token.FloatLit)
 	_tgtGenericInt   = defaultVarinfo(f90token.IntLit)
 	_tgtArray        = defaultVarinfo(f90token.DIMENSION)

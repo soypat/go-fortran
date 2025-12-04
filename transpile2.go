@@ -161,6 +161,12 @@ func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 	for i := range params {
 		vi := &params[i]
 		tp := tg.goType(vi)
+		// For INTENT(OUT) or INTENT(INOUT) non-array scalars, use pointer type
+		intent := vi.decl.Type.Intent()
+		isArray := vi.Dimensions() != nil && len(vi.Dimensions().Bounds) > 0
+		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
+			tp = &ast.StarExpr{X: tp}
+		}
 		dst = append(dst, &ast.Field{
 			Type:  tp,
 			Names: []*ast.Ident{tg.astIdent(vi.decl.Name)},
@@ -246,9 +252,9 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	case *f90.PrintStmt:
 		dst, err = tg.transformPrintStmt(dst, s)
 	case *f90.IfStmt:
-	// 	gostmt = tg.transformIfStmt(s)
+		dst, err = tg.transformIfStmt(dst, s)
 	case *f90.DoLoop:
-	// 	gostmt = tg.transformDoLoop(s)
+		dst, err = tg.transformDoLoop(dst, s)
 
 	case *f90.ReturnStmt:
 		// RETURN statement in functions will be handled by convertFunctionResultToReturn
@@ -256,30 +262,26 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		// gostmt = &ast.ReturnStmt{}
 	case *f90.CycleStmt:
 		// CYCLE → continue
-		// gostmt = &ast.BranchStmt{
-		// 	Tok: token.CONTINUE,
-		// }
+		dst = append(dst, &ast.BranchStmt{Tok: token.CONTINUE})
 	case *f90.ExitStmt:
 		// EXIT → break
-		// gostmt = &ast.BranchStmt{
-		// 	Tok: token.BREAK,
-		// }
+		dst = append(dst, &ast.BranchStmt{Tok: token.BREAK})
 	case *f90.ContinueStmt:
 		// CONTINUE → empty statement (no-op in Go)
 		// If there's a label, it will be handled by label processing later
 		// gostmt = &ast.EmptyStmt{}
 	case *f90.GotoStmt:
 		// GOTO label → goto labelN
-		// gostmt = &ast.BranchStmt{
-		// 	Tok:   token.GOTO,
-		// 	Label: ast.NewIdent("label" + s.Target),
-		// }
+		dst = append(dst, &ast.BranchStmt{
+			Tok:   token.GOTO,
+			Label: tg.astLabel(s.Target),
+		})
 	case *f90.AllocateStmt:
 		// gostmt = tg.transformAllocateStmt(s)
 	case *f90.DeallocateStmt:
 		// gostmt = tg.transformDeallocateStmt(s)
 	case *f90.SelectCaseStmt:
-		// gostmt = tg.transformSelectCaseStmt(s)
+		dst, err = tg.transformSelectCaseStmt(dst, s)
 	case *f90.CommonStmt:
 		// COMMON blocks are processed separately, no code generation in function body
 		return nil, nil
@@ -293,13 +295,16 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		// Cray-style POINTER statements are processed in preScanCommonBlocks, no code generation in function body
 		return nil, nil
 	case *f90.DataStmt:
-		// gostmt = tg.transformDataStmt(s)
+		dst, err = tg.transformDataStmt(dst, s)
 	case *f90.ArithmeticIfStmt:
-		// gostmt = tg.transformArithmeticIfStmt(s)
+		dst, err = tg.transformArithmeticIfStmt(dst, s)
 	case *f90.ComputedGotoStmt:
-		// gostmt = tg.transformComputedGotoStmt(s)
+		dst, err = tg.transformComputedGotoStmt(dst, s)
 	case *f90.StopStmt:
-		// gostmt = tg.transformStopStmt(s)
+		var code ast.Expr
+		code, _, err = tg.transformExpression(_tgtInt, s.Code)
+		dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{Fun: _astIntrinsicStop, Args: []ast.Expr{code}}})
+
 	case *f90.WriteStmt:
 		// gostmt = tg.transformWriteStmt(s)
 	case *f90.FormatStmt:
@@ -336,7 +341,7 @@ func (tg *ToGo) makeArrayInitializer(typ *varinfo, initializer ast.Expr) (ast.Ex
 	}
 	args := []ast.Expr{initializer} // First argument is array initializer
 	for _, bound := range dims.Bounds {
-		size, err := tg.transformExpression(_tgtInt32, bound.Upper)
+		size, _, err := tg.transformExpression(_tgtInt, bound.Upper)
 		if err != nil {
 			return nil, tg.makeErrWithPos(typ.decl.Position, "unable to make array: "+err.Error())
 		}
@@ -364,8 +369,10 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	for i := range stmt.Entities {
 		ent := &stmt.Entities[i]
 		vi := tg.repl.Var(ent.Name)
-		if vi.IsParameter() {
-			continue // Skip parameters, they're already declared in function signature
+		// Check if this is a PARAMETER constant (compile-time constant)
+		isParamConst := stmt.Type.Attr(f90token.PARAMETER) != nil
+		if vi.IsParameter() && !isParamConst {
+			continue // Skip function parameters, they're already declared in function signature
 		}
 		arrspec := vi.Dimensions()
 		tp := tg.goType(vi)
@@ -373,6 +380,14 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 		spec := &ast.ValueSpec{
 			Names: []*ast.Ident{ident},
 			Type:  tp,
+		}
+		// For PARAMETER constants, add the initializer value
+		if isParamConst && ent.Init != nil {
+			initVal, _, err := tg.transformExpression(vi, ent.Init)
+			if err != nil {
+				return nil, err
+			}
+			spec.Values = []ast.Expr{initVal}
 		}
 		decl.Specs = append(decl.Specs, spec)
 		useSpecs.Names = append(useSpecs.Names, nouse)
@@ -392,7 +407,23 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 				Tok: token.ASSIGN,
 				Rhs: []ast.Expr{newArrExpr},
 			})
-
+		} else if vi.decl.Type.Token == f90token.CHARACTER {
+			// Generate CHARACTER initialization: str = intrinsic.NewCharacterArray(len)
+			charLen := ent.Charlen()
+			if charLen != nil {
+				lenExpr, _, err := tg.transformExpression(_tgtInt, charLen)
+				if err != nil {
+					return nil, err
+				}
+				arrayInits = append(arrayInits, &ast.AssignStmt{
+					Lhs: []ast.Expr{ident},
+					Tok: token.ASSIGN,
+					Rhs: []ast.Expr{&ast.CallExpr{
+						Fun:  _astFnNewCharArray,
+						Args: []ast.Expr{lenExpr},
+					}},
+				})
+			}
 		}
 	}
 	if len(decl.Specs) == 0 {
@@ -420,9 +451,15 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 	}
 	for i := range stmt.Args {
 		info := &params[i]
-		goexpr, err := tg.transformExpression(info, stmt.Args[i])
+		goexpr, _, err := tg.transformExpression(info, stmt.Args[i])
 		if err != nil {
 			return dst, err
+		}
+		// For INTENT(OUT/INOUT) non-array scalar parameters, pass address
+		intent := info.decl.Type.Intent()
+		isArray := info.Dimensions() != nil && len(info.Dimensions().Bounds) > 0
+		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
+			goexpr = &ast.UnaryExpr{Op: token.AND, X: goexpr}
 		}
 		gstmt.Args = append(gstmt.Args, goexpr)
 	}
@@ -441,6 +478,12 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	case *f90.Identifier:
 		targetVinfo = tg.repl.Var(tgt.Value)
 		lhs = tg.astVarExpr(targetVinfo)
+		// Dereference INTENT(OUT/INOUT) non-array scalar parameters
+		intent := targetVinfo.decl.Type.Intent()
+		isArray := targetVinfo.Dimensions() != nil && len(targetVinfo.Dimensions().Bounds) > 0
+		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
+			lhs = &ast.StarExpr{X: lhs}
+		}
 		if binop, ok := stmt.Value.(*f90.BinaryExpr); ok && binop.Op == f90token.StringConcat {
 			return tg.transformStringConcat(dst, targetVinfo._varname, binop)
 		}
@@ -457,7 +500,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	} else if targetVinfo.decl == nil {
 		return nil, tg.makeErr(stmt.Target, "identifier with no corresponding type declaration:"+targetVinfo.Identifier())
 	}
-	rhs, err := tg.transformExpression(targetVinfo, stmt.Value)
+	rhs, _, err := tg.transformExpression(targetVinfo, stmt.Value)
 	if err != nil {
 		return dst, err
 	}
@@ -510,7 +553,7 @@ func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast
 	// Transform output list expressions to Go expressions
 	var args []ast.Expr
 	for _, expr := range stmt.OutputList {
-		goExpr, err := tg.transformExpression(nil, expr)
+		goExpr, _, err := tg.transformExpression(nil, expr)
 		if err != nil {
 			return dst, err
 		}
@@ -522,6 +565,332 @@ func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast
 		Args: args,
 	}
 	dst = append(dst, &ast.ExprStmt{X: callExpr})
+	return dst, nil
+}
+
+func (tg *ToGo) transformIfStmt(dst []ast.Stmt, stmt *f90.IfStmt) (_ []ast.Stmt, err error) {
+	// Transform the main condition
+	cond, _, err := tg.transformExpression(nil, stmt.Condition)
+	if err != nil {
+		return dst, err
+	}
+
+	// Transform THEN part statements
+	thenBody, err := tg.transformStatements(nil, stmt.ThenPart)
+	if err != nil {
+		return dst, err
+	}
+
+	// Build the Go if statement
+	goIf := &ast.IfStmt{
+		Cond: cond,
+		Body: &ast.BlockStmt{List: thenBody},
+	}
+
+	// Handle ELSE IF parts (chain them)
+	currentIf := goIf
+	for _, elseIf := range stmt.ElseIfParts {
+		elseIfCond, _, err := tg.transformExpression(nil, elseIf.Condition)
+		if err != nil {
+			return dst, err
+		}
+		elseIfBody, err := tg.transformStatements(nil, elseIf.ThenPart)
+		if err != nil {
+			return dst, err
+		}
+		nextIf := &ast.IfStmt{
+			Cond: elseIfCond,
+			Body: &ast.BlockStmt{List: elseIfBody},
+		}
+		currentIf.Else = nextIf
+		currentIf = nextIf
+	}
+
+	// Handle ELSE part
+	if len(stmt.ElsePart) > 0 {
+		elseBody, err := tg.transformStatements(nil, stmt.ElsePart)
+		if err != nil {
+			return dst, err
+		}
+		currentIf.Else = &ast.BlockStmt{List: elseBody}
+	}
+
+	dst = append(dst, goIf)
+	return dst, nil
+}
+
+func (tg *ToGo) transformDoLoop(dst []ast.Stmt, stmt *f90.DoLoop) (_ []ast.Stmt, err error) {
+	// Transform body statements
+	bodyStmts, err := tg.transformStatements(nil, stmt.Body)
+	if err != nil {
+		return dst, err
+	}
+
+	// Handle DO WHILE (no loop variable, condition in Start)
+	if stmt.Var == "" {
+		// DO WHILE: for condition { ... }
+		condExpr, _, err := tg.transformExpression(nil, stmt.Start)
+		if err != nil {
+			return dst, err
+		}
+		forStmt := &ast.ForStmt{
+			Cond: condExpr,
+			Body: &ast.BlockStmt{List: bodyStmts},
+		}
+		dst = append(dst, forStmt)
+		return dst, nil
+	}
+
+	// Counter-controlled DO loop: DO i = start, end [, step]
+	loopVar := tg.repl.Var(stmt.Var)
+	if loopVar == nil {
+		return dst, tg.makeErr(stmt, "unknown loop variable: "+stmt.Var)
+	}
+	loopVarIdent := ast.NewIdent(loopVar.Identifier())
+
+	// Transform start expression
+	startExpr, _, err := tg.transformExpression(loopVar, stmt.Start)
+	if err != nil {
+		return dst, err
+	}
+
+	// Transform end expression
+	endExpr, _, err := tg.transformExpression(loopVar, stmt.End)
+	if err != nil {
+		return dst, err
+	}
+
+	// Transform step expression (defaults to 1 if not provided)
+	var stepExpr ast.Expr = &ast.BasicLit{Kind: token.INT, Value: "1"}
+	if stmt.Step != nil {
+		stepExpr, _, err = tg.transformExpression(loopVar, stmt.Step)
+		if err != nil {
+			return dst, err
+		}
+	}
+
+	// Build Go for loop: for i := start; i <= end; i += step { ... }
+	// Init: i = start
+	initStmt := &ast.AssignStmt{
+		Lhs: []ast.Expr{loopVarIdent},
+		Tok: token.ASSIGN,
+		Rhs: []ast.Expr{startExpr},
+	}
+
+	// Condition: i <= end
+	condExpr := &ast.BinaryExpr{
+		X:  loopVarIdent,
+		Op: token.LEQ,
+		Y:  endExpr,
+	}
+
+	// Post: i += step (or i++ if step is 1)
+	var postStmt ast.Stmt
+	if basicLit, ok := stepExpr.(*ast.BasicLit); ok && basicLit.Value == "1" {
+		postStmt = &ast.IncDecStmt{X: loopVarIdent, Tok: token.INC}
+	} else {
+		postStmt = &ast.AssignStmt{
+			Lhs: []ast.Expr{loopVarIdent},
+			Tok: token.ADD_ASSIGN,
+			Rhs: []ast.Expr{stepExpr},
+		}
+	}
+
+	forStmt := &ast.ForStmt{
+		Init: initStmt,
+		Cond: condExpr,
+		Post: postStmt,
+		Body: &ast.BlockStmt{List: bodyStmts},
+	}
+
+	dst = append(dst, forStmt)
+	return dst, nil
+}
+
+func (tg *ToGo) transformSelectCaseStmt(dst []ast.Stmt, stmt *f90.SelectCaseStmt) (_ []ast.Stmt, err error) {
+	// Transform the selector expression
+	tagExpr, _, err := tg.transformExpression(nil, stmt.Expression)
+	if err != nil {
+		return dst, err
+	}
+
+	// Build Go switch statement
+	switchStmt := &ast.SwitchStmt{
+		Tag:  tagExpr,
+		Body: &ast.BlockStmt{},
+	}
+
+	for _, clause := range stmt.Cases {
+		// Transform body statements
+		bodyStmts, err := tg.transformStatements(nil, clause.Body)
+		if err != nil {
+			return dst, err
+		}
+
+		caseClause := &ast.CaseClause{
+			Body: bodyStmts,
+		}
+
+		if clause.IsDefault {
+			// CASE DEFAULT → default:
+			caseClause.List = nil
+		} else {
+			// CASE (val1, val2, ...) → case val1, val2, ...:
+			for _, val := range clause.Values {
+				valExpr, _, err := tg.transformExpression(nil, val)
+				if err != nil {
+					return dst, err
+				}
+				caseClause.List = append(caseClause.List, valExpr)
+			}
+		}
+
+		switchStmt.Body.List = append(switchStmt.Body.List, caseClause)
+	}
+
+	dst = append(dst, switchStmt)
+	return dst, nil
+}
+
+func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.Stmt, err error) {
+	// DATA statements initialize variables: DATA a, b, c / 10, 20, 30 /
+	// Generate assignment statements for each variable-value pair
+	if len(stmt.Variables) != len(stmt.Values) {
+		return dst, tg.makeErr(stmt, "DATA statement variable/value count mismatch")
+	}
+
+	for i := range stmt.Variables {
+		varExpr := stmt.Variables[i]
+		valExpr := stmt.Values[i]
+
+		// Get target variable info and LHS expression
+		var targetVinfo *varinfo
+		var lhs ast.Expr
+		var isArrayElement bool
+
+		switch v := varExpr.(type) {
+		case *f90.Identifier:
+			targetVinfo = tg.repl.Var(v.Value)
+			lhs = tg.astVarExpr(targetVinfo)
+		case *f90.ArrayRef:
+			targetVinfo = tg.repl.Var(v.Name)
+			if len(v.Subscripts) > 0 {
+				// Array element with indices: use Set method
+				isArrayElement = true
+			} else {
+				// No subscripts - treat as scalar variable
+				lhs = tg.astVarExpr(targetVinfo)
+			}
+		case *f90.FunctionCall:
+			// May be parsed as function call for array access
+			targetVinfo = tg.repl.Var(v.Name)
+			if len(v.Args) > 0 {
+				isArrayElement = true
+			} else {
+				lhs = tg.astVarExpr(targetVinfo)
+			}
+		default:
+			return dst, tg.makeErr(stmt, "unsupported DATA statement variable type")
+		}
+
+		if targetVinfo == nil {
+			return dst, tg.makeErr(stmt, "unknown variable in DATA statement")
+		}
+
+		// Transform the value expression
+		rhs, _, err := tg.transformExpression(targetVinfo, valExpr)
+		if err != nil {
+			return dst, err
+		}
+
+		if isArrayElement {
+			// Array element: generate arr.Set(value, indices)
+			switch v := varExpr.(type) {
+			case *f90.ArrayRef:
+				dst, err = tg.transformSetArrayRef(dst, v, rhs)
+			case *f90.FunctionCall:
+				syntheticRef := &f90.ArrayRef{
+					Name:       v.Name,
+					Subscripts: v.Args,
+					Position:   v.Position,
+				}
+				dst, err = tg.transformSetArrayRef(dst, syntheticRef, rhs)
+			}
+			if err != nil {
+				return dst, err
+			}
+		} else {
+			// Scalar: generate simple assignment
+			dst = append(dst, &ast.AssignStmt{
+				Lhs: []ast.Expr{lhs},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{rhs},
+			})
+		}
+	}
+
+	return dst, nil
+}
+
+func (tg *ToGo) transformArithmeticIfStmt(dst []ast.Stmt, stmt *f90.ArithmeticIfStmt) (_ []ast.Stmt, err error) {
+	// Arithmetic IF: IF (x) neg, zero, pos
+	// Becomes: if x < 0 { goto neg } else if x == 0 { goto zero } else { goto pos }
+	condExpr, _, err := tg.transformExpression(_tgtInt, stmt.Condition)
+	if err != nil {
+		return dst, err
+	}
+
+	zero := &ast.BasicLit{Kind: token.INT, Value: "0"}
+
+	// if condition < 0 { goto negLabel }
+	negIf := &ast.IfStmt{
+		Cond: &ast.BinaryExpr{X: condExpr, Op: token.LSS, Y: zero},
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.BranchStmt{Tok: token.GOTO, Label: tg.astLabel(stmt.NegativeLabel)},
+		}},
+	}
+
+	// else if condition == 0 { goto zeroLabel }
+	zeroIf := &ast.IfStmt{
+		Cond: &ast.BinaryExpr{X: condExpr, Op: token.EQL, Y: zero},
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.BranchStmt{Tok: token.GOTO, Label: tg.astLabel(stmt.ZeroLabel)},
+		}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{
+			// else { goto posLabel }
+			&ast.BranchStmt{Tok: token.GOTO, Label: tg.astLabel(stmt.PositiveLabel)},
+		}},
+	}
+
+	negIf.Else = zeroIf
+	dst = append(dst, negIf)
+	return dst, nil
+}
+
+func (tg *ToGo) transformComputedGotoStmt(dst []ast.Stmt, stmt *f90.ComputedGotoStmt) (_ []ast.Stmt, err error) {
+	// Computed GOTO: GO TO (100, 200, 300), choice
+	// Becomes: switch choice { case 1: goto label100; case 2: goto label200; ... }
+	tagExpr, _, err := tg.transformExpression(_tgtInt, stmt.Expression)
+	if err != nil {
+		return dst, err
+	}
+
+	switchStmt := &ast.SwitchStmt{
+		Tag:  tagExpr,
+		Body: &ast.BlockStmt{},
+	}
+
+	for i, label := range stmt.Labels {
+		caseClause := &ast.CaseClause{
+			List: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(i + 1)}},
+			Body: []ast.Stmt{
+				&ast.BranchStmt{Tok: token.GOTO, Label: tg.astLabel(label)},
+			},
+		}
+		switchStmt.Body.List = append(switchStmt.Body.List, caseClause)
+	}
+
+	dst = append(dst, switchStmt)
 	return dst, nil
 }
 
@@ -656,6 +1025,7 @@ func (tg *ToGo) astMethodCall(receiver, methodName string, args ...ast.Expr) *as
 
 // Common intrinsic identifiers.
 var (
+	_astIntrinsicStop  = &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("Stop")}
 	_astIntrinsic      = ast.NewIdent("intrinsic")
 	_astFnNewCharArray = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
@@ -732,7 +1102,7 @@ func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 			args := []ast.Expr{ast.NewIdent("nil")} // First argument is array initializer, we always initialize to zeroes.
 			for _, bound := range arrspec.Bounds {
 				if bound.Upper != nil {
-					size, err := tg.transformExpression(nil, bound.Upper)
+					size, _, err := tg.transformExpression(_tgtInt, bound.Upper)
 					if err != nil {
 						continue
 					}

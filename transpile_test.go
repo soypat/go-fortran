@@ -37,17 +37,10 @@ func TestTranspileGolden2(t *testing.T) {
 		t.Fatal(err)
 	}
 	var progSrc bytes.Buffer
+
 	helperWriteGoAST(t, &progSrc, &ast.File{
-		Name: ast.NewIdent("main"),
-		Imports: []*ast.ImportSpec{
-			{
-				Path: &ast.BasicLit{
-					Kind:  token.STRING,
-					Value: fmt.Sprintf("%q", "github.com/soypat/go-fortran/intrinsic"),
-				},
-			},
-		},
-		Decls: decls,
+		Name:  ast.NewIdent("main"),
+		Decls: decls, // DO NOT ADD IMPORTS. i.e: STOP statement adds output: then we create an intrinsic.Stop function that does the same.
 	})
 	const goFile = "testdata/golden.go"
 	os.WriteFile(goFile, progSrc.Bytes(), 0777)

@@ -65,7 +65,7 @@ func (ch CharacterArray) String() string {
 	return string(ch.data[:cap(ch.data)])
 }
 
-func (ch CharacterArray) SetFromString(data string) {
+func (ch *CharacterArray) SetFromString(data string) {
 	ch.data = ch.data[:cap(ch.data)] // Ensure full capacity for modification
 	n := copy(ch.data, data)
 	// Pad the rest with spaces
@@ -75,7 +75,7 @@ func (ch CharacterArray) SetFromString(data string) {
 	// Keep data at full capacity (Fortran semantics)
 }
 
-func (ch CharacterArray) SetConcat(toJoin ...CharacterArray) {
+func (ch *CharacterArray) SetConcat(toJoin ...CharacterArray) {
 	ch.data = ch.data[:cap(ch.data)]
 	off := 0
 	for i := range toJoin {
@@ -88,7 +88,7 @@ func (ch CharacterArray) SetConcat(toJoin ...CharacterArray) {
 	ch.setUnusedToSpace()
 }
 
-func (ch CharacterArray) SetConcatString(toJoin ...string) {
+func (ch *CharacterArray) SetConcatString(toJoin ...string) {
 	ch.data = ch.data[:cap(ch.data)]
 	off := 0
 	for i := range toJoin {

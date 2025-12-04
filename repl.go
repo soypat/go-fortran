@@ -241,6 +241,16 @@ func (repl *REPL) Eval(dst *varinfo, expr f90.Expression) (err error) {
 		err = repl.evalIntrinsic(dst, e)
 	case *f90.ArrayConstructor:
 		err = repl.evalArrayConstructor(dst, e)
+	case *f90.ArrayRef:
+		// Array element access: arr(i) - infer type from array variable
+		vi := repl.Var(e.Name)
+		if vi == nil {
+			err = fmt.Errorf("var %s undefined", e.Name)
+		} else {
+			// Copy the type information but mark as element access (scalar)
+			dst.decl = vi.decl
+			dst.val.tok = vi.typeToken()
+		}
 	default:
 		err = fmt.Errorf("unsupported expression: %T", expr)
 	}
@@ -253,6 +263,17 @@ func (repl *REPL) InferType(dst *varinfo, expr f90.Expression) error {
 	*dst = varinfo{}
 	prev := repl.noValueResolution
 	repl.noValueResolution = true
+	err := repl.Eval(dst, expr)
+	repl.noValueResolution = prev
+	return err
+}
+
+// InferType infers the type of expr without evaluating it.
+// Sets dst.val.tok to the result type.
+func (repl *REPL) ensureEval(dst *varinfo, expr f90.Expression) error {
+	*dst = varinfo{}
+	prev := repl.noValueResolution
+	repl.noValueResolution = false
 	err := repl.Eval(dst, expr)
 	repl.noValueResolution = prev
 	return err
@@ -533,6 +554,32 @@ func (repl *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
 	return nil
 }
 
+func (repl *REPL) getOrResolveKind(v *varinfo) (int, error) {
+	if v.kindFlag != 0 {
+		if v.kindFlag == -1 {
+			return 0, nil
+		}
+		return v.kindFlag, nil
+	}
+	kind := v.Kind()
+	if kind != nil {
+		var evaled varinfo
+		err := repl.ensureEval(&evaled, kind)
+		if err != nil {
+			return -2, err
+		}
+		if evaled.val.tok != f90token.INTEGER {
+			return -3, fmt.Errorf("expected integer kind for %s", v._varname)
+		} else if evaled.val.i64 == 0 {
+			return -4, fmt.Errorf("got zero kind for %s", v._varname)
+		}
+		v.kindFlag = int(evaled.val.i64)
+		return v.kindFlag, nil
+	}
+	v.kindFlag = -1 // No
+	return 0, nil
+}
+
 // promote returns the resulting promoted type of a binary operation between two types.
 func (repl *REPL) promote(dst, src *varinfo) (promotion f90token.Token, kind int) {
 	dtok := dst.typeToken()
@@ -542,12 +589,12 @@ func (repl *REPL) promote(dst, src *varinfo) (promotion f90token.Token, kind int
 		promotion = stok
 	case f90token.DOUBLEPRECISION:
 		switch stok {
-		case f90token.INTEGER, f90token.REAL, f90token.DOUBLEPRECISION:
+		case f90token.INTEGER, f90token.REAL:
 			promotion = f90token.DOUBLEPRECISION
 		}
 	case f90token.REAL:
 		switch stok {
-		case f90token.INTEGER, f90token.REAL:
+		case f90token.INTEGER:
 			promotion = f90token.REAL
 		case f90token.DOUBLEPRECISION:
 			promotion = f90token.DOUBLEPRECISION

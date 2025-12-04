@@ -319,6 +319,7 @@ type varinfo struct {
 	pointee  string // the pointer alias this variable references in EQUIVALENCE or cray style POINTER statement.
 	declPos  sourcePos
 	val      Value // Runtime value for REPL evaluation
+	kindFlag int   // 0 when uninitialized. -1 when unspecified, -2..-99 error. else is kind value.
 }
 
 func (p *varinfo) Value() Value                       { return p.val }
