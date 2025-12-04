@@ -635,19 +635,23 @@ func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 		structType := &ast.StructType{Fields: &ast.FieldList{}}
 		for i := range block.fields {
 			v := &block.fields[i]
-			goType := tg.goType(v) // TODO: needs to be a full array type.
+			goType := tg.goType(v)
 			elemType := tg.baseGotype(v.typeToken(), tg.resolveKind(v))
 			fieldIdent := ast.NewIdent(v.Identifier())
+
+			arrspec := v.Dimensions()
+			if arrspec != nil && len(arrspec.Bounds) > 0 {
+				// Arrays need pointer type since NewArray returns *Array[T]
+				goType = &ast.StarExpr{X: goType}
+			}
 			structType.Fields.List = append(structType.Fields.List, &ast.Field{
 				Names: []*ast.Ident{fieldIdent},
 				Type:  goType,
 			})
 
-			arrspec := v.Dimensions()
 			if arrspec == nil || len(arrspec.Bounds) == 0 {
 				continue
 			}
-			// goType = &ast.StarExpr{X: goType}
 			args := []ast.Expr{ast.NewIdent("nil")} // First argument is array initializer, we always initialize to zeroes.
 			for _, bound := range arrspec.Bounds {
 				if bound.Upper != nil {

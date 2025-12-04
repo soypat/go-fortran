@@ -300,11 +300,9 @@ func (tg *ToGo) transformArrayRef(vitgt *varinfo, e *f90.ArrayRef) (result ast.E
 // astVarExpr returns the AST expression for a variable, handling COMMON block access.
 func (tg *ToGo) astVarExpr(vi *varinfo) ast.Expr {
 	if vi.common != "" {
-		blockName := strings.ToUpper(vi.common)
-		varName := strings.ToUpper(vi.Identifier())
 		return &ast.SelectorExpr{
-			X:   ast.NewIdent(blockName),
-			Sel: ast.NewIdent(varName),
+			X:   ast.NewIdent(vi.common),
+			Sel: ast.NewIdent(vi.Identifier()),
 		}
 	}
 	return ast.NewIdent(vi.Identifier())

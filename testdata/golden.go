@@ -384,9 +384,9 @@ func LEVEL19() {
 	PRINT_COMMON_VALUES()
 }
 func SET_COMMON_VALUES() {
-	SHARED.X = 42
-	SHARED.Y = 99
-	SHARED.Z = 3.14159
+	SHARED.x = 42
+	SHARED.y = 99
+	SHARED.z = 3.14159
 }
 func PRINT_COMMON_VALUES() {
 }
@@ -629,10 +629,10 @@ func FIBONACCI(n int32) (FIBONACCI int32) {
 }
 
 var HOLDRT = struct {
-	YQR    intrinsic.Array[float32]
-	SUMXRQ intrinsic.Array[float32]
-	YMNRT  intrinsic.Array[float32]
-	MATRIX intrinsic.Array[float32]
+	YQR    *intrinsic.Array[float32]
+	SUMXRQ *intrinsic.Array[float32]
+	YMNRT  *intrinsic.Array[float32]
+	MATRIX *intrinsic.Array[float32]
 }{YQR: intrinsic.NewArray[float32](nil, 256), SUMXRQ: intrinsic.NewArray[float32](nil, 512), YMNRT: intrinsic.NewArray[float32](nil, 3), MATRIX: intrinsic.NewArray[float32](nil, 10, 20)}
 var SHARED struct {
 	x int32
@@ -640,5 +640,5 @@ var SHARED struct {
 	z float32
 }
 var STATS = struct {
-	COUNTS intrinsic.Array[int32]
+	COUNTS *intrinsic.Array[int32]
 }{COUNTS: intrinsic.NewArray[int32](nil, 100)}

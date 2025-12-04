@@ -528,12 +528,12 @@
 
       SUBROUTINE PRINT_COMMON_VALUES()
           INTEGER :: x, y
-          REAL :: z
-          COMMON /SHARED/ x, y, z
+          REAL :: Z
+          COMMON /SHARED/ x, y, Z
 
           PRINT *, 'LEVEL 19: x =', x
           PRINT *, 'LEVEL 19: y =', y
-          PRINT *, 'LEVEL 19: z =', z
+          PRINT *, 'LEVEL 19: z =', Z
       END SUBROUTINE PRINT_COMMON_VALUES
 
       ! LEVEL 20: DATA Statements
