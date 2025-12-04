@@ -159,8 +159,8 @@ func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.Fun
 func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 	params := tg.repl.ScopeParams()
 	for i := range params {
-		vi := params[i]
-		tp := tg.fortranTypeToGoWithKind(vi.decl)
+		vi := &params[i]
+		tp := tg.goType(vi)
 		dst = append(dst, &ast.Field{
 			Type:  tp,
 			Names: []*ast.Ident{tg.astIdent(vi.decl.Name)},
@@ -171,7 +171,7 @@ func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 
 func (tg *ToGo) getReturnParam() *ast.Field {
 	ret := tg.repl.scope.returnType
-	tp := tg.fortranTypeToGoWithKind(ret.decl)
+	tp := tg.goType(ret)
 	return &ast.Field{
 		Type:  tp,
 		Names: []*ast.Ident{tg.astIdent(ret.Identifier())},
@@ -368,10 +368,7 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 			continue // Skip parameters, they're already declared in function signature
 		}
 		arrspec := vi.Dimensions()
-		tp := tg.fortranTypeToGoWithKind(vi.decl)
-		if arrspec != nil {
-			tp = &ast.StarExpr{X: tp}
-		}
+		tp := tg.goType(vi)
 		ident := ast.NewIdent(vi.Identifier())
 		spec := &ast.ValueSpec{
 			Names: []*ast.Ident{ident},
@@ -509,52 +506,51 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	return dst, nil
 }
 
-// fortranTypeToGoWithKind converts Fortran type to Go type, considering KIND parameter
+// goType converts a varinfo to Go type, considering KIND parameter.
 // KIND mappings:
 //
 //	INTEGER(KIND=1) → int8, INTEGER(KIND=2) → int16
 //	INTEGER(KIND=4) → int32, INTEGER(KIND=8) → int64
 //	REAL(KIND=4) → float32, REAL(KIND=8) → float64
-func (tg *ToGo) fortranTypeToGoWithKind(decl *f90.DeclEntity) (goType ast.Expr) {
-	kindValue := tg.resolveKindFromDecl(decl)
-	baseType := tg.baseGotype(decl.Type.Token, kindValue)
-	dim := decl.Dimension()
-	if baseType != nil && dim == nil {
+//
+// Arrays are returned as pointer types (*intrinsic.Array[T]).
+func (tg *ToGo) goType(v *varinfo) ast.Expr {
+	tok := v.typeToken()
+	dim := v.Dimensions()
+	isArray := dim != nil && len(dim.Bounds) > 0
+
+	// Handle CHARACTER specially - always returns CharacterArray
+	if tok == f90token.CHARACTER {
+		return _astTypeCharArray
+	}
+
+	// Handle TYPE
+	if tok == f90token.TYPE {
+		if v.decl.Type.Name != "" {
+			return ast.NewIdent(v.decl.Type.Name)
+		}
+		tg.makeErrWithPos(v.decl.Position, "TYPE without name: "+v.decl.Name)
+		return ast.NewIdent("")
+	}
+
+	// Get base type for numeric types
+	baseType := tg.baseGotype(tok, tg.resolveKind(v))
+	if baseType == nil {
+		tg.makeErrWithPos(v.decl.Position, "unable to determine goType from: "+v.decl.Name)
+		return nil
+	}
+
+	if !isArray {
 		return baseType
 	}
-	ft := decl.Type
-	switch ft.Token {
-	case f90token.INTEGER, f90token.REAL:
-		goType = &ast.IndexExpr{
+
+	// Is an array - return pointer type
+	return &ast.StarExpr{
+		X: &ast.IndexExpr{
 			X:     _astTypeArray,
 			Index: baseType,
-		}
-	case f90token.CHARACTER:
-		goType = _astTypeCharArray
-	case f90token.TYPE:
-		if ft.Name != "" {
-			goType = ast.NewIdent(ft.Name)
-		}
+		},
 	}
-	if goType == nil {
-		tg.makeErrWithPos(decl.SourcePos(), "unable to determine go type: "+decl.Name)
-		goType = ast.NewIdent("")
-	}
-	return goType
-}
-
-func (tg *ToGo) goType(v *varinfo) ast.Expr {
-	dim := v.Dimensions()
-	if dim == nil || len(dim.Bounds) == 0 {
-		goType := tg.baseGotype(v.typeToken(), tg.resolveKind(v))
-		if goType == nil {
-			tg.makeErrWithPos(v.decl.Position, "unable to determine goType from: "+v.decl.Name)
-			return nil
-		}
-		return goType
-	}
-	return intrinsicSelGeneric("Array")(v)
-
 }
 
 func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType *ast.Ident) {
@@ -697,12 +693,7 @@ func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 			goType := tg.goType(v)
 			elemType := tg.baseGotype(v.typeToken(), tg.resolveKind(v))
 			fieldIdent := ast.NewIdent(v.Identifier())
-
 			arrspec := v.Dimensions()
-			if arrspec != nil && len(arrspec.Bounds) > 0 {
-				// Arrays need pointer type since NewArray returns *Array[T]
-				goType = &ast.StarExpr{X: goType}
-			}
 			structType.Fields.List = append(structType.Fields.List, &ast.Field{
 				Names: []*ast.Ident{fieldIdent},
 				Type:  goType,

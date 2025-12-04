@@ -133,18 +133,16 @@ func (tg *ToGo) transformArrayConstructor(vitgt *varinfo, e *f90.ArrayConstructo
 		elts = append(elts, elt)
 	}
 
-	// Generate: *intrinsic.NewArray[T]([]T{elts...}, len)
-	// Dereference since NewArray returns pointer but array vars are value types
-	return &ast.StarExpr{
-		X: &ast.CallExpr{
-			Fun: &ast.IndexExpr{X: _astFnNewArray, Index: elemIdent},
-			Args: []ast.Expr{
-				&ast.CompositeLit{
-					Type: &ast.ArrayType{Elt: elemIdent},
-					Elts: elts,
-				},
-				&ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(len(e.Values))},
+	// Generate: intrinsic.NewArray[T]([]T{elts...}, len)
+	// Returns pointer which matches array pointer types
+	return &ast.CallExpr{
+		Fun: &ast.IndexExpr{X: _astFnNewArray, Index: elemIdent},
+		Args: []ast.Expr{
+			&ast.CompositeLit{
+				Type: &ast.ArrayType{Elt: elemIdent},
+				Elts: elts,
 			},
+			&ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(len(e.Values))},
 		},
 	}, nil
 }

@@ -476,8 +476,8 @@ func LEVEL24() {
 		_    = vec2
 	)
 	vec2 = intrinsic.NewArray[int32](nil, 5)
-	vec1 = *intrinsic.NewArray[int32]([]int32{10, 20, 30}, 3)
-	vec2 = *intrinsic.NewArray[int32]([]int32{100, 200, 300, 400, 500}, 5)
+	vec1 = intrinsic.NewArray[int32]([]int32{10, 20, 30}, 3)
+	vec2 = intrinsic.NewArray[int32]([]int32{100, 200, 300, 400, 500}, 5)
 }
 func LEVEL25() {
 	var (
@@ -566,7 +566,7 @@ func SIMPLE_SUB() {
 func ADD_VALUES(a int32, b int32, result int32) {
 	result = a + b
 }
-func MODIFY_ARRAY(arr intrinsic.Array[int32], n int32) {
+func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 	var (
 		i int32
 		_ = i

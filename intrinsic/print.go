@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 )
 
@@ -39,9 +40,9 @@ func (f Formatter) Print(v ...any) {
 		buf = f.formatValue(buf, val)
 		prevWasString = isStringType
 	}
-
+	buf = append(buf, '\n')
 	// Print with newline (Fortran PRINT statement behavior)
-	fmt.Println(string(buf))
+	os.Stdout.Write(buf)
 }
 
 func (f Formatter) formatValue(dst []byte, value any) []byte {
