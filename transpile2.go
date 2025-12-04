@@ -149,6 +149,10 @@ func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.Fun
 	if err != nil {
 		return fn, err
 	}
+	// Add return statement for functions with return values (uses named return)
+	if returned != nil {
+		fn.Body.List = append(fn.Body.List, &ast.ReturnStmt{})
+	}
 	return fn, nil
 }
 
@@ -323,17 +327,51 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	return dst, err
 }
 
+func (tg *ToGo) makeArrayInitializer(typ *varinfo, initializer ast.Expr) (ast.Expr, error) {
+	dims := typ.Dimensions()
+	if dims == nil || len(dims.Bounds) == 0 {
+		return nil, tg.makeErrWithPos(typ.decl.Position, "invalid type declaration dimensions for array creation")
+	} else if dims.IsDeferred() {
+		return nil, tg.makeErrWithPos(typ.decl.Position, "cannot create array from deferred shape")
+	}
+	args := []ast.Expr{initializer} // First argument is array initializer
+	for _, bound := range dims.Bounds {
+		size, err := tg.transformExpression(_tgtInt32, bound.Upper)
+		if err != nil {
+			return nil, tg.makeErrWithPos(typ.decl.Position, "unable to make array: "+err.Error())
+		}
+		args = append(args, size)
+	}
+	elemType := tg.baseGotype(typ.typeToken(), tg.resolveKind(typ))
+	expr := &ast.CallExpr{
+		Fun: &ast.IndexExpr{
+			X:     _astFnNewArray,
+			Index: elemType,
+		},
+		Args: args,
+	}
+	return expr, nil
+}
+
 func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclaration) (_ []ast.Stmt, err error) {
 	decl := &ast.GenDecl{
 		Tok:   token.VAR,
 		Specs: make([]ast.Spec, 0, len(stmt.Entities)),
 	}
 	var useSpecs ast.ValueSpec
+	var arrayInits []ast.Stmt // Array initialization statements
 	nouse := tg.astIdent("_")
 	for i := range stmt.Entities {
 		ent := &stmt.Entities[i]
 		vi := tg.repl.Var(ent.Name)
+		if vi.IsParameter() {
+			continue // Skip parameters, they're already declared in function signature
+		}
+		arrspec := vi.Dimensions()
 		tp := tg.fortranTypeToGoWithKind(vi.decl)
+		if arrspec != nil {
+			tp = &ast.StarExpr{X: tp}
+		}
 		ident := ast.NewIdent(vi.Identifier())
 		spec := &ast.ValueSpec{
 			Names: []*ast.Ident{ident},
@@ -343,11 +381,31 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 		useSpecs.Names = append(useSpecs.Names, nouse)
 		// TODO: check usage flag.
 		useSpecs.Values = append(useSpecs.Values, ident)
+		// Generate array initialization for arrays with fixed dimensions
+		// Skip allocatable arrays - they're initialized by ALLOCATE statements
+
+		if arrspec != nil && len(arrspec.Bounds) > 0 && !vi.IsAllocatable() {
+			newArrExpr, err := tg.makeArrayInitializer(vi, ast.NewIdent("nil"))
+			if err != nil {
+				return nil, err
+			}
+			// Generate: arr = intrinsic.NewArray[T](nil, sizes...)
+			arrayInits = append(arrayInits, &ast.AssignStmt{
+				Lhs: []ast.Expr{ident},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{newArrExpr},
+			})
+
+		}
+	}
+	if len(decl.Specs) == 0 {
+		return dst, nil // No local variables to declare
 	}
 	decl.Specs = append(decl.Specs, &useSpecs)
 	dst = append(dst, &ast.DeclStmt{
 		Decl: decl,
 	})
+	dst = append(dst, arrayInits...)
 	return dst, nil
 }
 
@@ -441,7 +499,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
 		return dst, err
 	}
-	rhs = tg.wrapConversion(targetVinfo.decl.Type.Token, &rhsType, rhs)
+	rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
 	gstmt := &ast.AssignStmt{
 		Tok: token.ASSIGN,
 		Rhs: []ast.Expr{rhs},
@@ -458,7 +516,8 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 //	INTEGER(KIND=4) → int32, INTEGER(KIND=8) → int64
 //	REAL(KIND=4) → float32, REAL(KIND=8) → float64
 func (tg *ToGo) fortranTypeToGoWithKind(decl *f90.DeclEntity) (goType ast.Expr) {
-	baseType := tg.baseGotype(decl.Type.Token, 0)
+	kindValue := tg.resolveKindFromDecl(decl)
+	baseType := tg.baseGotype(decl.Type.Token, kindValue)
 	dim := decl.Dimension()
 	if baseType != nil && dim == nil {
 		return baseType
@@ -703,5 +762,23 @@ func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 }
 
 func (tg *ToGo) resolveKind(v *varinfo) int {
-	return 0
+	if v.decl == nil {
+		panic(tg.makeErrAtStmt("nil declaration for variable " + v.Identifier()))
+	}
+	return tg.resolveKindFromDecl(v.decl)
+}
+
+func (tg *ToGo) resolveKindFromDecl(decl *f90.DeclEntity) int {
+	if decl == nil {
+		return 0
+	}
+	kind := decl.Kind()
+	if kind == nil {
+		return 0
+	}
+	var dst varinfo
+	if err := tg.repl.Eval(&dst, kind); err != nil {
+		return 0
+	}
+	return int(dst.val.i64)
 }

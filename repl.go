@@ -534,7 +534,7 @@ func (repl *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
 }
 
 // promote returns the resulting promoted type of a binary operation between two types.
-func (repl *REPL) promote(dst, src *varinfo) (promotion f90token.Token) {
+func (repl *REPL) promote(dst, src *varinfo) (promotion f90token.Token, kind int) {
 	dtok := dst.typeToken()
 	stok := src.typeToken()
 	switch dtok {
@@ -562,7 +562,7 @@ func (repl *REPL) promote(dst, src *varinfo) (promotion f90token.Token) {
 			promotion = stok
 		}
 	}
-	return promotion
+	return promotion, 0
 }
 
 // typeToken returns the effective type token (prefers val.tok, falls back to decl).
@@ -622,7 +622,7 @@ func (repl *REPL) assignString(dst *varinfo, v string) error {
 }
 
 func (repl *REPL) assignFloatLike(dst, template *varinfo, v float64) error {
-	dst.val.tok = repl.promote(dst, template)
+	dst.val.tok, _ = repl.promote(dst, template)
 	dst.val.f64 = v
 	return nil
 }

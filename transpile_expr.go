@@ -11,6 +11,21 @@ import (
 	f90token "github.com/soypat/go-fortran/token"
 )
 
+func goTypeFromToken(tok f90token.Token) string {
+	switch tok {
+	case f90token.INTEGER:
+		return "int32"
+	case f90token.REAL:
+		return "float32"
+	case f90token.DOUBLEPRECISION:
+		return "float64"
+	case f90token.LOGICAL:
+		return "bool"
+	default:
+		return ""
+	}
+}
+
 // transformExpression transforms a single Fortran expression to a Go expression
 func (tg *ToGo) transformExpression(vitgt *varinfo, expr f90.Expression) (result ast.Expr, err error) {
 	switch e := expr.(type) {
@@ -99,7 +114,16 @@ func (tg *ToGo) transformExprIdentifer(vitgt *varinfo, e *f90.Identifier) (resul
 }
 
 func (tg *ToGo) transformArrayConstructor(vitgt *varinfo, e *f90.ArrayConstructor) (result ast.Expr, err error) {
-	// Transform (/ 1, 2, 3 /) → []T{1, 2, 3}
+	// Infer element type from target
+	elemType := "int32" // default
+	if vitgt != nil {
+		if t := goTypeFromToken(vitgt.typeToken()); t != "" {
+			elemType = t
+		}
+	}
+	elemIdent := ast.NewIdent(elemType)
+
+	// Transform values
 	var elts []ast.Expr
 	for _, val := range e.Values {
 		elt, err := tg.transformExpression(vitgt, val)
@@ -109,12 +133,19 @@ func (tg *ToGo) transformArrayConstructor(vitgt *varinfo, e *f90.ArrayConstructo
 		elts = append(elts, elt)
 	}
 
-	// Create slice literal with inferred type
-	return &ast.CompositeLit{
-		Type: &ast.ArrayType{
-			Elt: ast.NewIdent("int"), // TODO: infer element type from context
+	// Generate: *intrinsic.NewArray[T]([]T{elts...}, len)
+	// Dereference since NewArray returns pointer but array vars are value types
+	return &ast.StarExpr{
+		X: &ast.CallExpr{
+			Fun: &ast.IndexExpr{X: _astFnNewArray, Index: elemIdent},
+			Args: []ast.Expr{
+				&ast.CompositeLit{
+					Type: &ast.ArrayType{Elt: elemIdent},
+					Elts: elts,
+				},
+				&ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(len(e.Values))},
+			},
 		},
-		Elts: elts,
 	}, nil
 }
 
@@ -152,7 +183,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 	if err := tg.repl.InferType(&rightType, e.Right); err != nil {
 		return nil, err
 	}
-	promotion := tg.repl.promote(&leftType, &rightType)
+	promotion, promoteKind := tg.repl.promote(&leftType, &rightType)
 	if promotion == 0 {
 		return nil, tg.makeErr(e, fmt.Sprintf("cant promote %s to %s %q", leftType.val.tok, rightType.val.tok, e.AppendString(nil)))
 	}
@@ -181,8 +212,8 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 	case f90token.DoubleStar:
 		// Power operator: x ** y → math.Pow(x, y)
 		// math.Pow requires float64 arguments
-		left = tg.wrapConversion(vitgt.decl.Type.Token, &leftType, left)
-		right = tg.wrapConversion(vitgt.decl.Type.Token, &rightType, right)
+		left = tg.wrapConversion(vitgt, &leftType, left)
+		right = tg.wrapConversion(vitgt, &rightType, right)
 		sel := intrinsicSel("POW")
 		return &ast.CallExpr{
 			Fun:  sel(vitgt),
@@ -214,8 +245,8 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 
 	// Promote operands to common type for arithmetic/comparison ops
 	if needsPromotion {
-		left = tg.wrapConversion(promotion, &leftType, left)
-		right = tg.wrapConversion(promotion, &rightType, right)
+		left = tg.wrapPromotedType(promotion, promoteKind, &leftType, left)
+		right = tg.wrapPromotedType(promotion, promoteKind, &rightType, right)
 	}
 
 	return &ast.BinaryExpr{
@@ -395,29 +426,29 @@ func (tg *ToGo) transformExprSlice(vitgt *varinfo, dst []ast.Expr, src []f90.Exp
 	return dst, nil
 }
 
-// wrapConversion wraps expr with a type conversion if targetType differs from sourceType.
-func (tg *ToGo) wrapConversion(targetType f90token.Token, sourceType *varinfo, expr ast.Expr) ast.Expr {
+// wrapPromotedType wraps expr for binary operation type promotion (no KIND info).
+func (tg *ToGo) wrapPromotedType(targetType f90token.Token, targetKind int, sourceType *varinfo, expr ast.Expr) ast.Expr {
 	srcType := sourceType.typeToken()
-	if srcType == 0 {
-		err := tg.makeErrAtStmt("undefined source type for target type: " + targetType.String())
-		panic(err.Error())
-	}
 	if srcType == targetType {
-		return expr // No conversion needed
+		return expr
 	}
-	conv := "invalid"
-	switch targetType {
-	case f90token.REAL:
-		conv = "float32"
-	case f90token.DOUBLEPRECISION:
-		conv = "float64"
-	case f90token.INTEGER:
-		conv = "int32"
-	case f90token.LOGICAL:
-		return expr // bool → bool, no conversion needed
+	conv := tg.baseGotype(targetType, targetKind)
+	return &ast.CallExpr{Fun: conv, Args: []ast.Expr{expr}}
+}
+
+// wrapConversion wraps expr with a type conversion if target type differs from sourceType.
+func (tg *ToGo) wrapConversion(target *varinfo, sourceType *varinfo, expr ast.Expr) ast.Expr {
+	if target == nil {
+		return expr
 	}
+	srcType := sourceType.typeToken()
+	targetType := target.typeToken()
+	if srcType == targetType {
+		return expr
+	}
+	conv := tg.baseGotype(targetType, tg.resolveKind(target))
 	return &ast.CallExpr{
-		Fun:  ast.NewIdent(conv),
+		Fun:  conv,
 		Args: []ast.Expr{expr},
 	}
 }

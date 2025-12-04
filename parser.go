@@ -326,6 +326,8 @@ func (p *varinfo) Charlen() ast.Expression            { return p.decl.Charlen() 
 func (p *varinfo) Kind() ast.Expression               { return p.decl.Kind() }
 func (p *varinfo) Dimensions() *ast.ArraySpec         { return p.decl.Dimension() }
 func (p *varinfo) Identifier() string                 { return p._varname }
+func (p *varinfo) IsParameter() bool                  { return p.flags.HasAny(flagParameter) }
+func (p *varinfo) IsAllocatable() bool                { return p.flags.HasAny(flagAllocatable) }
 func (p *varinfo) reset()                             { *p = varinfo{} }
 func (p *Parser90) varResetAll()                      { p.vars.reset() }
 func (p *Parser90) varGet(name []byte) (vi *varinfo)  { return p.vars.Varb(name) }

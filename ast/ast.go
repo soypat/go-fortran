@@ -1002,6 +1002,15 @@ type ArraySpec struct {
 	Bounds []ArrayBound // One bound per dimension
 }
 
+func (as *ArraySpec) IsDeferred() bool {
+	for i := range as.Bounds {
+		if as.Bounds[i].Upper == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func (as *ArraySpec) CanExpr() bool {
 	return as.Expr() != nil
 }

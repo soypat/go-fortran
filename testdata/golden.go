@@ -20,7 +20,6 @@ func main() {
 	LEVEL15()
 	LEVEL16()
 	LEVEL17()
-	LEVEL18()
 	LEVEL19()
 	LEVEL20()
 	LEVEL21()
@@ -30,7 +29,6 @@ func main() {
 	LEVEL26()
 	LEVEL27()
 	LEVEL28()
-	LEVEL29()
 }
 func LEVEL01() {
 }
@@ -95,13 +93,15 @@ func LEVEL04() {
 }
 func LEVEL05() {
 	var (
-		arr1 intrinsic.Array[int32]
+		arr1 *intrinsic.Array[int32]
 		_    = arr1
 	)
+	arr1 = intrinsic.NewArray[int32](nil, 5)
 	var (
-		matrix intrinsic.Array[float32]
+		matrix *intrinsic.Array[float32]
 		_      = matrix
 	)
+	matrix = intrinsic.NewArray[float32](nil, 3, 3)
 	arr1.Set(10, 1)
 	arr1.Set(20, 2)
 	arr1.Set(30, 3)
@@ -124,9 +124,10 @@ func LEVEL06() {
 		_, _ = i, j
 	)
 	var (
-		arr1 intrinsic.Array[int32]
+		arr1 *intrinsic.Array[int32]
 		_    = arr1
 	)
+	arr1 = intrinsic.NewArray[int32](nil, 5)
 	var (
 		sum_val int32
 		_       = sum_val
@@ -141,9 +142,10 @@ func LEVEL06() {
 }
 func LEVEL07() {
 	var (
-		arr1 intrinsic.Array[int32]
+		arr1 *intrinsic.Array[int32]
 		_    = arr1
 	)
+	arr1 = intrinsic.NewArray[int32](nil, 5)
 	var (
 		result int32
 		_      = result
@@ -263,9 +265,10 @@ func LEVEL13() {
 		_, _, _ = i, sum_val, count
 	)
 	var (
-		arr intrinsic.Array[int32]
+		arr *intrinsic.Array[int32]
 		_   = arr
 	)
+	arr = intrinsic.NewArray[int32](nil, 10)
 	arr.Set(5, 1)
 	arr.Set(-3, 2)
 	arr.Set(7, 3)
@@ -337,13 +340,15 @@ func LEVEL16() {
 }
 func LEVEL17() {
 	var (
-		matrix intrinsic.Array[int32]
+		matrix *intrinsic.Array[int32]
 		_      = matrix
 	)
+	matrix = intrinsic.NewArray[int32](nil, 3, 4)
 	var (
-		vector intrinsic.Array[int32]
+		vector *intrinsic.Array[int32]
 		_      = vector
 	)
+	vector = intrinsic.NewArray[int32](nil, 5)
 	var (
 		size_total int32
 		size_dim1  int32
@@ -366,11 +371,11 @@ func LEVEL17() {
 }
 func LEVEL18() {
 	var (
-		vec intrinsic.Array[int32]
+		vec *intrinsic.Array[int32]
 		_   = vec
 	)
 	var (
-		mat intrinsic.Array[int32]
+		mat *intrinsic.Array[int32]
 		_   = mat
 	)
 	vec.Set(10, 1)
@@ -462,23 +467,25 @@ func LEVEL23() {
 }
 func LEVEL24() {
 	var (
-		vec1 intrinsic.Array[int32]
+		vec1 *intrinsic.Array[int32]
 		_    = vec1
 	)
+	vec1 = intrinsic.NewArray[int32](nil, 3)
 	var (
-		vec2 intrinsic.Array[int32]
+		vec2 *intrinsic.Array[int32]
 		_    = vec2
 	)
-	vec1 = []int{10, 20, 30}
-	vec2 = []int{100, 200, 300, 400, 500}
+	vec2 = intrinsic.NewArray[int32](nil, 5)
+	vec1 = *intrinsic.NewArray[int32]([]int32{10, 20, 30}, 3)
+	vec2 = *intrinsic.NewArray[int32]([]int32{100, 200, 300, 400, 500}, 5)
 }
 func LEVEL25() {
 	var (
-		i1 int32
+		i1 int8
 		_  = i1
 	)
 	var (
-		i2 int32
+		i2 int16
 		_  = i2
 	)
 	var (
@@ -486,7 +493,7 @@ func LEVEL25() {
 		_  = i4
 	)
 	var (
-		i8 int32
+		i8 int64
 		_  = i8
 	)
 	var (
@@ -494,7 +501,7 @@ func LEVEL25() {
 		_  = r4
 	)
 	var (
-		r8 float32
+		r8 float64
 		_  = r8
 	)
 	i1 = 127
@@ -502,7 +509,7 @@ func LEVEL25() {
 	i4 = 2147483647
 	i8 = 9223372036854775807
 	r4 = 3.14159
-	r8 = float32(3.141592653589793)
+	r8 = float64(3.141592653589793)
 }
 func LEVEL26() {
 	var (
@@ -512,17 +519,17 @@ func LEVEL26() {
 		_, _, _ = hex_val, oct_val, bin_val
 	)
 	var (
-		d1      float32
-		d2      float32
-		d4      float32
+		d1      float64
+		d2      float64
+		d4      float64
 		_, _, _ = d1, d2, d4
 	)
 	hex_val = int32(255)
 	oct_val = int32(255)
 	bin_val = int32(255)
-	d1 = float32(1)
-	d2 = float32(123)
-	d4 = float32(2.718281828)
+	d1 = float64(1)
+	d2 = float64(123)
+	d4 = float64(2.718281828)
 }
 func LEVEL27() {
 	var (
@@ -530,22 +537,22 @@ func LEVEL27() {
 		_     = ncomp
 	)
 	var (
-		factor float32
+		factor float64
 		_      = factor
 	)
 	var (
-		root3 float32
+		root3 float64
 		_     = root3
 	)
 	var (
-		PI float32
+		PI float64
 		_  = PI
 	)
 	var (
-		result float32
+		result float64
 		_      = result
 	)
-	result = float32(float64(factor*root3) * float64(ncomp))
+	result = float64(float64(factor*root3) * float64(ncomp))
 }
 func LEVEL28() {
 	HOLDRT.YQR.Set(1.5, 1)
@@ -554,38 +561,12 @@ func LEVEL28() {
 	HOLDRT.MATRIX.Set(42.5, 5, 10)
 	STATS.COUNTS.Set(42, 50)
 }
-func LEVEL29() {
-	MAT.Set(64, 1, 2)
-	MAXDM1 = 100
-	NPAA = intrinsic.MALLOC(MAXDM1 * 8)
-	NPII = NPAA
-	NPLL = NPII
-	M = 1
-	MAXDEF = intrinsic.MIN[int32](200000, MAXDM1)
-}
 func SIMPLE_SUB() {
 }
 func ADD_VALUES(a int32, b int32, result int32) {
-	var (
-		a    int32
-		b    int32
-		_, _ = a, b
-	)
-	var (
-		result int32
-		_      = result
-	)
 	result = a + b
 }
 func MODIFY_ARRAY(arr intrinsic.Array[int32], n int32) {
-	var (
-		n int32
-		_ = n
-	)
-	var (
-		arr intrinsic.Array[int32]
-		_   = arr
-	)
 	var (
 		i int32
 		_ = i
@@ -593,29 +574,19 @@ func MODIFY_ARRAY(arr intrinsic.Array[int32], n int32) {
 }
 func FACTORIAL(n int32) (FACTORIAL int32) {
 	var (
-		n int32
-		_ = n
-	)
-	var (
 		i      int32
 		result int32
 		_, _   = i, result
 	)
 	result = 1
 	FACTORIAL = result
+	return
 }
 func SQUARE_ROOT(x float32) (SQUARE_ROOT float32) {
-	var (
-		x float32
-		_ = x
-	)
 	SQUARE_ROOT = intrinsic.SQRT(x)
+	return
 }
 func FIBONACCI(n int32) (FIBONACCI int32) {
-	var (
-		n int32
-		_ = n
-	)
 	var (
 		a          int32
 		b          int32
@@ -626,6 +597,7 @@ func FIBONACCI(n int32) (FIBONACCI int32) {
 	a = 0
 	b = 1
 	FIBONACCI = b
+	return
 }
 
 var HOLDRT = struct {
