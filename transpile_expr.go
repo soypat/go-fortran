@@ -12,7 +12,7 @@ import (
 )
 
 // transformExpression transforms a single Fortran expression to a Go expression
-func (tg *ToGo) transformExpression(vitgt *varinfo, expr f90.Expression) (result ast.Expr, resultType *varinfo, err error) {
+func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result ast.Expr, resultType *Varinfo, err error) {
 	switch e := expr.(type) {
 	case *f90.StringLiteral:
 		resultType = _tgtStringLit
@@ -96,7 +96,7 @@ func (tg *ToGo) transformExpression(vitgt *varinfo, expr f90.Expression) (result
 	return result, resultType, err
 }
 
-func (tg *ToGo) transformExprIdentifer(vitgt *varinfo, e *f90.Identifier) (result ast.Expr, resultType *varinfo, err error) {
+func (tg *ToGo) transformExprIdentifer(vitgt *Varinfo, e *f90.Identifier) (result ast.Expr, resultType *Varinfo, err error) {
 	resultType = tg.repl.Var(e.Value)
 	if resultType == nil {
 		err = tg.makeErr(e, "identifier not found")
@@ -105,7 +105,7 @@ func (tg *ToGo) transformExprIdentifer(vitgt *varinfo, e *f90.Identifier) (resul
 	return tg.astVarExpr(resultType), resultType, nil
 }
 
-func (tg *ToGo) transformArrayConstructor(vitgt *varinfo, e *f90.ArrayConstructor) (result ast.Expr, err error) {
+func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructor) (result ast.Expr, err error) {
 	// Infer element type from target
 	elemIdent := tg.baseGotype(vitgt.val.tok, tg.resolveKind(vitgt))
 
@@ -133,7 +133,7 @@ func (tg *ToGo) transformArrayConstructor(vitgt *varinfo, e *f90.ArrayConstructo
 	}, nil
 }
 
-func (tg *ToGo) transformUnaryExpr(vitgt *varinfo, e *f90.UnaryExpr) (result ast.Expr, resultType *varinfo, err error) {
+func (tg *ToGo) transformUnaryExpr(vitgt *Varinfo, e *f90.UnaryExpr) (result ast.Expr, resultType *Varinfo, err error) {
 	operand, resultType, err := tg.transformExpression(vitgt, e.Operand)
 	if err != nil {
 		return nil, nil, err
@@ -158,7 +158,7 @@ func (tg *ToGo) transformUnaryExpr(vitgt *varinfo, e *f90.UnaryExpr) (result ast
 	}, resultType, nil
 }
 
-func (tg *ToGo) checkPromotion(left, right *varinfo) (lPromote, rPromote *varinfo, err error) {
+func (tg *ToGo) checkPromotion(left, right *Varinfo) (lPromote, rPromote *Varinfo, err error) {
 	if right == _tgtGenericFloat || right == _tgtGenericInt ||
 		left == _tgtGenericFloat || left == _tgtGenericInt {
 		return nil, nil, nil // Do not promote literals, go auto promotes them.
@@ -209,7 +209,7 @@ func normalizeTokenKind(tok f90token.Token, kind int) (f90token.Token, int) {
 	return tok, kind
 }
 
-func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result ast.Expr, resultType *varinfo, err error) {
+func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result ast.Expr, resultType *Varinfo, err error) {
 	left, leftType, err := tg.transformExpression(vitgt, e.Left)
 	if err != nil {
 		return nil, nil, err
@@ -300,7 +300,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 }
 
 // isPointerZeroComparison checks if ptrType is a Cray pointer and other is literal 0.
-func isPointerZeroComparison(ptrType, otherType *varinfo, otherExpr f90.Expression) bool {
+func isPointerZeroComparison(ptrType, otherType *Varinfo, otherExpr f90.Expression) bool {
 	if ptrType == nil || ptrType.pointee == "" {
 		return false // Not a pointer variable
 	}
@@ -322,7 +322,7 @@ func (tg *ToGo) pointerNilComparison(ptrExpr ast.Expr, op token.Token) ast.Expr 
 	}
 }
 
-func (tg *ToGo) transformFunctionCall(vitgt *varinfo, e *f90.FunctionCall) (result ast.Expr, resultType *varinfo, err error) {
+func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.FunctionCall) (result ast.Expr, resultType *Varinfo, err error) {
 	vi := tg.repl.Var(e.Name)
 	if vi != nil {
 		// Check if this is a declared variable (COMMON block array access)
@@ -380,7 +380,7 @@ func (tg *ToGo) transformFunctionCall(vitgt *varinfo, e *f90.FunctionCall) (resu
 // transformMALLOC handles MALLOC intrinsic specially.
 // MALLOC returns PointerTo[T] where T comes from the target's pointee type.
 // Generates: intrinsic.MALLOC[T](size)
-func (tg *ToGo) transformMALLOC(vitgt *varinfo, e *f90.FunctionCall) (result ast.Expr, resultType *varinfo, err error) {
+func (tg *ToGo) transformMALLOC(vitgt *Varinfo, e *f90.FunctionCall) (result ast.Expr, resultType *Varinfo, err error) {
 	if len(e.Args) != 1 {
 		return nil, nil, tg.makeErr(e, "MALLOC requires 1 argument")
 	}
@@ -415,7 +415,7 @@ func (tg *ToGo) transformMALLOC(vitgt *varinfo, e *f90.FunctionCall) (result ast
 	return call, vitgt, nil
 }
 
-func (tg *ToGo) transformArrayRef(vitgt *varinfo, e *f90.ArrayRef) (result ast.Expr, err error) {
+func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.ArrayRef) (result ast.Expr, err error) {
 	if e.Base != nil {
 		return nil, tg.makeErr(e, "chained ArrayRef expression not yet implemented")
 	}
@@ -449,7 +449,7 @@ func (tg *ToGo) transformArrayRef(vitgt *varinfo, e *f90.ArrayRef) (result ast.E
 
 // astVarExpr returns the AST expression for a variable, handling COMMON block access.
 // It does not handle access patterns.
-func (tg *ToGo) astVarExpr(vi *varinfo) ast.Expr {
+func (tg *ToGo) astVarExpr(vi *Varinfo) ast.Expr {
 	if vi.common != "" {
 		return &ast.SelectorExpr{
 			X:   ast.NewIdent(vi.common),
@@ -516,7 +516,7 @@ func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, 
 	return dst, nil
 }
 
-func (tg *ToGo) transformRangeExprToArgs(rng *f90.RangeExpr, vi *varinfo) (_ []ast.Expr, err error) {
+func (tg *ToGo) transformRangeExprToArgs(rng *f90.RangeExpr, vi *Varinfo) (_ []ast.Expr, err error) {
 	if vi == _tgtInt32 || vi == _tgtInt {
 		panic("misuse of varinfo")
 	}
@@ -542,7 +542,7 @@ func (tg *ToGo) transformRangeExprToArgs(rng *f90.RangeExpr, vi *varinfo) (_ []a
 	return []ast.Expr{start, end}, nil
 }
 
-func (tg *ToGo) transformExprSlice(vitgt *varinfo, dst []ast.Expr, src []f90.Expression) (_ []ast.Expr, err error) {
+func (tg *ToGo) transformExprSlice(vitgt *Varinfo, dst []ast.Expr, src []f90.Expression) (_ []ast.Expr, err error) {
 	for i := range src {
 		expr, _, err := tg.transformExpression(vitgt, src[i])
 		if err != nil {
@@ -554,7 +554,7 @@ func (tg *ToGo) transformExprSlice(vitgt *varinfo, dst []ast.Expr, src []f90.Exp
 }
 
 // wrapConversion wraps expr with a type conversion if target type differs from sourceType.
-func (tg *ToGo) wrapConversion(target *varinfo, sourceType *varinfo, expr ast.Expr) ast.Expr {
+func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Expr) ast.Expr {
 	ptrDerefFirst := tg.varIsPointerTo(sourceType)
 	// isArray := tg.varIsArray(sourceType)
 	switch {
@@ -608,14 +608,14 @@ func (tg *ToGo) wrapMethodIntrinsic(fn *intrinsicFn, call *ast.CallExpr) *ast.Ca
 type intrinsicFn struct {
 	name        string
 	expr        ast.Expr
-	exprGeneric func(tp *varinfo) ast.Expr
+	exprGeneric func(tp *Varinfo) ast.Expr
 	method      string
-	returnType  *varinfo
-	params      []*varinfo
+	returnType  *Varinfo
+	params      []*Varinfo
 	isVariadic  bool
 }
 
-func (tg *ToGo) intrinsicExpr(vitgt *varinfo, fn *intrinsicFn, args ...f90.Expression) (call *ast.CallExpr, resultType *varinfo, err error) {
+func (tg *ToGo) intrinsicExpr(vitgt *Varinfo, fn *intrinsicFn, args ...f90.Expression) (call *ast.CallExpr, resultType *Varinfo, err error) {
 	if fn.isVariadic {
 		if len(args) < len(fn.params) {
 			return nil, nil, fmt.Errorf("intrinsic %s requires at least %d arguments, got %d", fn.name, len(fn.params), len(args))
@@ -683,15 +683,15 @@ func getIntrinsic(name string, nargs int) *intrinsicFn {
 }
 
 // intrinsicSel creates a selector expression for intrinsic.NAME
-func intrinsicSel(name string) func(*varinfo) ast.Expr {
-	return func(tp *varinfo) ast.Expr {
+func intrinsicSel(name string) func(*Varinfo) ast.Expr {
+	return func(tp *Varinfo) ast.Expr {
 		return &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(name)}
 	}
 }
 
 // intrinsicSelGeneric creates a type-parameterized selector: intrinsic.NAME[T]
-func intrinsicSelGeneric(name string) func(*varinfo) ast.Expr {
-	return func(tp *varinfo) ast.Expr {
+func intrinsicSelGeneric(name string) func(*Varinfo) ast.Expr {
+	return func(tp *Varinfo) ast.Expr {
 		sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(name)}
 		if tp == nil || isGenericVarinfo(tp) {
 			return sel
@@ -734,7 +734,7 @@ func goTypeBasic(tok f90token.Token, kind int) (goType ast.Expr) {
 
 // makeIntrinsicFn creates an intrinsic that calls intrinsic.NAME (e.g., SQRT, SIN).
 // returnType is nil if return type matches first param.
-func makeIntrinsicFn(name string, returnType *varinfo, params ...*varinfo) intrinsicFn {
+func makeIntrinsicFn(name string, returnType *Varinfo, params ...*Varinfo) intrinsicFn {
 	return intrinsicFn{
 		name:        name,
 		exprGeneric: intrinsicSel(name),
@@ -744,18 +744,18 @@ func makeIntrinsicFn(name string, returnType *varinfo, params ...*varinfo) intri
 }
 
 // makeIntrinsicVariadic creates a variadic intrinsic like MAX, MIN.
-func makeIntrinsicVariadic(name string, returnType *varinfo, variadicType *varinfo) intrinsicFn {
+func makeIntrinsicVariadic(name string, returnType *Varinfo, variadicType *Varinfo) intrinsicFn {
 	return intrinsicFn{
 		name:        name,
 		exprGeneric: intrinsicSel(name),
 		returnType:  returnType,
-		params:      []*varinfo{variadicType},
+		params:      []*Varinfo{variadicType},
 		isVariadic:  true,
 	}
 }
 
 // makeIntrinsicFnGeneric creates a generic intrinsic that emits intrinsic.NAME[T].
-func makeIntrinsicFnGeneric(name string, returnType *varinfo, params ...*varinfo) intrinsicFn {
+func makeIntrinsicFnGeneric(name string, returnType *Varinfo, params ...*Varinfo) intrinsicFn {
 	return intrinsicFn{
 		name:        name,
 		exprGeneric: intrinsicSelGeneric(name),
@@ -765,29 +765,29 @@ func makeIntrinsicFnGeneric(name string, returnType *varinfo, params ...*varinfo
 }
 
 // makeIntrinsicVariadicGeneric creates a variadic generic intrinsic like MAX, MIN.
-func makeIntrinsicVariadicGeneric(name string, returnType *varinfo, variadicType *varinfo) intrinsicFn {
+func makeIntrinsicVariadicGeneric(name string, returnType *Varinfo, variadicType *Varinfo) intrinsicFn {
 	return intrinsicFn{
 		name:        name,
 		exprGeneric: intrinsicSelGeneric(name),
 		returnType:  returnType,
-		params:      []*varinfo{variadicType},
+		params:      []*Varinfo{variadicType},
 		isVariadic:  true,
 	}
 }
 
 // makeIntrinsicCast creates a type cast intrinsic like REAL, INT, DBLE.
-func makeIntrinsicCast(name, goType string, returnType, paramType *varinfo) intrinsicFn {
+func makeIntrinsicCast(name, goType string, returnType, paramType *Varinfo) intrinsicFn {
 	return intrinsicFn{
 		name:       name,
 		expr:       ast.NewIdent(goType),
 		returnType: returnType,
-		params:     []*varinfo{paramType},
+		params:     []*Varinfo{paramType},
 	}
 }
 
 // makeIntrinsicMethod creates a method-call intrinsic like LEN, TRIM.
-func makeIntrinsicMethod(name, methodName string, returnType, receiverType *varinfo, params ...*varinfo) intrinsicFn {
-	allParams := make([]*varinfo, 0, 1+len(params))
+func makeIntrinsicMethod(name, methodName string, returnType, receiverType *Varinfo, params ...*Varinfo) intrinsicFn {
+	allParams := make([]*Varinfo, 0, 1+len(params))
 	allParams = append(allParams, receiverType)
 	allParams = append(allParams, params...)
 	return intrinsicFn{
@@ -798,13 +798,13 @@ func makeIntrinsicMethod(name, methodName string, returnType, receiverType *vari
 	}
 }
 
-func (fn *intrinsicFn) inferReturnType(tgt *varinfo) (inferred *varinfo) {
+func (fn *intrinsicFn) inferReturnType(tgt *Varinfo) (inferred *Varinfo) {
 	if fn.returnType != nil {
 		inferred = fn.returnType
 	} else {
 		inferred = fn.params[0]
 	}
-	var dflt *varinfo
+	var dflt *Varinfo
 	switch inferred {
 	case _tgtGenericFloat:
 		dflt = _tgtFloat32
@@ -882,8 +882,8 @@ var intrinsics = []intrinsicFn{
 	// Note: MALLOC is handled specially in transformMALLOC, not here
 }
 
-func defaultVarinfo(tok f90token.Token) *varinfo {
-	return &varinfo{
+func defaultVarinfo(tok f90token.Token) *Varinfo {
+	return &Varinfo{
 		_varname: fmt.Sprintf("<default %s varinfo>", tok.String()),
 		decl:     &f90.DeclEntity{Type: &f90.TypeSpec{Token: tok}},
 	}
@@ -905,6 +905,6 @@ var (
 	_tgtArray        = defaultVarinfo(f90token.DIMENSION)
 )
 
-func isGenericVarinfo(vi *varinfo) bool {
+func isGenericVarinfo(vi *Varinfo) bool {
 	return vi == _tgtGenericFloat || vi == _tgtGenericInt
 }

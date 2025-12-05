@@ -22,7 +22,7 @@ func TestREPL_EvalResultTypes(t *testing.T) {
 	}
 	var r REPL
 	for i, test := range tests {
-		var vi varinfo
+		var vi Varinfo
 		err := r.Eval(&vi, test.expr)
 		if err != nil {
 			t.Fatalf("%d: %s", i, err)
@@ -71,7 +71,7 @@ func TestREPL_EvalLogicalExpressions(t *testing.T) {
 	}
 	var r REPL
 	for i, test := range tests {
-		var vi varinfo
+		var vi Varinfo
 		err := r.Eval(&vi, test.expr)
 		if err != nil {
 			t.Fatalf("%d: %s", i, err)
@@ -95,7 +95,7 @@ func TestREPL_EvalStringExpressions(t *testing.T) {
 	}
 	var r REPL
 	for i, test := range tests {
-		var vi varinfo
+		var vi Varinfo
 		err := r.Eval(&vi, test.expr)
 		if err != nil {
 			t.Fatalf("%d: %s", i, err)
@@ -120,7 +120,7 @@ func TestREPL_EvalErrors(t *testing.T) {
 	}
 	var r REPL
 	for i, test := range tests {
-		var vi varinfo
+		var vi Varinfo
 		err := r.Eval(&vi, test.expr)
 		if err == nil {
 			t.Errorf("%d: expected error for %q", i, test.expr.AppendString(nil))
@@ -182,7 +182,7 @@ func TestREPL_ConstantNumericExpressions(t *testing.T) {
 	const tol = 1e-10
 	var r REPL
 	for i, test := range tests {
-		var v varinfo
+		var v Varinfo
 		err := r.Eval(&v, test.expr)
 		if err != nil {
 			t.Fatalf("%d %s: %q", i, err, test.expr.AppendString(nil))
@@ -286,7 +286,7 @@ func TestREPL_InferType(t *testing.T) {
 	}
 	var r REPL
 	for i, test := range tests {
-		var vi varinfo
+		var vi Varinfo
 		err := r.InferType(&vi, test.expr)
 		if err != nil {
 			t.Fatalf("%d: %s", i, err)

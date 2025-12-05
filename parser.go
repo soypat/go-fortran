@@ -166,13 +166,17 @@ func (p *Parser90) makeUnitData(name string, token token.Token) *ParserUnitData 
 type ParserUnitData struct {
 	name       string
 	tok        token.Token
-	vars       []varinfo
-	returnType *varinfo
+	vars       []Varinfo
+	returnType *Varinfo
 	implicits  []*ast.ImplicitStatement
 }
 
+func (p *ParserUnitData) AppendVarinfo(dst []Varinfo) []Varinfo {
+	return append(dst, p.vars...)
+}
+
 // ProcedureParams returns the varinfos corresponding to parameters of the function, in order.
-func (p *ParserUnitData) ProcedureParams() []varinfo {
+func (p *ParserUnitData) ProcedureParams() []Varinfo {
 	for i := range p.vars {
 		if !p.vars[i].flags.HasAny(flagParameter) {
 			return p.vars[:i] // First varinfo are always function parameters.
@@ -196,11 +200,11 @@ func (p *ParserUnitData) resolveParameterTypes(params []ast.Parameter) error {
 	return nil
 }
 
-func (p *ParserUnitData) Varb(name []byte) (vi *varinfo) {
+func (p *ParserUnitData) Varb(name []byte) (vi *Varinfo) {
 	return p.Var(unsafe.String(&name[0], len(name)))
 }
 
-func (p *ParserUnitData) Var(name string) (vi *varinfo) {
+func (p *ParserUnitData) Var(name string) (vi *Varinfo) {
 	for i := range p.vars {
 		if strings.EqualFold(p.vars[i]._varname, name) {
 			return &p.vars[i]
@@ -295,7 +299,7 @@ var (
 	}
 )
 
-func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEntity, initFlags symflags, namespace string) (vi *varinfo, err error) {
+func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEntity, initFlags symflags, namespace string) (vi *Varinfo, err error) {
 	if decl != nil && name != decl.Name {
 		panic("bad varInit name argument mismatch with decl")
 	}
@@ -329,7 +333,7 @@ func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEnti
 	return vi, nil
 }
 
-type varinfo struct {
+type Varinfo struct {
 	decl     *ast.DeclEntity
 	flags    symflags
 	_varname string
@@ -340,18 +344,18 @@ type varinfo struct {
 	kindFlag int   // 0 when uninitialized. -1 when unspecified, -2..-99 error. else is kind value.
 }
 
-func (p *varinfo) Value() Value                       { return p.val }
-func (p *varinfo) Charlen() ast.Expression            { return p.decl.Charlen() }
-func (p *varinfo) Kind() ast.Expression               { return p.decl.Kind() }
-func (p *varinfo) Dimensions() *ast.ArraySpec         { return p.decl.Dimension() }
-func (p *varinfo) Identifier() string                 { return p._varname }
-func (p *varinfo) IsParameter() bool                  { return p.flags.HasAny(flagParameter) }
-func (p *varinfo) IsAllocatable() bool                { return p.flags.HasAny(flagAllocatable) }
-func (p *varinfo) reset()                             { *p = varinfo{} }
+func (p *Varinfo) Value() Value                       { return p.val }
+func (p *Varinfo) Charlen() ast.Expression            { return p.decl.Charlen() }
+func (p *Varinfo) Kind() ast.Expression               { return p.decl.Kind() }
+func (p *Varinfo) Dimensions() *ast.ArraySpec         { return p.decl.Dimension() }
+func (p *Varinfo) Identifier() string                 { return p._varname }
+func (p *Varinfo) IsParameter() bool                  { return p.flags.HasAny(flagParameter) }
+func (p *Varinfo) IsAllocatable() bool                { return p.flags.HasAny(flagAllocatable) }
+func (p *Varinfo) reset()                             { *p = Varinfo{} }
 func (p *Parser90) varResetAll()                      { p.vars.reset() }
-func (p *Parser90) varGet(name []byte) (vi *varinfo)  { return p.vars.Varb(name) }
-func (p *Parser90) varSGet(name string) (vi *varinfo) { return p.vars.Var(name) }
-func (p *Parser90) varInit(name string, decl *ast.DeclEntity, initFlags symflags, namespace string) (vi *varinfo) {
+func (p *Parser90) varGet(name []byte) (vi *Varinfo)  { return p.vars.Varb(name) }
+func (p *Parser90) varSGet(name string) (vi *Varinfo) { return p.vars.Var(name) }
+func (p *Parser90) varInit(name string, decl *ast.DeclEntity, initFlags symflags, namespace string) (vi *Varinfo) {
 	vi, err := p.vars.varInit(p.sourcePos(), name, decl, initFlags, namespace)
 	if err != nil {
 		p.addError(err.Error())

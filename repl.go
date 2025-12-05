@@ -47,10 +47,10 @@ func (v *Value) Float() float64 {
 // commonBlockInfo tracks variables in a COMMON block for transpilation.
 type commonBlockInfo struct {
 	Name   string // COMMON block name (empty string for blank COMMON)
-	fields []varinfo
+	fields []Varinfo
 }
 
-func (cb *commonBlockInfo) getField(name string) *varinfo {
+func (cb *commonBlockInfo) getField(name string) *Varinfo {
 	for i := range cb.fields {
 		if strings.EqualFold(cb.fields[i]._varname, name) {
 			return &cb.fields[i]
@@ -59,7 +59,7 @@ func (cb *commonBlockInfo) getField(name string) *varinfo {
 	return nil
 }
 
-func (cb *commonBlockInfo) addField(v *varinfo) {
+func (cb *commonBlockInfo) addField(v *Varinfo) {
 	if cb.getField(v._varname) != nil {
 		panic("field already exists: " + v._varname)
 	}
@@ -88,7 +88,7 @@ func (repl *REPL) Reset() {
 
 // collectCommonBlocks scans program unit variables for COMMON block membership
 // and builds the commonBlocks map with field types and array specs.
-func (tg *REPL) collectCommonBlocks(vars []varinfo) {
+func (tg *REPL) collectCommonBlocks(vars []Varinfo) {
 	for i := range vars {
 		v := &vars[i]
 		if !v.flags.HasAny(flagCommon) {
@@ -120,7 +120,7 @@ func (tg *REPL) getCommon(name string) *commonBlockInfo {
 	return nil
 }
 
-func (repl *REPL) Var(name string) *varinfo {
+func (repl *REPL) Var(name string) *Varinfo {
 	return repl.scope.Var(name)
 }
 
@@ -166,7 +166,7 @@ func (repl *REPL) ContainedOrExtern(name string) *ParserUnitData {
 	return data
 }
 
-func (repl *REPL) ScopeParams() []varinfo {
+func (repl *REPL) ScopeParams() []Varinfo {
 	for i, v := range repl.scope.vars {
 		if !v.flags.HasAny(flagParameter) {
 			return repl.scope.vars[:i]
@@ -223,7 +223,7 @@ func (repl *REPL) SetScope(pu f90.ProgramUnit) error {
 // Eval evaluates a Fortran expression into dst. Caller provides dst to avoid
 // allocations; dst can be reused across calls. On success dst.Value() holds
 // the result with val.tok set to the evaluated type.
-func (repl *REPL) Eval(dst *varinfo, expr f90.Expression) (err error) {
+func (repl *REPL) Eval(dst *Varinfo, expr f90.Expression) (err error) {
 	switch e := expr.(type) {
 	case *f90.IntegerLiteral:
 		err = repl.assignInt(dst, e.Value)
@@ -272,8 +272,8 @@ func (repl *REPL) Eval(dst *varinfo, expr f90.Expression) (err error) {
 
 // InferType infers the type of expr without evaluating it.
 // Sets dst.val.tok to the result type.
-func (repl *REPL) InferType(dst *varinfo, expr f90.Expression) error {
-	*dst = varinfo{}
+func (repl *REPL) InferType(dst *Varinfo, expr f90.Expression) error {
+	*dst = Varinfo{}
 	prev := repl.noValueResolution
 	repl.noValueResolution = true
 	err := repl.Eval(dst, expr)
@@ -283,8 +283,8 @@ func (repl *REPL) InferType(dst *varinfo, expr f90.Expression) error {
 
 // InferType infers the type of expr without evaluating it.
 // Sets dst.val.tok to the result type.
-func (repl *REPL) ensureEval(dst *varinfo, expr f90.Expression) error {
-	*dst = varinfo{}
+func (repl *REPL) ensureEval(dst *Varinfo, expr f90.Expression) error {
+	*dst = Varinfo{}
 	prev := repl.noValueResolution
 	repl.noValueResolution = false
 	err := repl.Eval(dst, expr)
@@ -292,7 +292,7 @@ func (repl *REPL) ensureEval(dst *varinfo, expr f90.Expression) error {
 	return err
 }
 
-func (repl *REPL) evalUnary(dst *varinfo, e *f90.UnaryExpr) error {
+func (repl *REPL) evalUnary(dst *Varinfo, e *f90.UnaryExpr) error {
 	err := repl.Eval(dst, e.Operand)
 	if err != nil {
 		return err
@@ -314,8 +314,8 @@ func (repl *REPL) evalUnary(dst *varinfo, e *f90.UnaryExpr) error {
 	return err
 }
 
-func (repl *REPL) evalBinary(dst *varinfo, e *f90.BinaryExpr) error {
-	var left, right varinfo
+func (repl *REPL) evalBinary(dst *Varinfo, e *f90.BinaryExpr) error {
+	var left, right Varinfo
 	err := repl.Eval(&left, e.Left)
 	if err != nil {
 		return err
@@ -358,7 +358,7 @@ func (repl *REPL) evalBinary(dst *varinfo, e *f90.BinaryExpr) error {
 	return nil
 }
 
-func (repl *REPL) evalIntBinary(dst *varinfo, l int64, op f90token.Token, ri int64) error {
+func (repl *REPL) evalIntBinary(dst *Varinfo, l int64, op f90token.Token, ri int64) error {
 	if repl.noValueResolution {
 		return repl.assignInt(dst, 0)
 	}
@@ -383,7 +383,7 @@ func (repl *REPL) evalIntBinary(dst *varinfo, l int64, op f90token.Token, ri int
 	return repl.assignInt(dst, result)
 }
 
-func (repl *REPL) evalFloatBinary(dst, typ *varinfo, l float64, op f90token.Token, rf float64) error {
+func (repl *REPL) evalFloatBinary(dst, typ *Varinfo, l float64, op f90token.Token, rf float64) error {
 	if repl.noValueResolution {
 		return repl.assignFloatLike(dst, typ, 0)
 	}
@@ -408,12 +408,12 @@ func (repl *REPL) evalFloatBinary(dst, typ *varinfo, l float64, op f90token.Toke
 	return repl.assignFloatLike(dst, typ, result)
 }
 
-func (repl *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
+func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.FunctionCall) error {
 	name := strings.ToUpper(e.Name)
 	if len(e.Args) == 0 {
 		return fmt.Errorf("%s intrinsic requires arguments", name)
 	}
-	var arg0 varinfo
+	var arg0 Varinfo
 	err := repl.Eval(&arg0, e.Args[0])
 	if err != nil {
 		return err
@@ -475,7 +475,7 @@ func (repl *REPL) evalIntrinsic(dst *varinfo, e *f90.FunctionCall) error {
 		if len(e.Args) < 2 {
 			return fmt.Errorf("MOD requires 2 arguments")
 		}
-		var arg1 varinfo
+		var arg1 Varinfo
 		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
 			return err
 		}
@@ -498,7 +498,7 @@ func (repl *REPL) evalFloatFn0(fn func(float64) float64, val float64) float64 {
 	return fn(val)
 }
 
-func (repl *REPL) evalMax(dst *varinfo, args []f90.Expression) error {
+func (repl *REPL) evalMax(dst *Varinfo, args []f90.Expression) error {
 	if len(args) == 0 {
 		return errors.New("MAX requires at least one argument")
 	}
@@ -509,7 +509,7 @@ func (repl *REPL) evalMax(dst *varinfo, args []f90.Expression) error {
 	if repl.noValueResolution {
 		return nil // Type determined from first arg
 	}
-	var next varinfo
+	var next Varinfo
 	for _, arg := range args[1:] {
 		err = repl.Eval(&next, arg)
 		if err != nil {
@@ -522,7 +522,7 @@ func (repl *REPL) evalMax(dst *varinfo, args []f90.Expression) error {
 	return nil
 }
 
-func (repl *REPL) evalMin(dst *varinfo, args []f90.Expression) error {
+func (repl *REPL) evalMin(dst *Varinfo, args []f90.Expression) error {
 	if len(args) == 0 {
 		return errors.New("MIN requires at least one argument")
 	}
@@ -533,7 +533,7 @@ func (repl *REPL) evalMin(dst *varinfo, args []f90.Expression) error {
 	if repl.noValueResolution {
 		return nil // Type determined from first arg
 	}
-	var next varinfo
+	var next Varinfo
 	for _, arg := range args[1:] {
 		err := repl.Eval(&next, arg)
 		if err != nil {
@@ -546,7 +546,7 @@ func (repl *REPL) evalMin(dst *varinfo, args []f90.Expression) error {
 	return nil
 }
 
-func (repl *REPL) evalArrayConstructor(dst *varinfo, e *f90.ArrayConstructor) error {
+func (repl *REPL) evalArrayConstructor(dst *Varinfo, e *f90.ArrayConstructor) error {
 	if len(e.Values) == 0 {
 		dst.val.tok = f90token.INTEGER // Default to integer for empty array
 		return nil
@@ -556,7 +556,7 @@ func (repl *REPL) evalArrayConstructor(dst *varinfo, e *f90.ArrayConstructor) er
 }
 
 // Helper methods for creating varinfo with values
-func (repl *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
+func (repl *REPL) prepAssignment(dst *Varinfo, src *Varinfo) error {
 	if dst.decl == nil {
 		// Declaration of dst should remain unset. Conceptually it's declaration is ephemeral, part of a REPL evaluation.
 	} else if dst.decl.Type.Token != src.decl.Type.Token {
@@ -567,7 +567,7 @@ func (repl *REPL) prepAssignment(dst *varinfo, src *varinfo) error {
 	return nil
 }
 
-func (repl *REPL) getOrResolveKind(v *varinfo) (int, error) {
+func (repl *REPL) getOrResolveKind(v *Varinfo) (int, error) {
 	if v.kindFlag != 0 {
 		if v.kindFlag == -1 {
 			return 0, nil
@@ -576,7 +576,7 @@ func (repl *REPL) getOrResolveKind(v *varinfo) (int, error) {
 	}
 	kind := v.Kind()
 	if kind != nil {
-		var evaled varinfo
+		var evaled Varinfo
 		err := repl.ensureEval(&evaled, kind)
 		if err != nil {
 			return -2, err
@@ -594,7 +594,7 @@ func (repl *REPL) getOrResolveKind(v *varinfo) (int, error) {
 }
 
 // promote returns the resulting promoted type of a binary operation between two types.
-func (repl *REPL) promote(dst, src *varinfo) (promotion f90token.Token, kind int) {
+func (repl *REPL) promote(dst, src *Varinfo) (promotion f90token.Token, kind int) {
 	dtok := dst.typeToken()
 	stok := src.typeToken()
 	switch dtok {
@@ -626,7 +626,7 @@ func (repl *REPL) promote(dst, src *varinfo) (promotion f90token.Token, kind int
 }
 
 // typeToken returns the effective type token (prefers val.tok, falls back to decl).
-func (v *varinfo) typeToken() f90token.Token {
+func (v *Varinfo) typeToken() f90token.Token {
 	if v.val.tok != 0 {
 		return v.val.tok
 	}
@@ -636,7 +636,7 @@ func (v *varinfo) typeToken() f90token.Token {
 	return 0
 }
 
-func (repl *REPL) assignInt(dst *varinfo, v int64) error {
+func (repl *REPL) assignInt(dst *Varinfo, v int64) error {
 	err := repl.prepAssignment(dst, _tgtInt32)
 	if err != nil {
 		return err
@@ -645,7 +645,7 @@ func (repl *REPL) assignInt(dst *varinfo, v int64) error {
 	return nil
 }
 
-func (repl *REPL) assignFloat32(dst *varinfo, v float64) error {
+func (repl *REPL) assignFloat32(dst *Varinfo, v float64) error {
 	err := repl.prepAssignment(dst, _tgtFloat32)
 	if err != nil {
 		return err
@@ -654,7 +654,7 @@ func (repl *REPL) assignFloat32(dst *varinfo, v float64) error {
 	return nil
 }
 
-func (repl *REPL) assignFloat64(dst *varinfo, v float64) error {
+func (repl *REPL) assignFloat64(dst *Varinfo, v float64) error {
 	err := repl.prepAssignment(dst, _tgtFloat64)
 	if err != nil {
 		return err
@@ -663,7 +663,7 @@ func (repl *REPL) assignFloat64(dst *varinfo, v float64) error {
 	return nil
 }
 
-func (repl *REPL) assignBool(dst *varinfo, v bool) error {
+func (repl *REPL) assignBool(dst *Varinfo, v bool) error {
 	err := repl.prepAssignment(dst, _tgtBool)
 	if err != nil {
 		return err
@@ -672,7 +672,7 @@ func (repl *REPL) assignBool(dst *varinfo, v bool) error {
 	return nil
 }
 
-func (repl *REPL) assignString(dst *varinfo, v string) error {
+func (repl *REPL) assignString(dst *Varinfo, v string) error {
 	err := repl.prepAssignment(dst, _tgtChar)
 	if err != nil {
 		return err
@@ -681,7 +681,7 @@ func (repl *REPL) assignString(dst *varinfo, v string) error {
 	return nil
 }
 
-func (repl *REPL) assignFloatLike(dst, template *varinfo, v float64) error {
+func (repl *REPL) assignFloatLike(dst, template *Varinfo, v float64) error {
 	dst.val.tok, _ = repl.promote(dst, template)
 	dst.val.f64 = v
 	return nil
@@ -690,7 +690,7 @@ func (repl *REPL) assignFloatLike(dst, template *varinfo, v float64) error {
 // Type checking helpers
 
 // promoteTypes returns the wider of two numeric types (Fortran type promotion).
-func (repl *REPL) promoteTypes(a, b *varinfo) *varinfo {
+func (repl *REPL) promoteTypes(a, b *Varinfo) *Varinfo {
 	if a == nil || a.decl == nil {
 		return b
 	}

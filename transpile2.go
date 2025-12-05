@@ -333,7 +333,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	return dst, err
 }
 
-func (tg *ToGo) makeArrayInitializer(typ *varinfo, initializer ast.Expr) (ast.Expr, error) {
+func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Expr, error) {
 	if !tg.varIsArray(typ) {
 		return nil, tg.makeErrWithPos(typ.decl.Position, "invalid type declaration dimensions for array creation")
 	}
@@ -485,7 +485,7 @@ func (tg *ToGo) transformAllocateStmt(dst []ast.Stmt, stmt *f90.AllocateStmt) (_
 
 func (tg *ToGo) transformDeallocateStmt(dst []ast.Stmt, stmt *f90.DeallocateStmt) (_ []ast.Stmt, err error) {
 	for _, obj := range stmt.Objects {
-		var vi *varinfo
+		var vi *Varinfo
 		switch e := obj.(type) {
 		case *f90.Identifier:
 			vi = tg.repl.Var(e.Value)
@@ -536,7 +536,7 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 }
 
 func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_ []ast.Stmt, err error) {
-	var targetVinfo *varinfo
+	var targetVinfo *Varinfo
 	var lhs ast.Expr
 	switch tgt := stmt.Target.(type) {
 	case *f90.ArrayRef:
@@ -601,7 +601,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	}
 
 	// Convert RHS to target type if needed
-	var rhsType varinfo
+	var rhsType Varinfo
 	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
 		return dst, err
 	}
@@ -672,7 +672,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast.Stmt, err error) {
 	// Transform output list expressions to Go expressions
 	var args []ast.Expr
-	var tgt varinfo
+	var tgt Varinfo
 	for _, expr := range stmt.OutputList {
 		err = tg.repl.InferType(&tgt, expr)
 		if err != nil {
@@ -844,7 +844,7 @@ func (tg *ToGo) transformDoLoop(dst []ast.Stmt, stmt *f90.DoLoop) (_ []ast.Stmt,
 
 func (tg *ToGo) transformSelectCaseStmt(dst []ast.Stmt, stmt *f90.SelectCaseStmt) (_ []ast.Stmt, err error) {
 	// Transform the selector expression
-	var viSelector varinfo
+	var viSelector Varinfo
 	err = tg.repl.InferType(&viSelector, stmt.Expression)
 	if err != nil {
 		return dst, tg.makeErr(stmt.Expression, err.Error())
@@ -904,7 +904,7 @@ func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.S
 		valExpr := stmt.Values[i]
 
 		// Get target variable info and LHS expression
-		var targetVinfo *varinfo
+		var targetVinfo *Varinfo
 		var lhs ast.Expr
 		var isArrayElement bool
 
@@ -1188,7 +1188,7 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 }
 
 // typeSize returns the size in bytes for a variable's base type.
-func (tg *ToGo) typeSize(v *varinfo) int {
+func (tg *ToGo) typeSize(v *Varinfo) int {
 	kind := tg.resolveKind(v)
 	switch v.typeToken() {
 	case f90token.REAL:
@@ -1264,7 +1264,7 @@ func (tg *ToGo) transformPointerCrayStmt(dst []ast.Stmt, stmt *f90.PointerCraySt
 //	REAL(KIND=4) → float32, REAL(KIND=8) → float64
 //
 // Arrays are returned as pointer types (*intrinsic.Array[T]).
-func (tg *ToGo) goType(v *varinfo) ast.Expr {
+func (tg *ToGo) goType(v *Varinfo) ast.Expr {
 	tok := v.typeToken()
 	isArray := tg.varIsArray(v)
 	// Handle Cray-style pointer variables (POINTER (ptr, pointee))
@@ -1360,7 +1360,7 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 // varIsArray returns true if the variable's Go type is *intrinsic.Array[T].
 // This applies to Fortran variables declared with DIMENSION attribute or
 // explicit array bounds in their type declaration.
-func (tg *ToGo) varIsArray(v *varinfo) bool {
+func (tg *ToGo) varIsArray(v *Varinfo) bool {
 	return v.flags.HasAny(flagDimension)
 }
 
@@ -1375,7 +1375,7 @@ func (tg *ToGo) varIsArray(v *varinfo) bool {
 //   - Cray-style pointer variables (flagPointer) - represent the pointer object, not pointee data
 //   - Arrays (flagDimension) - have their own access patterns (*intrinsic.Array[T])
 //   - CHARACTER types - use intrinsic.CharacterArray
-func (tg *ToGo) varIsPointerTo(v *varinfo) bool {
+func (tg *ToGo) varIsPointerTo(v *Varinfo) bool {
 	// Pointer variables (like NPAA) represent the address holder, not the data.
 	// They should not be auto-dereferenced.
 	if v.flags.HasAny(flagPointer) {
@@ -1560,7 +1560,7 @@ func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 	return dst
 }
 
-func (tg *ToGo) resolveKind(v *varinfo) int {
+func (tg *ToGo) resolveKind(v *Varinfo) int {
 	if v.decl == nil {
 		panic(tg.makeErrAtStmt("nil declaration for variable " + v.Identifier()))
 	}
@@ -1575,7 +1575,7 @@ func (tg *ToGo) resolveKindFromDecl(decl *f90.DeclEntity) int {
 	if kind == nil {
 		return 0
 	}
-	var dst varinfo
+	var dst Varinfo
 	if err := tg.repl.Eval(&dst, kind); err != nil {
 		return 0
 	}
