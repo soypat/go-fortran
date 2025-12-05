@@ -2840,3 +2840,115 @@ END FUNCTION`,
 		})
 	}
 }
+
+// TestDataStmtImplicitVariables verifies that variables used in DATA statements
+// are automatically registered with implicit types when not explicitly declared.
+// This test captures the fix for implicit variable handling in DATA statements.
+func TestDataStmtImplicitVariables(t *testing.T) {
+	tests := []struct {
+		name         string
+		src          string
+		expectedVars []struct {
+			name     string
+			typeName string
+		}
+	}{
+		{
+			name: "DATA with undeclared scalar variable",
+			src: `PROGRAM test
+      DATA D40/1.0D40/
+      PRINT *, D40
+END PROGRAM`,
+			expectedVars: []struct {
+				name     string
+				typeName string
+			}{
+				{name: "D40", typeName: "REAL"}, // D starts with D, so REAL by default I-N rule
+			},
+		},
+		{
+			name: "DATA with multiple undeclared variables",
+			src: `PROGRAM test
+      DATA HALF/0.5D0/
+      DATA NPREPW/0/,NORBVX/0/
+      PRINT *, HALF, NPREPW, NORBVX
+END PROGRAM`,
+			expectedVars: []struct {
+				name     string
+				typeName string
+			}{
+				{name: "HALF", typeName: "REAL"},    // H -> REAL
+				{name: "NPREPW", typeName: "INTEGER"}, // N -> INTEGER (I-N rule)
+				{name: "NORBVX", typeName: "INTEGER"}, // N -> INTEGER
+			},
+		},
+		{
+			name: "DATA with array element (undeclared array)",
+			src: `PROGRAM test
+      DATA I_DEFALT(1) /777/
+      PRINT *, I_DEFALT(1)
+END PROGRAM`,
+			expectedVars: []struct {
+				name     string
+				typeName string
+			}{
+				{name: "I_DEFALT", typeName: "INTEGER"}, // I -> INTEGER
+			},
+		},
+		{
+			name: "DATA with mix of declared and undeclared",
+			src: `PROGRAM test
+      DOUBLE PRECISION :: DECLARED
+      DATA DECLARED/1.0D0/
+      DATA UNDECLARED/2.0D0/
+      PRINT *, DECLARED, UNDECLARED
+END PROGRAM`,
+			expectedVars: []struct {
+				name     string
+				typeName string
+			}{
+				{name: "DECLARED", typeName: "DOUBLEPRECISION"},
+				{name: "UNDECLARED", typeName: "REAL"}, // U -> REAL
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var parser Parser90
+			err := parser.Reset(tt.name+".f90", strings.NewReader(tt.src))
+			if err != nil {
+				t.Fatalf("Reset failed: %v", err)
+			}
+
+			unit := parser.ParseNextProgramUnit()
+			if unit == nil {
+				t.Fatal("ParseNextProgramUnit returned nil")
+			}
+
+			helperFatalErrors(t, &parser, "source:\n"+tt.src)
+
+			// Get the ParserUnitData to check registered variables
+			data, ok := unit.UnitData().(*ParserUnitData)
+			if !ok {
+				t.Fatalf("Expected *ParserUnitData, got %T", unit.UnitData())
+			}
+
+			for _, expected := range tt.expectedVars {
+				vi := data.Var(expected.name)
+				if vi == nil {
+					t.Errorf("Variable %q not registered", expected.name)
+					continue
+				}
+				if vi.decl == nil || vi.decl.Type == nil {
+					t.Errorf("Variable %q has no type declaration", expected.name)
+					continue
+				}
+				gotType := vi.decl.Type.Token.String()
+				if !strings.EqualFold(gotType, expected.typeName) {
+					t.Errorf("Variable %q: expected type %q, got %q", expected.name, expected.typeName, gotType)
+				}
+			}
+		})
+	}
+}
