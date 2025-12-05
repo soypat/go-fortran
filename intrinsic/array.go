@@ -103,6 +103,33 @@ func NewArrayWithBounds[T any](data []T, shape, lower, upper []int) *Array[T] {
 	}
 }
 
+// Allocate allocates the array with given dimensions (1-based bounds).
+// Panics if already allocated (Fortran semantics without STAT=).
+func (a *Array[T]) Allocate(dims ...int) {
+	if a.data != nil {
+		panic("array already allocated")
+	}
+	*a = *NewArray[T](nil, dims...)
+}
+
+// Deallocate frees the array's memory.
+// Panics if not allocated (Fortran semantics without STAT=).
+func (a *Array[T]) Deallocate() {
+	if a.data == nil {
+		panic("array not allocated")
+	}
+	a.data = nil
+	a.shape = nil
+	a.lower = nil
+	a.upper = nil
+	a.stride = nil
+}
+
+// Allocated returns true if the array has allocated memory.
+func (a *Array[T]) Allocated() bool {
+	return a.data != nil
+}
+
 // At returns the element at the given indices (using Fortran indexing with custom bounds)
 // Implements the subscript value formula from F77 Table 1 / F95 Table 6.1.
 //

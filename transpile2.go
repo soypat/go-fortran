@@ -276,9 +276,9 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 			Label: tg.astLabel(s.Target),
 		})
 	case *f90.AllocateStmt:
-		// gostmt = tg.transformAllocateStmt(s)
+		dst, err = tg.transformAllocateStmt(dst, s)
 	case *f90.DeallocateStmt:
-		// gostmt = tg.transformDeallocateStmt(s)
+		dst, err = tg.transformDeallocateStmt(dst, s)
 	case *f90.SelectCaseStmt:
 		dst, err = tg.transformSelectCaseStmt(dst, s)
 	case *f90.CommonStmt:
@@ -385,8 +385,8 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 		useSpecs.Values = append(useSpecs.Values, ident)
 		// Generate array initialization for arrays with fixed dimensions
 		// Skip allocatable arrays - they're initialized by ALLOCATE statements
-
-		if tg.varIsArray(vi) && !vi.IsAllocatable() {
+		isArray := tg.varIsArray(vi)
+		if isArray && !vi.IsAllocatable() {
 			newArrExpr, err := tg.makeArrayInitializer(vi, ast.NewIdent("nil"))
 			if err != nil {
 				return nil, err
@@ -396,6 +396,21 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 				Lhs: []ast.Expr{ident},
 				Tok: token.ASSIGN,
 				Rhs: []ast.Expr{newArrExpr},
+			})
+		} else if isArray && vi.IsAllocatable() {
+			// ALLOCATABLE arrays: initialize with new() so Allocate method can be called
+			// Generate: arr = new(intrinsic.Array[T])
+			baseType := tg.baseGotype(vi.typeToken(), tg.resolveKind(vi))
+			newExpr := &ast.CallExpr{
+				Fun: ast.NewIdent("new"),
+				Args: []ast.Expr{
+					&ast.IndexExpr{X: _astTypeArray, Index: baseType},
+				},
+			}
+			arrayInits = append(arrayInits, &ast.AssignStmt{
+				Lhs: []ast.Expr{ident},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{newExpr},
 			})
 		} else if vi.decl.Type.Token == f90token.CHARACTER {
 			// Generate CHARACTER initialization: str = intrinsic.NewCharacterArray(len)
@@ -424,6 +439,54 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 		Decl: decl,
 	})
 	dst = append(dst, arrayInits...)
+	return dst, nil
+}
+
+func (tg *ToGo) transformAllocateStmt(dst []ast.Stmt, stmt *f90.AllocateStmt) (_ []ast.Stmt, err error) {
+	for _, obj := range stmt.Objects {
+		arrRef, ok := obj.(*f90.ArrayRef)
+		if !ok {
+			return dst, tg.makeErr(stmt, "ALLOCATE requires array reference")
+		}
+		vi := tg.repl.Var(arrRef.Name)
+		if vi == nil {
+			return dst, tg.makeErr(stmt, "unknown variable: "+arrRef.Name)
+		}
+		var args []ast.Expr
+		for _, sub := range arrRef.Subscripts {
+			arg, _, err := tg.transformExpression(_tgtInt, sub)
+			if err != nil {
+				return dst, err
+			}
+			args = append(args, arg)
+		}
+		// Generate: varname.Allocate(dims...)
+		call := &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: tg.astVarExpr(vi), Sel: ast.NewIdent("Allocate")},
+			Args: args,
+		}
+		dst = append(dst, &ast.ExprStmt{X: call})
+	}
+	return dst, nil
+}
+
+func (tg *ToGo) transformDeallocateStmt(dst []ast.Stmt, stmt *f90.DeallocateStmt) (_ []ast.Stmt, err error) {
+	for _, obj := range stmt.Objects {
+		var vi *varinfo
+		switch e := obj.(type) {
+		case *f90.Identifier:
+			vi = tg.repl.Var(e.Value)
+		case *f90.ArrayRef:
+			vi = tg.repl.Var(e.Name)
+		default:
+			return dst, tg.makeErr(stmt, "DEALLOCATE requires variable")
+		}
+		// Generate: varname.Deallocate()
+		call := &ast.CallExpr{
+			Fun: &ast.SelectorExpr{X: tg.astVarExpr(vi), Sel: ast.NewIdent("Deallocate")},
+		}
+		dst = append(dst, &ast.ExprStmt{X: call})
+	}
 	return dst, nil
 }
 

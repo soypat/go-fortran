@@ -20,6 +20,7 @@ func main() {
 	LEVEL15()
 	LEVEL16()
 	LEVEL17()
+	LEVEL18()
 	LEVEL19()
 	LEVEL20()
 	LEVEL21()
@@ -30,6 +31,7 @@ func main() {
 	LEVEL27()
 	LEVEL28()
 	LEVEL29()
+	LEVEL30()
 	intrinsic.Stop(0)
 }
 func LEVEL01() {
@@ -504,21 +506,27 @@ func LEVEL18() {
 		vec *intrinsic.Array[int32]
 		_   = vec
 	)
+	vec = new(intrinsic.Array[int32])
 	var (
 		mat *intrinsic.Array[int32]
 		_   = mat
 	)
+	mat = new(intrinsic.Array[int32])
+	vec.Allocate(5)
 	vec.Set(10, 1)
 	vec.Set(20, 2)
 	vec.Set(30, 3)
 	intrinsic.Print("LEVEL 18: vec(1) =", vec.At(1))
 	intrinsic.Print("LEVEL 18: vec(3) =", vec.At(3))
 	intrinsic.Print("LEVEL 18: SIZE(vec) =", int32(vec.Size()))
+	mat.Allocate(2, 3)
 	mat.Set(100, 1, 1)
 	mat.Set(200, 2, 3)
 	intrinsic.Print("LEVEL 18: mat(1,1) =", mat.At(1, 1))
 	intrinsic.Print("LEVEL 18: mat(2,3) =", mat.At(2, 3))
 	intrinsic.Print("LEVEL 18: SIZE(mat) =", int32(mat.Size()))
+	vec.Deallocate()
+	mat.Deallocate()
 	intrinsic.Print("LEVEL 18: Arrays deallocated")
 }
 func LEVEL19() {

@@ -21,7 +21,7 @@
       CALL LEVEL15()
       CALL LEVEL16()
       CALL LEVEL17()
-      ! CALL LEVEL18() ! TODO: ALLOCATE/DEALLOCATE not yet implemented
+      CALL LEVEL18()
       CALL LEVEL19()
       CALL LEVEL20()
       CALL LEVEL21()
@@ -31,7 +31,8 @@
       CALL LEVEL26()
       CALL LEVEL27()
       CALL LEVEL28()
-      CALL LEVEL29() ! TODO: Cray pointers not yet implemented
+      CALL LEVEL29()
+      CALL LEVEL30()
       STOP 0
       CONTAINS
 
