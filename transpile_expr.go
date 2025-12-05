@@ -302,7 +302,6 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 	}
 
 	// Promote operands to common type for arithmetic/comparison ops
-
 	if needsPromotion {
 		if lpromote != nil {
 			left = tg.wrapConversion(lpromote, leftType, left)

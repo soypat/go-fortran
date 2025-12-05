@@ -250,3 +250,58 @@ func TestComparisonOperatorReturnsLogical(t *testing.T) {
 		t.Errorf("TransformProgram failed: %v", err)
 	}
 }
+
+// TestModuleVariableImport verifies that variables from USE'd modules are accessible
+// during transpilation. Without this, module variables cause "identifier not found".
+func TestModuleVariableImport(t *testing.T) {
+	src := `      module testmod
+      LOGICAL :: flag = .TRUE.
+      end module testmod
+
+      PROGRAM TEST
+      use testmod
+      if(flag) then
+        PRINT *, 'TEST'
+      endif
+      END PROGRAM`
+
+	var parser Parser90
+	err := parser.Reset("test.f90", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Parse all program units (module + program)
+	var units []f90.ProgramUnit
+	for {
+		unit := parser.ParseNextProgramUnit()
+		if unit == nil {
+			break
+		}
+		units = append(units, unit)
+	}
+	if len(units) != 2 {
+		t.Fatalf("Expected 2 program units (module + program), got %d", len(units))
+	}
+
+	mod, ok := units[0].(*f90.Module)
+	if !ok {
+		t.Fatalf("Expected Module, got %T", units[0])
+	}
+	program, ok := units[1].(*f90.ProgramBlock)
+	if !ok {
+		t.Fatalf("Expected ProgramBlock, got %T", units[1])
+	}
+
+	// Transpile with module as extern
+	var tg ToGo
+	tg.SetSource("test.f90", strings.NewReader(src))
+	err = tg.AddExtern([]f90.ProgramUnit{mod})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tg.TransformProgram(program)
+	if err != nil {
+		t.Errorf("TransformProgram failed: %v", err)
+	}
+}
