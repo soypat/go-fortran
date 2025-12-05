@@ -163,7 +163,7 @@ func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 		tp := tg.goType(vi)
 		// For INTENT(OUT) or INTENT(INOUT) non-array scalars, use pointer type
 		intent := vi.decl.Type.Intent()
-		isArray := vi.Dimensions() != nil && len(vi.Dimensions().Bounds) > 0
+		isArray := tg.varIsArray(vi)
 		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
 			tp = &ast.StarExpr{X: tp}
 		}
@@ -322,10 +322,11 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 }
 
 func (tg *ToGo) makeArrayInitializer(typ *varinfo, initializer ast.Expr) (ast.Expr, error) {
-	dims := typ.Dimensions()
-	if dims == nil || len(dims.Bounds) == 0 {
+	if !tg.varIsArray(typ) {
 		return nil, tg.makeErrWithPos(typ.decl.Position, "invalid type declaration dimensions for array creation")
-	} else if dims.IsDeferred() {
+	}
+	dims := typ.Dimensions()
+	if dims.IsDeferred() {
 		return nil, tg.makeErrWithPos(typ.decl.Position, "cannot create array from deferred shape")
 	}
 	args := []ast.Expr{initializer} // First argument is array initializer
@@ -364,7 +365,6 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 		if vi.IsParameter() && !isParamConst {
 			continue // Skip function parameters, they're already declared in function signature
 		}
-		arrspec := vi.Dimensions()
 		tp := tg.goType(vi)
 		ident := ast.NewIdent(vi.Identifier())
 		spec := &ast.ValueSpec{
@@ -386,7 +386,7 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 		// Generate array initialization for arrays with fixed dimensions
 		// Skip allocatable arrays - they're initialized by ALLOCATE statements
 
-		if arrspec != nil && len(arrspec.Bounds) > 0 && !vi.IsAllocatable() {
+		if tg.varIsArray(vi) && !vi.IsAllocatable() {
 			newArrExpr, err := tg.makeArrayInitializer(vi, ast.NewIdent("nil"))
 			if err != nil {
 				return nil, err
@@ -447,7 +447,7 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 		}
 		// For INTENT(OUT/INOUT) non-array scalar parameters, pass address
 		intent := info.decl.Type.Intent()
-		isArray := info.Dimensions() != nil && len(info.Dimensions().Bounds) > 0
+		isArray := tg.varIsArray(info)
 		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
 			goexpr = &ast.UnaryExpr{Op: token.AND, X: goexpr}
 		}
@@ -470,7 +470,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		lhs = tg.astVarExpr(targetVinfo)
 		// Dereference INTENT(OUT/INOUT) non-array scalar parameters
 		intent := targetVinfo.decl.Type.Intent()
-		isArray := targetVinfo.Dimensions() != nil && len(targetVinfo.Dimensions().Bounds) > 0
+		isArray := tg.varIsArray(targetVinfo)
 		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
 			lhs = &ast.StarExpr{X: lhs}
 		}
@@ -555,6 +555,21 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	} else {
 		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
 	}
+
+	// Handle equivalenced scalar assignment: f = value → f.Set(1, value)
+	// CHARACTER types are excluded as they use SetFromString
+	isArray := tg.varIsArray(targetVinfo)
+	isCharacter := targetVinfo.typeToken() == f90token.CHARACTER
+	if !isArray && !isCharacter && targetVinfo.flags.HasAny(flagEquivalenced) {
+		dst = append(dst, &ast.ExprStmt{
+			X: &ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: lhs, Sel: ast.NewIdent("Set")},
+				Args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "1"}, rhs},
+			},
+		})
+		return dst, nil
+	}
+
 	gstmt := &ast.AssignStmt{
 		Tok: token.ASSIGN,
 		Rhs: []ast.Expr{rhs},
@@ -581,10 +596,25 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast.Stmt, err error) {
 	// Transform output list expressions to Go expressions
 	var args []ast.Expr
+	var tgt varinfo
 	for _, expr := range stmt.OutputList {
-		goExpr, _, err := tg.transformExpression(nil, expr)
+		err = tg.repl.InferType(&tgt, expr)
+		if err != nil {
+			return dst, tg.makeErr(stmt, err.Error())
+		}
+		goExpr, tp, err := tg.transformExpression(&tgt, expr)
 		if err != nil {
 			return dst, err
+		}
+		if tg.varIsPointerTo(tp) {
+			// Print intrinsic can't just receive pointers willy nilly.
+			goExpr = &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   goExpr,
+					Sel: ast.NewIdent("At"),
+				},
+				Args: []ast.Expr{_astOne},
+			}
 		}
 		args = append(args, goExpr)
 	}
@@ -599,7 +629,7 @@ func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast
 
 func (tg *ToGo) transformIfStmt(dst []ast.Stmt, stmt *f90.IfStmt) (_ []ast.Stmt, err error) {
 	// Transform the main condition
-	cond, _, err := tg.transformExpression(nil, stmt.Condition)
+	cond, _, err := tg.transformExpression(_tgtBool, stmt.Condition)
 	if err != nil {
 		return dst, err
 	}
@@ -619,7 +649,7 @@ func (tg *ToGo) transformIfStmt(dst []ast.Stmt, stmt *f90.IfStmt) (_ []ast.Stmt,
 	// Handle ELSE IF parts (chain them)
 	currentIf := goIf
 	for _, elseIf := range stmt.ElseIfParts {
-		elseIfCond, _, err := tg.transformExpression(nil, elseIf.Condition)
+		elseIfCond, _, err := tg.transformExpression(_tgtBool, elseIf.Condition)
 		if err != nil {
 			return dst, err
 		}
@@ -658,7 +688,7 @@ func (tg *ToGo) transformDoLoop(dst []ast.Stmt, stmt *f90.DoLoop) (_ []ast.Stmt,
 	// Handle DO WHILE (no loop variable, condition in Start)
 	if stmt.Var == "" {
 		// DO WHILE: for condition { ... }
-		condExpr, _, err := tg.transformExpression(nil, stmt.Start)
+		condExpr, _, err := tg.transformExpression(_tgtBool, stmt.Start)
 		if err != nil {
 			return dst, err
 		}
@@ -738,7 +768,12 @@ func (tg *ToGo) transformDoLoop(dst []ast.Stmt, stmt *f90.DoLoop) (_ []ast.Stmt,
 
 func (tg *ToGo) transformSelectCaseStmt(dst []ast.Stmt, stmt *f90.SelectCaseStmt) (_ []ast.Stmt, err error) {
 	// Transform the selector expression
-	tagExpr, _, err := tg.transformExpression(nil, stmt.Expression)
+	var viSelector varinfo
+	err = tg.repl.InferType(&viSelector, stmt.Expression)
+	if err != nil {
+		return dst, tg.makeErr(stmt.Expression, err.Error())
+	}
+	tagExpr, _, err := tg.transformExpression(&viSelector, stmt.Expression)
 	if err != nil {
 		return dst, err
 	}
@@ -766,7 +801,7 @@ func (tg *ToGo) transformSelectCaseStmt(dst []ast.Stmt, stmt *f90.SelectCaseStmt
 		} else {
 			// CASE (val1, val2, ...) → case val1, val2, ...:
 			for _, val := range clause.Values {
-				valExpr, _, err := tg.transformExpression(nil, val)
+				valExpr, _, err := tg.transformExpression(&viSelector, val)
 				if err != nil {
 					return dst, err
 				}
@@ -925,10 +960,178 @@ func (tg *ToGo) transformComputedGotoStmt(dst []ast.Stmt, stmt *f90.ComputedGoto
 
 func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceStmt) (_ []ast.Stmt, err error) {
 	for _, set := range stmt.Sets {
-		// Us
-		_ = set
+		if len(set) < 2 {
+			continue // Need at least 2 items to equivalence
+		}
+
+		// Analyze the set to find the primary storage provider
+		// Priority: arrays > character arrays > largest scalar
+		var primaryIdx int
+		var primarySize int
+		var hasArray bool
+		for i, ref := range set {
+			vinfo := tg.repl.Var(ref.Name)
+			if vinfo == nil {
+				continue
+			}
+			isArray := tg.varIsArray(vinfo)
+			if isArray {
+				hasArray = true
+				primaryIdx = i
+				break
+			}
+			// For scalars, track the largest by type size
+			size := tg.typeSize(vinfo)
+			if size > primarySize {
+				primarySize = size
+				primaryIdx = i
+			}
+		}
+
+		primaryRef := set[primaryIdx]
+		primaryVinfo := tg.repl.Var(primaryRef.Name)
+		primaryExpr := tg.astVarExpr(primaryVinfo)
+
+		if !hasArray {
+			// All scalars - allocate memory for primary and share with others
+			// Generate: primary = intrinsic.MALLOC[T](size)
+			primaryType := tg.baseGotype(primaryVinfo.typeToken(), tg.resolveKind(primaryVinfo))
+			dst = append(dst, &ast.AssignStmt{
+				Tok: token.ASSIGN,
+				Lhs: []ast.Expr{primaryExpr},
+				Rhs: []ast.Expr{
+					&ast.CallExpr{
+						Fun: &ast.IndexExpr{
+							X:     &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("MALLOC")},
+							Index: primaryType,
+						},
+						Args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", primarySize)}},
+					},
+				},
+			})
+
+			// Generate: other = intrinsic.PointerFrom[T](primary) for each other scalar
+			for i, ref := range set {
+				if i == primaryIdx {
+					continue
+				}
+				vinfo := tg.repl.Var(ref.Name)
+				if vinfo == nil {
+					return dst, tg.makeErrWithPos(stmt.Position, "unknown variable in EQUIVALENCE: "+ref.Name)
+				}
+				varExpr := tg.astVarExpr(vinfo)
+				elemType := tg.baseGotype(vinfo.typeToken(), tg.resolveKind(vinfo))
+
+				// Generate: other = intrinsic.PointerFrom[T](primary)
+				dst = append(dst, &ast.AssignStmt{
+					Tok: token.ASSIGN,
+					Lhs: []ast.Expr{varExpr},
+					Rhs: []ast.Expr{
+						&ast.CallExpr{
+							Fun: &ast.IndexExpr{
+								X:     &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("PointerFrom")},
+								Index: elemType,
+							},
+							Args: []ast.Expr{primaryExpr},
+						},
+					},
+				})
+			}
+		} else {
+			// Has array - use Equivalence with PointerOff for offsets
+			args := make([]ast.Expr, len(set))
+			for i, ref := range set {
+				vinfo := tg.repl.Var(ref.Name)
+				if vinfo == nil {
+					return dst, tg.makeErrWithPos(stmt.Position, "unknown variable in EQUIVALENCE: "+ref.Name)
+				}
+
+				varExpr := tg.astVarExpr(vinfo)
+				isArray := tg.varIsArray(vinfo)
+				isCharacter := vinfo.typeToken() == f90token.CHARACTER
+				isPointerTo := tg.varIsPointerTo(vinfo)
+
+				if len(ref.Subscripts) == 0 {
+					if isArray {
+						args[i] = varExpr // *Array implements PointerSetter
+					} else if isCharacter {
+						args[i] = &ast.UnaryExpr{Op: token.AND, X: varExpr}
+					} else if isPointerTo {
+						// Equivalenced scalar is already PointerTo[T], use &var
+						args[i] = &ast.UnaryExpr{Op: token.AND, X: varExpr}
+					} else {
+						return dst, tg.makeErrWithPos(stmt.Position, "unexpected non-equivalenced scalar in EQUIVALENCE: "+ref.Name)
+					}
+				} else {
+					// Subscripted: PointerOff(var, var.AtOffset(...))
+					var offsetArgs []ast.Expr
+					for _, sub := range ref.Subscripts {
+						arg, _, err := tg.transformExpression(_tgtInt, sub)
+						if err != nil {
+							return dst, err
+						}
+						offsetArgs = append(offsetArgs, arg)
+					}
+					offsetCall := &ast.CallExpr{
+						Fun:  &ast.SelectorExpr{X: varExpr, Sel: ast.NewIdent("AtOffset")},
+						Args: offsetArgs,
+					}
+					args[i] = &ast.CallExpr{
+						Fun: &ast.SelectorExpr{
+							X:   _astIntrinsic,
+							Sel: ast.NewIdent("PointerOff"),
+						},
+						Args: []ast.Expr{varExpr, offsetCall},
+					}
+				}
+			}
+
+			dst = append(dst, &ast.ExprStmt{
+				X: &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   _astIntrinsic,
+						Sel: ast.NewIdent("Equivalence"),
+					},
+					Args: args,
+				},
+			})
+		}
 	}
 	return dst, nil
+}
+
+// typeSize returns the size in bytes for a variable's base type.
+func (tg *ToGo) typeSize(v *varinfo) int {
+	kind := tg.resolveKind(v)
+	switch v.typeToken() {
+	case f90token.REAL:
+		if kind == 8 {
+			return 8
+		}
+		return 4
+	case f90token.DOUBLE, f90token.DOUBLEPRECISION:
+		return 8
+	case f90token.INTEGER:
+		switch kind {
+		case 1:
+			return 1
+		case 2:
+			return 2
+		case 8:
+			return 8
+		default:
+			return 4
+		}
+	case f90token.COMPLEX:
+		if kind == 8 {
+			return 16
+		}
+		return 8
+	case f90token.LOGICAL:
+		return 4
+	default:
+		return 4
+	}
 }
 
 // transformPointerCrayStmt generates declarations for Cray-style POINTER statements.
@@ -976,12 +1179,10 @@ func (tg *ToGo) transformPointerCrayStmt(dst []ast.Stmt, stmt *f90.PointerCraySt
 // Arrays are returned as pointer types (*intrinsic.Array[T]).
 func (tg *ToGo) goType(v *varinfo) ast.Expr {
 	tok := v.typeToken()
-	dim := v.Dimensions()
-	isArray := dim != nil && len(dim.Bounds) > 0
-
+	isArray := tg.varIsArray(v)
 	// Handle Cray-style pointer variables (POINTER (ptr, pointee))
 	// The pointer variable's type is PointerTo[pointee_type]
-	if v.flags.HasAny(flagPointee | flagPointer) {
+	if tg.varIsPointerTo(v) {
 		if v.pointee != "" {
 			pointeeVar := tg.repl.Var(v.pointee)
 			if pointeeVar == nil {
@@ -1007,6 +1208,12 @@ func (tg *ToGo) goType(v *varinfo) ast.Expr {
 	if baseType == nil {
 		tg.makeErrWithPos(v.decl.Position, "unable to determine goType from: "+v.decl.Name)
 		return nil
+	}
+
+	// Handle equivalenced scalars - they become PointerTo[T] for memory sharing
+	// CHARACTER types are excluded as they have their own memory management (CharacterArray)
+	if !isArray && tok != f90token.CHARACTER && v.flags.HasAny(flagEquivalenced) {
+		return goTypePointerTo(baseType)
 	}
 
 	if !isArray {
@@ -1061,6 +1268,15 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 		goType = _astTypeCharArray
 	}
 	return goType
+}
+
+func (tg *ToGo) varIsArray(v *varinfo) bool {
+	return v.flags.HasAny(flagDimension)
+}
+
+func (tg *ToGo) varIsPointerTo(v *varinfo) bool {
+	// CHARACTER types are excluded as they have their own access methods
+	return v.flags.HasAny(flagEquivalenced|flagPointee|flagPointer) && !tg.varIsArray(v) && v.typeToken() != f90token.CHARACTER
 }
 
 func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, root *f90.BinaryExpr) (_ []ast.Stmt, err error) {
@@ -1179,16 +1395,17 @@ func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 			goType := tg.goType(v)
 			elemType := tg.baseGotype(v.typeToken(), tg.resolveKind(v))
 			fieldIdent := ast.NewIdent(v.Identifier())
-			arrspec := v.Dimensions()
+
 			structType.Fields.List = append(structType.Fields.List, &ast.Field{
 				Names: []*ast.Ident{fieldIdent},
 				Type:  goType,
 			})
 
-			if arrspec == nil || len(arrspec.Bounds) == 0 {
+			if !tg.varIsArray(v) {
 				continue
 			}
 			args := []ast.Expr{ast.NewIdent("nil")} // First argument is array initializer, we always initialize to zeroes.
+			arrspec := v.Dimensions()
 			for _, bound := range arrspec.Bounds {
 				if bound.Upper != nil {
 					size, _, err := tg.transformExpression(_tgtInt, bound.Upper)

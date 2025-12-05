@@ -95,5 +95,7 @@
  LEVEL 28: MATRIX(5,10) =   42.5000000    
  LEVEL 28: COUNTS(50) =          42
  LEVEL 29: byte mat acbd
- LEVEL 29: uint32 mat acbd
+ LEVEL 29: uint32 mat dcba
+ LEVEL 29: linked float=1,int   1.00000000      1065353216
+ LEVEL 29: linked float,int=1109917696   42.0000000      1109917696
 STOP 0

@@ -34,6 +34,120 @@ type PointerSetter interface {
 	SetDataUnsafe(ptr unsafe.Pointer)
 }
 
+// Equivalence implements Fortran's EQUIVALENCE statement by making multiple
+// pointers share the same underlying memory allocation.
+//
+// # Fortran EQUIVALENCE
+//
+// The EQUIVALENCE statement forces multiple variables to share the same memory location:
+//
+//	DOUBLE PRECISION :: dval(100)
+//	INTEGER :: ival(200)
+//	EQUIVALENCE (dval, ival)
+//
+// After equivalence, dval and ival refer to the same memory region.
+//
+// # How It Works
+//
+// Equivalence finds the largest allocation among the provided pointers and sets
+// all pointers to share that base address. Each pointer retains its own type
+// information for element access.
+//
+// # Usage
+//
+// All arguments must be pointers to PointerSetter types (use & operator):
+//
+//	var floatPtr PointerTo[float64]
+//	var intPtr PointerTo[int32]
+//	floatPtr = MALLOC[float64](100 * 8)  // Allocate 100 float64s
+//
+//	Equivalence(&floatPtr, &intPtr)
+//	// Now both point to same memory; intPtr sees 200 int32 elements
+//
+// # Notes
+//
+// For type-punning (viewing memory as a different type), prefer [PointerFrom]
+// which returns a new typed view without modifying the original pointer.
+func Equivalence(toEquiv ...PointerSetter) {
+	largest := toEquiv[0]
+	maxAlloc := sizeUnderlyingAlloc(largest)
+	for _, buf := range toEquiv[1:] {
+		alloc := sizeUnderlyingAlloc(buf)
+		if alloc > maxAlloc {
+			largest = buf
+			maxAlloc = alloc
+		}
+	}
+
+	baseAddr := largest.DataUnsafe()
+	for _, equiv := range toEquiv {
+		equiv.SetDataUnsafe(baseAddr)
+	}
+}
+
+// PointerOff wraps a PointerSetter with an element offset for EQUIVALENCE.
+// Used when equivalencing at a specific array element: EQUIVALENCE (A, B(5))
+//
+// The elemNum parameter is a 1-based element number (Fortran indexing).
+// Use Array.AtOffset(indices...) + 1 to convert multi-dimensional indices.
+//
+// Example:
+//
+//	// EQUIVALENCE (A, MAT(2,3))
+//	intrinsic.Equivalence(&a, intrinsic.PointerOff(mat, mat.AtOffset(2, 3) + 1))
+func PointerOff(ptr PointerSetter, elemNum int) PointerSetter {
+	q := ptrOff{ptr: ptr, elemOffset: elemNum - 1} // Convert 1-based to 0-based internally
+	if q.LenBuffer() < 0 {
+		panic("elemNum exceeds size")
+	}
+	return &q
+}
+
+func sizeUnderlyingAlloc(ps PointerSetter) int {
+	if q, ok := ps.(*ptrOff); ok {
+		return q.SizeUnderlyingAlloc()
+	}
+	return ps.LenBuffer() * ps.SizeElement()
+}
+
+type ptrOff struct {
+	ptr        PointerSetter
+	elemOffset int
+}
+
+var _ PointerSetter = (*ptrOff)(nil)
+
+func (q *ptrOff) SetDataUnsafe(v unsafe.Pointer) {
+	q.ptr.SetDataUnsafe(unsafe.Add(v, -q.Offset()))
+}
+func (q *ptrOff) DataUnsafe() unsafe.Pointer {
+	return unsafe.Add(q.ptr.DataUnsafe(), q.Offset())
+}
+func (q *ptrOff) SizeElement() int {
+	return q.ptr.SizeElement()
+}
+func (q *ptrOff) LenBuffer() int {
+	return q.ptr.LenBuffer() - q.elemOffset
+}
+func (q *ptrOff) Offset() int {
+	return q.ptr.SizeElement() * q.elemOffset
+}
+func (q *ptrOff) SizeUnderlyingAlloc() int {
+	if qq, ok := q.ptr.(*ptrOff); ok {
+		return qq.SizeUnderlyingAlloc()
+	}
+	return q.ptr.LenBuffer() * q.ptr.SizeElement()
+}
+
+// Ptr creates a Pointer from a single element reference.
+// Used for passing scalar variables by reference to OUT/INOUT parameters.
+func Ptr[T any](v *T) PointerTo[T] {
+	return PointerTo[T]{
+		v:        unsafe.Pointer(v),
+		alloclen: 1,
+	}
+}
+
 // MALLOC allocates memory for Fortran MALLOC calls (typically a C library function).
 // In transpiled code, actual memory allocation is handled by Go's garbage collector.
 //
@@ -64,15 +178,6 @@ func NewPointerFromSlice[T any](v []T) PointerTo[T] {
 	return PointerTo[T]{
 		v:        unsafe.Pointer(&v[0]),
 		alloclen: len(v),
-	}
-}
-
-// Ptr creates a Pointer from a single element reference.
-// Used for passing scalar variables by reference to OUT/INOUT parameters.
-func Ptr[T any](v *T) PointerTo[T] {
-	return PointerTo[T]{
-		v:        unsafe.Pointer(v),
-		alloclen: 1,
 	}
 }
 
@@ -233,87 +338,6 @@ func UnsafePointerData[I integer, T any](p PointerTo[T]) I {
 		panic("pointer address not representable by target integer size")
 	}
 	return conv
-}
-
-// Equivalence implements Fortran's EQUIVALENCE statement by making multiple
-// pointers share the same underlying memory allocation.
-//
-// # Fortran EQUIVALENCE
-//
-// The EQUIVALENCE statement forces multiple variables to share the same memory location:
-//
-//	DOUBLE PRECISION :: dval(100)
-//	INTEGER :: ival(200)
-//	EQUIVALENCE (dval, ival)
-//
-// After equivalence, dval and ival refer to the same memory region.
-//
-// # How It Works
-//
-// Equivalence finds the largest allocation among the provided pointers and sets
-// all pointers to share that base address. Each pointer retains its own type
-// information for element access.
-//
-// # Usage
-//
-// All arguments must be pointers to PointerSetter types (use & operator):
-//
-//	var floatPtr PointerTo[float64]
-//	var intPtr PointerTo[int32]
-//	floatPtr = MALLOC[float64](100 * 8)  // Allocate 100 float64s
-//
-//	Equivalence(&floatPtr, &intPtr)
-//	// Now both point to same memory; intPtr sees 200 int32 elements
-//
-// # Notes
-//
-// For type-punning (viewing memory as a different type), prefer [PointerFrom]
-// which returns a new typed view without modifying the original pointer.
-func Equivalence(toEquiv ...PointerSetter) {
-	largest := toEquiv[0]
-	maxSize := largest.LenBuffer() * largest.SizeElement()
-	for _, buf := range toEquiv[1:] {
-		size := buf.LenBuffer() * buf.SizeElement()
-		if size > maxSize {
-			largest = buf
-			maxSize = size
-		}
-	}
-	baseAddr := largest.DataUnsafe()
-	for _, equiv := range toEquiv {
-		equiv.SetDataUnsafe(baseAddr)
-	}
-}
-
-func EquivOff(ptr PointerSetter, elemOff int) PointerSetter {
-	q := equivOffset{ptr: ptr, elemOffset: elemOff}
-	if q.LenBuffer() < 0 {
-		panic("elemOff exceeds size")
-	}
-	return &q
-}
-
-type equivOffset struct {
-	ptr        PointerSetter
-	elemOffset int
-}
-
-var _ PointerSetter = (*equivOffset)(nil)
-
-func (q *equivOffset) SetDataUnsafe(v unsafe.Pointer) {
-	q.ptr.SetDataUnsafe(unsafe.Add(v, -q.Offset()))
-}
-func (q *equivOffset) DataUnsafe() unsafe.Pointer {
-	return unsafe.Add(q.ptr.DataUnsafe(), q.Offset())
-}
-func (q *equivOffset) SizeElement() int {
-	return q.ptr.SizeElement()
-}
-func (q *equivOffset) LenBuffer() int {
-	return q.ptr.LenBuffer() - q.elemOffset
-}
-func (q *equivOffset) Offset() int {
-	return q.ptr.SizeElement() * q.elemOffset
 }
 
 // PointerFrom creates a type-punned view of an existing [Pointer], reinterpreting

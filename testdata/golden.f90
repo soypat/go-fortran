@@ -718,6 +718,10 @@
         CHARACTER(4) A
         EQUIVALENCE (A, MAT(1,1), MAT4(1,2))
         DATA letters /Z'61626364'/
+        ! SECOND EQUIVALENCE
+        REAL :: F
+        INTEGER :: N
+        EQUIVALENCE(F, N)
         MAT(1,1) = firstLetter
         MAT(1,2) = firstLetter+1
         MAT(2,1) = firstLetter+2
@@ -725,6 +729,10 @@
         PRINT *, 'LEVEL 29: byte mat ', A
         MAT4(1,2) = letters
         PRINT *, 'LEVEL 29: uint32 mat ', A
+        F = 1
+        PRINT *, 'LEVEL 29: linked float=1,int', F, N
+        N = 1109917696 ! is 42 in floating point land.
+        PRINT *, 'LEVEL 29: linked float,int=1109917696', F, N
     END SUBROUTINE LEVEL29
     SUBROUTINE LEVEL30()
         ! Test advanced features: DIMENSION, MALLOC, DATA with hex, labeled DO

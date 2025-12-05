@@ -73,6 +73,7 @@ func (tg *ToGo) transformExpression(vitgt *varinfo, expr f90.Expression) (result
 		result, resultType, err = tg.transformFunctionCall(vitgt, e)
 
 	case *f90.ArrayConstructor:
+		resultType = vitgt
 		result, err = tg.transformArrayConstructor(vitgt, e)
 	case *f90.RangeExpr:
 		// Range expressions in subscripts (e.g., arr(1:5), str(2:3))
@@ -81,11 +82,15 @@ func (tg *ToGo) transformExpression(vitgt *varinfo, expr f90.Expression) (result
 	default:
 		err = tg.makeErr(expr, "unsupported expression")
 	}
-
-	if result == nil && err == nil {
-		err = tg.makeErr(expr, "unhandled expression type, result is nil")
+	if (result == nil || resultType == nil) && err == nil {
+		err = tg.makeErr(expr, "unhandled expression type, result or result type is nil")
 	}
-	if vitgt == _tgtInt {
+	if err != nil {
+		return nil, nil, err
+	}
+	doWrap := vitgt == _tgtInt ||
+		(tg.varIsPointerTo(resultType) != tg.varIsPointerTo(vitgt))
+	if doWrap {
 		result = tg.wrapConversion(vitgt, resultType, result)
 	}
 	return result, resultType, err
@@ -97,18 +102,7 @@ func (tg *ToGo) transformExprIdentifer(vitgt *varinfo, e *f90.Identifier) (resul
 		err = tg.makeErr(e, "identifier not found")
 		return nil, nil, err
 	}
-	// Check if this identifier is in a COMMON block
-	if resultType.common != "" {
-		blockName := resultType.common     // Already sanitized (lowercase)
-		varName := resultType.Identifier() // Use sanitized name (matches struct field)
-		result = &ast.SelectorExpr{
-			X:   ast.NewIdent(blockName),
-			Sel: ast.NewIdent(varName),
-		}
-	} else {
-		result = ast.NewIdent(resultType.Identifier())
-	}
-	return result, resultType, err
+	return tg.astVarExpr(resultType), resultType, nil
 }
 
 func (tg *ToGo) transformArrayConstructor(vitgt *varinfo, e *f90.ArrayConstructor) (result ast.Expr, err error) {
@@ -500,9 +494,8 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 
 func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs ast.Expr) (_ []ast.Stmt, err error) {
 	vi := tg.repl.Var(fexpr.Name)
-	dim := vi.decl.Dimension()
 	isRanged := fexpr.IsRanged()
-	if dim != nil || isRanged && len(fexpr.Subscripts) > 1 || fexpr.Base != nil {
+	if tg.varIsArray(vi) || isRanged && len(fexpr.Subscripts) > 1 || fexpr.Base != nil {
 		return dst, tg.makeErrWithPos(fexpr.Position, "unsupported character type attributes for range set")
 	}
 	args, err := tg.transformRangeExprToArgs(fexpr.Subscripts[0].(*f90.RangeExpr), vi)
@@ -561,9 +554,20 @@ func (tg *ToGo) transformExprSlice(vitgt *varinfo, dst []ast.Expr, src []f90.Exp
 
 // wrapConversion wraps expr with a type conversion if target type differs from sourceType.
 func (tg *ToGo) wrapConversion(target *varinfo, sourceType *varinfo, expr ast.Expr) ast.Expr {
-	if target == nil {
-		return expr
-	} else if target == _tgtInt {
+	ptrDerefFirst := tg.varIsPointerTo(sourceType)
+	// isArray := tg.varIsArray(sourceType)
+	switch {
+	case ptrDerefFirst:
+		expr = &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   expr,
+				Sel: ast.NewIdent("At"),
+			},
+			Args: []ast.Expr{_astOne},
+		}
+	case target == nil:
+		panic(tg.makeErrAtStmt("nil target variable: " + sourceType._varname))
+	case target == _tgtInt:
 		if sourceType != _tgtInt && sourceType != _tgtGenericInt {
 			expr = &ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{expr}}
 		}

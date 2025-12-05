@@ -197,7 +197,7 @@ func (a *Array[T]) UpperDim(dim int) int {
 }
 
 func (a *Array[T]) AtOffset(indices ...int) int {
-	return a.offset(indices)
+	return a.offset(indices) + 1
 }
 
 // offset calculates the flat index for multi-dimensional access using column-major layout

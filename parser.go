@@ -37,12 +37,14 @@ const (
 	flagAllocatable                       // Has ALLOCATABLE attribute
 	flagCommon                            // Variable is in a COMMON block
 	flagPointee                           // Cray-style pointee (accessed through pointer variable)
+	flagDimension                         // DIMENSION attribute or implicit dimension set. Variable is an array type.
 	flagIntentOut
 	flagIntentIn
 	flagArrayInit
 	flagArraySpec // ArraySpec used in type declaration.
 	flagReturned
 	flagRecursive
+	flagEquivalenced // Participates in EQUIVALENCE statement (scalars become PointerTo[T])
 )
 
 func (f symflags) HasAny(hasBits symflags) bool { return f&hasBits != 0 }
@@ -78,6 +80,10 @@ func flagsFromTypespec(ts *ast.TypeSpec) (flags symflags) {
 			flags |= flagTarget
 		case token.RECURSIVE:
 			flags |= flagRecursive
+		case token.DIMENSION:
+			if len(attr.Dimension.Bounds) > 0 {
+				flags |= flagDimension
+			}
 		}
 	}
 	return flags
@@ -2935,7 +2941,7 @@ func (p *Parser90) parseSpecStatement(sawDecl *bool) ast.Statement {
 		return p.parseUse()
 	case token.FORMAT:
 		return p.parseFormatStmt()
-	case token.INTEGER, token.REAL, token.DOUBLE, token.COMPLEX, token.LOGICAL, token.CHARACTER:
+	case token.INTEGER, token.REAL, token.DOUBLE, token.DOUBLEPRECISION, token.COMPLEX, token.LOGICAL, token.CHARACTER:
 		*sawDecl = true
 		return p.parseTypeDecl()
 	case token.TYPE:
@@ -3373,6 +3379,9 @@ func (p *Parser90) parseTypeDecl() ast.Statement {
 		entity := &stmt.Entities[len(stmt.Entities)-1]
 		if p.currentTokenIs(token.LParen) {
 			entity.ArraySpec = p.parseArraySpec()
+			if len(entity.ArraySpec.Bounds) > 0 {
+				entFlags |= flagDimension
+			}
 		}
 		if p.currentTokenIs(token.Asterisk) {
 			// Character length or Kind, old F77
@@ -4374,6 +4383,12 @@ func (p *Parser90) parseEquivalenceStmt() ast.Statement {
 			ref := p.parseArrayRef()
 			if ref == nil {
 				break
+			}
+			// Flag the variable as participating in EQUIVALENCE
+			if vi := p.varSGet(ref.Name); vi != nil {
+				vi.flags |= flagEquivalenced
+			} else {
+				p.varInit(ref.Name, nil, flagEquivalenced, "")
 			}
 			set = append(set, *ref)
 			// Check for comma (more variables) or closing paren

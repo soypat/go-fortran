@@ -828,15 +828,29 @@ func LEVEL29() {
 		_ = a
 	)
 	a = intrinsic.NewCharacterArray(4)
-	intrinsic.Equivalence(&a, mat, intrinsic.EquivOff(mat4, mat4.AtOffset(1, 2)))
+	intrinsic.Equivalence(&a, intrinsic.PointerOff(mat, mat.AtOffset(1, 1)), intrinsic.PointerOff(mat4, mat4.AtOffset(1, 2)))
 	letters = 1633837924
+	var (
+		f intrinsic.PointerTo[float32]
+		_ = f
+	)
+	var (
+		n intrinsic.PointerTo[int32]
+		_ = n
+	)
+	f = intrinsic.MALLOC[float32](4)
+	n = intrinsic.PointerFrom[int32](f)
 	mat.Set(firstletter, 1, 1)
 	mat.Set(firstletter+1, 1, 2)
 	mat.Set(firstletter+2, 2, 1)
 	mat.Set(firstletter+3, 2, 2)
 	intrinsic.Print("LEVEL 29: byte mat ", a)
-	mat4.Set(letters, 1, 1)
+	mat4.Set(letters, 1, 2)
 	intrinsic.Print("LEVEL 29: uint32 mat ", a)
+	f.Set(1, float32(1))
+	intrinsic.Print("LEVEL 29: linked float=1,int", f, n)
+	n.Set(1, 1109917696)
+	intrinsic.Print("LEVEL 29: linked float,int=1109917696", f, n)
 }
 func LEVEL30() {
 	var (
@@ -877,6 +891,12 @@ func LEVEL30() {
 		_ = c
 	)
 	c = intrinsic.NewArray[intrinsic.CharacterArray](nil, 4)
+	intrinsic.Equivalence(&a, &b, intrinsic.PointerOff(mat, mat.AtOffset(1, 2)))
+	intrinsic.Equivalence(c, intrinsic.PointerOff(mat, mat.AtOffset(1, 1)))
+	var (
+		defalt intrinsic.PointerTo[float64]
+		_      = defalt
+	)
 	var (
 		i_defalt *intrinsic.Array[int32]
 		_        = i_defalt
@@ -884,6 +904,7 @@ func LEVEL30() {
 	i_defalt = intrinsic.NewArray[int32](nil, 2)
 	i_defalt.Set(125269879, 1)
 	i_defalt.Set(125269879, 2)
+	intrinsic.Equivalence(&defalt, i_defalt)
 	intrinsic.Print("LEVEL 29: Advanced features test")
 	mat.Set(64, 1, 2)
 	maxdm1 = 100
