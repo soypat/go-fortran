@@ -19,7 +19,7 @@ PROGRAM implicit_none_placement
   IMPLICIT NONE  ! ERROR "IMPLICIT NONE must appear before type declarations"
 
   ! Invalid: Duplicate IMPLICIT NONE
-  IMPLICIT NONE  ! ERROR "duplicate IMPLICIT statement"
+  IMPLICIT NONE  ! ERROR "duplicate IMPLICIT NONE"
 
   ! Invalid: PARAMETER without value
   INTEGER, PARAMETER :: NO_VALUE  ! FUTURE ERROR: PARAMETER requires initialization
@@ -32,7 +32,7 @@ PROGRAM implicit_none_placement
   ! matrix = 0.0  ! Would need dimensions to match
 
   ! Invalid: Multiple type specifications
-  INTEGER REAL :: confused  ! FUTURE ERROR: "expected ::"
+  INTEGER REAL :: confused  ! ERROR "::"
 
   ! Invalid: ALLOCATABLE with explicit shape
   REAL, ALLOCATABLE :: bad_alloc(10)  ! FUTURE ERROR: ALLOCATABLE must be deferred shape

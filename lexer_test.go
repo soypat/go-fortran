@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/soypat/go-fortran/ast"
 	"github.com/soypat/go-fortran/token"
 )
 
@@ -306,6 +307,27 @@ func TestLexer90_tokens(t *testing.T) {
 				{tok: token.RParen, literal: ""},
 			},
 		},
+		17: {
+			src: "!\n!\n",
+			expect: []testtoktuple{
+				{tok: token.LineComment},
+				{tok: token.NewLine},
+				{tok: token.LineComment},
+				{tok: token.NewLine},
+			},
+		},
+		18: {
+			src: "PROGRAM G2DYN\n!\n!\n",
+			expect: []testtoktuple{
+				{tok: token.PROGRAM, literal: "PROGRAM"},
+				{tok: token.Identifier, literal: "G2DYN"},
+				{tok: token.NewLine},
+				{tok: token.LineComment},
+				{tok: token.NewLine},
+				{tok: token.LineComment},
+				{tok: token.NewLine},
+			},
+		},
 	}
 	var l Lexer90
 	for i, test := range cases {
@@ -331,5 +353,111 @@ func TestLexer90_tokens(t *testing.T) {
 			tok, _, lit := l.NextToken()
 			t.Errorf("%s expected lexer to be done, got %s (%s)", l.Source(), lit, tok.String())
 		}
+	}
+}
+
+// TestLexer90_TokenLineCol tests that TokenLineCol returns correct positions for all tokens,
+// especially empty comment lines which had a bug where they were reported on the wrong line.
+func TestLexer90_TokenLineCol(t *testing.T) {
+	type tokpos struct {
+		tok  token.Token
+		line int
+		col  int
+	}
+	cases := []struct {
+		name   string
+		src    string
+		expect []tokpos
+	}{
+		{
+			name: "empty_comment_lines",
+			// Line 1: "!" (empty comment)
+			// Line 2: "!" (empty comment)
+			// Line 3: "PROGRAM X"
+			src: "!\n!\nPROGRAM X\n",
+			expect: []tokpos{
+				{tok: token.LineComment, line: 1, col: 1},
+				{tok: token.NewLine, line: 1, col: 2},
+				{tok: token.LineComment, line: 2, col: 1},
+				{tok: token.NewLine, line: 2, col: 2},
+				{tok: token.PROGRAM, line: 3, col: 1},
+				{tok: token.Identifier, line: 3, col: 9},
+				{tok: token.NewLine, line: 3, col: 10},
+			},
+		},
+		{
+			name: "program_then_empty_comments",
+			// Line 1: "PROGRAM G2DYN"
+			// Line 2: "!" (empty comment)
+			// Line 3: "!" (empty comment)
+			src: "PROGRAM G2DYN\n!\n!\n",
+			expect: []tokpos{
+				{tok: token.PROGRAM, line: 1, col: 1},
+				{tok: token.Identifier, line: 1, col: 9},
+				{tok: token.NewLine, line: 1, col: 14},
+				{tok: token.LineComment, line: 2, col: 1},
+				{tok: token.NewLine, line: 2, col: 2},
+				{tok: token.LineComment, line: 3, col: 1},
+				{tok: token.NewLine, line: 3, col: 2},
+			},
+		},
+		{
+			name: "comment_with_content",
+			// Line 1: "! comment text"
+			// Line 2: "X = 1"
+			src: "! comment text\nX = 1\n",
+			expect: []tokpos{
+				{tok: token.LineComment, line: 1, col: 1},
+				{tok: token.NewLine, line: 1, col: 15},
+				{tok: token.Identifier, line: 2, col: 1},
+				{tok: token.Equals, line: 2, col: 3},
+				{tok: token.IntLit, line: 2, col: 5},
+				{tok: token.NewLine, line: 2, col: 6},
+			},
+		},
+		{
+			name: "openmp_directive_style_comment",
+			// Line 1: "!$" (OpenMP-style empty directive, should be comment)
+			// Line 2: "PROGRAM TEST"
+			src: "!$\nPROGRAM TEST\n",
+			expect: []tokpos{
+				{tok: token.LineComment, line: 1, col: 1},
+				{tok: token.NewLine, line: 1, col: 3},
+				{tok: token.PROGRAM, line: 2, col: 1},
+				{tok: token.Identifier, line: 2, col: 9},
+				{tok: token.NewLine, line: 2, col: 13},
+			},
+		},
+	}
+
+	var l Lexer90
+	var buf [256]byte
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rd := strings.NewReader(tc.src)
+			err := l.Reset("test.f90", rd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, expect := range tc.expect {
+				tok, pos, _ := l.NextToken()
+				line, col := l.TokenLineCol()
+				if tok != expect.tok {
+					t.Errorf("token %d: want %v, got %v", i, expect.tok, tok)
+				}
+				rd.Reset(tc.src)
+				wantLine, wantCol, _, err := ast.Pos(pos, pos).ToLineCol(rd, buf[:])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if wantLine != line {
+					t.Errorf("token %d (%s) want%d:%d got%d:%d", i, tok.String(), wantLine, wantCol, line, col)
+				}
+				if line != expect.line || col != expect.col {
+					t.Errorf("token %d (%v): want line:col %d:%d, got %d:%d",
+						i, tok, expect.line, expect.col, line, col)
+				}
+			}
+		})
 	}
 }

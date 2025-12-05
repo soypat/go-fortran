@@ -9,7 +9,7 @@ import (
 // Example of 1D array with default bounds [1:size]
 // Corresponds to Fortran: INTEGER :: arr(5)
 func ExampleNewArray_oneDimensional() {
-	arr := intrinsic.NewArray[int32](5)
+	arr := intrinsic.NewArray[int32](nil, 5)
 
 	// Set elements using Fortran 1-based indexing
 	arr.Set(10, 1)
@@ -30,7 +30,7 @@ func ExampleNewArray_oneDimensional() {
 // Example of 2D array with column-major layout
 // Corresponds to Fortran: REAL :: matrix(3, 4)
 func ExampleNewArray_twoDimensional() {
-	matrix := intrinsic.NewArray[float32](3, 4)
+	matrix := intrinsic.NewArray[float32](nil, 3, 4)
 
 	// Create identity-like matrix
 	matrix.Set(1.0, 1, 1)
@@ -52,7 +52,7 @@ func ExampleNewArray_twoDimensional() {
 // Corresponds to Fortran: DIMENSION A(-5:5)
 func ExampleNewArrayWithBounds() {
 	// Array with bounds from -5 to 5 (11 elements)
-	arr := intrinsic.NewArrayWithBounds[int32](
+	arr := intrinsic.NewArrayWithBounds[int32](nil,
 		[]int{11}, // shape: 11 elements
 		[]int{-5}, // lower bound: -5
 		[]int{5},  // upper bound: 5
@@ -77,7 +77,7 @@ func ExampleNewArrayWithBounds() {
 // Corresponds to Fortran: DIMENSION matrix(0:2, 10:12)
 func ExampleNewArrayWithBounds_twoDimensional() {
 	// 2D array with custom bounds: (0:2, 10:12)
-	matrix := intrinsic.NewArrayWithBounds[int32](
+	matrix := intrinsic.NewArrayWithBounds[int32](nil,
 		[]int{3, 3},  // shape: 3x3
 		[]int{0, 10}, // lower bounds: 0, 10
 		[]int{2, 12}, // upper bounds: 2, 12
@@ -99,7 +99,7 @@ func ExampleNewArrayWithBounds_twoDimensional() {
 // In Fortran, the first index varies fastest
 func ExampleArray_columnMajor() {
 	// Create a 2x3 matrix
-	matrix := intrinsic.NewArray[int32](2, 3)
+	matrix := intrinsic.NewArray[int32](nil, 2, 3)
 
 	// Fill with unique values
 	matrix.Set(11, 1, 1)
@@ -131,7 +131,7 @@ func ExampleArray_columnMajor() {
 
 // Example of intrinsic function equivalents
 func ExampleArray_intrinsics() {
-	matrix := intrinsic.NewArray[int32](3, 4)
+	matrix := intrinsic.NewArray[int32](nil, 3, 4)
 
 	// SIZE(array, 1) - size of first dimension
 	fmt.Printf("SIZE = %d\n", matrix.Len())

@@ -1,13 +1,16 @@
 package fortran
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
+	"unsafe"
 
 	"github.com/soypat/go-fortran/ast"
 	"github.com/soypat/go-fortran/token"
@@ -20,6 +23,71 @@ var debugNoStuckCheck string
 type (
 	statementParseFn func() ast.Statement // For statement-level constructs
 )
+
+// VarFlags for parser.
+type VarFlags uint64
+
+const (
+	VFlagImplicit     VarFlags = 1 << iota // Type inferred from IMPLICIT rules
+	VFlagUsed                              // Symbol is referenced in code
+	VFlagPointer                           // Has POINTER attribute
+	VFlagTarget                            // Has TARGET attribute
+	VFlagParameter                         // Is a function/subroutine parameter
+	VFlagPointerParam                      // OUT/INOUT scalar parameter (needs dereference)
+	VFlagAllocatable                       // Has ALLOCATABLE attribute
+	VFlagCommon                            // Variable is in a COMMON block
+	VFlagPointee                           // Cray-style pointee (accessed through pointer variable)
+	VFlagDimension                         // DIMENSION attribute or implicit dimension set. Variable is an array type.
+	VFlagIntentOut
+	VFlagIntentIn
+	VFlagArrayInit
+	VFlagArraySpec // ArraySpec used in type declaration.
+	VFlagReturned
+	VFlagRecursive
+	VFlagEquivalenced // Participates in EQUIVALENCE statement (scalars become PointerTo[T])
+)
+
+func (f VarFlags) HasAny(hasBits VarFlags) bool { return f&hasBits != 0 }
+func (f VarFlags) HasAll(hasBits VarFlags) bool { return f&hasBits == hasBits }
+func (f VarFlags) With(mask VarFlags, setBits bool) VarFlags {
+	if setBits {
+		return f | mask
+	} else {
+		return f &^ mask
+	}
+}
+
+func flagsFromTypespec(ts *ast.TypeSpec) (flags VarFlags) {
+	for i := range ts.Attributes {
+		attr := &ts.Attributes[i]
+		switch attr.Token {
+		case token.INTENT:
+			if tok, ok := attr.Expr.(*ast.TokenExpr); ok {
+				switch tok.Token {
+				case token.IN:
+					flags |= VFlagIntentIn
+				case token.OUT:
+					flags |= VFlagIntentOut
+				case token.INOUT:
+					flags |= VFlagIntentIn | VFlagIntentOut
+				}
+			}
+		case token.POINTER:
+			flags |= VFlagPointer
+		case token.ALLOCATABLE:
+			flags |= VFlagAllocatable
+		case token.TARGET:
+			flags |= VFlagTarget
+		case token.RECURSIVE:
+			flags |= VFlagRecursive
+		case token.DIMENSION:
+			if len(attr.Dimension.Bounds) > 0 {
+				flags |= VFlagDimension
+			}
+		}
+	}
+	return flags
+}
 
 type ParserError struct {
 	sp  sourcePos
@@ -71,7 +139,8 @@ type Parser90 struct {
 	uberpeek toktuple
 	stmtFns  map[token.Token]statementParseFn // Statement parsers
 	errors   []ParserError                    // Collected parsing errors
-
+	vars     ParserUnitData
+	// vars          []varinfo // variables defined in current scope.
 	maxStatements int
 	maxErrs       int
 	nStatements   int
@@ -80,6 +149,261 @@ type Parser90 struct {
 	nSamePosCheckCount int
 	lastPosCheck       int
 	died               bool
+
+	ignoreUndeclaredVars bool
+}
+
+func (p *Parser90) makeUnitData(name string, token token.Token) *ParserUnitData {
+	return &ParserUnitData{
+		name:       name,
+		tok:        token,
+		vars:       slices.Clone(p.vars.vars),
+		implicits:  slices.Clone(p.vars.implicits),
+		returnType: p.vars.returnType,
+	}
+}
+
+type ParserUnitData struct {
+	name       string
+	tok        token.Token
+	vars       []Varinfo
+	returnType *Varinfo
+	implicits  []*ast.ImplicitStatement
+}
+
+func (p *ParserUnitData) AppendVarinfo(dst []Varinfo) []Varinfo {
+	return append(dst, p.vars...)
+}
+
+// ProcedureParams returns the varinfos corresponding to parameters of the function, in order.
+func (p *ParserUnitData) ProcedureParams() []Varinfo {
+	for i := range p.vars {
+		if !p.vars[i].flags.HasAny(VFlagParameter) {
+			return p.vars[:i] // First varinfo are always function parameters.
+		}
+	}
+	return p.vars
+}
+
+func (p *ParserUnitData) resolveParameterTypes(params []ast.Parameter) error {
+	if len(params) > len(p.vars) {
+		return errors.New("too many parameters for varinfo size")
+	}
+	for i := range params {
+		vi := &p.vars[i]
+		if vi._varname != params[i].Name {
+			return fmt.Errorf("mismatched param/varinfo name")
+
+		}
+		params[i].Decl = vi.decl
+	}
+	return nil
+}
+
+func (p *ParserUnitData) Varb(name []byte) (vi *Varinfo) {
+	return p.Var(unsafe.String(&name[0], len(name)))
+}
+
+func (p *ParserUnitData) Var(name string) (vi *Varinfo) {
+	for i := range p.vars {
+		if strings.EqualFold(p.vars[i]._varname, name) {
+			return &p.vars[i]
+		}
+	}
+	return nil
+}
+func (pud *ParserUnitData) reset() {
+	*pud = ParserUnitData{
+		vars:      pud.vars[:0],
+		implicits: pud.implicits[:0],
+	}
+}
+
+func (pud *ParserUnitData) copyFrom(src *ParserUnitData) {
+	*pud = ParserUnitData{
+		name:       src.name,
+		tok:        src.tok,
+		vars:       append(pud.vars[:0], src.vars...),
+		returnType: src.returnType,
+		implicits:  append(pud.implicits[:0], src.implicits...),
+	}
+	for i := range pud.vars {
+		if pud.vars[i].flags.HasAny(VFlagReturned) {
+			pud.returnType = &pud.vars[i]
+			break
+		}
+	}
+
+}
+
+// isImplicitNone returns true if IMPLICIT NONE is active in this unit.
+func (pud *ParserUnitData) isImplicitNone() bool {
+	for _, impl := range pud.implicits {
+		if impl.IsNone {
+			return true
+		}
+	}
+	return false
+}
+
+// implicitDeclFor returns a DeclEntity with the implicit type for the given identifier.
+// Returns nil if IMPLICIT NONE is active.
+func (pud *ParserUnitData) implicitDeclFor(ident string) *ast.DeclEntity {
+	if pud.isImplicitNone() {
+		return nil
+	}
+	// Check custom IMPLICIT rules first
+	for _, impl := range pud.implicits {
+		ts := impl.ImplicitTypeFor(ident)
+		if ts != nil {
+			return &ast.DeclEntity{Name: ident, Type: ts}
+		}
+	}
+	// Use default Fortran I-N convention
+	letter := ident[0]
+	if letter >= 'a' && letter <= 'z' {
+		letter -= 'a' - 'A'
+	}
+	if letter >= 'I' && letter <= 'N' {
+		return &ast.DeclEntity{Name: ident, Type: _implicitInteger.Type}
+	}
+	return &ast.DeclEntity{Name: ident, Type: _implicitReal.Type}
+}
+
+// resolveImplicitTypes assigns types to variables with nil decl based on IMPLICIT rules.
+// Called after specification section is parsed, before executable section.
+func (pud *ParserUnitData) resolveImplicitTypes() {
+	if pud.isImplicitNone() {
+		return // No type resolving.
+	}
+
+	for i := range pud.vars {
+		vi := &pud.vars[i]
+		// Skip variables that already have explicit type declarations.
+		// But handle partial decls (e.g., from Cray POINTER with ArraySpec but no Type).
+		if vi.decl != nil && vi.decl.Type != nil {
+			continue // Already has explicit type
+		}
+		ident := vi.Identifier()
+		var implicitType *ast.TypeSpec
+		for _, impl := range pud.implicits {
+			ts := impl.ImplicitTypeFor(ident)
+			if ts != nil {
+				implicitType = ts
+				vi.flags |= VFlagImplicit
+				break
+			}
+		}
+		if implicitType == nil {
+			// Use default Fortran I-N convention
+			letter := ident[0]
+			if letter >= 'a' && letter <= 'z' {
+				letter -= 'a' - 'A'
+			}
+			if letter >= 'I' && letter <= 'N' {
+				implicitType = _implicitInteger.Type
+			} else {
+				implicitType = _implicitReal.Type
+			}
+		}
+		// TODO: From cray pointer we now have special case where decl is non-nil but type is nil. Can we just consolidate both cases?
+		// Assign type, preserving any existing ArraySpec from partial decl
+		if vi.decl == nil {
+			vi.decl = &ast.DeclEntity{
+				Name: vi._varname,
+				Type: implicitType,
+			}
+		} else {
+			// Partial decl exists (e.g., from Cray POINTER) - just fill in Type
+			vi.decl.Type = implicitType
+		}
+	}
+}
+
+var (
+	_implicitInteger = &ast.DeclEntity{
+		Name: "IMPLICIT INTEGER(default)",
+		Type: &ast.TypeSpec{Token: token.INTEGER},
+	}
+	_implicitReal = &ast.DeclEntity{
+		Name: "IMPLICIT REAL(default)",
+		Type: &ast.TypeSpec{Token: token.REAL},
+	}
+)
+
+func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEntity, initFlags VarFlags, namespace string) (vi *Varinfo, err error) {
+	if decl != nil && name != decl.Name {
+		panic("bad varInit name argument mismatch with decl")
+	}
+	vi = pud.Var(name)
+	if vi != nil {
+		if decl != nil && vi.decl != nil {
+			err = errors.New("double variable initialization with " + vi.declPos.String())
+			return vi, err
+		}
+	} else {
+		pud.vars = slices.Grow(pud.vars, 1)
+		pud.vars = pud.vars[:len(pud.vars)+1]
+		vi = &pud.vars[len(pud.vars)-1]
+		vi.reset()
+	}
+	// Set fields.
+	vi.flags |= initFlags
+	if vi.decl == nil {
+		vi.decl = decl
+		vi._varname = name
+		vi.declPos = sp
+	}
+	if initFlags&VFlagCommon != 0 {
+		vi.common = namespace
+	} else if initFlags&VFlagPointer != 0 {
+		vi.pointee = namespace
+	} else if initFlags&VFlagReturned != 0 {
+		pud.returnType = vi
+	}
+
+	return vi, nil
+}
+
+type Varinfo struct {
+	decl     *ast.DeclEntity
+	flags    VarFlags
+	_varname string
+	common   string // set to COMMON block name if found in COMMON statement
+	pointee  string // the pointer alias this variable references in EQUIVALENCE or cray style POINTER statement.
+	declPos  sourcePos
+	val      Value // Runtime value for REPL evaluation
+	kindFlag int   // 0 when uninitialized. -1 when unspecified, -2..-99 error. else is kind value.
+}
+
+func (p *Varinfo) Flags() VarFlags            { return p.flags }
+func (p *Varinfo) Value() Value               { return p.val }
+func (p *Varinfo) Charlen() ast.Expression    { return p.decl.Charlen() }
+func (p *Varinfo) Kind() ast.Expression       { return p.decl.Kind() }
+func (p *Varinfo) Dimensions() *ast.ArraySpec { return p.decl.Dimension() }
+func (p *Varinfo) Identifier() string         { return p._varname }
+func (p *Varinfo) IsParameter() bool          { return p.flags.HasAny(VFlagParameter) }
+func (p *Varinfo) IsAllocatable() bool        { return p.flags.HasAny(VFlagAllocatable) }
+func (p *Varinfo) CommonBlock() string        { return p.common }
+func (p *Varinfo) DeclPos() (source string, line, col int) {
+	return p.declPos.Source, p.declPos.Line, p.declPos.Col
+}
+func (p *Varinfo) TypeToken() token.Token {
+	if p.decl == nil || p.decl.Type == nil {
+		return token.Undefined
+	}
+	return p.decl.Type.Token
+}
+func (p *Varinfo) reset()                             { *p = Varinfo{} }
+func (p *Parser90) varResetAll()                      { p.vars.reset() }
+func (p *Parser90) varGet(name []byte) (vi *Varinfo)  { return p.vars.Varb(name) }
+func (p *Parser90) varSGet(name string) (vi *Varinfo) { return p.vars.Var(name) }
+func (p *Parser90) varInit(name string, decl *ast.DeclEntity, initFlags VarFlags, namespace string) (vi *Varinfo) {
+	vi, err := p.vars.varInit(p.sourcePos(), name, decl, initFlags, namespace)
+	if err != nil {
+		p.addError(err.Error())
+	}
+	return vi
 }
 
 func (p *Parser90) Reset(source string, r io.Reader) error {
@@ -101,7 +425,9 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 		maxStatements: p.maxStatements,
 		stmtFns:       p.stmtFns,
 		errors:        p.errors[:0], // Reuse slice, clear contents
+		vars:          p.vars,
 	}
+	p.vars.reset()
 	clear(p.stmtFns)
 
 	// Initialize token stream
@@ -281,30 +607,29 @@ func (p *Parser90) parseTopLevelUnit() ast.ProgramUnit {
 // parseProgramBlock parses a PROGRAM...END PROGRAM block
 // Precondition: current token is PROGRAM
 func (p *Parser90) parseProgramBlock() ast.Statement {
+	p.varResetAll()
 	start := p.sourcePos()
 	block := &ast.ProgramBlock{}
 
 	p.expect(token.PROGRAM, "")
 
 	// Parse program name (keywords can be used as program names)
-	if !p.canUseAsIdentifier() {
-		p.addError("expected program name, got " + p.current.tok.String())
+	if !p.expectIdentifier(&block.Name, "program name") {
 		return nil
 	}
-	block.Name = string(p.current.lit)
-	p.nextToken() // consume program name
 
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
 	block.Body = p.parseBody(nil)
+	block.Data = p.makeUnitData(block.Name, token.PROGRAM)
 
 	// Handle CONTAINS section (internal procedures)
 	if p.consumeIf(token.CONTAINS) {
 		block.Contains = p.parseAppendProgramUnits(block.Contains[:0])
 	}
 
-	p.expectEndProgramUnit(token.PROGRAM, token.ENDPROGRAM, start)
+	p.expectEndProgramUnit(token.PROGRAM, token.ENDPROGRAM, start, block.Name)
 	p.consumeIf(token.Identifier)
 	block.Position = ast.Pos(start.Pos, p.current.start)
 	return block
@@ -319,25 +644,24 @@ func (p *Parser90) parseModule() ast.Statement {
 	p.expect(token.MODULE, "")
 
 	// Parse module name (keywords can be used as module names)
-	if !p.canUseAsIdentifier() {
-		p.addError("expected module name, got " + p.current.tok.String())
+	if !p.expectIdentifier(&mod.Name, "module name") {
 		return nil
 	}
-	mod.Name = string(p.current.lit)
-	p.nextToken() // consume module name
 
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
 	mod.Body = p.parseBody(nil)
+	mod.Data = p.makeUnitData(mod.Name, token.MODULE)
 
 	// Handle CONTAINS section with recursive parsing
 	if p.consumeIf(token.CONTAINS) {
 		mod.Contains = p.parseAppendProgramUnits(mod.Contains[:0])
 	}
-	p.expectEndProgramUnit(token.MODULE, token.ENDMODULE, start)
+	p.expectEndProgramUnit(token.MODULE, token.ENDMODULE, start, mod.Name)
 	p.consumeIf(token.Identifier)
 	mod.Position = ast.Pos(start.Pos, p.current.start)
+
 	return mod
 }
 
@@ -357,18 +681,16 @@ func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramU
 // parseSubroutine parses a SUBROUTINE...END SUBROUTINE block
 // Precondition: current token is SUBROUTINE
 func (p *Parser90) parseSubroutine() ast.Statement {
+	p.varResetAll()
 	start := p.sourcePos()
 	sub := &ast.Subroutine{}
 
 	p.expect(token.SUBROUTINE, "")
 
 	// Parse subroutine name (keywords can be used as subroutine names)
-	if !p.canUseAsIdentifier() {
-		p.addError("expected subroutine name, got " + p.current.tok.String())
+	if !p.expectIdentifier(&sub.Name, "subroutine name") {
 		return nil
 	}
-	sub.Name = string(p.current.lit)
-	p.nextToken() // consume subroutine name
 
 	// Parse parameter list if present
 	if p.currentTokenIs(token.LParen) {
@@ -380,8 +702,10 @@ func (p *Parser90) parseSubroutine() ast.Statement {
 	// Parse body statements
 	sub.Body = p.parseBody(sub.Parameters)
 
-	p.expectEndProgramUnit(token.SUBROUTINE, token.ENDSUBROUTINE, start)
+	p.expectEndProgramUnit(token.SUBROUTINE, token.ENDSUBROUTINE, start, sub.Name)
 	p.consumeIf(token.Identifier)
+
+	sub.Data = p.makeUnitData(sub.Name, token.SUBROUTINE)
 	sub.Position = ast.Pos(start.Pos, p.current.start)
 	return sub
 }
@@ -389,30 +713,29 @@ func (p *Parser90) parseSubroutine() ast.Statement {
 // parseFunction parses a FUNCTION...END FUNCTION block
 // Precondition: current token is FUNCTION
 func (p *Parser90) parseFunction() ast.Statement {
+	p.varResetAll()
 	start := p.sourcePos()
 	fn := &ast.Function{}
-
-	p.expect(token.FUNCTION, "")
-
-	// Parse function name (can be Identifier, FormatSpec, or keyword used as identifier)
-	if !p.canUseAsIdentifier() {
-		p.addError("expected function name, got " + p.current.tok.String())
+	if !p.expect(token.FUNCTION, "") {
 		return nil
 	}
-	fn.Name = string(p.current.lit)
-	p.nextToken() // consume function name
 
+	// Parse function name (can be Identifier, FormatSpec, or keyword used as identifier)
+	if !p.expectIdentifier(&fn.Name, "function name") {
+		return nil
+	}
 	// Parse parameter list
 	if p.currentTokenIs(token.LParen) {
 		fn.Parameters = p.parseParameterList()
 	}
 
 	// Check for RESULT clause
+	hasResult := false
 	if p.consumeIf(token.RESULT) {
 		if p.expect(token.LParen, "RESULT open") {
-			if p.expectCurrent(token.Identifier) {
-				fn.ResultVariable = string(p.current.lit)
-				p.nextToken() // consume result variable name
+			if p.expectIdentifier(&fn.ResultVariable, "function RESULT variable specification") {
+				p.varInit(fn.ResultVariable, nil, VFlagReturned, "")
+				hasResult = true
 			}
 			p.expect(token.RParen, "RESULT close")
 		}
@@ -421,10 +744,19 @@ func (p *Parser90) parseFunction() ast.Statement {
 	// Parse body statements
 	fn.Body = p.parseBody(fn.Parameters)
 
-	p.expectEndProgramUnit(token.FUNCTION, token.ENDFUNCTION, start)
+	p.expectEndProgramUnit(token.FUNCTION, token.ENDFUNCTION, start, fn.Name)
 	p.consumeIf(token.Identifier)
 	fn.Position = ast.Pos(start.Pos, p.current.start)
-
+	pud := p.makeUnitData(fn.Name, token.FUNCTION)
+	fn.Data = pud
+	if hasResult {
+		for i := range pud.vars {
+			if pud.vars[i].flags.HasAny(VFlagReturned) {
+				pud.returnType = &pud.vars[i]
+				break
+			}
+		}
+	}
 	return fn
 }
 
@@ -441,17 +773,12 @@ func (p *Parser90) parseBlockData() ast.ProgramUnit {
 	}
 
 	// Parse optional block data name
-	if p.currentTokenIs(token.Identifier) {
-		bd.Name = string(p.current.lit)
-		p.nextToken()
-	}
-
+	p.consumeIdentifier(&bd.Name)
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
 	bd.Body = p.parseBody(nil)
 
-	bd.Position = ast.Pos(start, p.current.start)
 	p.expect(token.END, "expected END after DATA BLOCK body")
 
 	// Consume optional BLOCK DATA after END
@@ -460,7 +787,8 @@ func (p *Parser90) parseBlockData() ast.ProgramUnit {
 		p.consumeIf(token.DATA)
 	}
 	p.consumeIf(token.Identifier) // Optional name after END BLOCK DATA
-
+	bd.Position = ast.Pos(start, p.current.start)
+	bd.Data = p.makeUnitData(bd.Name, token.DATA)
 	return bd
 }
 
@@ -508,7 +836,7 @@ func (p *Parser90) peekTokenIs(t token.Token) bool {
 
 func (p *Parser90) expectCurrent(t token.Token) bool {
 	if !p.currentTokenIs(t) {
-		p.addError("expected " + t.String() + ", got " + p.current.tok.String())
+		p.addError("expected " + t.String() + ", got " + p.current.String())
 		return false
 	}
 	return true
@@ -518,7 +846,7 @@ func (p *Parser90) expectCurrent(t token.Token) bool {
 // Returns true if token matched and was consumed, false otherwise.
 func (p *Parser90) expect(t token.Token, reason string) bool {
 	if !p.currentTokenIs(t) {
-		p.addError(reason + ": " + "expected " + t.String() + ", got " + p.current.tok.String())
+		p.addError(reason + ": " + "expected " + t.String() + ", got " + p.current.String())
 		return false
 	}
 	p.nextToken()
@@ -566,7 +894,7 @@ func (p *Parser90) expectEndConstruct(keyword, singleEndForm token.Token, start 
 	}
 	if p.currentTokenIs(token.END) {
 		// END without expected keyword - belongs to parent
-		p.addErrorMismatchedEnd(start, keyword)
+		p.addErrorMismatchedEnd(start, keyword, "")
 		return false
 	} else {
 		p.addError("expected END " + keyword.String())
@@ -574,7 +902,7 @@ func (p *Parser90) expectEndConstruct(keyword, singleEndForm token.Token, start 
 	}
 }
 
-func (p *Parser90) expectEndProgramUnit(keyword, singleEndForm token.Token, start sourcePos) bool {
+func (p *Parser90) expectEndProgramUnit(keyword, singleEndForm token.Token, start sourcePos, name string) bool {
 	// Check for F77 single-token form e.g: ENDPROGRAM or F90 two-token form e.g: END PROGRAM
 	if p.consumeIf(singleEndForm) || p.consumeIf2(token.END, keyword) {
 		return true
@@ -582,13 +910,13 @@ func (p *Parser90) expectEndProgramUnit(keyword, singleEndForm token.Token, star
 		// Program units do not need keyword specifier, can be single END form.
 		return true
 	}
-	p.addErrorMismatchedEnd(start, keyword)
+	p.addErrorMismatchedEnd(start, keyword, name)
 	return false
 }
 
-func (p *Parser90) addErrorMismatchedEnd(start sourcePos, keyword token.Token) {
-	p.addErrorWithPos(start, keyword.String()+" missing missing END with keyword")
-	p.addError("expected 'END " + keyword.String() + "'; got END without keyword (may belong to enclosing program unit or construct)")
+func (p *Parser90) addErrorMismatchedEnd(start sourcePos, keyword token.Token, label string) {
+	p.addErrorWithPos(start, keyword.String()+" missing END with keyword "+label)
+	p.addError("expected 'END " + keyword.String() + "'; got END without keyword (may belong to enclosing program unit or construct) " + label)
 }
 
 func (p *Parser90) skipUnexpectedEndConstructs(msg string) (skipped bool) {
@@ -655,10 +983,56 @@ func (p *Parser90) strToks() string {
 		p.peek.lit, p.peek.tok, p.uberpeek.lit, p.uberpeek.tok)
 }
 
+func (p *Parser90) consumeIdentifier(dst *string, allowTokens ...token.Token) bool {
+	if p.canUseAsIdentifier() || slices.Contains(allowTokens, p.current.tok) {
+		*dst = p.currentLiteral()
+		p.nextToken()
+		return true
+	}
+	return false
+}
+
+func (p *Parser90) expectIdentifier(dst *string, reason string, allowTokens ...token.Token) bool {
+	consumed := p.consumeIdentifier(dst, allowTokens...)
+	if !consumed {
+		p.addError("expected identifier got " + p.current.String() + ": " + reason)
+	}
+	return consumed
+}
+
 // canUseAsIdentifier returns true if the current token can be used as an identifier.
 // In Fortran, keywords can be used as variable/function/subroutine names in many contexts.
 func (p *Parser90) canUseAsIdentifier() bool {
 	return p.current.tok.CanBeUsedAsIdentifier()
+}
+
+func (p *Parser90) currentLiteral() string {
+	if len(p.current.lit) > 0 {
+		return string(p.current.lit)
+	}
+	return p.current.tok.String()
+}
+
+func (p *Parser90) currentAsVarString(bitset VarFlags, common string) string {
+	v := p.varGet(p.current.lit)
+	if v == nil {
+		// Variable not declared - check if implicit typing is allowed.
+		lit := p.currentLiteral()
+		if p.vars.isImplicitNone() {
+			if !p.ignoreUndeclaredVars {
+				p.addError("variable " + lit + " undefined")
+			}
+			return lit
+		}
+		// Create implicitly typed variable with type resolved immediately.
+		implicitDecl := p.vars.implicitDeclFor(lit)
+		v = p.varInit(lit, implicitDecl, VFlagImplicit, "")
+	}
+	if bitset&VFlagCommon != 0 {
+		v.common = common
+	}
+	v.flags |= bitset
+	return v._varname
 }
 
 // parseParameterList parses a parameter list like (a, b, c)
@@ -679,31 +1053,11 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 
 	// Parse parameters using generic helper
 	parseOneParam := func() (ast.Parameter, error) {
-		// Accept identifiers, keywords, or * (alternate return specifier in F77)
+		// Accept identifiers, keywords, or *, even DATA (alternate return specifier in F77)
 		var paramName string
-		if p.currentTokenIs(token.Asterisk) {
-			paramName = "*"
-			p.nextToken()
-
-		} else if p.currentTokenIs(token.END) || p.currentTokenIs(token.DATA) {
-			// TODO: figure out way to not have this special case.
-			// Special case: END and DATA can be used as parameter names
-			// even though they're excluded from canUseAsIdentifier()
-			paramName = p.current.tok.String()
-			p.nextToken()
-		} else if p.canUseAsIdentifier() {
-			// Accept any token that can be used as an identifier (includes keywords)
-			// For keywords, use token.String(); for identifiers, use the literal
-			if len(p.current.lit) > 0 {
-				paramName = string(p.current.lit)
-			} else {
-				paramName = p.current.tok.String()
-			}
-			p.nextToken()
-		} else {
-			return ast.Parameter{}, fmt.Errorf("expected parameter name")
+		if !p.expectIdentifier(&paramName, "parameter name", token.DATA, token.Asterisk) {
+			return ast.Parameter{}, errors.New("bad parameter")
 		}
-
 		// Create Parameter with just the name for now
 		// Type information will be filled in by parseBody when it sees type declarations
 		return ast.Parameter{Name: paramName}, nil
@@ -717,6 +1071,7 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 			p.addError(err.Error())
 			break
 		}
+		p.varInit(param.Name, nil, VFlagParameter, "") // parameters have no type.
 		params = append(params, param)
 		if p.currentTokenIs(token.Comma) {
 			p.nextToken()
@@ -733,14 +1088,12 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 
 // parseBody parses specification statements, then executable statements
 // If parameters are provided, it will populate their type information when type declarations are found
-func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
+func (p *Parser90) parseBody(params []ast.Parameter) []ast.Statement {
+	defer p.vars.resolveParameterTypes(params)
 	var stmts []ast.Statement
-	var sawImplicit, sawDecl bool
+	var sawDecl bool
 	// Create a map for quick parameter lookup
-	paramMap := make(map[string]*ast.Parameter)
-	for i := range parameters {
-		paramMap[parameters[i].Name] = &parameters[i]
-	}
+	p.vars.implicits = p.vars.implicits[:0] // TODO: shouldn't anytime vars is reset implicits also be reset? This seems like an edge case.
 	p.skipNewlinesAndComments()
 	// Phase 2: Parse specification statements
 	for p.loopUntil(token.CONTAINS, token.END) {
@@ -756,7 +1109,7 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 			break
 		}
 
-		if stmt := p.parseSpecStatement(&sawImplicit, &sawDecl, paramMap); stmt != nil {
+		if stmt := p.parseSpecStatement(&sawDecl); stmt != nil {
 			stmts = append(stmts, stmt)
 		} else {
 			// Not a parseable spec statement - skip the construct
@@ -765,6 +1118,7 @@ func (p *Parser90) parseBody(parameters []ast.Parameter) []ast.Statement {
 		p.skipNewlinesAndComments()
 	}
 	p.nStatements += len(stmts) // Add specification statements.
+	p.vars.resolveImplicitTypes()
 
 	// Phase 3: Parse executable statements
 	for !p.isEndOfProgramUnit() && p.loopUntil(token.CONTAINS) {
@@ -2182,7 +2536,7 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 	} else {
 		// Counter-controlled DO loop
 		if p.canUseAsIdentifier() {
-			stmt.Var = string(p.current.lit)
+			stmt.Var = p.currentAsVarString(VFlagUsed, "")
 			p.nextToken()
 			p.expect(token.Equals, "after loop variable")
 
@@ -2507,10 +2861,10 @@ func (p *Parser90) skipToNextStatement() {
 func (p *Parser90) parseDerivedTypeStmt() *ast.DerivedTypeStmt {
 	startPos := p.sourcePos()
 	p.expect(token.TYPE, "parse derived type")
-	attrs, spec, intent := p.parseTypeAttributes()
-	if intent != 0 || spec != nil {
-		p.addError("derived type statement should not have array spec nor intent attribute")
-	}
+	attrs := p.parseTypeAttributess()
+	// if intent != 0 || spec != nil { // TODO: validate here?
+	// 	p.addError("derived type statement should not have array spec nor intent attribute")
+	// }
 	p.consumeIf(token.DoubleColon)                                // Optional :: after TYPE
 	if !p.canUseAsIdentifier() || !p.peekTokenIs(token.NewLine) { // Type name
 		p.addError("expected type name after TYPE and newline")
@@ -2559,7 +2913,7 @@ func (p *Parser90) parseDerivedTypeStmt() *ast.DerivedTypeStmt {
 //	integer, kind :: k = kind(0.0)
 func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	startPos := p.current.start
-	ts := p.expectTypeSpec()
+	ts := p.expectTypeSpec(false)
 	// KIND and LEN are allowed in component declarations (e.g., CHARACTER(LEN=50), REAL(KIND=8))
 	// Parse optional attributes
 	var attributes []token.Token
@@ -2575,7 +2929,8 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	var components []ast.DeclEntity
 	for p.canUseAsIdentifier() || p.currentTokenIs(token.DATA) {
 		entity := ast.DeclEntity{
-			Name: string(p.current.lit),
+			Name:     string(p.current.lit),
+			Position: p.currentAstPos(),
 		}
 		p.nextToken() // consume identifier.
 		if p.currentTokenIs(token.LParen) {
@@ -2598,20 +2953,18 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	}
 }
 
-// skipInterfaceBlock skips from INTERFACE to END INTERFACE
-func (p *Parser90) skipInterfaceBlock() {
-	p.expect(token.INTERFACE, "skip") // Skip INTERFACE
+func (p *Parser90) skipConstruct(keyword, endComposed token.Token) {
+	if !p.expect(keyword, "skip") {
+		panic("invalid skip")
+	}
 	depth := 1
 	for depth > 0 && !p.IsDone() {
-		if p.currentTokenIs(token.INTERFACE) {
+		if p.consumeIf(keyword) {
 			depth++
-			p.nextToken()
-		} else if p.currentTokenIs(token.END) && p.peekTokenIs(token.INTERFACE) {
-			p.nextToken() // consume END
-			p.nextToken() // consume INTERFACE
+		} else if p.consumeIf(endComposed) || p.consumeIf2(token.END, keyword) {
 			depth--
 			if depth == 0 {
-				// Consume optional interface name after END INTERFACE
+				// Consume optional name after END <keyword>
 				p.consumeIf(token.Identifier)
 			}
 		} else {
@@ -2633,7 +2986,7 @@ func (p *Parser90) isEndOfProgramUnit() bool {
 
 // parseSpecStatement parses a specification statement
 // paramMap is used to populate type information for parameters
-func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[string]*ast.Parameter) ast.Statement {
+func (p *Parser90) parseSpecStatement(sawDecl *bool) ast.Statement {
 	// Check for labeled FORMAT statement (can appear in spec section)
 	var label string
 	if p.currentTokenIs(token.IntLit) && p.peekTokenIs(token.FORMAT) {
@@ -2648,27 +3001,27 @@ func (p *Parser90) parseSpecStatement(sawImplicit, sawDecl *bool, paramMap map[s
 
 	switch p.current.tok {
 	case token.IMPLICIT:
-		return p.parseImplicit(sawImplicit, sawDecl)
+		return p.parseImplicit(sawDecl)
 	case token.USE:
 		return p.parseUse()
 	case token.FORMAT:
 		return p.parseFormatStmt()
-	case token.INTEGER, token.REAL, token.DOUBLE, token.COMPLEX, token.LOGICAL, token.CHARACTER:
+	case token.INTEGER, token.REAL, token.DOUBLE, token.DOUBLEPRECISION, token.COMPLEX, token.LOGICAL, token.CHARACTER:
 		*sawDecl = true
-		return p.parseTypeDecl(paramMap)
+		return p.parseTypeDecl()
 	case token.TYPE:
 		// Distinguish between TYPE definition and TYPE(typename) declaration
 		if p.peekTokenIs(token.LParen) {
 			// TYPE(typename) :: var - treat as type declaration
 			*sawDecl = true
-			return p.parseTypeDecl(paramMap)
+			return p.parseTypeDecl()
 		} else {
 			// TYPE :: name ... END TYPE - parse derived type definition
 			return p.parseDerivedTypeStmt()
 		}
 	case token.INTERFACE:
 		// INTERFACE block - skip entire block
-		p.skipInterfaceBlock()
+		p.skipConstruct(token.INTERFACE, token.ENDINTERFACE)
 		return &ast.InterfaceStmt{} // Return non-nil to indicate success
 	case token.DATA:
 		// DATA statement - skip to end of statement (complex to parse fully)
@@ -2707,7 +3060,9 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 	// Loop to handle all pairs
 	for p.loopUntil(token.NewLine) {
 		// Parse variable list: x, y, z OR (arr(i), i=1,n)
-		for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.NewLine) && !p.IsDone() {
+		for p.loopUntil(token.Slash, token.NewLine) {
+			var varName string
+			varStart := p.sourcePos()
 			if p.currentTokenIs(token.LParen) {
 				startPos := p.sourcePos()
 				p.nextToken()
@@ -2717,43 +3072,30 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 					return nil
 				}
 				stmt.Variables = append(stmt.Variables, impliedDoLoop)
-			} else if p.canUseAsIdentifier() {
-				varStart := p.sourcePos()
-				varName := string(p.current.lit)
-				p.nextToken()
-
+			} else if p.expectIdentifier(&varName, "DATA statement") {
 				// Array subscript: arr(1,2,3)
-				if p.currentTokenIs(token.LParen) {
-					p.nextToken() // consume (
-					var subscripts []ast.Expression
-					for p.loopUntil(token.RParen) {
-						expr := p.parseExpression(0, token.RParen, token.Comma)
+				var subscripts []ast.Expression
+				if p.consumeIf(token.LParen) {
+					parseExpr := func() (ast.Expression, error) {
+						expr := p.parseExpression(0)
 						if expr == nil {
-							p.addError("failed to parse array subscript in DATA statement")
-							return nil
+							return nil, errors.New("failed to parse DATA array reference")
 						}
-						subscripts = append(subscripts, expr)
-						if !p.consumeIf(token.Comma) {
-							break
-						}
+						return expr, nil
 					}
-					p.expect(token.RParen, "closing array subscript")
-
-					stmt.Variables = append(stmt.Variables, &ast.ArrayRef{
-						Name:       varName,
-						Subscripts: subscripts,
-						Position:   ast.Pos(varStart.Pos, p.currentAstPos().End()),
-					})
-				} else {
-					stmt.Variables = append(stmt.Variables, &ast.Identifier{
-						Value:    varName,
-						Position: ast.Pos(varStart.Pos, p.currentAstPos().Start()),
-					})
+					exprs, err := parseCommaSeparatedList(p, token.RParen, parseExpr)
+					if err != nil {
+						return nil
+					}
+					subscripts = exprs
+					p.expect(token.RParen, "closing parentheses for DATA array reference")
 				}
-			} else {
-				break
+				stmt.Variables = append(stmt.Variables, &ast.ArrayRef{
+					Name:       varName,
+					Subscripts: subscripts,
+					Position:   ast.Pos(varStart.Pos, p.currentAstPos().End()),
+				})
 			}
-
 			p.consumeIf(token.Comma)
 		}
 
@@ -2761,9 +3103,8 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 		if !p.expect(token.Slash, "expected / before DATA values") {
 			return stmt
 		}
-
 		// Parse value list - use parseExpression with terminators
-		for !p.currentTokenIs(token.Slash) && !p.currentTokenIs(token.NewLine) && !p.IsDone() {
+		for p.loopUntil(token.Slash, token.NewLine) {
 			value := p.parseExpression(0, token.Slash, token.Comma)
 			if value != nil {
 				stmt.Values = append(stmt.Values, value)
@@ -2778,10 +3119,8 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 
 		// Expect closing slash
 		p.expect(token.Slash, "expected / after DATA values")
-
 		// Check for comma or another variable (continuation case)
 		p.consumeIf(token.Comma)
-
 		// If next token is not an identifier, we're done
 		if !p.canUseAsIdentifier() {
 			break
@@ -2803,20 +3142,24 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 //	IMPLICIT REAL (A-H, O-Z)
 //	IMPLICIT INTEGER (I-N)
 //	IMPLICIT REAL(KIND=8) (A-C, X-Z), INTEGER (I-N)
-func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
+func (p *Parser90) parseImplicit(sawDecl *bool) ast.Statement {
 	start := p.current.start
 	stmt := &ast.ImplicitStatement{}
 	p.expect(token.IMPLICIT, "")
-
 	// Check for IMPLICIT NONE
 	if p.currentTokenIs(token.Identifier) && strings.EqualFold(string(p.current.lit), "NONE") {
-		if *sawImplicit {
-			p.addError("duplicate IMPLICIT statement")
+		if len(p.vars.implicits) > 0 {
+			if p.vars.implicits[0].IsNone {
+				p.addError("duplicate IMPLICIT NONE")
+			} else {
+				p.addError("IMPLICIT NONE not allowed after IMPLICIT type-spec")
+			}
 		} else if *sawDecl {
+			// Only check sawDecl for the first IMPLICIT NONE
 			p.addError("IMPLICIT NONE must appear before type declarations")
 		}
-		*sawImplicit = true
 		stmt.IsNone = true
+		p.vars.implicits = append(p.vars.implicits, stmt)
 		p.nextToken()
 		stmt.Position = ast.Pos(start, p.current.start)
 		return stmt
@@ -2943,10 +3286,15 @@ func (p *Parser90) parseImplicit(sawImplicit, sawDecl *bool) ast.Statement {
 		}
 	}
 
-	if *sawImplicit {
-		p.addError("duplicate IMPLICIT statement")
+	// Check if IMPLICIT NONE was already declared - no other IMPLICIT statements allowed after it
+	for _, impl := range p.vars.implicits {
+		if impl.IsNone {
+			p.addError("IMPLICIT type-spec not allowed after IMPLICIT NONE")
+			break
+		}
 	}
-	*sawImplicit = true
+
+	p.vars.implicits = append(p.vars.implicits, stmt)
 
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
@@ -3054,7 +3402,7 @@ func (p *Parser90) expectTypeSpecIntrinsic() (ts ast.TypeSpec) {
 //   - REAL(KIND=8)      → TypeSpec{Token: REAL, KindOrLen: 8}
 //   - TYPE(person)      → TypeSpec{Token: TYPE, Name: "person"}
 //   - CHARACTER(LEN=20) → TypeSpec{Token: CHARACTER, KindOrLen: 20}
-func (p *Parser90) expectTypeSpec() (ts ast.TypeSpec) {
+func (p *Parser90) expectTypeSpec(withAttrs bool) (ts ast.TypeSpec) {
 	ts.Token = p.current.tok
 	if ts.Token == token.TYPE {
 		// Derived type: TYPE(typename)
@@ -3066,188 +3414,142 @@ func (p *Parser90) expectTypeSpec() (ts ast.TypeSpec) {
 		ts.Name = string(p.current.lit)
 		p.nextToken() // consume identifier
 		p.nextToken() // consume )
-		return ts     // tok=TYPE
+
+		return ts // tok=TYPE
+	} else {
+		ts = p.expectTypeSpecIntrinsic()
+	}
+	if withAttrs {
+		ts.Attributes = p.parseTypeAttributess()
 	}
 	// Intrinsic type
-	return p.expectTypeSpecIntrinsic()
+	return ts
 }
 
 // parseTypeDecl parses INTEGER :: x, y or REAL, PARAMETER :: pi = 3.14 or TYPE(typename) :: var
 // If paramMap is provided, it will populate type information for any parameters found
-func (p *Parser90) parseTypeDecl(paramMap map[string]*ast.Parameter) ast.Statement {
+func (p *Parser90) parseTypeDecl() ast.Statement {
 	start := p.sourcePos()
-	ts := p.expectTypeSpec()
-
-	// Parse attributes (PARAMETER, INTENT, etc.)
-	attributes, arraySpec, intentType := p.parseTypeAttributes()
-
+	stmt := &ast.TypeDeclaration{
+		Type:     p.expectTypeSpec(true),
+		Position: ast.Pos(start.Pos, p.current.start),
+	}
 	// F77: INTEGER A, B, C (no ::)
 	// F90: INTEGER :: A, B, C (with ::)
 	p.consumeIf(token.DoubleColon)
 
+	specFlags := flagsFromTypespec(&stmt.Type)
 	// Parse entity list
 	// Note: DATA can be used as a variable name here, even though tok.CanBeUsedAsIdentifier() returns false for it
-	var entities []ast.DeclEntity
-	for p.canUseAsIdentifier() || p.currentTokenIs(token.DATA) {
-		entityName := string(p.current.lit)
-		entity := ast.DeclEntity{Name: entityName}
-		// Set CHARACTER length if this is a CHARACTER type
-		if ts.Token == token.CHARACTER {
-			entity.CharLen = ts.KindOrLen
-		}
-		// Start with arraySpec from DIMENSION attribute if present
-		if arraySpec != nil {
-			entity.ArraySpec = arraySpec
-		}
-
-		p.nextToken()
-
-		// Check for array declarator: arr(10,20)
-		var entityArraySpec *ast.ArraySpec
+	var entityName string
+	for p.consumeIdentifier(&entityName, token.DATA) {
+		entFlags := specFlags
+		stmt.Entities = append(stmt.Entities, ast.DeclEntity{
+			Name:     entityName,
+			Type:     &stmt.Type,
+			Position: p.currentAstPos(),
+		})
+		entity := &stmt.Entities[len(stmt.Entities)-1]
 		if p.currentTokenIs(token.LParen) {
-			// This could be an array declarator - parse it
-			entityArraySpec = p.parseArraySpec()
-			// Entity-level array spec takes precedence over DIMENSION attribute
-			if entityArraySpec != nil {
-				entity.ArraySpec = entityArraySpec
+			entity.ArraySpec = p.parseArraySpec()
+			if len(entity.ArraySpec.Bounds) > 0 {
+				entFlags |= VFlagDimension
 			}
 		}
-
-		// Parse initialization expression: = value or => null()
-		if p.currentTokenIs(token.Equals) || p.currentTokenIs(token.PointerAssign) {
-			isPointerAssign := p.currentTokenIs(token.PointerAssign)
-			p.nextToken() // consume = or =>
-
-			var initTokens []byte
-			if isPointerAssign {
-				initTokens = append(initTokens, []byte("=> ")...)
+		if p.currentTokenIs(token.Asterisk) {
+			// Character length or Kind, old F77
+			p.nextToken()
+			// Check for assumed-length character: *(*)
+			if p.currentTokenIs(token.LParen) && p.peekTokenIs(token.Asterisk) {
+				p.nextToken() // consume (
+				pos := p.current.start
+				p.nextToken() // consume *
+				p.expect(token.RParen, "closing ')' after *(*)")
+				entity.KindOrLen = &ast.Identifier{Value: "*", Position: ast.Pos(pos, pos+1)}
+			} else {
+				entity.KindOrLen = p.parseExpression(0, token.Comma, token.Equals, token.PointerAssign)
 			}
-
-			depth := 0
-			// Stop at newline or construct-ending keywords to avoid consuming tokens from parent scope
-			for p.loopUntilEndElseOr(token.NewLine) {
-				// Skip inline comments (LineComment tokens) - they shouldn't be part of the expression
-				if p.currentTokenIs(token.LineComment) {
-					p.nextToken()
-					continue
-				}
-				if p.currentTokenIs(token.LParen) {
-					depth++
-				} else if p.currentTokenIs(token.RParen) {
-					depth--
-				} else if p.currentTokenIs(token.Comma) && depth == 0 {
-					break
-				}
-				// Add space before token if needed (but not before first token, and not around parens/slashes)
-				if len(initTokens) > 0 {
-					lastChar := initTokens[len(initTokens)-1]
-					currIsSpecial := p.currentTokenIs(token.LParen) || p.currentTokenIs(token.RParen) || p.currentTokenIs(token.Slash)
-					lastIsSpecial := lastChar == '(' || lastChar == ')' || lastChar == '/'
-					if !currIsSpecial && !lastIsSpecial {
-						initTokens = append(initTokens, ' ')
-					}
-				}
-				// Append token literal - for operators, use String() if lit is empty
-				if len(p.current.lit) > 0 {
-					initTokens = append(initTokens, p.current.lit...)
-				} else {
-					// Operator tokens have empty lit, use token's string representation
-					initTokens = append(initTokens, []byte(p.current.tok.String())...)
-				}
-				p.nextToken()
-			}
-			entity.Initializer = string(initTokens)
 		}
-
+		switch p.current.tok {
+		case token.Comma:
+			p.nextToken() // No initializer.
+		case token.PointerAssign:
+			entFlags |= VFlagPointer
+			fallthrough
+		case token.Equals:
+			p.nextToken()
+			if p.currentTokenIs(token.LParen) && p.peekTokenIs(token.Slash) {
+				entity.Init = p.parseArrayConstructor()
+				entFlags |= VFlagArrayInit
+			} else {
+				entity.Init = p.parseExpression(0, token.Comma)
+			}
+		case token.Slash:
+			entity.Init = p.parseExpression(0, token.Slash)
+		case token.NewLine, token.LineComment:
+			// End of type decl, append last declared variable.
+		default:
+			p.addError("unexpected token in type declaration of " + entityName + ": " + p.current.String())
+		}
 		// Add entity to statement (now that all fields are populated)
-		entities = append(entities, entity)
-
-		// If this entity is a parameter, populate its type information
-		if paramMap != nil {
-			if param, exists := paramMap[entityName]; exists {
-				param.Type = ts
-				param.Intent = intentType
-				param.Attributes = append(param.Attributes, attributes...)
-				// Use entity array spec if present, otherwise DIMENSION attribute spec
-				if entityArraySpec != nil {
-					param.ArraySpec = entityArraySpec
-				} else if arraySpec != nil {
-					param.ArraySpec = arraySpec
-				}
-			}
-		}
-
-		if !p.currentTokenIs(token.Comma) {
-			break
-		}
-		p.nextToken()
-	}
-	stmt := &ast.TypeDeclaration{
-		Type:       ts,
-		Attributes: attributes,
-		Entities:   entities,
-		Position:   ast.Pos(start.Pos, p.current.start),
+		p.varInit(entityName, entity, entFlags, "")
+		// consume identifier separating comma.
+		p.consumeIf(token.Comma)
 	}
 	return stmt
 }
 
-func (p *Parser90) parseTypeAttributes() (attrs []token.Token, spec *ast.ArraySpec, intent ast.IntentType) {
+func (p *Parser90) currentTokenExpr() *ast.TokenExpr {
+	return &ast.TokenExpr{Token: p.current.tok, Position: p.currentAstPos()}
+}
+
+func (p *Parser90) parseTypeAttributess() (attrs []ast.TypeAttribute) {
 	for p.loopWhile(token.Comma) {
 		p.nextToken() // consume Comma.
 		if !p.current.tok.IsAttribute() {
 			p.addError("parsing type decl attributes: " + p.current.String())
 			break
 		}
-		attrs = append(attrs, p.current.tok)
+		attr := ast.TypeAttribute{Token: p.current.tok}
 		switch {
 		case p.consumeIf(token.INTENT):
 			p.expect(token.LParen, "INTENT attribute")
-			switch p.current.tok {
-			case token.IN:
-				intent = ast.IntentIn
-			case token.OUT:
-				intent = ast.IntentOut
-			case token.INOUT:
-				intent = ast.IntentInOut
-			}
+			attr.Expr = p.currentTokenExpr()
 			p.nextToken() // consume intent.
 			p.expect(token.RParen, "INTENT attribute")
 		case p.consumeIf(token.DIMENSION):
-			if p.currentTokenIs(token.LParen) {
-				spec = p.parseArraySpec()
-			}
-		case p.consumeIf(token.ALLOCATABLE):
-			// Just consume token, already in attributes slice
-		case p.consumeIf(token.POINTER):
-			// Just consume token
-		case p.consumeIf(token.TARGET):
-			// Just consume token
-		case p.consumeIf(token.OPTIONAL):
-			// Just consume token
-		case p.consumeIf(token.PARAMETER):
-			// Just consume token
-		case p.consumeIf(token.SAVE):
-			// Just consume token
-		case p.consumeIf(token.EXTERNAL):
-			// Just consume token
-		case p.consumeIf(token.INTRINSIC):
-			// Just consume token
-		case p.consumeIf(token.PUBLIC):
-			// Just consume token
-		case p.consumeIf(token.PRIVATE):
-			// Just consume token
-		case p.consumeIf(token.RECURSIVE):
-			// Just consume token
-		case p.consumeIf(token.ELEMENTAL):
-			// Just consume token
-		case p.consumeIf(token.PURE):
-			// Just consume token
+			attr.Dimension = p.parseArraySpec()
 		default:
-			p.addError("unexpected attribute: " + p.current.String())
-			p.nextToken() // Skip uknown tokens.
+			if p.current.tok.IsAttribute() {
+				attr.Expr = p.currentTokenExpr()
+			} else {
+				p.addError("unexpected attribute: " + p.current.String())
+			}
+			p.nextToken()
 		}
+		attrs = append(attrs, attr)
+
 	}
-	return attrs, spec, intent
+	return attrs
+}
+
+func (p *Parser90) parseArrayRef() *ast.ArrayRef {
+	var varname string
+	if !p.expectIdentifier(&varname, "array reference variable name") {
+		return nil
+	}
+	stmt := &ast.ArrayRef{Name: varname}
+	if p.consumeIf(token.LParen) {
+		for {
+			expr := p.parseExpression(0, token.Comma)
+			stmt.Subscripts = append(stmt.Subscripts, expr)
+			if !p.consumeIf(token.Comma) {
+				break
+			}
+		}
+		p.expect(token.RParen, "closing left parentheses")
+	}
+	return stmt
 }
 
 // parseArraySpec parses array dimension specification from DIMENSION(...) or entity declarator
@@ -3699,23 +4001,31 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 			}
 
 			if result == nil {
-				// First (...) - create function call for identifier
-				result = &ast.FunctionCall{
-					Name:     name,
-					Args:     args,
-					Position: ast.Pos(startPos, endPos),
+				// Check if identifier is a declared variable (array or CHARACTER for substring)
+				vi := p.varSGet(name)
+				isDeclared := vi != nil && vi.decl != nil
+				isArray := isDeclared && vi.decl.Dimension() != nil
+				isChar := isDeclared && vi.decl.Charlen() != nil
+				if isArray || isChar {
+					result = &ast.ArrayRef{
+						Name:       name,
+						Subscripts: args,
+						Position:   ast.Pos(startPos, endPos),
+					}
+				} else {
+					// Function call or unknown identifier (external function)
+					result = &ast.FunctionCall{
+						Name:     name,
+						Args:     args,
+						Position: ast.Pos(startPos, endPos),
+					}
 				}
 			} else {
-				// Subsequent (...) - substring/section of previous result
-				// Represent as nested FunctionCall where the previous result
-				// is the first (implicit) argument
-				// e.g., array(i)(1:5) becomes FunctionCall{Args: [i]}{Args: [1:5]}
-				// We prepend the base as arg[0] to maintain the chain
-				chainedArgs := append([]ast.Expression{result}, args...)
-				result = &ast.FunctionCall{
-					Name:     "", // Empty name indicates chained subscript/substring
-					Args:     chainedArgs,
-					Position: ast.Pos(startPos, endPos),
+				// Chained subscript/substring: arr(i)(2:3), func()(i), etc.
+				result = &ast.ArrayRef{
+					Base:       result,
+					Subscripts: args,
+					Position:   ast.Pos(startPos, endPos),
 				}
 			}
 		}
@@ -3738,9 +4048,15 @@ func (p *Parser90) tryParseFloatLit() *ast.RealLiteral {
 	if !p.currentTokenIs(token.FloatLit) {
 		return nil
 	}
+	rawStr := string(p.current.lit)
+	value, err := p.parseFloatValue(rawStr)
+	if err != nil {
+		p.addError(fmt.Sprintf("invalid float literal: %s", rawStr))
+		value = 0.0
+	}
 	lit := &ast.RealLiteral{
-		Value:    0.0, // Will need proper parsing
-		Raw:      string(p.current.lit),
+		Value:    value,
+		Raw:      rawStr,
 		Position: p.currentAstPos(),
 	}
 	p.nextToken()
@@ -3876,35 +4192,44 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 // parseTypePrefixedConstruct handles type-prefixed functions like "INTEGER FUNCTION foo()"
 func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 	// Save the type token
+	start := p.sourcePos()
 	ts := p.expectTypeSpecIntrinsic()
-	if ts.Token == 0 {
-		return nil
+	// Parse as function
+	fn := p.parseFunction().(*ast.Function)
+	fn.Type = ts
+	pud := p.makeUnitData(fn.Name, token.FUNCTION)
+	fn.Data = pud
+	if pud.returnType == nil {
+		decl := &ast.DeclEntity{
+			Name:     fn.Name,
+			Type:     &fn.Type,
+			Position: fn.Position,
+		}
+		var err error
+		vinfo := pud.Var(fn.Name)
+		if vinfo == nil {
+			vinfo, err = pud.varInit(start, fn.Name, decl, VFlagReturned, "")
+			if err != nil {
+				panic(err)
+			}
+		}
+		pud.returnType = vinfo
 	}
-	// Check if this is a function
-	if p.currentTokenIs(token.FUNCTION) {
-		// Parse as function
-		fn := p.parseFunction().(*ast.Function)
-		fn.Type = ts
-		return fn
-	}
+	return fn
 
-	// Otherwise, this is a type declaration (Phase 2)
-	// For now, skip this line, stop at construct endings
-	p.addError("type declarations not yet supported in Phase 1")
-	for p.loopUntilEndElseOr(token.NewLine) {
-		p.nextToken()
-	}
-	return nil
 }
 
 // parseProcedureWithAttributes handles procedures with attributes like RECURSIVE, PURE, ELEMENTAL
 func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 	// Collect all attributes
 	attributes := []token.Token{}
-
 	for p.current.tok.IsAttributeKeyword() && !p.IsDone() {
 		attributes = append(attributes, p.current.tok)
 		p.nextToken()
+	}
+	if p.current.tok.IsTypeDeclaration() {
+		// Is a function.
+		return p.parseTypePrefixedConstruct()
 	}
 
 	// Now must be SUBROUTINE or FUNCTION
@@ -3919,30 +4244,8 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 		if fn, ok := stmt.(*ast.Function); ok {
 			fn.Attributes = attributes
 		}
-	} else if p.current.tok.IsTypeDeclaration() {
-		// Type-prefixed function with attributes
-		typeToken := p.current.tok
-		p.nextToken()
-
-		// Parse KIND if present (e.g., REAL*8 FUNCTION)
-		var kindParam ast.Expression
-		if p.currentTokenIs(token.Asterisk) || p.currentTokenIs(token.LParen) {
-			kindParam = p.parseKindSelector()
-		}
-
-		if p.currentTokenIs(token.FUNCTION) {
-			stmt = p.parseFunction()
-			if fn, ok := stmt.(*ast.Function); ok {
-				fn.Attributes = attributes
-				fn.Type.Token = typeToken
-				fn.Type.KindOrLen = kindParam
-			}
-		} else {
-			p.addError("expected FUNCTION after type keyword")
-			return nil
-		}
 	} else {
-		p.addError("expected SUBROUTINE or FUNCTION after attributes")
+		p.addError("expected SUBROUTINE after attributes")
 		return nil
 	}
 
@@ -4068,11 +4371,9 @@ func parseInt64(s string) (int64, error) {
 //	COMMON /name/ var1, var2
 func (p *Parser90) parseCommonStmt() ast.Statement {
 	startPos := p.current.start
-	p.nextToken() // consume COMMON
+	p.expect(token.COMMON, "")
 
-	stmt := &ast.CommonStmt{
-		// Label is handled at statement parsing level, not here
-	}
+	stmt := &ast.CommonStmt{}
 
 	// Check for named COMMON: /name/ or blank COMMON: //
 	// Note: // is tokenized as StringConcat, not two separate slashes
@@ -4080,26 +4381,17 @@ func (p *Parser90) parseCommonStmt() ast.Statement {
 		// Blank COMMON: //
 	} else if p.consumeIf(token.Slash) {
 		// Named COMMON: /blockname/
-		// Parse block name
-		if p.canUseAsIdentifier() || p.current.tok.IsKeyword() {
-			stmt.BlockName = string(p.current.lit)
-			p.nextToken()
-		} else {
-			p.addError("expected block name in COMMON statement")
-		}
-
-		// Consume closing slash
-		if !p.expect(token.Slash, "closing COMMON block name") {
-			return stmt
+		if !p.expectIdentifier(&stmt.BlockName, "common identifier", token.DATA) || // Parse block name
+			!p.expect(token.Slash, "closing COMMON block name") { // Consume closing slash
+			return nil
 		}
 	}
-	// else: blank COMMON without slashes (some F77 dialects allow this)
 
 	// Parse comma-separated variable list
-	for p.canUseAsIdentifier() {
-		varName := string(p.current.lit)
-		stmt.Variables = append(stmt.Variables, varName)
-		p.nextToken()
+	var commonVar string
+	for p.consumeIdentifier(&commonVar) {
+		p.varInit(commonVar, nil, VFlagCommon, stmt.BlockName)
+		stmt.Variables = append(stmt.Variables, commonVar)
 
 		// Check for array specification: var(dims)
 		// COMMON blocks can contain arrays with dimension specs
@@ -4163,47 +4455,42 @@ func (p *Parser90) parseEquivalenceStmt() ast.Statement {
 	// Parse comma-separated equivalence sets: (var1, var2, ...), (var3, var4, ...), ...
 	for {
 		// Expect opening parenthesis for equivalence set
-		if !p.expect(token.LParen, "opening parenthesis in EQUIVALENCE set") {
+		if !p.expect(token.LParen, "open EQUIVALENCE set") {
 			break
 		}
-
 		// Parse variable list within this set
-		var set []ast.Expression
+		var set []ast.ArrayRef
 		for {
 			// Parse variable (can be simple identifier or array reference)
-			if !p.canUseAsIdentifier() {
-				p.addError("expected variable name in EQUIVALENCE set")
+			ref := p.parseArrayRef()
+			if ref == nil {
 				break
 			}
-
-			// Parse as expression to handle both identifiers and array refs
-			expr := p.parsePrimaryExpr()
-			if expr != nil {
-				set = append(set, expr)
+			// Flag the variable as participating in EQUIVALENCE
+			if vi := p.varSGet(ref.Name); vi != nil {
+				vi.flags |= VFlagEquivalenced
+			} else {
+				p.varInit(ref.Name, nil, VFlagEquivalenced, "")
 			}
-
+			set = append(set, *ref)
 			// Check for comma (more variables) or closing paren
 			if !p.consumeIf(token.Comma) {
 				break
 			}
 		}
-
 		// Add this set to the statement
 		if len(set) > 0 {
 			stmt.Sets = append(stmt.Sets, set)
 		}
-
 		// Expect closing parenthesis
 		if !p.expect(token.RParen, "closing parenthesis in EQUIVALENCE set") {
 			break
 		}
-
 		// Check for comma (more sets) or end of statement
 		if !p.consumeIf(token.Comma) {
 			break
 		}
 	}
-
 	stmt.Position = ast.Pos(startPos, p.current.start)
 	return stmt
 }
@@ -4270,61 +4557,66 @@ func (p *Parser90) parsePointerCrayStmt() ast.Statement {
 
 	// Parse comma-separated list of (pointer_var, pointee) pairs
 	for {
-		if !p.currentTokenIs(token.LParen) {
-			p.addError("expected '(' in POINTER statement")
-			break
-		}
-		p.nextToken() // consume '('
-
+		var ptrVar, pointeeVar string
 		// Parse pointer variable name
-		if !p.canUseAsIdentifier() {
-			p.addError("expected pointer variable name in POINTER statement")
-			break
-		}
-		ptrVar := string(p.current.lit)
-		p.nextToken()
-
-		// Expect comma between pointer_var and pointee
-		if !p.currentTokenIs(token.Comma) {
-			p.addError("expected ',' between pointer variable and pointee in POINTER statement")
-			break
-		}
-		p.nextToken() // consume ','
-
-		// Parse pointee name
-		if !p.canUseAsIdentifier() {
-			p.addError("expected pointee name in POINTER statement")
-			break
-		}
-		pointee := string(p.current.lit)
-		p.nextToken()
-
+		ok := p.expect(token.LParen, "opening cray POINTER statement")
+		ok = ok && p.expectIdentifier(&ptrVar, "POINTER cray pointer variable")
+		ok = ok && p.expect(token.Comma, "comma after pointer variable")
+		ok = ok && p.expectIdentifier(&pointeeVar, "POINTER cray pointee name")
 		// Parse optional array spec for pointee
 		var arraySpec *ast.ArraySpec
 		if p.currentTokenIs(token.LParen) {
 			arraySpec = p.parseArraySpec()
+			ok = ok && arraySpec != nil
 		}
-
-		// Expect closing ')'
-		if !p.currentTokenIs(token.RParen) {
-			p.addError("expected ')' to close POINTER pair")
-			break
-		}
-		p.nextToken() // consume ')'
-
+		ok = ok && p.expect(token.RParen, "close cray POINTER statement")
 		// Add the pointer pair to statement
 		stmt.Pointers = append(stmt.Pointers, ast.PointerCrayPair{
-			PointerVar: ptrVar,
-			Pointee:    pointee,
-			ArraySpec:  arraySpec,
+			PointerVar:       ptrVar,
+			Pointee:          pointeeVar,
+			PointeeArraySpec: arraySpec,
 		})
-
+		p.varInit(ptrVar, nil, VFlagPointer, pointeeVar)
+		// Create partial DeclEntity with ArraySpec if present.
+		// Type will be filled in by resolveImplicitTypes.
+		// TODO: what? is this really necessary?
+		var pointeeDecl *ast.DeclEntity
+		pointeeFlags := VFlagPointee
+		if arraySpec != nil {
+			pointeeDecl = &ast.DeclEntity{
+				Name:      pointeeVar,
+				ArraySpec: arraySpec,
+			}
+			pointeeFlags |= VFlagDimension
+		}
+		p.varInit(pointeeVar, pointeeDecl, pointeeFlags, "")
 		// Check for comma (more pairs) or end of statement
-		if !p.consumeIf(token.Comma) {
+		if !ok || !p.consumeIf(token.Comma) {
 			break
 		}
 	}
-
 	stmt.Position = ast.Pos(startPos, p.current.start)
 	return stmt
+}
+
+func (p *Parser90) parseFloatValue(v string) (float64, error) {
+	// Parse FORTRAN 77 and Fortran 90 formatted float literal to float64 value.
+	// Handles:
+	// - D/d exponent notation (double precision): 1.0D0, 2.5D-3
+	// - Q/q exponent notation (quad precision): 1.0Q0
+	// - Kind suffixes: 1.5_8, 2.0_REAL64
+	// - Standard E/e notation: 1.5E3, 2.0e-5
+
+	// Strip kind suffix: 1.5_8 → 1.5, 2.0_REAL64 → 2.0
+	if idx := strings.Index(v, "_"); idx >= 0 {
+		v = v[:idx]
+	}
+
+	// Replace D/d/Q/q exponent notation with e notation
+	v = strings.ReplaceAll(v, "D", "e")
+	v = strings.ReplaceAll(v, "d", "e")
+	v = strings.ReplaceAll(v, "Q", "e")
+	v = strings.ReplaceAll(v, "q", "e")
+
+	return strconv.ParseFloat(v, 64)
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 )
 
@@ -32,16 +33,16 @@ func (f Formatter) Print(v ...any) {
 		_, thisIsString := val.(string)
 		_, thisIsCharArray := val.(CharacterArray)
 		isStringType := thisIsString || thisIsCharArray
-		dontSpace := i == 1 && prevWasString && isStringType
+		dontSpace := prevWasString && isStringType
 		if !dontSpace && i > 0 { // Don't add separator before first item
 			buf = append(buf, ' ')
 		}
 		buf = f.formatValue(buf, val)
 		prevWasString = isStringType
 	}
-
+	buf = append(buf, '\n')
 	// Print with newline (Fortran PRINT statement behavior)
-	fmt.Println(string(buf))
+	os.Stdout.Write(buf)
 }
 
 func (f Formatter) formatValue(dst []byte, value any) []byte {
@@ -103,7 +104,11 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 			// Fixed format with variable precision based on magnitude
 			var decPlaces int
 			if absX < 1.0 {
-				decPlaces = width - 1 // e.g., 0.479 → 9 decimals
+				if width == 18 { // DOUBLE PRECISION
+					decPlaces = width - 2 // "0." takes 2 chars for float64
+				} else {
+					decPlaces = width - 1 // float32 uses different formula
+				}
 			} else {
 				nIntDig := int(math.Log10(absX)) + 1
 				decPlaces = width - nIntDig - 1
@@ -116,7 +121,11 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 			leftPad = totalWidth - valueLen
 			rightPad = 0
 		} else if absX < 1.0 {
-			leftPad = 1
+			if width == 18 { // DOUBLE PRECISION needs more left padding
+				leftPad = 2
+			} else {
+				leftPad = 1
+			}
 			rightPad = totalWidth - leftPad - valueLen
 		} else {
 			leftPad = 2

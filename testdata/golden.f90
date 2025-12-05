@@ -32,6 +32,8 @@
       CALL LEVEL27()
       CALL LEVEL28()
       CALL LEVEL29()
+      CALL LEVEL30()
+      CALL LEVEL31()
       STOP 0
       CONTAINS
 
@@ -50,15 +52,18 @@
           REAL :: x
           LOGICAL :: flag
           CHARACTER(LEN=20) :: message
-
+          CHARACTER :: a
+          a = 'a' ! letter a
           i = 42
           x = 3.14159
           flag = .TRUE.
           message = 'Variables assigned'
-
           PRINT *, 'LEVEL 2: i =', i, ', x =', x
           PRINT *, 'LEVEL 2: flag =', flag
           PRINT *, 'LEVEL 2:', message
+          PRINT *, 'LEVEL 2:', a, a ! Check Spacing between single characters.
+          PRINT *, a,a,a,i,a ! Check spacing, varied
+          PRINT *, i,a,i,a
       END SUBROUTINE LEVEL02
 
 ! ==============================================================================
@@ -528,12 +533,12 @@
 
       SUBROUTINE PRINT_COMMON_VALUES()
           INTEGER :: x, y
-          REAL :: z
-          COMMON /SHARED/ x, y, z
+          REAL :: Z
+          COMMON /SHARED/ x, y, Z
 
           PRINT *, 'LEVEL 19: x =', x
           PRINT *, 'LEVEL 19: y =', y
-          PRINT *, 'LEVEL 19: z =', z
+          PRINT *, 'LEVEL 19: z =', Z
       END SUBROUTINE PRINT_COMMON_VALUES
 
       ! LEVEL 20: DATA Statements
@@ -710,44 +715,73 @@
           PRINT *, 'LEVEL 28: COUNTS(50) =', COUNTS(50)
       END SUBROUTINE LEVEL28
 
-      SUBROUTINE LEVEL29()
-          ! Test advanced features: DIMENSION, MALLOC, DATA with hex, labeled DO
-        !   DOUBLE PRECISION ,ALLOCATABLE,  DIMENSION(:) :: AA
-        !   INTEGER   ,ALLOCATABLE,  DIMENSION(:) :: II
-        !   LOGICAL   ,ALLOCATABLE,  DIMENSION(:) :: LL  
-          IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L),INTEGER (I)
-          POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1)) ! cray style pointer, implicit initialization.  
-          INTEGER :: N, M, MAXMUM, MAXDM1, MAXDEF
-            
-          ! Initialize with hex values (Cray-style hex literals)
-          DOUBLEPRECISION          :: DEFALT
-          INTEGER,DIMENSION(2)     :: I_DEFALT
-          DATA I_DEFALT(1) /Z'7777777'/
-          DATA I_DEFALT(2) /Z'7777777'/
-          EQUIVALENCE ( DEFALT, I_DEFALT )
-          PRINT *, 'LEVEL 29: Advanced features test'
-
-          ! Test MALLOC intrinsic
-          MAXDM1 = 100
-          NPAA = MALLOC(MAXDM1 * 8)
-          IF( NPAA .EQ. 0 ) THEN
-             STOP 69
-          ENDIF
-          NPII = NPAA
-          NPLL = NPII
-          M = 1
-          ! Initialize array using labeled DO loop
-           MAXDEF=MIN(200000,MAXDM1)
-           DO  900 M=1,MAXDEF,32768
-           MAXMUM=MIN(M+32767,MAXDEF)
-           DO  800 N=M,MAXMUM
-           AA(N)=DEFALT
-  800      END DO
-  900      END DO
-
-          PRINT *, 'LEVEL 29: AA(2) ', AA(2) 
-          PRINT *, 'LEVEL 29: Initialized', MAXMUM - M + 1, 'elements'
-      END SUBROUTINE LEVEL29
+    SUBROUTINE LEVEL29()
+        INTEGER(1), PARAMETER :: firstLetter = 97 ! 97 is ascii for 'a'
+        INTEGER :: letters
+        INTEGER(1) :: MAT(2,2)
+        INTEGER :: MAT4(1,2)
+        CHARACTER(4) A
+        EQUIVALENCE (A, MAT(1,1), MAT4(1,2))
+        DATA letters /Z'61626364'/
+        ! SECOND EQUIVALENCE
+        REAL :: F
+        INTEGER :: N
+        EQUIVALENCE(F, N)
+        MAT(1,1) = firstLetter
+        MAT(1,2) = firstLetter+1
+        MAT(2,1) = firstLetter+2
+        MAT(2,2) = firstLetter+3
+        PRINT *, 'LEVEL 29: byte mat ', A
+        MAT4(1,2) = letters
+        PRINT *, 'LEVEL 29: uint32 mat ', A
+        F = 1
+        PRINT *, 'LEVEL 29: linked float=1,int', F, N
+        N = 1109917696 ! is 42 in floating point land.
+        PRINT *, 'LEVEL 29: linked float,int=1109917696', F, N
+    END SUBROUTINE LEVEL29
+    SUBROUTINE LEVEL30() ! EQUIVALENCE playaround.
+        CHARACTER :: A, B
+        CHARACTER, DIMENSION(4) :: C
+        INTEGER :: MAT(2,2)
+        EQUIVALENCE (C(1), MAT(1,1))
+        EQUIVALENCE (A, B, MAT(1,2))
+        MAT(1,1) = 64 ! Affect C.
+        MAT(1,2) = 97 ! Affect A and B.
+        PRINT *, 'LEVEL 30: CHAR A,B:', A, B
+        PRINT *, 'LEVEL 30: CHAR C:', C(1)
+    END SUBROUTINE LEVEL30
+    SUBROUTINE LEVEL31()
+        ! Test advanced features: DIMENSION, MALLOC, DATA with hex, labeled DO
+        IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L),INTEGER (I)
+        POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1)) ! cray style pointer, implicit initialization.
+        INTEGER :: N, M, MAXMUM, MAXDM1, MAXDEF
+        ! Initialize with hex values (Cray-style hex literals)
+        DOUBLEPRECISION          :: DEFALT
+        INTEGER,DIMENSION(2)     :: I_DEFALT
+        DATA I_DEFALT(1) /Z'7777777'/
+        DATA I_DEFALT(2) /Z'7777777'/
+        EQUIVALENCE ( DEFALT, I_DEFALT )
+        PRINT *, 'LEVEL 29: Advanced features test'
+        ! Test MALLOC intrinsic
+        MAXDM1 = 100
+        NPAA = MALLOC(MAXDM1 * 8)
+        IF( NPAA .EQ. 0 ) THEN
+           STOP 69
+        ENDIF
+        NPII = NPAA
+        NPLL = NPII
+        M = 1
+        ! Initialize array using labeled DO loop
+         MAXDEF=MIN(200000,MAXDM1)
+         DO  900 M=1,MAXDEF,32768
+         MAXMUM=MIN(M+32767,MAXDEF)
+         DO  800 N=M,MAXMUM
+        !  AA(N)=DEFALT
+800      END DO
+900      END DO
+        PRINT *, 'LEVEL 29: AA(2) ', AA(2)
+        PRINT *, 'LEVEL 29: Initialized', MAXMUM - M + 1, 'elements'
+    END SUBROUTINE LEVEL31
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

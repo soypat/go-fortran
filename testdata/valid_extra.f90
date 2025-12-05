@@ -6,6 +6,7 @@ MODULE abc
 END MODULE
 
 SUBROUTINE f77_test()
+    INTEGER :: i
       DO 10 i = 1, 10
 10    CONTINUE
     END SUBROUTINE

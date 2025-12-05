@@ -26,8 +26,8 @@ type Lexer90 struct {
 	// Higher level statistics fields:
 
 	source    string // filename or source name.
-	line      int    // file line number
-	col       int    // column number in line
+	line      int    // file line number (position of current char)
+	col       int    // column number in line (position of current char)
 	pos       int    // byte position.
 	parens    int    // '{','}' braces counter to pick up on unbalanced braces early.
 	tokenLine int    // line number where the last token started
@@ -61,6 +61,9 @@ func (l *Lexer90) Reset(source string, r io.Reader) error {
 		l.idbuf = make([]byte, 0, 1024)
 	}
 	// Fill up peek and current character.
+	const peeklen = 2
+	l.col = -peeklen + 1 // col is 1 based.
+	l.pos = -peeklen
 	l.readCharLL()
 	l.readCharLL()
 	return l.err
@@ -118,20 +121,18 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 		l.err = errors.New("lexer unitilialized")
 		return token.Illegal, 0, nil
 	}
-
+	l.skipWhitespace()
 	// Handle labels at the beginning of a line
 	if l.col == 1 && isDigit(l.ch) {
 		startPos = l.pos
 		l.tokenLine, l.tokenCol = l.line, l.col
-		literal, ok := l.readNumber()
-		if !ok || l.col <= 6 { // Labels are in columns 1-5
-			return token.IntLit, startPos, literal
+		literal, isFloat := l.readNumber()
+		if isFloat {
+			return token.FloatLit, startPos, literal
 		}
-		l.err = errors.New("bad label")
-		return token.Illegal, startPos, literal
+		return token.IntLit, startPos, literal
 	}
 
-	l.skipWhitespace()
 	startPos = l.pos
 	// Capture starting line/col for this token
 	l.tokenLine, l.tokenCol = l.line, l.col
@@ -766,22 +767,21 @@ func (l *Lexer90) peekAhead(n int) rune {
 // (e.g., inside comments). For normal code, use readChar() instead.
 func (l *Lexer90) readCharLL() {
 	// Advance character buffer first, so even on EOF we don't lose the last char
+	currentIsNewline := l.ch == '\n'
 	l.ch = l.peek
-
 	ch, sz, err := l.input.ReadRune()
 	if err != nil {
 		l.peek = 0
 		l.err = err
 		return
 	}
-	if ch == '\n' {
-		l.line++
-		l.col = 0
-	} else {
-		l.col++
-	}
+	l.col++
 	l.pos += sz
 	l.peek = ch
+	if currentIsNewline {
+		l.line++
+		l.col = 1
+	}
 }
 
 // PositionString returns the "source:line:column" representation of the lexer's current position.

@@ -2,6 +2,9 @@
  LEVEL 2: i =          42 , x =   3.14159012    
  LEVEL 2: flag = T
  LEVEL 2:Variables assigned  
+ LEVEL 2:aa
+ aaa          42 a
+          42 a          42 a
  LEVEL 3: j =          52 , k =          84
  LEVEL 3: y =   6.28318024     , z =   45.1415901    
  LEVEL 4: i is greater than 40
@@ -101,7 +104,13 @@
  LEVEL 28: YMNRT(2) =   3.14000010    
  LEVEL 28: MATRIX(5,10) =   42.5000000    
  LEVEL 28: COUNTS(50) =          42
+ LEVEL 29: byte mat acbd
+ LEVEL 29: uint32 mat dcba
+ LEVEL 29: linked float=1,int   1.00000000      1065353216
+ LEVEL 29: linked float,int=1109917696   42.0000000      1109917696
+ LEVEL 30: CHAR A,B:aa
+ LEVEL 30: CHAR C:@
  LEVEL 29: Advanced features test
- LEVEL 29: AA(2)    1.0844641954813119E-272
+ LEVEL 29: AA(2)    0.0000000000000000     
  LEVEL 29: Initialized      -32668 elements
 STOP 0

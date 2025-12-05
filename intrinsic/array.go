@@ -1,5 +1,7 @@
 package intrinsic
 
+import "unsafe"
+
 // Array represents a multi-dimensional Fortran array with column-major layout.
 // It uses a single contiguous memory allocation (slab allocation) for efficiency.
 //
@@ -34,7 +36,7 @@ type Array[T any] struct {
 	stride []int // Column-major strides: stride[0]=1, stride[i]=stride[i-1]*shape[i-1]
 }
 
-func NewArray[T any](dims ...int) *Array[T] {
+func NewArray[T any](data []T, dims ...int) *Array[T] {
 	if len(dims) > 7 {
 		panic("array dimension too large")
 	} else if len(dims) == 0 {
@@ -47,7 +49,7 @@ func NewArray[T any](dims ...int) *Array[T] {
 	for i, d := range dims {
 		shape[i], lower[i], upper[i] = d, 1, d
 	}
-	return NewArrayWithBounds[T](shape, lower, upper)
+	return NewArrayWithBounds(data, shape, lower, upper)
 }
 
 // NewArrayWithBounds creates an array with custom bounds for each dimension.
@@ -62,7 +64,7 @@ func NewArray[T any](dims ...int) *Array[T] {
 // Column-major strides are computed as:
 //   - stride[0] = 1
 //   - stride[i] = stride[i-1] * shape[i-1]
-func NewArrayWithBounds[T any](shape, lower, upper []int) *Array[T] {
+func NewArrayWithBounds[T any](data []T, shape, lower, upper []int) *Array[T] {
 	if len(shape) != len(lower) || len(shape) != len(upper) {
 		panic("array: shape, lower, and upper must have same length")
 	}
@@ -74,6 +76,11 @@ func NewArrayWithBounds[T any](shape, lower, upper []int) *Array[T] {
 			panic("array: dimension size must be non-negative")
 		}
 		totalSize *= dim
+	}
+	if data == nil {
+		data = make([]T, totalSize)
+	} else if len(data) != totalSize {
+		panic("array: mismatch data with shape")
 	}
 
 	// Calculate column-major strides (F77 Table 1, F95 Table 6.1)
@@ -88,7 +95,7 @@ func NewArrayWithBounds[T any](shape, lower, upper []int) *Array[T] {
 	}
 
 	return &Array[T]{
-		data:   make([]T, totalSize), // Slab allocation: single contiguous memory
+		data:   data, // Slab allocation: single contiguous memory
 		shape:  append([]int(nil), shape...),
 		lower:  append([]int(nil), lower...),
 		upper:  append([]int(nil), upper...),
@@ -96,25 +103,31 @@ func NewArrayWithBounds[T any](shape, lower, upper []int) *Array[T] {
 	}
 }
 
-// NewArrayFromValues creates a 1D array initialized with the given values.
-// The array will have bounds (1:len(values)) following Fortran conventions.
-//
-// Example:
-//
-//	arr := NewArrayFromValues([]int32{10, 20, 30})
-//	// Creates array with indices 1, 2, 3
-//	arr.At(1) // returns 10
-//	arr.At(2) // returns 20
-//	arr.At(3) // returns 30
-func NewArrayFromValues[T any](values []T) *Array[T] {
-	n := len(values)
-	if n == 0 {
-		panic("cannot create array from empty values")
+// Allocate allocates the array with given dimensions (1-based bounds).
+// Panics if already allocated (Fortran semantics without STAT=).
+func (a *Array[T]) Allocate(dims ...int) {
+	if a.data != nil {
+		panic("array already allocated")
 	}
+	*a = *NewArray[T](nil, dims...)
+}
 
-	arr := NewArray[T](n)
-	copy(arr.data, values)
-	return arr
+// Deallocate frees the array's memory.
+// Panics if not allocated (Fortran semantics without STAT=).
+func (a *Array[T]) Deallocate() {
+	if a.data == nil {
+		panic("array not allocated")
+	}
+	a.data = nil
+	a.shape = nil
+	a.lower = nil
+	a.upper = nil
+	a.stride = nil
+}
+
+// Allocated returns true if the array has allocated memory.
+func (a *Array[T]) Allocated() bool {
+	return a.data != nil
 }
 
 // At returns the element at the given indices (using Fortran indexing with custom bounds)
@@ -132,6 +145,11 @@ func NewArrayFromValues[T any](values []T) *Array[T] {
 func (a *Array[T]) At(indices ...int) T {
 	offset := a.offset(indices)
 	return a.data[offset]
+}
+
+func (a *Array[T]) AtPtr(indices ...int) *T {
+	offset := a.offset(indices)
+	return &a.data[offset]
 }
 
 // Set sets the element at the given indices (using Fortran indexing with custom bounds)
@@ -210,6 +228,10 @@ func (a *Array[T]) UpperDim(dim int) int {
 	return a.upper[dim-1]
 }
 
+func (a *Array[T]) AtOffset(indices ...int) int {
+	return a.offset(indices) + 1
+}
+
 // offset calculates the flat index for multi-dimensional access using column-major layout
 // Implements the subscript value formula from F77 Table 1 (line 2436-2459) and F95 Table 6.1.
 //
@@ -241,6 +263,31 @@ func (a *Array[T]) offset(indices []int) int {
 }
 
 // Pointer returns the pointer to the underlying flat buffer.
-func (a *Array[T]) Pointer() Pointer[T] {
+func (a *Array[T]) Pointer() PointerTo[T] {
 	return NewPointerFromSlice(a.data)
+}
+
+var _ Pointer = (*Array[float32])(nil) // compile time check of interface implementation.
+
+// SizeElement implements [Pointer] interface.
+func (a *Array[T]) SizeElement() int {
+	var z T
+	return int(unsafe.Sizeof(z))
+}
+
+// DataUnsafe implements [Pointer] interface.
+func (a *Array[T]) DataUnsafe() unsafe.Pointer {
+	return unsafe.Pointer(&a.data[0])
+}
+
+// DataUnsafe implements [Pointer] interface.
+//
+// Deprecated: Extremely unsafe.
+func (a *Array[T]) SetDataUnsafe(v unsafe.Pointer) {
+	a.data = unsafe.Slice((*T)(v), len(a.data))
+}
+
+// SizeBuffer implements [Pointer] interface.
+func (a *Array[T]) LenBuffer() int {
+	return len(a.data)
 }

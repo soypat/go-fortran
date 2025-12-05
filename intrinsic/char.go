@@ -2,6 +2,7 @@ package intrinsic
 
 import (
 	"bytes"
+	"slices"
 	"unsafe"
 )
 
@@ -21,15 +22,48 @@ import (
 //	str.SetFromString("Hello")     // Sets "Hello" + 15 spaces, len=5
 //	s := str.String()              // Returns full 20-char string with padding
 type CharacterArray struct {
-	data []byte // Slice where cap(data) = Fortran LEN, len(data) = actual bytes set
+	data  []byte  // Slice where cap(data) = Fortran LEN, len(data) = actual bytes set
+	inmem [8]byte // In-memory store for short strings.
 }
 
-func NewCharacterArray(len int) CharacterArray {
-	ch := CharacterArray{
-		data: make([]byte, 0, len),
-	}
-	ch.setUnusedToSpace()
+func NewCharacterArray(length int) (ch CharacterArray) {
+	ch.Allocate(length)
 	return ch
+}
+
+var _ Pointer = CharacterArray{} // compile time check of interface implementation.
+var _ PointerSetter = (*CharacterArray)(nil)
+
+// SetDataUnsafe implements [Pointer] interface.
+//
+// Deprecated: Extremely unsafe.
+func (ch *CharacterArray) SetDataUnsafe(v unsafe.Pointer) {
+	l := len(ch.data)
+	ch.data = unsafe.Slice((*byte)(v), cap(ch.data))
+	ch.data = ch.data[:l]
+}
+
+func (ch *CharacterArray) Allocate(length int) {
+	if length < len(ch.inmem) {
+		ch.data = ch.inmem[:0:length]
+	} else {
+		ch.data = slices.Grow(ch.data[:0], length)[:0:length] // Reuse memory if possible. Safe for nil data slice.
+	}
+}
+
+// DataUnsafe implements [Pointer] interface.
+func (ch CharacterArray) DataUnsafe() unsafe.Pointer {
+	return unsafe.Pointer(&ch.data[0])
+}
+
+// SizeElement returns the number of bytes per character. Always returns 1 in Go. Implements [pointer] interface.
+func (ch CharacterArray) SizeElement() int {
+	return 1
+}
+
+// LenBuffer returns length of flattened character buffer in characters (bytes). Implements [pointer] interface.
+func (ch CharacterArray) LenBuffer() int {
+	return cap(ch.data)
 }
 
 func (ch CharacterArray) At(i int) byte {
@@ -49,7 +83,7 @@ func (ch CharacterArray) String() string {
 }
 
 func (ch *CharacterArray) SetFromString(data string) {
-	ch.data = ch.data[:cap(ch.data)]  // Ensure full capacity for modification
+	ch.data = ch.data[:cap(ch.data)] // Ensure full capacity for modification
 	n := copy(ch.data, data)
 	// Pad the rest with spaces
 	for i := n; i < cap(ch.data); i++ {
@@ -68,42 +102,24 @@ func (ch *CharacterArray) SetConcat(toJoin ...CharacterArray) {
 		}
 	}
 	ch.data = ch.data[:off]
-	ch.setUnusedToSpace()
+	ch.setToSpace(off)
 }
 
-// SetRange sets a substring range (1-based indices) to the given value
-// Corresponds to Fortran: str(start:end) = value
-func (ch *CharacterArray) SetRange(start, end int, value string) {
-	// Ensure data slice is at full capacity for in-place modification
+func (ch *CharacterArray) SetConcatString(toJoin ...string) {
 	ch.data = ch.data[:cap(ch.data)]
-
-	// Convert 1-based Fortran indices to 0-based Go indices
-	startIdx := start - 1
-	endIdx := end
-
-	// Bounds checking
-	if startIdx < 0 {
-		startIdx = 0
+	off := 0
+	for i := range toJoin {
+		off += copy(ch.data[off:], toJoin[i])
+		if off >= len(ch.data) {
+			break
+		}
 	}
-	if endIdx > cap(ch.data) {
-		endIdx = cap(ch.data)
-	}
-	if startIdx >= endIdx {
-		return
-	}
-
-	// Copy value into the range
-	rangeLen := endIdx - startIdx
-	n := copy(ch.data[startIdx:endIdx], value)
-
-	// Pad with spaces if value is shorter than range
-	for i := n; i < rangeLen; i++ {
-		ch.data[startIdx+i] = ' '
-	}
+	ch.data = ch.data[:off]
+	ch.setToSpace(off)
 }
 
-func (ch *CharacterArray) setUnusedToSpace() {
-	raw := ch.data[len(ch.data):cap(ch.data)]
+func (ch *CharacterArray) setToSpace(after int) {
+	raw := ch.data[after:cap(ch.data)]
 	for i := range raw {
 		raw[i] = ' '
 	}
@@ -134,7 +150,8 @@ func (ch CharacterArray) LenTrim() int {
 func (ch CharacterArray) Trim() CharacterArray {
 	lenTrim := ch.LenTrim()
 	result := NewCharacterArray(cap(ch.data))
-	copy(result.data[:cap(result.data)], ch.data[:lenTrim])
+	n := copy(result.data[:cap(result.data)], ch.data[:lenTrim])
+	result.setToSpace(n)
 	// Rest is already spaces from NewCharacterArray
 	return result
 }
@@ -162,8 +179,8 @@ func (ch CharacterArray) AdjustL() CharacterArray {
 	}
 
 	// Copy non-leading-space portion to start of result
-	copy(result.data[:cap(result.data)], s[firstNonSpace:])
-	// Rest is already spaces from NewCharacterArray
+	n := copy(result.data[:cap(result.data)], s[firstNonSpace:])
+	result.setToSpace(n)
 	return result
 }
 
@@ -176,6 +193,10 @@ func (ch CharacterArray) AdjustR() CharacterArray {
 	// Copy trimmed content to end of result
 	offset := cap(ch.data) - lenTrim
 	copy(result.data[offset:cap(result.data)], ch.data[:lenTrim])
+	toSpace := result.data[:offset]
+	for i := range toSpace {
+		toSpace[i] = ' '
+	}
 	// Leading portion is already spaces from NewCharacterArray
 	return result
 }

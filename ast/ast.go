@@ -1,6 +1,10 @@
 package ast
 
 import (
+	"bytes"
+	"errors"
+	"io"
+
 	"github.com/soypat/go-fortran/token"
 )
 
@@ -27,6 +31,8 @@ type Statement interface {
 type ProgramUnit interface {
 	Statement
 	programUnitNode()
+	UnitName() string
+	UnitData() any
 }
 
 func Pos(start, end int) Position {
@@ -53,11 +59,80 @@ type TypeSpec struct {
 	Name  string      // Is non-empty for TYPE specified.
 	// Optional kind parameter. Valid for token.INTEGER, token.REAL, token.COMPLEX, token.LOGICAL
 	// For CHARACTER type is required and is the LEN attribute.
-	KindOrLen Expression
+	KindOrLen  Expression
+	Attributes []TypeAttribute
+}
+
+func (ts *TypeSpec) Kind() Expression {
+	if ts.Token != token.CHARACTER && ts.KindOrLen != nil {
+		return ts.KindOrLen
+	}
+	if attr := ts.Attr(token.KIND); attr != nil {
+		return attr.Expr
+	}
+	return nil
+}
+
+func (ts *TypeSpec) Charlen() Expression {
+	if ts.Token != token.CHARACTER {
+		return nil
+	}
+	if ts.KindOrLen != nil {
+		return ts.KindOrLen
+	}
+	if attr := ts.Attr(token.LEN); attr != nil {
+		return attr.Expr
+	}
+	return nil
+}
+
+func (ts *TypeSpec) Dimension() *ArraySpec {
+	if attr := ts.Attr(token.DIMENSION); attr != nil {
+		return attr.Dimension
+	}
+	return nil
+}
+
+func (ts *TypeSpec) Attr(tok token.Token) *TypeAttribute {
+	for i := range ts.Attributes {
+		if ts.Attributes[i].Token == tok {
+			return &ts.Attributes[i]
+		}
+	}
+	return nil
+}
+
+func (ts *TypeSpec) Intent() IntentType {
+	for i := range ts.Attributes {
+		attr := &ts.Attributes[i]
+		if tok, ok := attr.Expr.(*TokenExpr); attr.Token == token.INTENT && ok {
+			switch tok.Token {
+			case token.IN:
+				return IntentIn
+			case token.OUT:
+				return IntentOut
+			case token.INOUT:
+				return IntentInOut
+			default:
+				return intentDefault
+			}
+		}
+	}
+	return intentDefault
 }
 
 func (ts TypeSpec) AppendString(dst []byte) []byte {
-	return appendTypenameOrTok(dst, ts.Name, ts.Token)
+	dst = appendTypenameOrTok(dst, ts.Name, ts.Token)
+	if len(ts.Attributes) > 0 {
+		dst = append(dst, ", "...)
+		for i := range ts.Attributes {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = ts.Attributes[i].AppendString(dst)
+		}
+	}
+	return dst
 }
 
 func appendTypenameOrTok(dst []byte, typename string, tok token.Token) []byte {
@@ -137,11 +212,15 @@ type ProgramBlock struct {
 	Contains []ProgramUnit // Internal procedures (CONTAINS section)
 	Label    string
 	Position
+	// Example: Parser result of variable resolved types and usage.
+	Data any
 }
 
 var _ ProgramUnit = (*ProgramBlock)(nil) // compile time check of interface implementation.
 
 func (pb *ProgramBlock) GetLabel() string { return pb.Label }
+func (pb *ProgramBlock) UnitData() any    { return pb.Data }
+func (pb *ProgramBlock) UnitName() string { return pb.Name }
 
 func (pb *ProgramBlock) statementNode()   {}
 func (pb *ProgramBlock) programUnitNode() {}
@@ -179,11 +258,15 @@ type Subroutine struct {
 	Body       []Statement   // Specification and executable statements
 	Label      string
 	Position
+	// Example: Parser result of variable resolved types and usage.
+	Data any
 }
 
 var _ ProgramUnit = (*Subroutine)(nil) // compile time check of interface implementation.
 
-func (s *Subroutine) GetLabel() string { return s.Label }
+func (s *Subroutine) GetLabel() string  { return s.Label }
+func (pb *Subroutine) UnitData() any    { return pb.Data }
+func (pb *Subroutine) UnitName() string { return pb.Name }
 
 func (s *Subroutine) statementNode()   {}
 func (s *Subroutine) programUnitNode() {}
@@ -229,11 +312,15 @@ type Function struct {
 	Body           []Statement   // Specification and executable statements
 	Label          string
 	Position
+	// Example: Parser result of variable resolved types and usage.
+	Data any
 }
 
 var _ ProgramUnit = (*Function)(nil) // compile time check of interface implementation.
 
-func (f *Function) GetLabel() string { return f.Label }
+func (f *Function) GetLabel() string  { return f.Label }
+func (pb *Function) UnitData() any    { return pb.Data }
+func (pb *Function) UnitName() string { return pb.Name }
 
 func (f *Function) statementNode()   {}
 func (f *Function) programUnitNode() {}
@@ -284,11 +371,15 @@ type Module struct {
 	Contains []ProgramUnit // Procedures in CONTAINS section
 	Label    string
 	Position
+	// Example: Parser result of variable resolved types and usage.
+	Data any
 }
 
 var _ ProgramUnit = (*Module)(nil) // compile time check of interface implementation.
 
-func (m *Module) GetLabel() string { return m.Label }
+func (m *Module) GetLabel() string  { return m.Label }
+func (pb *Module) UnitData() any    { return pb.Data }
+func (pb *Module) UnitName() string { return pb.Name }
 
 func (m *Module) statementNode()   {}
 func (m *Module) programUnitNode() {}
@@ -323,11 +414,16 @@ type BlockData struct {
 	Body  []Statement
 	Label string
 	Position
+	// Data stores program unit data.
+	// Example: Parser result of variable resolved types and usage.
+	Data any
 }
 
 var _ ProgramUnit = (*BlockData)(nil) // compile time check of interface implementation.
 
 func (bd *BlockData) GetLabel() string { return bd.Label }
+func (pb *BlockData) UnitData() any    { return pb.Data }
+func (pb *BlockData) UnitName() string { return pb.Name }
 
 func (bd *BlockData) statementNode()   {}
 func (bd *BlockData) programUnitNode() {}
@@ -371,6 +467,28 @@ type ImplicitRule struct {
 	LetterRanges []LetterRange // Letter ranges this rule applies to
 }
 
+func (ir *ImplicitRule) InRange(firstLetter byte) bool {
+	firstLetter = toUpper(firstLetter)
+	for _, letters := range ir.LetterRanges {
+		if firstLetter >= letters.Start && firstLetter <= letters.End {
+			return true
+		}
+	}
+	return false
+}
+
+func (lr *LetterRange) InRange(letter byte) bool {
+	letter = toUpper(letter)
+	return letter >= lr.Start && letter <= lr.End
+}
+
+func toUpper(b byte) byte {
+	if b >= 'a' && b <= 'z' {
+		b -= 'a' - 'A'
+	}
+	return b
+}
+
 // ImplicitStatement controls implicit typing rules for variables. IMPLICIT NONE
 // disables implicit typing, requiring all variables to be explicitly declared.
 // Without IMPLICIT NONE, Fortran uses default typing rules (I-N for INTEGER,
@@ -387,6 +505,19 @@ type ImplicitStatement struct {
 	Rules  []ImplicitRule // Custom type rules (empty if IsNone)
 	Label  string
 	Position
+}
+
+func (is *ImplicitStatement) ImplicitTypeFor(ident string) *TypeSpec {
+	if is.IsNone || len(ident) == 0 {
+		return nil
+	}
+	firstLetter := toUpper(ident[0])
+	for i := range is.Rules {
+		if is.Rules[i].InRange(firstLetter) {
+			return &is.Rules[i].Type
+		}
+	}
+	return nil
 }
 
 var _ Statement = (*ImplicitStatement)(nil) // compile time check of interface implementation.
@@ -654,7 +785,8 @@ func (ds *DimensionStmt) AppendString(dst []byte) []byte {
 // This makes DEFALT and I_DEFALT(1) occupy the same 8 bytes of memory,
 // allowing the same memory to be viewed as either a float64 or two int32 values.
 type EquivalenceStmt struct {
-	Sets  [][]Expression // Each set is a list of variable names/refs that share memory
+	Sets [][]ArrayRef
+	// Sets  [][]Expression // Each set is a list of variable names/refs that share memory
 	Label string
 	Position
 }
@@ -673,12 +805,9 @@ func (es *EquivalenceStmt) AppendString(dst []byte) []byte {
 		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		dst = append(dst, " ("...)
-		for j, expr := range set {
-			if j > 0 {
-				dst = append(dst, ", "...)
-			}
-			dst = expr.AppendString(dst)
+		dst = append(dst, '(')
+		for _, ref := range set {
+			dst = ref.AppendString(dst)
 		}
 		dst = append(dst, ')')
 	}
@@ -706,9 +835,9 @@ type PointerCrayStmt struct {
 
 // PointerCrayPair represents a single (pointer_var, pointee) pair.
 type PointerCrayPair struct {
-	PointerVar string     // e.g., "NPAA" - holds memory address
-	Pointee    string     // e.g., "AA" - variable accessed through pointer
-	ArraySpec  *ArraySpec // e.g., "(1)" from AA(1), often a placeholder dimension
+	PointerVar       string     // e.g., "NPAA" - holds memory address
+	Pointee          string     // e.g., "AA" - variable accessed through pointer
+	PointeeArraySpec *ArraySpec // e.g., "(1)" from AA(1), often a placeholder dimension
 }
 
 var _ Statement = (*PointerCrayStmt)(nil) // compile time check
@@ -733,9 +862,9 @@ func (ps *PointerCrayStmt) AppendString(dst []byte) []byte {
 		dst = append(dst, pair.PointerVar...)
 		dst = append(dst, ", "...)
 		dst = append(dst, pair.Pointee...)
-		if pair.ArraySpec != nil {
+		if pair.PointeeArraySpec != nil {
 			dst = append(dst, '(')
-			for j, bound := range pair.ArraySpec.Bounds {
+			for j, bound := range pair.PointeeArraySpec.Bounds {
 				if j > 0 {
 					dst = append(dst, ',')
 				}
@@ -793,10 +922,9 @@ func (ds *DataStmt) AppendString(dst []byte) []byte {
 //	REAL, PARAMETER :: PI = 3.14159
 //	CHARACTER(LEN=80), INTENT(IN) :: filename
 type TypeDeclaration struct {
-	Type       TypeSpec      // Type with optional KIND/LEN
-	Attributes []token.Token // e.g., PARAMETER, SAVE, INTENT, etc.
-	Entities   []DeclEntity  // Variables being declared
-	Label      string
+	Type     TypeSpec
+	Entities []DeclEntity // Variables being declared
+	Label    string
 	Position
 }
 
@@ -810,15 +938,6 @@ func (td *TypeDeclaration) AppendTokenLiteral(dst []byte) []byte {
 }
 func (td *TypeDeclaration) AppendString(dst []byte) []byte {
 	dst = td.Type.AppendString(dst)
-	if len(td.Attributes) > 0 {
-		dst = append(dst, ", "...)
-		for i, attr := range td.Attributes {
-			if i > 0 {
-				dst = append(dst, ", "...)
-			}
-			dst = append(dst, attr.String()...)
-		}
-	}
 	dst = append(dst, " :: "...)
 	for i, entity := range td.Entities {
 		if i > 0 {
@@ -863,18 +982,147 @@ type ArrayBound struct {
 	Upper Expression // Upper bound expression (nil for assumed shape, Identifier("*") for assumed size)
 }
 
+func (ab *ArrayBound) AppendString(dst []byte) []byte {
+	if id, ok := ab.Upper.(*Identifier); ok && id.Value == "*" {
+		return append(dst, '*')
+	}
+	if ab.Lower != nil {
+		dst = ab.Lower.AppendString(dst)
+	}
+	dst = append(dst, ':')
+	if ab.Upper != nil {
+		dst = ab.Upper.AppendString(dst)
+	}
+	return dst
+}
+
 // ArraySpec represents array dimension specification
 type ArraySpec struct {
 	Kind   ArraySpecKind
 	Bounds []ArrayBound // One bound per dimension
 }
 
-// DeclEntity represents a single entity in a type declaration
+func (as *ArraySpec) IsDeferred() bool {
+	for i := range as.Bounds {
+		if as.Bounds[i].Upper == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (as *ArraySpec) CanExpr() bool {
+	return as.Expr() != nil
+}
+
+func (as *ArraySpec) Expr() Expression {
+	if len(as.Bounds) == 1 && as.Bounds[0].Lower != nil && as.Bounds[1].Upper == nil {
+		return as.Bounds[0].Lower
+	}
+	return nil
+}
+
+func (as *ArraySpec) AppendString(dst []byte) []byte {
+	dst = append(dst, '(')
+	for i := range as.Bounds {
+		dst = as.Bounds[i].AppendString(dst)
+		if i != len(as.Bounds)-1 {
+			dst = append(dst, ',')
+		}
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
+type TypeAttribute struct {
+	Token     token.Token
+	Expr      Expression
+	Dimension *ArraySpec
+}
+
+func (ta *TypeAttribute) AppendString(dst []byte) []byte {
+	dst = append(dst, ta.Token.String()...)
+	if ta.Expr != nil {
+		dst = append(dst, '(')
+		dst = ta.Expr.AppendString(dst)
+		dst = append(dst, ')')
+	} else if ta.Dimension != nil {
+		dst = ta.Dimension.AppendString(dst)
+	}
+	return dst
+}
+
+type TokenExpr struct {
+	Token token.Token
+	Position
+}
+
+var _ Expression = (*TokenExpr)(nil) // compile time check of interface implementation.
+
+func (te *TokenExpr) expressionNode() {}
+func (te *TokenExpr) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, te.Token.String()...)
+}
+func (te *TokenExpr) AppendString(dst []byte) []byte {
+	return te.AppendString(dst)
+}
+
+// DeclEntity represents a single entity in a type declaration.
+// Multiple entities can appear in one statement (e.g., "INTEGER :: i=1, j=2").
+//
+// Parsing edge cases:
+//   - F90: REAL, DIMENSION(3) :: field = (/ 0., 1., 2. /)  → ArraySpec + Initializer
+//   - F90: INTEGER :: i = 1, j = 2  → Multiple entities, each with own Initializer
+//   - F90: CHARACTER(LEN=*) :: str  → CharLen = Identifier("*")
+//   - F90: TYPE(t_pair) :: pair = t_pair(1, 0.5)  → Derived type with Initializer
+//   - F77: INTEGER I /2/, J /3/  → Multiple entities with DATA-style Initializer
+//   - F77: CHARACTER*80 NAME  → CharLen = IntegerLiteral("80")
+//
+// Note: Initializer is currently a string (becomes Expression in Phase 4).
 type DeclEntity struct {
-	Name        string
-	ArraySpec   *ArraySpec // Array dimensions if this is an array
-	Initializer string     // Initialization expression (will become Expression in Phase 4)
-	CharLen     Expression // CHARACTER length specification (nil if not specified or using type default)
+	Name      string
+	Type      *TypeSpec
+	ArraySpec *ArraySpec // Array dimensions if this is an array. CHARACTER a(8,2) : array of characters of shape 8x2
+	KindOrLen Expression // Non-default kind or character length. Old F77 syntax. CHARACTER a*8 : character string of length 8.
+	Init      Expression
+	Position
+}
+
+func (de *DeclEntity) Kind() Expression {
+	if de.KindOrLen != nil {
+		return de.KindOrLen
+	}
+	return de.Type.Kind()
+}
+
+func (de *DeclEntity) Charlen() Expression {
+	if de.Type.Token == token.CHARACTER && de.KindOrLen != nil {
+		return de.KindOrLen
+	}
+	return de.Type.Charlen()
+}
+
+func (de *DeclEntity) Dimension() *ArraySpec {
+	if de.ArraySpec != nil {
+		return de.ArraySpec
+	}
+	return de.Type.Dimension()
+}
+
+func (de *DeclEntity) AppendString(dst []byte) []byte {
+	dst = append(dst, de.Name...)
+	if de.ArraySpec != nil {
+		dst = de.ArraySpec.AppendString(dst)
+	}
+	if de.KindOrLen != nil {
+		dst = append(dst, '*')
+		dst = de.Type.KindOrLen.AppendString(dst)
+	}
+	if de.Init != nil {
+		dst = append(dst, ' ', '=')
+		dst = de.Init.AppendString(dst)
+	}
+	return dst
 }
 
 // IntentType represents the INTENT attribute direction
@@ -912,11 +1160,8 @@ func (it IntentType) String() string {
 //	REAL, DIMENSION(:), INTENT(INOUT) :: array
 //	CHARACTER(LEN=*), OPTIONAL :: message
 type Parameter struct {
-	Name       string        // Parameter name
-	Type       TypeSpec      // Type with optional KIND/LEN
-	Intent     IntentType    // INTENT(IN/OUT/INOUT)
-	Attributes []token.Token // Other attributes (OPTIONAL, POINTER, TARGET, etc.)
-	ArraySpec  *ArraySpec    // Array dimensions if this is an array parameter
+	Name string // Parameter name
+	Decl *DeclEntity
 }
 
 // Identifier represents a variable name, function name, or other named entity
@@ -1004,7 +1249,7 @@ func (il *IntegerLiteral) AppendTokenLiteral(dst []byte) []byte {
 }
 func (il *IntegerLiteral) AppendString(dst []byte) []byte {
 	// Convert int64 to string
-	return append(dst, []byte(string(rune(il.Value)))...)
+	return append(dst, il.Raw...)
 }
 
 // RealLiteral represents a floating-point constant in source code. Supports
@@ -1206,17 +1451,21 @@ func (fc *FunctionCall) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// ArrayRef represents a reference to a single element of an array using integer
-// subscripts. For array sections (ranges), use [ArraySection] instead.
+// ArrayRef represents array element access, array sections, or substrings.
+// Either Name or Base is set, not both:
+//   - Name: direct variable access like arr(i) or str(2:5)
+//   - Base: chained access like arr(i)(2:3) where Base is the preceding expression
 //
-// Example:
+// Subscripts can be integers (element access) or RangeExpr (section/substring).
 //
-//	<array-name>(<subscript-list>)
-//	arr(i)
-//	matrix(i, j)
-//	cube(x, y, z)
+// Examples:
+//
+//	arr(i)           → ArrayRef{Name: "arr", Subscripts: [i]}
+//	arr(1:5)         → ArrayRef{Name: "arr", Subscripts: [RangeExpr]}
+//	arr(i)(2:3)      → ArrayRef{Base: ArrayRef{...}, Subscripts: [RangeExpr]}
 type ArrayRef struct {
-	Name       string
+	Name       string     // Variable name (empty if Base is set)
+	Base       Expression // Preceding expression for chained access
 	Subscripts []Expression
 	Position
 }
@@ -1228,16 +1477,39 @@ func (ar *ArrayRef) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "ARRAYREF"...)
 }
 func (ar *ArrayRef) AppendString(dst []byte) []byte {
-	dst = append(dst, ar.Name...)
-	dst = append(dst, '(')
-	for i, sub := range ar.Subscripts {
-		if i > 0 {
-			dst = append(dst, ", "...)
-		}
-		dst = sub.AppendString(dst)
+	if ar.Base != nil {
+		dst = ar.Base.AppendString(dst)
+	} else {
+		dst = append(dst, ar.Name...)
 	}
-	dst = append(dst, ')')
+	if len(ar.Subscripts) > 0 {
+		dst = append(dst, '(')
+		for i, sub := range ar.Subscripts {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = sub.AppendString(dst)
+		}
+		dst = append(dst, ')')
+	}
 	return dst
+}
+
+func (ar *ArrayRef) IsRanged() bool {
+	if IsRanged(ar.Base) {
+		return true
+	}
+	for i := range ar.Subscripts {
+		if IsRanged(ar.Subscripts[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func IsRanged(expr Expression) bool {
+	_, ok := expr.(*RangeExpr)
+	return ok
 }
 
 // ParenExpr represents an expression enclosed in parentheses for grouping or
@@ -2421,7 +2693,7 @@ type DerivedTypeStmt struct {
 	Name       string
 	Components []ComponentDecl
 	Label      string
-	Attributes []token.Token
+	Attributes []TypeAttribute
 	Position
 }
 
@@ -2748,3 +3020,65 @@ func (ca *ComponentAccess) AppendString(dst []byte) []byte {
 // 	}
 // 	return nil
 // }
+
+// ToLineCol converts a byte offset to line:column.
+// Line and column are 1-indexed. Also returns the length of the line containing the offset.
+// aux is a scratch buffer used for reading; its size determines read chunk size (1024B recommended).
+func (pos Position) ToLineCol(r io.ReaderAt, aux []byte) (line, col, lineLength int, err error) {
+	offset := pos.Start()
+	if r == nil || offset < 0 {
+		return 0, 0, 0, errors.New("invalid reader or offset")
+	}
+
+	line = 1
+	lastNewlinePos := -1 // byte position of last newline seen (-1 means before start of file)
+
+	// Read source up to offset to count newlines
+	for readPos := 0; readPos < offset; {
+		toRead := min(len(aux), offset-readPos)
+		n, rerr := r.ReadAt(aux[:toRead], int64(readPos))
+		if n == 0 && rerr != nil {
+			return 0, 0, 0, rerr
+		}
+
+		// Count newlines and find last newline position in this chunk
+		chunk := aux[:n]
+		for {
+			idx := bytes.IndexByte(chunk, '\n')
+			if idx < 0 {
+				break
+			}
+			line++
+			lastNewlinePos = readPos + (n - len(chunk)) + idx
+			chunk = chunk[idx+1:]
+		}
+
+		readPos += n
+		if rerr == io.EOF {
+			break
+		}
+	}
+
+	col = offset - lastNewlinePos
+
+	// Find line length by reading until next newline or EOF
+	lineLength = col - 1 // at minimum, the portion before offset
+	for readPos := offset; ; {
+		n, rerr := r.ReadAt(aux[:], int64(readPos))
+		if n == 0 && rerr != nil {
+			break
+		}
+		idx := bytes.IndexByte(aux[:n], '\n')
+		if idx >= 0 {
+			lineLength = (readPos - lastNewlinePos - 1) + idx
+			break
+		}
+		readPos += n
+		if rerr == io.EOF {
+			lineLength = readPos - lastNewlinePos - 1
+			break
+		}
+	}
+
+	return line, col, lineLength, nil
+}

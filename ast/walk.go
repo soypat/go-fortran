@@ -62,6 +62,7 @@ func Walk(v Visitor, node Node) {
 
 	// Declaration statements
 	case *TypeDeclaration:
+
 		if n.Type.KindOrLen != nil {
 			Walk(v, n.Type.KindOrLen)
 		}
@@ -75,9 +76,6 @@ func Walk(v Visitor, node Node) {
 						Walk(v, bound.Upper)
 					}
 				}
-			}
-			if entity.CharLen != nil {
-				Walk(v, entity.CharLen)
 			}
 			// Note: entity.Initializer is a string, not an Expression
 		}
@@ -121,9 +119,6 @@ func Walk(v Visitor, node Node) {
 						Walk(v, bound.Upper)
 					}
 				}
-			}
-			if entity.CharLen != nil {
-				Walk(v, entity.CharLen)
 			}
 		}
 
@@ -350,10 +345,6 @@ func Walk(v Visitor, node Node) {
 		}
 
 	case *ArrayRef:
-		// n.Name is a string, not a Node
-		for _, subscript := range n.Subscripts {
-			Walk(v, subscript)
-		}
 
 	case *ArraySection:
 		// n.Name is a string, not a Node

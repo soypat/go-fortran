@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/soypat/go-fortran/ast"
+	"github.com/soypat/go-fortran/token"
 )
 
 // TestParameterTypeInfo verifies that parameter type information is correctly
@@ -147,12 +148,12 @@ END SUBROUTINE old_style
 					t.Errorf("Parameter %d: expected name %q, got %q", i, exp.name, param.Name)
 				}
 
-				if param.Type.Token.String() != exp.typ {
-					t.Errorf("Parameter %d (%s): expected type %q, got %q", i, param.Name, exp.typ, param.Type.Token.String())
+				if param.Decl.Type.Token.String() != exp.typ {
+					t.Errorf("Parameter %d (%s): expected type %q, got %q", i, param.Name, exp.typ, param.Decl.Type.Token.String())
 				}
 
-				if param.Intent != exp.intent {
-					t.Errorf("Parameter %d (%s): expected intent %v, got %v", i, param.Name, exp.intent, param.Intent)
+				if param.Decl.Type.Intent() != exp.intent {
+					t.Errorf("Parameter %d (%s): expected intent %v, got %v", i, param.Name, exp.intent, param.Decl.Type.Intent())
 				}
 			}
 		})
@@ -201,7 +202,7 @@ END PROGRAM test
 				charLen     string
 				initializer string
 			}{
-				{name: "vec", typ: "INTEGER", initializer: "(/1 , 2 , 3/)"}, // Captures array constructor delimiters and commas
+				{name: "vec", typ: "INTEGER", initializer: "(/1, 2, 3/)"}, // Captures array constructor delimiters and commas
 			},
 		},
 		{
@@ -266,7 +267,7 @@ END PROGRAM test
 				charLen     string
 				initializer string
 			}{
-				{name: "ptr", typ: "INTEGER", initializer: "=>  null()"}, // Captures function call parentheses
+				{name: "ptr", typ: "INTEGER", initializer: "null()"}, // Captures function call parentheses
 			},
 		},
 		{
@@ -368,8 +369,8 @@ END PROGRAM test
 				for _, param := range params {
 					if param.Name == exp.name {
 						found = true
-						actualType = param.Type.Token.String()
-						actualCharLenExpr = param.Type.KindOrLen
+						actualType = param.Decl.Type.Token.String()
+						actualCharLenExpr = param.Decl.Type.KindOrLen
 						// Convert Expression to string for comparison if present
 						if actualCharLenExpr != nil {
 							actualCharLen = exprToString(actualCharLenExpr)
@@ -384,8 +385,10 @@ END PROGRAM test
 					for _, entity := range entities {
 						if entity.Name == exp.name {
 							found = true
-							actualInit = entity.Initializer
-							actualCharLenExpr = entity.CharLen
+							if entity.Init != nil {
+								actualInit = string(entity.Init.AppendString(nil))
+							}
+							actualCharLenExpr = entity.Type.KindOrLen
 							// Convert Expression to string for comparison if present
 							if actualCharLenExpr != nil {
 								actualCharLen = exprToString(actualCharLenExpr)
@@ -484,14 +487,14 @@ END SUBROUTINE test
 
 	// Check for DIMENSION attribute in the attributes list
 	hasDimension := false
-	for _, attr := range arrParam.Attributes {
-		if attr.String() == "DIMENSION" {
+	for _, attr := range arrParam.Decl.Type.Attributes {
+		if attr.Token == token.DIMENSION {
 			hasDimension = true
 			break
 		}
 	}
 	if !hasDimension {
-		t.Errorf("Parameter 'arr' should have DIMENSION attribute, got: %v", arrParam.Attributes)
+		t.Errorf("Parameter 'arr' should have DIMENSION attribute, got: %v", arrParam.Decl.Type.Attributes)
 	}
 
 	// Check that opt has OPTIONAL attribute
@@ -505,14 +508,14 @@ END SUBROUTINE test
 	}
 
 	hasOptional := false
-	for _, attr := range optParam.Attributes {
-		if attr.String() == "OPTIONAL" {
+	for _, attr := range optParam.Decl.Type.Attributes {
+		if attr.Token == token.OPTIONAL {
 			hasOptional = true
 			break
 		}
 	}
 	if !hasOptional {
-		t.Errorf("Parameter 'opt' should have OPTIONAL attribute, got: %v", optParam.Attributes)
+		t.Errorf("Parameter 'opt' should have OPTIONAL attribute, got: %v", optParam.Decl.Type.Attributes)
 	}
 }
 
@@ -743,7 +746,6 @@ END PROGRAM test
 
 			// Extract entities to check from body statements
 			var entities []ast.DeclEntity
-			var params []ast.Parameter
 
 			switch tt.unitType {
 			case "subroutine":
@@ -751,7 +753,6 @@ END PROGRAM test
 				if !ok {
 					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
 				}
-				params = sub.Parameters
 				// Extract entities from type declarations in body
 				for _, stmt := range sub.Body {
 					if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
@@ -773,25 +774,14 @@ END PROGRAM test
 				t.Fatalf("Unknown unit type: %s", tt.unitType)
 			}
 
-			// Check parameters first
 			for i, exp := range tt.expected {
 				var arraySpec *ast.ArraySpec
-
-				// Look for the entity in parameters
+				// Look for the entity in declarations.
 				found := false
-				for _, param := range params {
-					if param.Name == exp.name {
-						arraySpec = param.ArraySpec
-						found = true
-						break
-					}
-				}
-
-				// If not found in parameters, look in entities
 				if !found {
 					for _, entity := range entities {
 						if entity.Name == exp.name {
-							arraySpec = entity.ArraySpec
+							arraySpec = entity.Dimension()
 							found = true
 							break
 						}
@@ -948,6 +938,7 @@ func exprEqual(t *testing.T, got, want ast.Expression) bool {
 		return false
 	}
 }
+
 // TestKindParameterSupport verifies that KIND parameters are correctly captured
 // in type declarations for INTEGER, REAL, and other types
 func TestKindParameterSupport(t *testing.T) {
@@ -1145,14 +1136,14 @@ END PROGRAM`,
 			entity := typeDecl.Entities[0]
 
 			if tt.expectLength {
-				if entity.CharLen == nil {
+				if entity.Type.KindOrLen == nil {
 					t.Errorf("Expected CharLen to be non-nil Expression")
 					return
 				}
 
-				lit, ok := entity.CharLen.(*ast.IntegerLiteral)
+				lit, ok := entity.Type.KindOrLen.(*ast.IntegerLiteral)
 				if !ok {
-					t.Errorf("Expected CharLen to be IntegerLiteral, got %T", entity.CharLen)
+					t.Errorf("Expected CharLen to be IntegerLiteral, got %T", entity.Type.KindOrLen)
 					return
 				}
 
@@ -1247,15 +1238,15 @@ END SUBROUTINE`
 	if param0.Name != "n" {
 		t.Errorf("Expected parameter 0 name 'n', got '%s'", param0.Name)
 	}
-	if param0.Type.Token.String() != "INTEGER" {
-		t.Errorf("Expected parameter 0 type 'INTEGER', got '%s'", param0.Type.Token)
+	if param0.Decl.Type.Token.String() != "INTEGER" {
+		t.Errorf("Expected parameter 0 type 'INTEGER', got '%s'", param0.Decl.Type.Token)
 	}
-	if param0.Type.KindOrLen == nil {
+	if param0.Decl.Type.KindOrLen == nil {
 		t.Errorf("Expected parameter 0 KindOrLen to be non-nil")
 	} else {
-		lit, ok := param0.Type.KindOrLen.(*ast.IntegerLiteral)
+		lit, ok := param0.Decl.Type.KindOrLen.(*ast.IntegerLiteral)
 		if !ok {
-			t.Errorf("Expected parameter 0 KindOrLen to be IntegerLiteral, got %T", param0.Type.KindOrLen)
+			t.Errorf("Expected parameter 0 KindOrLen to be IntegerLiteral, got %T", param0.Decl.Type.KindOrLen)
 		} else if lit.Value != 4 {
 			t.Errorf("Expected parameter 0 KindOrLen value 4, got %d", lit.Value)
 		}
@@ -1266,15 +1257,15 @@ END SUBROUTINE`
 	if param1.Name != "arr" {
 		t.Errorf("Expected parameter 1 name 'arr', got '%s'", param1.Name)
 	}
-	if param1.Type.Token.String() != "REAL" {
-		t.Errorf("Expected parameter 1 type 'REAL', got '%s'", param1.Type.Token)
+	if param1.Decl.Type.Token.String() != "REAL" {
+		t.Errorf("Expected parameter 1 type 'REAL', got '%s'", param1.Decl.Type.Token)
 	}
-	if param1.Type.KindOrLen == nil {
+	if param1.Decl.Type.KindOrLen == nil {
 		t.Errorf("Expected parameter 1 KindOrLen to be non-nil")
 	} else {
-		lit, ok := param1.Type.KindOrLen.(*ast.IntegerLiteral)
+		lit, ok := param1.Decl.Type.KindOrLen.(*ast.IntegerLiteral)
 		if !ok {
-			t.Errorf("Expected parameter 1 KindOrLen to be IntegerLiteral, got %T", param1.Type.KindOrLen)
+			t.Errorf("Expected parameter 1 KindOrLen to be IntegerLiteral, got %T", param1.Decl.Type.KindOrLen)
 		} else if lit.Value != 8 {
 			t.Errorf("Expected parameter 1 KindOrLen value 8, got %d", lit.Value)
 		}

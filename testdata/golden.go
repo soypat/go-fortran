@@ -2,21 +2,6 @@ package main
 
 import "github.com/soypat/go-fortran/intrinsic"
 
-var HOLDRT = struct {
-	YQR    *intrinsic.Array[float32]
-	SUMXRQ *intrinsic.Array[float32]
-	YMNRT  *intrinsic.Array[float32]
-	MATRIX *intrinsic.Array[float32]
-}{YQR: intrinsic.NewArray[float32](256), SUMXRQ: intrinsic.NewArray[float32](512), YMNRT: intrinsic.NewArray[float32](3), MATRIX: intrinsic.NewArray[float32](10, 20)}
-var SHARED struct {
-	X int32
-	Y int32
-	Z float32
-}
-var STATS = struct {
-	COUNTS *intrinsic.Array[int32]
-}{COUNTS: intrinsic.NewArray[int32](100)}
-
 func main() {
 	LEVEL01()
 	LEVEL02()
@@ -46,16 +31,37 @@ func main() {
 	LEVEL27()
 	LEVEL28()
 	LEVEL29()
-	intrinsic.Exit(0)
+	LEVEL30()
+	LEVEL31()
+	intrinsic.Stop(0)
 }
 func LEVEL01() {
 	intrinsic.Print("LEVEL 1: Hello, World!")
 }
 func LEVEL02() {
-	var i int32
-	var x float32
-	var flag bool
-	var message intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+	var (
+		i int32
+		_ = i
+	)
+	var (
+		x float32
+		_ = x
+	)
+	var (
+		flag bool
+		_    = flag
+	)
+	var (
+		message intrinsic.CharacterArray
+		_       = message
+	)
+	message = intrinsic.NewCharacterArray(20)
+	var (
+		a intrinsic.CharacterArray
+		_ = a
+	)
+	a = intrinsic.NewCharacterArray(1)
+	a.SetFromString("a")
 	i = 42
 	x = 3.14159
 	flag = true
@@ -63,17 +69,22 @@ func LEVEL02() {
 	intrinsic.Print("LEVEL 2: i =", i, ", x =", x)
 	intrinsic.Print("LEVEL 2: flag =", flag)
 	intrinsic.Print("LEVEL 2:", message)
+	intrinsic.Print("LEVEL 2:", a, a)
+	intrinsic.Print(a, a, a, i, a)
+	intrinsic.Print(i, a, i, a)
 }
 func LEVEL03() {
 	var (
-		i int32
-		j int32
-		k int32
+		i       int32
+		j       int32
+		k       int32
+		_, _, _ = i, j, k
 	)
 	var (
-		x float32
-		y float32
-		z float32
+		x       float32
+		y       float32
+		z       float32
+		_, _, _ = x, y, z
 	)
 	i = 42
 	x = 3.14159
@@ -85,9 +96,18 @@ func LEVEL03() {
 	intrinsic.Print("LEVEL 3: y =", y, ", z =", z)
 }
 func LEVEL04() {
-	var i int32
-	var x float32
-	var flag bool
+	var (
+		i int32
+		_ = i
+	)
+	var (
+		x float32
+		_ = x
+	)
+	var (
+		flag bool
+		_    = flag
+	)
 	i = 42
 	x = 3.14159
 	flag = true
@@ -108,74 +128,99 @@ func LEVEL04() {
 	}
 }
 func LEVEL05() {
-	var arr1 = intrinsic.NewArray[int32](5)
-	var matrix = intrinsic.NewArray[float32](3, 3)
-	arr1.Set(10, int(1))
-	arr1.Set(20, int(2))
-	arr1.Set(30, int(3))
-	arr1.Set(40, int(4))
-	arr1.Set(50, int(5))
-	intrinsic.Print("LEVEL 5: arr1(1) =", arr1.At(int(1)))
-	intrinsic.Print("LEVEL 5: arr1(3) =", arr1.At(int(3)))
-	intrinsic.Print("LEVEL 5: arr1(5) =", arr1.At(int(5)))
-	matrix.Set(1.0, int(1), int(1))
-	matrix.Set(0.0, int(1), int(2))
-	matrix.Set(0.0, int(1), int(3))
-	matrix.Set(0.0, int(2), int(1))
-	matrix.Set(1.0, int(2), int(2))
-	matrix.Set(0.0, int(2), int(3))
-	matrix.Set(0.0, int(3), int(1))
-	matrix.Set(0.0, int(3), int(2))
-	matrix.Set(1.0, int(3), int(3))
-	intrinsic.Print("LEVEL 5: matrix(1,1) =", matrix.At(int(1), int(1)))
-	intrinsic.Print("LEVEL 5: matrix(2,2) =", matrix.At(int(2), int(2)))
-	_ = arr1
-	_ = matrix
+	var (
+		arr1 *intrinsic.Array[int32]
+		_    = arr1
+	)
+	arr1 = intrinsic.NewArray[int32](nil, 5)
+	var (
+		matrix *intrinsic.Array[float32]
+		_      = matrix
+	)
+	matrix = intrinsic.NewArray[float32](nil, 3, 3)
+	arr1.Set(10, 1)
+	arr1.Set(20, 2)
+	arr1.Set(30, 3)
+	arr1.Set(40, 4)
+	arr1.Set(50, 5)
+	intrinsic.Print("LEVEL 5: arr1(1) =", arr1.At(1))
+	intrinsic.Print("LEVEL 5: arr1(3) =", arr1.At(3))
+	intrinsic.Print("LEVEL 5: arr1(5) =", arr1.At(5))
+	matrix.Set(1.0, 1, 1)
+	matrix.Set(0.0, 1, 2)
+	matrix.Set(0.0, 1, 3)
+	matrix.Set(0.0, 2, 1)
+	matrix.Set(1.0, 2, 2)
+	matrix.Set(0.0, 2, 3)
+	matrix.Set(0.0, 3, 1)
+	matrix.Set(0.0, 3, 2)
+	matrix.Set(1.0, 3, 3)
+	intrinsic.Print("LEVEL 5: matrix(1,1) =", matrix.At(1, 1))
+	intrinsic.Print("LEVEL 5: matrix(2,2) =", matrix.At(2, 2))
 }
 func LEVEL06() {
 	var (
-		i int32
-		j int32
+		i    int32
+		j    int32
+		_, _ = i, j
 	)
-	var arr1 = intrinsic.NewArray[int32](5)
-	var sum_val int32
-	arr1.Set(10, int(1))
-	arr1.Set(20, int(2))
-	arr1.Set(30, int(3))
-	arr1.Set(40, int(4))
-	arr1.Set(50, int(5))
+	var (
+		arr1 *intrinsic.Array[int32]
+		_    = arr1
+	)
+	arr1 = intrinsic.NewArray[int32](nil, 5)
+	var (
+		sum_val int32
+		_       = sum_val
+	)
+	arr1.Set(10, 1)
+	arr1.Set(20, 2)
+	arr1.Set(30, 3)
+	arr1.Set(40, 4)
+	arr1.Set(50, 5)
 	sum_val = 0
-	for i = 1; i <= 5; i += 1 {
+	for i = 1; i <= 5; i++ {
 		sum_val = sum_val + arr1.At(int(i))
 	}
 	intrinsic.Print("LEVEL 6: sum of arr1 =", sum_val)
 	sum_val = 0
-	for i = 1; i <= 3; i += 1 {
-		for j = 1; j <= 3; j += 1 {
+	for i = 1; i <= 3; i++ {
+		for j = 1; j <= 3; j++ {
 			sum_val = sum_val + 1
 		}
 	}
 	intrinsic.Print("LEVEL 6: nested loop count =", sum_val)
-	_ = arr1
-	_ = j
 }
 func LEVEL07() {
-	var arr1 = intrinsic.NewArray[int32](5)
-	var result int32
-	arr1.Set(10, int(1))
-	arr1.Set(20, int(2))
-	arr1.Set(30, int(3))
-	arr1.Set(40, int(4))
-	arr1.Set(50, int(5))
+	var (
+		arr1 *intrinsic.Array[int32]
+		_    = arr1
+	)
+	arr1 = intrinsic.NewArray[int32](nil, 5)
+	var (
+		result int32
+		_      = result
+	)
+	arr1.Set(10, 1)
+	arr1.Set(20, 2)
+	arr1.Set(30, 3)
+	arr1.Set(40, 4)
+	arr1.Set(50, 5)
 	SIMPLE_SUB()
-	ADD_VALUES(10, 20, intrinsic.Ptr(&result))
+	ADD_VALUES(10, 20, &result)
 	intrinsic.Print("LEVEL 7: ADD_VALUES(10, 20) =", result)
 	MODIFY_ARRAY(arr1, 5)
-	intrinsic.Print("LEVEL 7: arr1 after modify:", arr1.At(int(1)), arr1.At(int(2)), arr1.At(int(3)))
+	intrinsic.Print("LEVEL 7: arr1 after modify:", arr1.At(1), arr1.At(2), arr1.At(3))
 }
 func LEVEL08() {
-	var fact_result int32
-	var sqrt_result float32
+	var (
+		fact_result int32
+		_           = fact_result
+	)
+	var (
+		sqrt_result float32
+		_           = sqrt_result
+	)
 	fact_result = FACTORIAL(5)
 	intrinsic.Print("LEVEL 8: FACTORIAL(5) =", fact_result)
 	sqrt_result = SQUARE_ROOT(16.0)
@@ -187,6 +232,7 @@ func LEVEL09() {
 		n          int32
 		fib_result int32
 		sum_val    int32
+		_, _, _, _ = i, n, fib_result, sum_val
 	)
 	n = 7
 	fib_result = FIBONACCI(n)
@@ -201,21 +247,24 @@ func LEVEL09() {
 }
 func LEVEL10() {
 	var (
-		i int32
-		j int32
-		k int32
+		i       int32
+		j       int32
+		k       int32
+		_, _, _ = i, j, k
 	)
 	var (
 		x           float32
 		y           float32
 		z           float32
 		expr_result float32
+		_, _, _, _  = x, y, z, expr_result
 	)
 	var (
-		flag  bool
-		cond1 bool
-		cond2 bool
-		cond3 bool
+		flag       bool
+		cond1      bool
+		cond2      bool
+		cond3      bool
+		_, _, _, _ = flag, cond1, cond2, cond3
 	)
 	i = 11
 	j = 52
@@ -226,44 +275,53 @@ func LEVEL10() {
 	flag = true
 	expr_result = (x+y)*z - float32(k)/2.0
 	intrinsic.Print("LEVEL 10: complex expr =", expr_result)
-	cond1 = i > 5 && j < 100
-	cond2 = x >= 3.0 || y <= 1.0
+	cond1 = (i > 5) && (j < 100)
+	cond2 = (x >= 3.0) || (y <= 1.0)
 	cond3 = !flag
 	intrinsic.Print("LEVEL 10: cond1 =", cond1, ", cond2 =", cond2)
 	intrinsic.Print("LEVEL 10: cond3 =", cond3)
 }
 func LEVEL11() {
 	var (
-		str1 intrinsic.CharacterArray = intrinsic.NewCharacterArray(10)
-		str2 intrinsic.CharacterArray = intrinsic.NewCharacterArray(10)
+		str1 intrinsic.CharacterArray
+		str2 intrinsic.CharacterArray
+		_, _ = str1, str2
 	)
-	var str3 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+	str1 = intrinsic.NewCharacterArray(10)
+	str2 = intrinsic.NewCharacterArray(10)
+	var (
+		str3 intrinsic.CharacterArray
+		_    = str3
+	)
+	str3 = intrinsic.NewCharacterArray(20)
 	str1.SetFromString("Hello")
 	str2.SetFromString("World")
-	str3.SetFromString(str1.String() + " " + str2.String())
+	str3.SetConcatString(str1.String(), " ", str2.String())
 	intrinsic.Print("LEVEL 11: concatenation:", str3)
 }
 func LEVEL12() {
 	var (
-		angle   float32
-		sin_val float32
-		cos_val float32
-		abs_val float32
+		angle      float32
+		sin_val    float32
+		cos_val    float32
+		abs_val    float32
+		_, _, _, _ = angle, sin_val, cos_val, abs_val
 	)
 	var (
-		i       int32
-		j       int32
-		k       int32
-		max_val int32
-		min_val int32
+		i             int32
+		j             int32
+		k             int32
+		max_val       int32
+		min_val       int32
+		_, _, _, _, _ = i, j, k, max_val, min_val
 	)
 	i = 11
 	j = 52
 	k = 84
 	angle = 0.5
-	sin_val = intrinsic.SIN[float32](angle)
-	cos_val = intrinsic.COS[float32](angle)
-	abs_val = intrinsic.ABS[float32](-5.5)
+	sin_val = intrinsic.SIN(angle)
+	cos_val = intrinsic.COS(angle)
+	abs_val = float32(intrinsic.ABS[float32](-5.5))
 	max_val = intrinsic.MAX[int32](i, j, k)
 	min_val = intrinsic.MIN[int32](10, 20, 5)
 	intrinsic.Print("LEVEL 12: SIN(0.5) =", sin_val)
@@ -276,20 +334,25 @@ func LEVEL13() {
 		i       int32
 		sum_val int32
 		count   int32
+		_, _, _ = i, sum_val, count
 	)
-	var arr = intrinsic.NewArray[int32](10)
-	arr.Set(5, int(1))
-	arr.Set(-3, int(2))
-	arr.Set(7, int(3))
-	arr.Set(-1, int(4))
-	arr.Set(9, int(5))
-	arr.Set(2, int(6))
-	arr.Set(-4, int(7))
-	arr.Set(6, int(8))
-	arr.Set(8, int(9))
-	arr.Set(1, int(10))
+	var (
+		arr *intrinsic.Array[int32]
+		_   = arr
+	)
+	arr = intrinsic.NewArray[int32](nil, 10)
+	arr.Set(5, 1)
+	arr.Set(-3, 2)
+	arr.Set(7, 3)
+	arr.Set(-1, 4)
+	arr.Set(9, 5)
+	arr.Set(2, 6)
+	arr.Set(-4, 7)
+	arr.Set(6, 8)
+	arr.Set(8, 9)
+	arr.Set(1, 10)
 	sum_val = 0
-	for i = 1; i <= 10; i += 1 {
+	for i = 1; i <= 10; i++ {
 		if arr.At(int(i)) < 0 {
 			continue
 		}
@@ -297,42 +360,47 @@ func LEVEL13() {
 	}
 	intrinsic.Print("LEVEL 13: sum of positive =", sum_val)
 	count = 0
-	for i = 1; i <= 10; i += 1 {
+	for i = 1; i <= 10; i++ {
 		if arr.At(int(i)) > 7 {
 			break
 		}
 		count = count + 1
 	}
 	intrinsic.Print("LEVEL 13: count before >7 =", count)
-	for i = 1; i <= 3; i += 1 {
+	for i = 1; i <= 3; i++ {
 		count = i
 	}
 	intrinsic.Print("LEVEL 13: last count =", count)
-	_ = arr
 }
 func LEVEL14() {
 	var (
-		x int32
-		y int32
+		x    int32
+		y    int32
+		_, _ = x, y
 	)
 	goto label100
 	x = 999
+	goto label100
 label100:
-	;
+	{
+	}
 	x = 10
 	y = 5
 	if y == 5 {
 		goto label200
 	}
 	y = 999
+	goto label200
 label200:
-	;
+	{
+	}
 	intrinsic.Print("LEVEL 14: x =", x, ", y =", y)
 }
 func LEVEL15() {
 	var (
 		choice int32
 		result int32
+		_, _   = choice, result
 	)
 	choice = 2
 	switch choice {
@@ -369,14 +437,19 @@ func LEVEL15() {
 }
 func LEVEL16() {
 	var (
-		str1 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
-		str2 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
-		str3 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		str1    intrinsic.CharacterArray
+		str2    intrinsic.CharacterArray
+		str3    intrinsic.CharacterArray
+		_, _, _ = str1, str2, str3
 	)
+	str1 = intrinsic.NewCharacterArray(20)
+	str2 = intrinsic.NewCharacterArray(20)
+	str3 = intrinsic.NewCharacterArray(20)
 	var (
 		len_val      int32
 		len_trim_val int32
 		index_val    int32
+		_, _, _      = len_val, len_trim_val, index_val
 	)
 	str1.SetFromString("Hello")
 	len_val = int32(str1.Len())
@@ -395,57 +468,75 @@ func LEVEL16() {
 	str3.SetFromString(str1.AdjustR().String())
 	intrinsic.Print("LEVEL 16: ADJUSTR =", str3)
 	str1.SetFromString("abcdef")
-	str3.SetFromString(str1.View(int(2), int(4)).String())
-	str1.SetRange(int(2), int(3), "z")
+	str3.SetFromString(str1.Substring(2, 4))
+	str1.SetFromString("z")
 	intrinsic.Print("LEVEL 16: str3 =", str3)
 }
 func LEVEL17() {
-	var matrix = intrinsic.NewArray[int32](3, 4)
-	var vector = intrinsic.NewArray[int32](5)
+	var (
+		matrix *intrinsic.Array[int32]
+		_      = matrix
+	)
+	matrix = intrinsic.NewArray[int32](nil, 3, 4)
+	var (
+		vector *intrinsic.Array[int32]
+		_      = vector
+	)
+	vector = intrinsic.NewArray[int32](nil, 5)
 	var (
 		size_total int32
 		size_dim1  int32
 		size_dim2  int32
+		_, _, _    = size_total, size_dim1, size_dim2
 	)
 	var (
-		lb int32
-		ub int32
+		lb   int32
+		ub   int32
+		_, _ = lb, ub
 	)
 	size_total = int32(matrix.Size())
 	intrinsic.Print("LEVEL 17: SIZE(matrix) =", size_total)
-	size_dim1 = int32(matrix.SizeDim(int(1)))
+	size_dim1 = int32(matrix.SizeDim(1))
 	intrinsic.Print("LEVEL 17: SIZE(matrix,1) =", size_dim1)
-	size_dim2 = int32(matrix.SizeDim(int(2)))
+	size_dim2 = int32(matrix.SizeDim(2))
 	intrinsic.Print("LEVEL 17: SIZE(matrix,2) =", size_dim2)
 	size_total = int32(vector.Size())
 	intrinsic.Print("LEVEL 17: SIZE(vector) =", size_total)
-	lb = int32(matrix.LowerDim(int(1)))
+	lb = int32(matrix.LowerDim(1))
 	intrinsic.Print("LEVEL 17: LBOUND(matrix,1) =", lb)
-	lb = int32(matrix.LowerDim(int(2)))
+	lb = int32(matrix.LowerDim(2))
 	intrinsic.Print("LEVEL 17: LBOUND(matrix,2) =", lb)
-	ub = int32(matrix.UpperDim(int(1)))
+	ub = int32(matrix.UpperDim(1))
 	intrinsic.Print("LEVEL 17: UBOUND(matrix,1) =", ub)
-	ub = int32(matrix.UpperDim(int(2)))
+	ub = int32(matrix.UpperDim(2))
 	intrinsic.Print("LEVEL 17: UBOUND(matrix,2) =", ub)
 }
 func LEVEL18() {
-	var vec *intrinsic.Array[int32]
-	var mat *intrinsic.Array[int32]
-	vec = intrinsic.NewArray[int32](5)
-	vec.Set(10, int(1))
-	vec.Set(20, int(2))
-	vec.Set(30, int(3))
-	intrinsic.Print("LEVEL 18: vec(1) =", vec.At(int(1)))
-	intrinsic.Print("LEVEL 18: vec(3) =", vec.At(int(3)))
+	var (
+		vec *intrinsic.Array[int32]
+		_   = vec
+	)
+	vec = new(intrinsic.Array[int32])
+	var (
+		mat *intrinsic.Array[int32]
+		_   = mat
+	)
+	mat = new(intrinsic.Array[int32])
+	vec.Allocate(5)
+	vec.Set(10, 1)
+	vec.Set(20, 2)
+	vec.Set(30, 3)
+	intrinsic.Print("LEVEL 18: vec(1) =", vec.At(1))
+	intrinsic.Print("LEVEL 18: vec(3) =", vec.At(3))
 	intrinsic.Print("LEVEL 18: SIZE(vec) =", int32(vec.Size()))
-	mat = intrinsic.NewArray[int32](2, 3)
-	mat.Set(100, int(1), int(1))
-	mat.Set(200, int(2), int(3))
-	intrinsic.Print("LEVEL 18: mat(1,1) =", mat.At(int(1), int(1)))
-	intrinsic.Print("LEVEL 18: mat(2,3) =", mat.At(int(2), int(3)))
+	mat.Allocate(2, 3)
+	mat.Set(100, 1, 1)
+	mat.Set(200, 2, 3)
+	intrinsic.Print("LEVEL 18: mat(1,1) =", mat.At(1, 1))
+	intrinsic.Print("LEVEL 18: mat(2,3) =", mat.At(2, 3))
 	intrinsic.Print("LEVEL 18: SIZE(mat) =", int32(mat.Size()))
-	vec = nil
-	mat = nil
+	vec.Deallocate()
+	mat.Deallocate()
 	intrinsic.Print("LEVEL 18: Arrays deallocated")
 }
 func LEVEL19() {
@@ -453,34 +544,50 @@ func LEVEL19() {
 	PRINT_COMMON_VALUES()
 }
 func SET_COMMON_VALUES() {
-	SHARED.X = 42
-	SHARED.Y = 99
-	SHARED.Z = 3.14159
+	var (
+		x    int32
+		y    int32
+		_, _ = x, y
+	)
+	var (
+		z float32
+		_ = z
+	)
+	shared.x = 42
+	shared.y = 99
+	shared.z = 3.14159
 }
 func PRINT_COMMON_VALUES() {
-	intrinsic.Print("LEVEL 19: x =", SHARED.X)
-	intrinsic.Print("LEVEL 19: y =", SHARED.Y)
-	intrinsic.Print("LEVEL 19: z =", SHARED.Z)
+	var (
+		x    int32
+		y    int32
+		_, _ = x, y
+	)
+	var (
+		z float32
+		_ = z
+	)
+	intrinsic.Print("LEVEL 19: x =", shared.x)
+	intrinsic.Print("LEVEL 19: y =", shared.y)
+	intrinsic.Print("LEVEL 19: z =", shared.z)
 }
 func LEVEL20() {
 	var (
-		a int32
-		b int32
-		c int32
+		a       int32
+		b       int32
+		c       int32
+		_, _, _ = a, b, c
 	)
 	var (
-		x float32
-		y float32
+		x    float32
+		y    float32
+		_, _ = x, y
 	)
-	{
-		a = 10
-		b = 20
-		c = 30
-	}
-	{
-		x = 3.14
-		y = 2.71
-	}
+	a = 10
+	b = 20
+	c = 30
+	x = 3.14
+	y = 2.71
 	intrinsic.Print("LEVEL 20: a =", a)
 	intrinsic.Print("LEVEL 20: b =", b)
 	intrinsic.Print("LEVEL 20: c =", c)
@@ -491,26 +598,39 @@ func LEVEL21() {
 	var (
 		x      int32
 		choice int32
+		_, _   = x, choice
 	)
 	x = -5
-	if x < 0 {
+	if int(x) < 0 {
 		goto label10
-	} else if x == 0 {
+	} else if int(x) == 0 {
 		goto label20
 	} else {
 		goto label30
 	}
+	goto label10
 label10:
-	intrinsic.Print("LEVEL 21: x is negative")
+	{
+		intrinsic.Print("LEVEL 21: x is negative")
+	}
 	goto label40
+	goto label20
 label20:
-	intrinsic.Print("LEVEL 21: x is zero")
+	{
+		intrinsic.Print("LEVEL 21: x is zero")
+	}
 	goto label40
+	goto label30
 label30:
-	intrinsic.Print("LEVEL 21: x is positive")
+	{
+		intrinsic.Print("LEVEL 21: x is positive")
+	}
+	goto label40
 label40:
-	choice = 2
-	switch choice {
+	{
+		choice = 2
+	}
+	switch int(choice) {
 	case 1:
 		goto label100
 	case 2:
@@ -518,55 +638,97 @@ label40:
 	case 3:
 		goto label300
 	}
+	goto label100
 label100:
-	intrinsic.Print("LEVEL 21: Choice was 1")
+	{
+		intrinsic.Print("LEVEL 21: Choice was 1")
+	}
 	goto label400
+	goto label200
 label200:
-	intrinsic.Print("LEVEL 21: Choice was 2")
+	{
+		intrinsic.Print("LEVEL 21: Choice was 2")
+	}
 	goto label400
+	goto label300
 label300:
-	intrinsic.Print("LEVEL 21: Choice was 3")
+	{
+		intrinsic.Print("LEVEL 21: Choice was 3")
+	}
+	goto label400
 label400:
-	;
-	_ = choice
-	_ = x
+	{
+	}
 }
 func LEVEL22() {
 }
 func LEVEL23() {
-	const MAX_SIZE int32 = 100
-	const PI float32 = 3.14159
-	const TAU float32 = 2.0 * PI
-	intrinsic.Print("LEVEL 23: MAX_SIZE =", MAX_SIZE)
-	intrinsic.Print("LEVEL 23: PI =", PI)
-	intrinsic.Print("LEVEL 23: TAU =", TAU)
+	var (
+		max_size int32 = 100
+		_              = max_size
+	)
+	var (
+		pi float32 = 3.14159
+		_          = pi
+	)
+	var (
+		tau float32 = 2.0 * pi
+		_           = tau
+	)
+	intrinsic.Print("LEVEL 23: MAX_SIZE =", max_size)
+	intrinsic.Print("LEVEL 23: PI =", pi)
+	intrinsic.Print("LEVEL 23: TAU =", tau)
 }
 func LEVEL24() {
-	var vec1 = intrinsic.NewArray[int32](3)
-	var vec2 = intrinsic.NewArray[int32](5)
-	vec1 = intrinsic.NewArrayFromValues[int32]([]int32{10, 20, 30})
-	intrinsic.Print("LEVEL 24: vec1(1) =", vec1.At(int(1)))
-	intrinsic.Print("LEVEL 24: vec1(2) =", vec1.At(int(2)))
-	intrinsic.Print("LEVEL 24: vec1(3) =", vec1.At(int(3)))
-	vec2 = intrinsic.NewArrayFromValues[int32]([]int32{100, 200, 300, 400, 500})
-	intrinsic.Print("LEVEL 24: vec2(1) =", vec2.At(int(1)))
-	intrinsic.Print("LEVEL 24: vec2(5) =", vec2.At(int(5)))
-	_ = vec1
-	_ = vec2
+	var (
+		vec1 *intrinsic.Array[int32]
+		_    = vec1
+	)
+	vec1 = intrinsic.NewArray[int32](nil, 3)
+	var (
+		vec2 *intrinsic.Array[int32]
+		_    = vec2
+	)
+	vec2 = intrinsic.NewArray[int32](nil, 5)
+	vec1 = intrinsic.NewArray[int32]([]int32{10, 20, 30}, 3)
+	intrinsic.Print("LEVEL 24: vec1(1) =", vec1.At(1))
+	intrinsic.Print("LEVEL 24: vec1(2) =", vec1.At(2))
+	intrinsic.Print("LEVEL 24: vec1(3) =", vec1.At(3))
+	vec2 = intrinsic.NewArray[int32]([]int32{100, 200, 300, 400, 500}, 5)
+	intrinsic.Print("LEVEL 24: vec2(1) =", vec2.At(1))
+	intrinsic.Print("LEVEL 24: vec2(5) =", vec2.At(5))
 }
 func LEVEL25() {
-	var i1 int8
-	var i2 int16
-	var i4 int32
-	var i8 int64
-	var r4 float32
-	var r8 float64
-	i1 = int8(127)
-	i2 = int16(32767)
+	var (
+		i1 int8
+		_  = i1
+	)
+	var (
+		i2 int16
+		_  = i2
+	)
+	var (
+		i4 int32
+		_  = i4
+	)
+	var (
+		i8 int64
+		_  = i8
+	)
+	var (
+		r4 float32
+		_  = r4
+	)
+	var (
+		r8 float64
+		_  = r8
+	)
+	i1 = 127
+	i2 = 32767
 	i4 = 2147483647
-	i8 = int64(9223372036854775807)
+	i8 = 9223372036854775807
 	r4 = 3.14159
-	r8 = 3.141592653589793e0
+	r8 = float64(3.141592653589793)
 	intrinsic.Print("LEVEL 25: i1 =", i1)
 	intrinsic.Print("LEVEL 25: i2 =", i2)
 	intrinsic.Print("LEVEL 25: i4 =", i4)
@@ -579,11 +741,13 @@ func LEVEL26() {
 		hex_val int32
 		oct_val int32
 		bin_val int32
+		_, _, _ = hex_val, oct_val, bin_val
 	)
 	var (
-		d1 float64
-		d2 float64
-		d4 float64
+		d1      float64
+		d2      float64
+		d4      float64
+		_, _, _ = d1, d2, d4
 	)
 	hex_val = int32(255)
 	oct_val = int32(255)
@@ -591,121 +755,270 @@ func LEVEL26() {
 	intrinsic.Print("LEVEL 26: hex_val =", hex_val)
 	intrinsic.Print("LEVEL 26: oct_val =", oct_val)
 	intrinsic.Print("LEVEL 26: bin_val =", bin_val)
-	d1 = 1.0e0
-	d2 = 1.23e+02
-	d4 = 2.718281828e0
+	d1 = float64(1.0)
+	d2 = float64(123.0)
+	d4 = float64(2.718281828)
 	intrinsic.Print("LEVEL 26: d1 =", d1)
 	intrinsic.Print("LEVEL 26: d2 =", d2)
 	intrinsic.Print("LEVEL 26: d4 =", d4)
 }
 func LEVEL27() {
-	const ncomp int32 = 5
-	const factor float64 = 1.1574074074074073e-05
-	const root3 float64 = 1.7320508075688772e+00
-	const PI float64 = 3.141592653589793e+00
-	var result float64
-	result = factor * root3 * float64(ncomp)
+	var (
+		ncomp int32 = 5
+		_           = ncomp
+	)
+	var (
+		factor float64 = 1.0 / 86400.0
+		_              = factor
+	)
+	var (
+		root3 float64 = intrinsic.SQRT(3.0)
+		_             = root3
+	)
+	var (
+		pi float64 = 4.0 * intrinsic.ATAN(1.0)
+		_          = pi
+	)
+	var (
+		result float64
+		_      = result
+	)
+	result = float64(factor * root3 * float64(ncomp))
 	intrinsic.Print("LEVEL 27: ncomp =", ncomp)
 	intrinsic.Print("LEVEL 27: factor =", factor)
 	intrinsic.Print("LEVEL 27: root3 =", root3)
-	intrinsic.Print("LEVEL 27: PI =", PI)
+	intrinsic.Print("LEVEL 27: PI =", pi)
 	intrinsic.Print("LEVEL 27: result =", result)
 }
 func LEVEL28() {
+	var (
+		yqr     *intrinsic.Array[float32]
+		sumxrq  *intrinsic.Array[float32]
+		ymnrt   *intrinsic.Array[float32]
+		_, _, _ = yqr, sumxrq, ymnrt
+	)
+	yqr = intrinsic.NewArray[float32](nil, 256)
+	sumxrq = intrinsic.NewArray[float32](nil, 512)
+	ymnrt = intrinsic.NewArray[float32](nil, 3)
+	var (
+		matrix *intrinsic.Array[float32]
+		_      = matrix
+	)
+	matrix = intrinsic.NewArray[float32](nil, 10, 20)
+	var (
+		counts *intrinsic.Array[int32]
+		_      = counts
+	)
+	counts = intrinsic.NewArray[int32](nil, 100)
 	intrinsic.Print("LEVEL 28: COMMON block arrays initialized")
-	HOLDRT.YQR.Set(1.5, int(1))
-	HOLDRT.SUMXRQ.Set(99.9, int(512))
-	HOLDRT.YMNRT.Set(3.14, int(2))
-	HOLDRT.MATRIX.Set(42.5, int(5), int(10))
-	STATS.COUNTS.Set(42, int(50))
-	intrinsic.Print("LEVEL 28: YQR(1) =", HOLDRT.YQR.At(int(1)))
-	intrinsic.Print("LEVEL 28: SUMXRQ(512) =", HOLDRT.SUMXRQ.At(int(512)))
-	intrinsic.Print("LEVEL 28: YMNRT(2) =", HOLDRT.YMNRT.At(int(2)))
-	intrinsic.Print("LEVEL 28: MATRIX(5,10) =", HOLDRT.MATRIX.At(int(5), int(10)))
-	intrinsic.Print("LEVEL 28: COUNTS(50) =", STATS.COUNTS.At(int(50)))
+	holdrt.yqr.Set(1.5, 1)
+	holdrt.sumxrq.Set(99.90000000000001, 512)
+	holdrt.ymnrt.Set(3.14, 2)
+	holdrt.matrix.Set(42.5, 5, 10)
+	stats.counts.Set(42, 50)
+	intrinsic.Print("LEVEL 28: YQR(1) =", holdrt.yqr.At(1))
+	intrinsic.Print("LEVEL 28: SUMXRQ(512) =", holdrt.sumxrq.At(512))
+	intrinsic.Print("LEVEL 28: YMNRT(2) =", holdrt.ymnrt.At(2))
+	intrinsic.Print("LEVEL 28: MATRIX(5,10) =", holdrt.matrix.At(5, 10))
+	intrinsic.Print("LEVEL 28: COUNTS(50) =", stats.counts.At(50))
 }
 func LEVEL29() {
-	var NPAA intrinsic.Pointer[float64]
-	var NPII intrinsic.Pointer[int32]
-	var NPLL intrinsic.Pointer[bool]
 	var (
-		N      int32
-		M      int32
-		MAXMUM int32
-		MAXDM1 int32
-		MAXDEF int32
+		firstletter int8 = 97
+		_                = firstletter
 	)
-	var I_DEFALT = intrinsic.NewArray[int32](2)
-	I_DEFALT.Set(125269879, int(1))
-	I_DEFALT.Set(125269879, int(2))
+	var (
+		letters int32
+		_       = letters
+	)
+	var (
+		mat *intrinsic.Array[int8]
+		_   = mat
+	)
+	mat = intrinsic.NewArray[int8](nil, 2, 2)
+	var (
+		mat4 *intrinsic.Array[int32]
+		_    = mat4
+	)
+	mat4 = intrinsic.NewArray[int32](nil, 1, 2)
+	var (
+		a intrinsic.CharacterArray
+		_ = a
+	)
+	a = intrinsic.NewCharacterArray(4)
+	intrinsic.Equivalence(&a, intrinsic.PointerOff(mat, mat.AtOffset(1, 1)), intrinsic.PointerOff(mat4, mat4.AtOffset(1, 2)))
+	letters = 1633837924
+	var (
+		f intrinsic.PointerTo[float32]
+		_ = f
+	)
+	var (
+		n intrinsic.PointerTo[int32]
+		_ = n
+	)
+	f = intrinsic.MALLOC[float32](4)
+	n = intrinsic.PointerFrom[int32](f)
+	mat.Set(firstletter, 1, 1)
+	mat.Set(firstletter+1, 1, 2)
+	mat.Set(firstletter+2, 2, 1)
+	mat.Set(firstletter+3, 2, 2)
+	intrinsic.Print("LEVEL 29: byte mat ", a)
+	mat4.Set(letters, 1, 2)
+	intrinsic.Print("LEVEL 29: uint32 mat ", a)
+	f.Set(1, float32(float32(1)))
+	intrinsic.Print("LEVEL 29: linked float=1,int", f.At(1), n.At(1))
+	n.Set(1, int32(1109917696))
+	intrinsic.Print("LEVEL 29: linked float,int=1109917696", f.At(1), n.At(1))
+}
+func LEVEL30() {
+	var (
+		a    intrinsic.CharacterArray
+		b    intrinsic.CharacterArray
+		_, _ = a, b
+	)
+	a = intrinsic.NewCharacterArray(1)
+	b = intrinsic.NewCharacterArray(1)
+	var (
+		c *intrinsic.Array[intrinsic.CharacterArray]
+		_ = c
+	)
+	c = intrinsic.NewArray[intrinsic.CharacterArray](nil, 4)
+	var (
+		mat *intrinsic.Array[int32]
+		_   = mat
+	)
+	mat = intrinsic.NewArray[int32](nil, 2, 2)
+	intrinsic.Equivalence(c.AtPtr(1), intrinsic.PointerOff(mat, mat.AtOffset(1, 1)))
+	intrinsic.Equivalence(&a, &b, intrinsic.PointerOff(mat, mat.AtOffset(1, 2)))
+	mat.Set(64, 1, 1)
+	mat.Set(97, 1, 2)
+	intrinsic.Print("LEVEL 30: CHAR A,B:", a, b)
+	intrinsic.Print("LEVEL 30: CHAR C:", c.At(1))
+}
+func LEVEL31() {
+	var (
+		npaa intrinsic.PointerTo[float64]
+		aa   intrinsic.PointerTo[float64]
+		_, _ = npaa, aa
+	)
+	var (
+		npii intrinsic.PointerTo[int32]
+		ii   intrinsic.PointerTo[int32]
+		_, _ = npii, ii
+	)
+	var (
+		npll intrinsic.PointerTo[bool]
+		ll   intrinsic.PointerTo[bool]
+		_, _ = npll, ll
+	)
+	var (
+		n             int32
+		m             int32
+		maxmum        int32
+		maxdm1        int32
+		maxdef        int32
+		_, _, _, _, _ = n, m, maxmum, maxdm1, maxdef
+	)
+	var (
+		defalt intrinsic.PointerTo[float64]
+		_      = defalt
+	)
+	var (
+		i_defalt *intrinsic.Array[int32]
+		_        = i_defalt
+	)
+	i_defalt = intrinsic.NewArray[int32](nil, 2)
+	i_defalt.Set(125269879, 1)
+	i_defalt.Set(125269879, 2)
+	intrinsic.Equivalence(&defalt, i_defalt)
 	intrinsic.Print("LEVEL 29: Advanced features test")
-	MAXDM1 = 100
-	NPAA = intrinsic.MALLOC[float64](MAXDM1 * 8)
-	if NPAA.Data() == nil {
-		intrinsic.Exit(69)
+	maxdm1 = 100
+	npaa = intrinsic.MALLOC[float64](maxdm1 * 8)
+	aa = npaa
+	if npaa.DataUnsafe() == nil {
+		intrinsic.Stop(69)
 	}
-	NPII = intrinsic.Equivalence[int32, float64](NPAA)
-	NPLL = intrinsic.Equivalence[bool, int32](NPII)
-	M = 1
-	MAXDEF = intrinsic.MIN[int32](200000, MAXDM1)
-	for M = 1; M <= MAXDEF; M += 32768 {
-		MAXMUM = intrinsic.MIN[int32](M+32767, MAXDEF)
-		for N = M; N <= MAXMUM; N += 1 {
-			NPAA.Set(int(N), DEFALT)
+	npii = intrinsic.PointerFrom[int32](npaa)
+	ii = npii
+	npll = intrinsic.PointerFrom[bool](npii)
+	ll = npll
+	m = 1
+	maxdef = intrinsic.MIN[int32](200000, maxdm1)
+	for m = 1; m <= maxdef; m += 32768 {
+		maxmum = intrinsic.MIN[int32](m+32767, maxdef)
+		for n = m; n <= maxmum; n++ {
 		}
 	}
-	intrinsic.Print("LEVEL 29: AA(2) ", NPAA.At(int(2)))
-	intrinsic.Print("LEVEL 29: Initialized", MAXMUM-M+1, "elements")
-	_ = I_DEFALT
-	_ = N
-	_ = NPLL
+	intrinsic.Print("LEVEL 29: AA(2) ", aa.At(2))
+	intrinsic.Print("LEVEL 29: Initialized", maxmum-m+1, "elements")
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
 }
-func ADD_VALUES(a int32, b int32, result intrinsic.Pointer[int32]) {
-	result.Set(1, a+b)
+func ADD_VALUES(a int32, b int32, result *int32) {
+	*result = a + b
 	intrinsic.Print("LEVEL 7: Inside ADD_VALUES")
 }
 func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
-	var i int32
-	for i = 1; i <= n; i += 1 {
+	var (
+		i int32
+		_ = i
+	)
+	for i = 1; i <= n; i++ {
 		arr.Set(arr.At(int(i))*2, int(i))
 	}
 	intrinsic.Print("LEVEL 7: Inside MODIFY_ARRAY")
-	_ = i
 }
-func FACTORIAL(n int32) int32 {
+func FACTORIAL(n int32) (factorial int32) {
 	var (
 		i      int32
 		result int32
+		_, _   = i, result
 	)
 	result = 1
-	for i = 1; i <= n; i += 1 {
+	for i = 1; i <= n; i++ {
 		result = result * i
 	}
-	return result
+	factorial = result
+	return
 }
-func SQUARE_ROOT(x float32) float32 {
-	return intrinsic.SQRT[float32](x)
+func SQUARE_ROOT(x float32) (square_root float32) {
+	square_root = intrinsic.SQRT(x)
+	return
 }
-func FIBONACCI(n int32) int32 {
+func FIBONACCI(n int32) (fibonacci int32) {
 	var (
-		a    int32
-		b    int32
-		temp int32
-		i    int32
+		a          int32
+		b          int32
+		temp       int32
+		i          int32
+		_, _, _, _ = a, b, temp, i
 	)
 	if n <= 1 {
-		return n
+		fibonacci = n
 	}
 	a = 0
 	b = 1
-	for i = 2; i <= n; i += 1 {
+	for i = 2; i <= n; i++ {
 		temp = a + b
 		a = b
 		b = temp
 	}
-	_ = i
-	return b
+	fibonacci = b
+	return
 }
+
+var holdrt = struct {
+	yqr    *intrinsic.Array[float32]
+	sumxrq *intrinsic.Array[float32]
+	ymnrt  *intrinsic.Array[float32]
+	matrix *intrinsic.Array[float32]
+}{yqr: intrinsic.NewArray[float32](nil, 256), sumxrq: intrinsic.NewArray[float32](nil, 512), ymnrt: intrinsic.NewArray[float32](nil, 3), matrix: intrinsic.NewArray[float32](nil, 10, 20)}
+var shared struct {
+	x int32
+	y int32
+	z float32
+}
+var stats = struct {
+	counts *intrinsic.Array[int32]
+}{counts: intrinsic.NewArray[int32](nil, 100)}

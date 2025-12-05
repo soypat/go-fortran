@@ -139,6 +139,11 @@ func MODREAL[T float](a, p T) T {
 	return T(math.Mod(float64(a), float64(p)))
 }
 
+// POW returns a to the power of exponent. In fortran represented as a**exponent.
+func POW[T float](a, exponent T) T {
+	return T(math.Pow(float64(a), float64(exponent)))
+}
+
 // SIGN transfers the sign of b to the magnitude of a
 // Fortran: SIGN(a, b) returns |a| if b >= 0, -|a| if b < 0
 func SIGN[T signed | float](a, b T) T {

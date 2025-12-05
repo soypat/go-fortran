@@ -22,12 +22,15 @@ _old*
 !/go.mod
 testdata/golden
 testdata/golden.out
+/golden*
 # test transpile files.
 *.f90.go 
+
 # `__debug_bin` Debug binary generated in VSCode when using the built-in debugger.
 **__debug_bin*
 *bin
-
+/fortranvar
+/fortrangrep
 # IDE
 .vscode/
 
@@ -39,7 +42,7 @@ geodyn
 claude-test
 .claude
 !/testdata/**.f90
-
+*temp.f90
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 *.cov

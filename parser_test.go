@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/soypat/go-fortran/ast"
 )
 
 //go:embed testdata
@@ -155,4 +157,52 @@ func newParser(t *testing.T, code string) *Parser90 {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// TestArrayRefVsFunctionCall verifies that declared arrays produce ArrayRef nodes
+// while undeclared identifiers produce FunctionCall nodes.
+func TestArrayRefVsFunctionCall(t *testing.T) {
+	src := `SUBROUTINE test()
+  INTEGER, DIMENSION(10) :: arr
+  INTEGER :: x
+  x = arr(5)
+  x = UNKNOWN_FUNC(5)
+END SUBROUTINE`
+
+	p := newParser(t, src)
+	unit := p.ParseNextProgramUnit()
+	if unit == nil {
+		t.Fatal("expected program unit")
+	}
+	sub, ok := unit.(*ast.Subroutine)
+	if !ok {
+		t.Fatalf("expected Subroutine, got %T", unit)
+	}
+
+	// Find the assignment statements
+	var assignStmts []*ast.AssignmentStmt
+	for _, stmt := range sub.Body {
+		if assign, ok := stmt.(*ast.AssignmentStmt); ok {
+			assignStmts = append(assignStmts, assign)
+		}
+	}
+	if len(assignStmts) != 2 {
+		t.Fatalf("expected 2 assignment statements, got %d", len(assignStmts))
+	}
+
+	// First assignment: x = arr(5) - arr should be ArrayRef
+	arrRef, ok := assignStmts[0].Value.(*ast.ArrayRef)
+	if !ok {
+		t.Errorf("expected arr(5) to be *ast.ArrayRef, got %T", assignStmts[0].Value)
+	} else if arrRef.Name != "arr" {
+		t.Errorf("expected ArrayRef name 'arr', got %s", arrRef.Name)
+	}
+
+	// Second assignment: x = UNKNOWN_FUNC(5) - should be FunctionCall
+	funcCall, ok := assignStmts[1].Value.(*ast.FunctionCall)
+	if !ok {
+		t.Errorf("expected UNKNOWN_FUNC(5) to be *ast.FunctionCall, got %T", assignStmts[1].Value)
+	} else if funcCall.Name != "UNKNOWN_FUNC" {
+		t.Errorf("expected FunctionCall name 'UNKNOWN_FUNC', got %s", funcCall.Name)
+	}
 }
