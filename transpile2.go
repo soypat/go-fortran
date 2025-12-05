@@ -1270,13 +1270,31 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 	return goType
 }
 
+// varIsArray returns true if the variable's Go type is *intrinsic.Array[T].
+// This applies to Fortran variables declared with DIMENSION attribute or
+// explicit array bounds in their type declaration.
 func (tg *ToGo) varIsArray(v *varinfo) bool {
 	return v.flags.HasAny(flagDimension)
 }
 
+// varIsPointerTo returns true if the variable's Go type is intrinsic.PointerTo[T]
+// AND should be automatically dereferenced when accessed.
+//
+// This applies to:
+//   - Equivalenced scalar variables (flagEquivalenced) - need dereferencing for value access
+//   - Non-array Cray-style pointee variables (flagPointee) - rare, usually pointees are arrays
+//
+// Excluded:
+//   - Cray-style pointer variables (flagPointer) - represent the pointer object, not pointee data
+//   - Arrays (flagDimension) - have their own access patterns (*intrinsic.Array[T])
+//   - CHARACTER types - use intrinsic.CharacterArray
 func (tg *ToGo) varIsPointerTo(v *varinfo) bool {
-	// CHARACTER types are excluded as they have their own access methods
-	return v.flags.HasAny(flagEquivalenced|flagPointee|flagPointer) && !tg.varIsArray(v) && v.typeToken() != f90token.CHARACTER
+	// Pointer variables (like NPAA) represent the address holder, not the data.
+	// They should not be auto-dereferenced.
+	if v.flags.HasAny(flagPointer) {
+		return false
+	}
+	return v.flags.HasAny(flagEquivalenced|flagPointee) && !tg.varIsArray(v) && v.typeToken() != f90token.CHARACTER
 }
 
 func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, root *f90.BinaryExpr) (_ []ast.Stmt, err error) {

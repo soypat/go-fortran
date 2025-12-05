@@ -448,6 +448,7 @@ func (tg *ToGo) transformArrayRef(vitgt *varinfo, e *f90.ArrayRef) (result ast.E
 }
 
 // astVarExpr returns the AST expression for a variable, handling COMMON block access.
+// It does not handle access patterns.
 func (tg *ToGo) astVarExpr(vi *varinfo) ast.Expr {
 	if vi.common != "" {
 		return &ast.SelectorExpr{

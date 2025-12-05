@@ -847,10 +847,10 @@ func LEVEL29() {
 	intrinsic.Print("LEVEL 29: byte mat ", a)
 	mat4.Set(letters, 1, 2)
 	intrinsic.Print("LEVEL 29: uint32 mat ", a)
-	f.Set(1, float32(1))
-	intrinsic.Print("LEVEL 29: linked float=1,int", f, n)
-	n.Set(1, 1109917696)
-	intrinsic.Print("LEVEL 29: linked float,int=1109917696", f, n)
+	f.Set(1, float32(float32(1)))
+	intrinsic.Print("LEVEL 29: linked float=1,int", f.At(1), n.At(1))
+	n.Set(1, int32(1109917696))
+	intrinsic.Print("LEVEL 29: linked float,int=1109917696", f.At(1), n.At(1))
 }
 func LEVEL30() {
 	var (

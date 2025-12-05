@@ -241,33 +241,43 @@ func (pud *ParserUnitData) resolveImplicitTypes() {
 
 	for i := range pud.vars {
 		vi := &pud.vars[i]
-		if vi.decl != nil {
+		// Skip variables that already have explicit type declarations.
+		// But handle partial decls (e.g., from Cray POINTER with ArraySpec but no Type).
+		if vi.decl != nil && vi.decl.Type != nil {
 			continue // Already has explicit type
 		}
 		ident := vi.Identifier()
+		var implicitType *ast.TypeSpec
 		for _, impl := range pud.implicits {
 			ts := impl.ImplicitTypeFor(ident)
-			if ts == nil {
-				continue
+			if ts != nil {
+				implicitType = ts
+				vi.flags |= flagImplicit
+				break
 			}
-			vi.decl = &ast.DeclEntity{
-				Name:     vi._varname,
-				Position: impl.Position,
-				Type:     ts,
-			}
-			vi.flags |= flagImplicit
-			break
 		}
-		if vi.decl == nil {
+		if implicitType == nil {
+			// Use default Fortran I-N convention
 			letter := ident[0]
 			if letter >= 'a' && letter <= 'z' {
 				letter -= 'a' - 'A'
 			}
 			if letter >= 'I' && letter <= 'N' {
-				vi.decl = _implicitInteger
+				implicitType = _implicitInteger.Type
 			} else {
-				vi.decl = _implicitReal
+				implicitType = _implicitReal.Type
 			}
+		}
+		// TODO: From cray pointer we now have special case where decl is non-nil but type is nil. Can we just consolidate both cases?
+		// Assign type, preserving any existing ArraySpec from partial decl
+		if vi.decl == nil {
+			vi.decl = &ast.DeclEntity{
+				Name: vi._varname,
+				Type: implicitType,
+			}
+		} else {
+			// Partial decl exists (e.g., from Cray POINTER) - just fill in Type
+			vi.decl.Type = implicitType
 		}
 	}
 }
@@ -4495,7 +4505,19 @@ func (p *Parser90) parsePointerCrayStmt() ast.Statement {
 			PointeeArraySpec: arraySpec,
 		})
 		p.varInit(ptrVar, nil, flagPointer, pointeeVar)
-		p.varInit(pointeeVar, nil, flagPointee, "")
+		// Create partial DeclEntity with ArraySpec if present.
+		// Type will be filled in by resolveImplicitTypes.
+		// TODO: what? is this really necessary?
+		var pointeeDecl *ast.DeclEntity
+		pointeeFlags := flagPointee
+		if arraySpec != nil {
+			pointeeDecl = &ast.DeclEntity{
+				Name:      pointeeVar,
+				ArraySpec: arraySpec,
+			}
+			pointeeFlags |= flagDimension
+		}
+		p.varInit(pointeeVar, pointeeDecl, pointeeFlags, "")
 		// Check for comma (more pairs) or end of statement
 		if !ok || !p.consumeIf(token.Comma) {
 			break
