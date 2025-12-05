@@ -344,14 +344,24 @@ type Varinfo struct {
 	kindFlag int   // 0 when uninitialized. -1 when unspecified, -2..-99 error. else is kind value.
 }
 
-func (p *Varinfo) Flags() VarFlags                    { return p.flags }
-func (p *Varinfo) Value() Value                       { return p.val }
-func (p *Varinfo) Charlen() ast.Expression            { return p.decl.Charlen() }
-func (p *Varinfo) Kind() ast.Expression               { return p.decl.Kind() }
-func (p *Varinfo) Dimensions() *ast.ArraySpec         { return p.decl.Dimension() }
-func (p *Varinfo) Identifier() string                 { return p._varname }
-func (p *Varinfo) IsParameter() bool                  { return p.flags.HasAny(VFlagParameter) }
-func (p *Varinfo) IsAllocatable() bool                { return p.flags.HasAny(VFlagAllocatable) }
+func (p *Varinfo) Flags() VarFlags            { return p.flags }
+func (p *Varinfo) Value() Value               { return p.val }
+func (p *Varinfo) Charlen() ast.Expression    { return p.decl.Charlen() }
+func (p *Varinfo) Kind() ast.Expression       { return p.decl.Kind() }
+func (p *Varinfo) Dimensions() *ast.ArraySpec { return p.decl.Dimension() }
+func (p *Varinfo) Identifier() string         { return p._varname }
+func (p *Varinfo) IsParameter() bool          { return p.flags.HasAny(VFlagParameter) }
+func (p *Varinfo) IsAllocatable() bool        { return p.flags.HasAny(VFlagAllocatable) }
+func (p *Varinfo) CommonBlock() string        { return p.common }
+func (p *Varinfo) DeclPos() (source string, line, col int) {
+	return p.declPos.Source, p.declPos.Line, p.declPos.Col
+}
+func (p *Varinfo) TypeToken() token.Token {
+	if p.decl == nil || p.decl.Type == nil {
+		return token.Undefined
+	}
+	return p.decl.Type.Token
+}
 func (p *Varinfo) reset()                             { *p = Varinfo{} }
 func (p *Parser90) varResetAll()                      { p.vars.reset() }
 func (p *Parser90) varGet(name []byte) (vi *Varinfo)  { return p.vars.Varb(name) }
@@ -587,7 +597,7 @@ func (p *Parser90) parseProgramBlock() ast.Statement {
 		block.Contains = p.parseAppendProgramUnits(block.Contains[:0])
 	}
 
-	p.expectEndProgramUnit(token.PROGRAM, token.ENDPROGRAM, start)
+	p.expectEndProgramUnit(token.PROGRAM, token.ENDPROGRAM, start, block.Name)
 	p.consumeIf(token.Identifier)
 	block.Position = ast.Pos(start.Pos, p.current.start)
 	return block
@@ -616,7 +626,7 @@ func (p *Parser90) parseModule() ast.Statement {
 	if p.consumeIf(token.CONTAINS) {
 		mod.Contains = p.parseAppendProgramUnits(mod.Contains[:0])
 	}
-	p.expectEndProgramUnit(token.MODULE, token.ENDMODULE, start)
+	p.expectEndProgramUnit(token.MODULE, token.ENDMODULE, start, mod.Name)
 	p.consumeIf(token.Identifier)
 	mod.Position = ast.Pos(start.Pos, p.current.start)
 
@@ -660,7 +670,7 @@ func (p *Parser90) parseSubroutine() ast.Statement {
 	// Parse body statements
 	sub.Body = p.parseBody(sub.Parameters)
 
-	p.expectEndProgramUnit(token.SUBROUTINE, token.ENDSUBROUTINE, start)
+	p.expectEndProgramUnit(token.SUBROUTINE, token.ENDSUBROUTINE, start, sub.Name)
 	p.consumeIf(token.Identifier)
 
 	sub.Data = p.makeUnitData(sub.Name, token.SUBROUTINE)
@@ -702,7 +712,7 @@ func (p *Parser90) parseFunction() ast.Statement {
 	// Parse body statements
 	fn.Body = p.parseBody(fn.Parameters)
 
-	p.expectEndProgramUnit(token.FUNCTION, token.ENDFUNCTION, start)
+	p.expectEndProgramUnit(token.FUNCTION, token.ENDFUNCTION, start, fn.Name)
 	p.consumeIf(token.Identifier)
 	fn.Position = ast.Pos(start.Pos, p.current.start)
 	pud := p.makeUnitData(fn.Name, token.FUNCTION)
@@ -852,7 +862,7 @@ func (p *Parser90) expectEndConstruct(keyword, singleEndForm token.Token, start 
 	}
 	if p.currentTokenIs(token.END) {
 		// END without expected keyword - belongs to parent
-		p.addErrorMismatchedEnd(start, keyword)
+		p.addErrorMismatchedEnd(start, keyword, "")
 		return false
 	} else {
 		p.addError("expected END " + keyword.String())
@@ -860,7 +870,7 @@ func (p *Parser90) expectEndConstruct(keyword, singleEndForm token.Token, start 
 	}
 }
 
-func (p *Parser90) expectEndProgramUnit(keyword, singleEndForm token.Token, start sourcePos) bool {
+func (p *Parser90) expectEndProgramUnit(keyword, singleEndForm token.Token, start sourcePos, name string) bool {
 	// Check for F77 single-token form e.g: ENDPROGRAM or F90 two-token form e.g: END PROGRAM
 	if p.consumeIf(singleEndForm) || p.consumeIf2(token.END, keyword) {
 		return true
@@ -868,13 +878,13 @@ func (p *Parser90) expectEndProgramUnit(keyword, singleEndForm token.Token, star
 		// Program units do not need keyword specifier, can be single END form.
 		return true
 	}
-	p.addErrorMismatchedEnd(start, keyword)
+	p.addErrorMismatchedEnd(start, keyword, name)
 	return false
 }
 
-func (p *Parser90) addErrorMismatchedEnd(start sourcePos, keyword token.Token) {
-	p.addErrorWithPos(start, keyword.String()+" missing missing END with keyword")
-	p.addError("expected 'END " + keyword.String() + "'; got END without keyword (may belong to enclosing program unit or construct)")
+func (p *Parser90) addErrorMismatchedEnd(start sourcePos, keyword token.Token, label string) {
+	p.addErrorWithPos(start, keyword.String()+" missing END with keyword "+label)
+	p.addError("expected 'END " + keyword.String() + "'; got END without keyword (may belong to enclosing program unit or construct) " + label)
 }
 
 func (p *Parser90) skipUnexpectedEndConstructs(msg string) (skipped bool) {

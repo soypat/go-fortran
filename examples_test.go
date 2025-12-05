@@ -344,7 +344,7 @@ END PROGRAM
 
 	// Output:
 	// Parse errors detected:
-	//   bad.f90:4:13: IMPLICIT NONE must appear before type declarations
+	//   bad.f90:4:12: IMPLICIT NONE must appear before type declarations
 }
 
 // Example_parseSubroutine demonstrates parsing a subroutine
