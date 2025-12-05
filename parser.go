@@ -3434,7 +3434,16 @@ func (p *Parser90) parseTypeDecl() ast.Statement {
 		if p.currentTokenIs(token.Asterisk) {
 			// Character length or Kind, old F77
 			p.nextToken()
-			entity.KindOrLen = p.parseExpression(0, token.Comma, token.Equals, token.PointerAssign)
+			// Check for assumed-length character: *(*)
+			if p.currentTokenIs(token.LParen) && p.peekTokenIs(token.Asterisk) {
+				p.nextToken() // consume (
+				pos := p.current.start
+				p.nextToken() // consume *
+				p.expect(token.RParen, "closing ')' after *(*)")
+				entity.KindOrLen = &ast.Identifier{Value: "*", Position: ast.Pos(pos, pos+1)}
+			} else {
+				entity.KindOrLen = p.parseExpression(0, token.Comma, token.Equals, token.PointerAssign)
+			}
 		}
 		switch p.current.tok {
 		case token.Comma:
