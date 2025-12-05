@@ -250,8 +250,22 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 			Args: []ast.Expr{left, right},
 		}, vitgt, nil
 	case f90token.EQ, f90token.EqEq:
+		// Special case: pointer comparison to 0 → ptr.DataUnsafe() == nil
+		if isPointerZeroComparison(leftType, rightType, e.Right) {
+			return tg.pointerNilComparison(left, token.EQL), _tgtBool, nil
+		}
+		if isPointerZeroComparison(rightType, leftType, e.Left) {
+			return tg.pointerNilComparison(right, token.EQL), _tgtBool, nil
+		}
 		op = token.EQL
 	case f90token.NE, f90token.NotEquals:
+		// Special case: pointer comparison to 0 → ptr.DataUnsafe() != nil
+		if isPointerZeroComparison(leftType, rightType, e.Right) {
+			return tg.pointerNilComparison(left, token.NEQ), _tgtBool, nil
+		}
+		if isPointerZeroComparison(rightType, leftType, e.Left) {
+			return tg.pointerNilComparison(right, token.NEQ), _tgtBool, nil
+		}
 		op = token.NEQ
 	case f90token.LT, f90token.Less:
 		op = token.LSS
@@ -291,6 +305,29 @@ func (tg *ToGo) transformBinaryExpr(vitgt *varinfo, e *f90.BinaryExpr) (result a
 	}, resultType, nil
 }
 
+// isPointerZeroComparison checks if ptrType is a Cray pointer and other is literal 0.
+func isPointerZeroComparison(ptrType, otherType *varinfo, otherExpr f90.Expression) bool {
+	if ptrType == nil || ptrType.pointee == "" {
+		return false // Not a pointer variable
+	}
+	// Check if other is an integer literal 0
+	if lit, ok := otherExpr.(*f90.IntegerLiteral); ok && lit.Value == 0 {
+		return true
+	}
+	return false
+}
+
+// pointerNilComparison generates: ptr.DataUnsafe() == nil (or !=)
+func (tg *ToGo) pointerNilComparison(ptrExpr ast.Expr, op token.Token) ast.Expr {
+	return &ast.BinaryExpr{
+		X: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{X: ptrExpr, Sel: ast.NewIdent("DataUnsafe")},
+		},
+		Op: op,
+		Y:  ast.NewIdent("nil"),
+	}
+}
+
 func (tg *ToGo) transformFunctionCall(vitgt *varinfo, e *f90.FunctionCall) (result ast.Expr, resultType *varinfo, err error) {
 	vi := tg.repl.Var(e.Name)
 	if vi != nil {
@@ -307,6 +344,12 @@ func (tg *ToGo) transformFunctionCall(vitgt *varinfo, e *f90.FunctionCall) (resu
 		// Treat as array element access: arr.At(int(indices)...)
 		return tg.astMethodCall(e.Name, "At", args...), vi, nil
 	}
+
+	// Special handling for MALLOC - type parameter comes from target's pointee
+	if strings.EqualFold(e.Name, "MALLOC") {
+		return tg.transformMALLOC(vitgt, e)
+	}
+
 	fi := tg.ContainedOrExtern(e.Name)
 	if fi == nil {
 		fn := getIntrinsic(e.Name, len(e.Args))
@@ -338,6 +381,44 @@ func (tg *ToGo) transformFunctionCall(vitgt *varinfo, e *f90.FunctionCall) (resu
 		Fun:  ast.NewIdent(fi.name),
 		Args: args,
 	}, fi.returnType, nil
+}
+
+// transformMALLOC handles MALLOC intrinsic specially.
+// MALLOC returns PointerTo[T] where T comes from the target's pointee type.
+// Generates: intrinsic.MALLOC[T](size)
+func (tg *ToGo) transformMALLOC(vitgt *varinfo, e *f90.FunctionCall) (result ast.Expr, resultType *varinfo, err error) {
+	if len(e.Args) != 1 {
+		return nil, nil, tg.makeErr(e, "MALLOC requires 1 argument")
+	}
+
+	// Get the size argument
+	sizeArg, _, err := tg.transformExpression(_tgtInt32, e.Args[0])
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Determine element type from target's pointee
+	var elemType ast.Expr
+	if vitgt != nil && vitgt.pointee != "" {
+		pointeeVar := tg.repl.Var(vitgt.pointee)
+		if pointeeVar != nil {
+			elemType = tg.baseGotype(pointeeVar.typeToken(), tg.resolveKind(pointeeVar))
+		}
+	}
+	if elemType == nil {
+		// Fallback: try to get type from target directly if it's a known pointer type
+		return nil, nil, tg.makeErr(e, "MALLOC: cannot determine element type from target")
+	}
+
+	// Generate: intrinsic.MALLOC[T](size)
+	call := &ast.CallExpr{
+		Fun: &ast.IndexExpr{
+			X:     &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("MALLOC")},
+			Index: elemType,
+		},
+		Args: []ast.Expr{sizeArg},
+	}
+	return call, vitgt, nil
 }
 
 func (tg *ToGo) transformArrayRef(vitgt *varinfo, e *f90.ArrayRef) (result ast.Expr, err error) {
@@ -793,8 +874,7 @@ var intrinsics = []intrinsicFn{
 	makeIntrinsicMethod("LBOUND", "LowerDim", _tgtInt32, _tgtArray, _tgtInt32),
 	makeIntrinsicMethod("UBOUND", "UpperDim", _tgtInt32, _tgtArray, _tgtInt32),
 
-	// Special
-	makeIntrinsicFn("MALLOC", nil, _tgtInt32),
+	// Note: MALLOC is handled specially in transformMALLOC, not here
 }
 
 func defaultVarinfo(tok f90token.Token) *varinfo {

@@ -288,7 +288,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	case *f90.EquivalenceStmt:
 		dst, err = tg.transformEquivalenceStmt(dst, s)
 	case *f90.PointerCrayStmt:
-		// Cray-style POINTER statements are processed in preScanCommonBlocks, no code generation in function body
+		dst, err = tg.transformPointerCrayStmt(dst, s)
 	case *f90.DataStmt:
 		dst, err = tg.transformDataStmt(dst, s)
 	case *f90.ArithmeticIfStmt:
@@ -529,7 +529,32 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
 		return dst, err
 	}
-	rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
+
+	// Special case: cross-type pointer assignment (npii = npaa where types differ)
+	// Generates: npii = intrinsic.PointerFrom[T](npaa)
+	if targetVinfo.pointee != "" && rhsType.pointee != "" {
+		// Both are pointer variables - check if pointee types differ
+		targetPointee := tg.repl.Var(targetVinfo.pointee)
+		rhsPointee := tg.repl.Var(rhsType.pointee)
+		if targetPointee == nil || rhsPointee == nil {
+			return dst, tg.makeErr(stmt, "pointee(s) not found: "+targetVinfo.pointee+", "+rhsType.pointee)
+		}
+		tgtTok := targetPointee.typeToken()
+		rhsTok := rhsPointee.typeToken()
+		if tgtTok != rhsTok {
+			// Different types - use PointerFrom for conversion
+			elemType := tg.baseGotype(tgtTok, tg.resolveKind(targetPointee))
+			rhs = &ast.CallExpr{
+				Fun: &ast.IndexExpr{
+					X:     &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("PointerFrom")},
+					Index: elemType,
+				},
+				Args: []ast.Expr{rhs},
+			}
+		}
+	} else {
+		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
+	}
 	gstmt := &ast.AssignStmt{
 		Tok: token.ASSIGN,
 		Rhs: []ast.Expr{rhs},
@@ -892,6 +917,41 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 	return dst, nil
 }
 
+// transformPointerCrayStmt generates declarations for Cray-style POINTER statements.
+// For POINTER (NPAA, AA(1)), generates:
+//
+//	var npaa intrinsic.PointerTo[float64]
+//	var aa intrinsic.PointerTo[float64]
+func (tg *ToGo) transformPointerCrayStmt(dst []ast.Stmt, stmt *f90.PointerCrayStmt) (_ []ast.Stmt, err error) {
+	for _, pair := range stmt.Pointers {
+		ptrVar := tg.repl.Var(pair.PointerVar)
+		pointeeVar := tg.repl.Var(pair.Pointee)
+		if ptrVar == nil || pointeeVar == nil {
+			return dst, tg.makeErr(stmt, "pointer or pointee variable not found")
+		}
+
+		// Get the pointee's base type for PointerTo[T]
+		pointeeType := tg.baseGotype(pointeeVar.typeToken(), tg.resolveKind(pointeeVar))
+		ptrType := goTypePointerTo(pointeeType)
+
+		// Generate: var ptrName intrinsic.PointerTo[T]
+		ptrIdent := ast.NewIdent(ptrVar.Identifier())
+		pointeeIdent := ast.NewIdent(pointeeVar.Identifier())
+		nouse := tg.astIdent("_")
+
+		decl := &ast.GenDecl{
+			Tok: token.VAR,
+			Specs: []ast.Spec{
+				&ast.ValueSpec{Names: []*ast.Ident{ptrIdent}, Type: ptrType},
+				&ast.ValueSpec{Names: []*ast.Ident{pointeeIdent}, Type: ptrType},
+				&ast.ValueSpec{Names: []*ast.Ident{nouse, nouse}, Values: []ast.Expr{ptrIdent, pointeeIdent}},
+			},
+		}
+		dst = append(dst, &ast.DeclStmt{Decl: decl})
+	}
+	return dst, nil
+}
+
 // goType converts a varinfo to Go type, considering KIND parameter.
 // KIND mappings:
 //
@@ -904,6 +964,20 @@ func (tg *ToGo) goType(v *varinfo) ast.Expr {
 	tok := v.typeToken()
 	dim := v.Dimensions()
 	isArray := dim != nil && len(dim.Bounds) > 0
+
+	// Handle Cray-style pointer variables (POINTER (ptr, pointee))
+	// The pointer variable's type is PointerTo[pointee_type]
+	if v.flags.HasAny(flagPointee | flagPointer) {
+		if v.pointee != "" {
+			pointeeVar := tg.repl.Var(v.pointee)
+			if pointeeVar == nil {
+				panic(tg.makeErrWithPos(v.decl.Position, "pointee variable not found: "+v.pointee))
+			}
+			pointeeType := tg.baseGotype(pointeeVar.typeToken(), tg.resolveKind(pointeeVar))
+			return goTypePointerTo(pointeeType)
+		}
+		return goTypePointerTo(tg.baseGotype(v.typeToken(), tg.resolveKind(v)))
+	}
 
 	// Handle TYPE
 	if tok == f90token.TYPE {
@@ -931,6 +1005,14 @@ func (tg *ToGo) goType(v *varinfo) ast.Expr {
 			X:     _astTypeArray,
 			Index: baseType,
 		},
+	}
+}
+
+// goTypePointerTo returns intrinsic.PointerTo[elementType] for Cray-style pointers.
+func goTypePointerTo(elementType ast.Expr) ast.Expr {
+	return &ast.IndexExpr{
+		X:     _astTypePointerTo,
+		Index: elementType,
 	}
 }
 
@@ -1043,6 +1125,10 @@ var (
 	_astTypePointer = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("Pointer"),
+	}
+	_astTypePointerTo = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("PointerTo"),
 	}
 )
 

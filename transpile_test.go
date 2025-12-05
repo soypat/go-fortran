@@ -53,7 +53,7 @@ func TestTranspileGolden2(t *testing.T) {
 	for {
 		expectLine, remaining, okLine := bytes.Cut(expected, []byte{'\n'})
 		expected = remaining
-		gotLine, remaining, okGot := bytes.Cut(output, []byte{'\n'})
+		gotLine, remaining, _ := bytes.Cut(output, []byte{'\n'})
 		output = remaining
 		if !bytes.Equal(expectLine, gotLine) {
 			misses++
@@ -62,7 +62,7 @@ func TestTranspileGolden2(t *testing.T) {
 				t.Error("too many mismatches, end comparison")
 				break // too many errors.
 			}
-		} else if !okLine || !okGot {
+		} else if !okLine {
 			break
 		}
 	}

@@ -29,6 +29,7 @@ func main() {
 	LEVEL26()
 	LEVEL27()
 	LEVEL28()
+	LEVEL29()
 	intrinsic.Stop(0)
 }
 func LEVEL01() {
@@ -805,6 +806,21 @@ func LEVEL28() {
 }
 func LEVEL29() {
 	var (
+		npaa intrinsic.PointerTo[float64]
+		aa   intrinsic.PointerTo[float64]
+		_, _ = npaa, aa
+	)
+	var (
+		npii intrinsic.PointerTo[int32]
+		ii   intrinsic.PointerTo[int32]
+		_, _ = npii, ii
+	)
+	var (
+		npll intrinsic.PointerTo[bool]
+		ll   intrinsic.PointerTo[bool]
+		_, _ = npll, ll
+	)
+	var (
 		n             int32
 		m             int32
 		maxmum        int32
@@ -837,12 +853,12 @@ func LEVEL29() {
 	intrinsic.Print("LEVEL 29: Advanced features test")
 	mat.Set(64, 1, 2)
 	maxdm1 = 100
-	npaa = intrinsic.MALLOC(maxdm1 * 8)
-	if npaa == 0 {
+	npaa = intrinsic.MALLOC[float64](maxdm1 * 8)
+	if npaa.DataUnsafe() == nil {
 		intrinsic.Stop(69)
 	}
-	npii = npaa
-	npll = npii
+	npii = intrinsic.PointerFrom[int32](npaa)
+	npll = intrinsic.PointerFrom[bool](npii)
 	m = 1
 	maxdef = intrinsic.MIN[int32](200000, maxdm1)
 	for m = 1; m <= maxdef; m += 32768 {
@@ -851,7 +867,7 @@ func LEVEL29() {
 		}
 	}
 	intrinsic.Print("CHAR A,B:", a, b)
-	intrinsic.Print("CHAR C", c)
+	intrinsic.Print("CHAR C", c.At(1))
 	intrinsic.Print("LEVEL 29: AA(2) ", aa.At(2), "MAT(1,2)", mat.At(1, 2))
 	intrinsic.Print("LEVEL 29: Initialized", maxmum-m+1, "elements")
 }

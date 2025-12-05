@@ -31,7 +31,7 @@
       CALL LEVEL26()
       CALL LEVEL27()
       CALL LEVEL28()
-      ! CALL LEVEL29() ! TODO: Cray pointers not yet implemented
+      CALL LEVEL29() ! TODO: Cray pointers not yet implemented
       STOP 0
       CONTAINS
 
@@ -750,7 +750,7 @@
 800      END DO
 900      END DO
         PRINT *, 'CHAR A,B:', A, B
-        PRINT *, 'CHAR C', C
+        PRINT *, 'CHAR C', C(1)
         PRINT *, 'LEVEL 29: AA(2) ', AA(2), 'MAT(1,2)', MAT(1,2)
         PRINT *, 'LEVEL 29: Initialized', MAXMUM - M + 1, 'elements'
     END SUBROUTINE LEVEL29
