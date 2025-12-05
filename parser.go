@@ -246,6 +246,30 @@ func (pud *ParserUnitData) isImplicitNone() bool {
 	return false
 }
 
+// implicitDeclFor returns a DeclEntity with the implicit type for the given identifier.
+// Returns nil if IMPLICIT NONE is active.
+func (pud *ParserUnitData) implicitDeclFor(ident string) *ast.DeclEntity {
+	if pud.isImplicitNone() {
+		return nil
+	}
+	// Check custom IMPLICIT rules first
+	for _, impl := range pud.implicits {
+		ts := impl.ImplicitTypeFor(ident)
+		if ts != nil {
+			return &ast.DeclEntity{Name: ident, Type: ts}
+		}
+	}
+	// Use default Fortran I-N convention
+	letter := ident[0]
+	if letter >= 'a' && letter <= 'z' {
+		letter -= 'a' - 'A'
+	}
+	if letter >= 'I' && letter <= 'N' {
+		return &ast.DeclEntity{Name: ident, Type: _implicitInteger.Type}
+	}
+	return &ast.DeclEntity{Name: ident, Type: _implicitReal.Type}
+}
+
 // resolveImplicitTypes assigns types to variables with nil decl based on IMPLICIT rules.
 // Called after specification section is parsed, before executable section.
 func (pud *ParserUnitData) resolveImplicitTypes() {
@@ -1000,8 +1024,9 @@ func (p *Parser90) currentAsVarString(bitset VarFlags, common string) string {
 			}
 			return lit
 		}
-		// Create implicitly typed variable (type will be resolved later by resolveImplicitTypes).
-		v = p.varInit(lit, nil, 0, "")
+		// Create implicitly typed variable with type resolved immediately.
+		implicitDecl := p.vars.implicitDeclFor(lit)
+		v = p.varInit(lit, implicitDecl, VFlagImplicit, "")
 	}
 	if bitset&VFlagCommon != 0 {
 		v.common = common

@@ -74,3 +74,18 @@
         END DO
       END DO
       END SUBROUTINE
+
+! Test 8: Partial IMPLICIT with I-N defaulting to INTEGER
+! This tests the fix for variables created in executable section
+! after resolveImplicitTypes was called
+      SUBROUTINE TEST_PARTIAL_IMPLICIT
+      IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+      DO 10 I=1,200
+        X = I
+   10 END DO
+      DO 20 M=1,100
+        DO 30 N=M,200
+          Y = M + N
+   30   CONTINUE
+   20 CONTINUE
+      END SUBROUTINE
