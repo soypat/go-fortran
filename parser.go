@@ -236,13 +236,21 @@ func (pud *ParserUnitData) copyFrom(src *ParserUnitData) {
 
 }
 
+// isImplicitNone returns true if IMPLICIT NONE is active in this unit.
+func (pud *ParserUnitData) isImplicitNone() bool {
+	for _, impl := range pud.implicits {
+		if impl.IsNone {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveImplicitTypes assigns types to variables with nil decl based on IMPLICIT rules.
 // Called after specification section is parsed, before executable section.
 func (pud *ParserUnitData) resolveImplicitTypes() {
-	for _, impl := range pud.implicits {
-		if impl.IsNone {
-			return // No type resolving.
-		}
+	if pud.isImplicitNone() {
+		return // No type resolving.
 	}
 
 	for i := range pud.vars {
@@ -983,18 +991,23 @@ func (p *Parser90) currentLiteral() string {
 
 func (p *Parser90) currentAsVarString(bitset VarFlags, common string) string {
 	v := p.varGet(p.current.lit)
-	if v != nil {
-		if bitset&VFlagCommon != 0 {
-			v.common = common
+	if v == nil {
+		// Variable not declared - check if implicit typing is allowed.
+		lit := p.currentLiteral()
+		if p.vars.isImplicitNone() {
+			if !p.ignoreUndeclaredVars {
+				p.addError("variable " + lit + " undefined")
+			}
+			return lit
 		}
-		v.flags |= bitset
-		return v._varname
+		// Create implicitly typed variable (type will be resolved later by resolveImplicitTypes).
+		v = p.varInit(lit, nil, 0, "")
 	}
-	lit := p.currentLiteral()
-	if !p.ignoreUndeclaredVars {
-		p.addError("variable " + lit + " undefined")
+	if bitset&VFlagCommon != 0 {
+		v.common = common
 	}
-	return lit
+	v.flags |= bitset
+	return v._varname
 }
 
 // parseParameterList parses a parameter list like (a, b, c)
@@ -3108,12 +3121,16 @@ func (p *Parser90) parseImplicit(sawDecl *bool) ast.Statement {
 	start := p.current.start
 	stmt := &ast.ImplicitStatement{}
 	p.expect(token.IMPLICIT, "")
-	sawImplicit := len(p.vars.implicits) > 0
 	// Check for IMPLICIT NONE
 	if p.currentTokenIs(token.Identifier) && strings.EqualFold(string(p.current.lit), "NONE") {
-		if sawImplicit {
-			p.addError("duplicate IMPLICIT statements" + fmt.Sprintf("%+v", p.vars.implicits[0]))
+		if len(p.vars.implicits) > 0 {
+			if p.vars.implicits[0].IsNone {
+				p.addError("duplicate IMPLICIT NONE")
+			} else {
+				p.addError("IMPLICIT NONE not allowed after IMPLICIT type-spec")
+			}
 		} else if *sawDecl {
+			// Only check sawDecl for the first IMPLICIT NONE
 			p.addError("IMPLICIT NONE must appear before type declarations")
 		}
 		stmt.IsNone = true
@@ -3244,8 +3261,12 @@ func (p *Parser90) parseImplicit(sawDecl *bool) ast.Statement {
 		}
 	}
 
-	if sawImplicit {
-		p.addError("duplicate IMPLICIT statement")
+	// Check if IMPLICIT NONE was already declared - no other IMPLICIT statements allowed after it
+	for _, impl := range p.vars.implicits {
+		if impl.IsNone {
+			p.addError("IMPLICIT type-spec not allowed after IMPLICIT NONE")
+			break
+		}
 	}
 
 	p.vars.implicits = append(p.vars.implicits, stmt)
