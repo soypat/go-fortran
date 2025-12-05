@@ -2,6 +2,7 @@ package intrinsic
 
 import (
 	"bytes"
+	"slices"
 	"unsafe"
 )
 
@@ -21,14 +22,12 @@ import (
 //	str.SetFromString("Hello")     // Sets "Hello" + 15 spaces, len=5
 //	s := str.String()              // Returns full 20-char string with padding
 type CharacterArray struct {
-	data []byte // Slice where cap(data) = Fortran LEN, len(data) = actual bytes set
+	data  []byte  // Slice where cap(data) = Fortran LEN, len(data) = actual bytes set
+	inmem [8]byte // In-memory store for short strings.
 }
 
-func NewCharacterArray(len int) CharacterArray {
-	ch := CharacterArray{
-		data: make([]byte, 0, len),
-	}
-	// Fortran does NOT set character array on initialization.
+func NewCharacterArray(length int) (ch CharacterArray) {
+	ch.Allocate(length)
 	return ch
 }
 
@@ -42,6 +41,14 @@ func (ch *CharacterArray) SetDataUnsafe(v unsafe.Pointer) {
 	l := len(ch.data)
 	ch.data = unsafe.Slice((*byte)(v), cap(ch.data))
 	ch.data = ch.data[:l]
+}
+
+func (ch *CharacterArray) Allocate(length int) {
+	if length < len(ch.inmem) {
+		ch.data = ch.inmem[:0:length]
+	} else {
+		ch.data = slices.Grow(ch.data[:0], length)[:0:length] // Reuse memory if possible. Safe for nil data slice.
+	}
 }
 
 // DataUnsafe implements [Pointer] interface.

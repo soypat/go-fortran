@@ -32,6 +32,7 @@ func main() {
 	LEVEL28()
 	LEVEL29()
 	LEVEL30()
+	LEVEL31()
 	intrinsic.Stop(0)
 }
 func LEVEL01() {
@@ -55,6 +56,12 @@ func LEVEL02() {
 		_       = message
 	)
 	message = intrinsic.NewCharacterArray(20)
+	var (
+		a intrinsic.CharacterArray
+		_ = a
+	)
+	a = intrinsic.NewCharacterArray(1)
+	a.SetFromString("a")
 	i = 42
 	x = 3.14159
 	flag = true
@@ -62,6 +69,9 @@ func LEVEL02() {
 	intrinsic.Print("LEVEL 2: i =", i, ", x =", x)
 	intrinsic.Print("LEVEL 2: flag =", flag)
 	intrinsic.Print("LEVEL 2:", message)
+	intrinsic.Print("LEVEL 2:", a, a)
+	intrinsic.Print(a, a, a, i, a)
+	intrinsic.Print(i, a, i, a)
 }
 func LEVEL03() {
 	var (
@@ -862,6 +872,31 @@ func LEVEL29() {
 }
 func LEVEL30() {
 	var (
+		a    intrinsic.CharacterArray
+		b    intrinsic.CharacterArray
+		_, _ = a, b
+	)
+	a = intrinsic.NewCharacterArray(1)
+	b = intrinsic.NewCharacterArray(1)
+	var (
+		c *intrinsic.Array[intrinsic.CharacterArray]
+		_ = c
+	)
+	c = intrinsic.NewArray[intrinsic.CharacterArray](nil, 4)
+	var (
+		mat *intrinsic.Array[int32]
+		_   = mat
+	)
+	mat = intrinsic.NewArray[int32](nil, 2, 2)
+	intrinsic.Equivalence(c.AtPtr(1), intrinsic.PointerOff(mat, mat.AtOffset(1, 1)))
+	intrinsic.Equivalence(&a, &b, intrinsic.PointerOff(mat, mat.AtOffset(1, 2)))
+	mat.Set(64, 1, 1)
+	mat.Set(97, 1, 2)
+	intrinsic.Print("LEVEL 30: CHAR A,B:", a, b)
+	intrinsic.Print("LEVEL 30: CHAR C:", c.At(1))
+}
+func LEVEL31() {
+	var (
 		npaa intrinsic.PointerTo[float64]
 		aa   intrinsic.PointerTo[float64]
 		_, _ = npaa, aa
@@ -885,23 +920,6 @@ func LEVEL30() {
 		_, _, _, _, _ = n, m, maxmum, maxdm1, maxdef
 	)
 	var (
-		mat *intrinsic.Array[int32]
-		_   = mat
-	)
-	mat = intrinsic.NewArray[int32](nil, 2, 2)
-	var (
-		a    intrinsic.CharacterArray
-		b    intrinsic.CharacterArray
-		_, _ = a, b
-	)
-	var (
-		c *intrinsic.Array[intrinsic.CharacterArray]
-		_ = c
-	)
-	c = intrinsic.NewArray[intrinsic.CharacterArray](nil, 4)
-	intrinsic.Equivalence(&a, &b, intrinsic.PointerOff(mat, mat.AtOffset(1, 2)))
-	intrinsic.Equivalence(c, intrinsic.PointerOff(mat, mat.AtOffset(1, 1)))
-	var (
 		defalt intrinsic.PointerTo[float64]
 		_      = defalt
 	)
@@ -914,7 +932,6 @@ func LEVEL30() {
 	i_defalt.Set(125269879, 2)
 	intrinsic.Equivalence(&defalt, i_defalt)
 	intrinsic.Print("LEVEL 29: Advanced features test")
-	mat.Set(64, 1, 2)
 	maxdm1 = 100
 	npaa = intrinsic.MALLOC[float64](maxdm1 * 8)
 	aa = npaa
@@ -932,9 +949,7 @@ func LEVEL30() {
 		for n = m; n <= maxmum; n++ {
 		}
 	}
-	intrinsic.Print("CHAR A,B:", a, b)
-	intrinsic.Print("CHAR C", c.At(1))
-	intrinsic.Print("LEVEL 29: AA(2) ", aa.At(2), "MAT(1,2)", mat.At(1, 2))
+	intrinsic.Print("LEVEL 29: AA(2) ", aa.At(2))
 	intrinsic.Print("LEVEL 29: Initialized", maxmum-m+1, "elements")
 }
 func SIMPLE_SUB() {

@@ -71,8 +71,14 @@ type PointerSetter interface {
 func Equivalence(toEquiv ...PointerSetter) {
 	largest := toEquiv[0]
 	maxAlloc := sizeUnderlyingAlloc(largest)
-	for _, buf := range toEquiv[1:] {
+	for _, buf := range toEquiv {
 		alloc := sizeUnderlyingAlloc(buf)
+		if alloc == 0 {
+			if c, ok := buf.(*CharacterArray); ok && c.data == nil {
+				c.Allocate(1)
+				alloc = 1
+			}
+		}
 		if alloc > maxAlloc {
 			largest = buf
 			maxAlloc = alloc

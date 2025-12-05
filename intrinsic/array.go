@@ -147,6 +147,11 @@ func (a *Array[T]) At(indices ...int) T {
 	return a.data[offset]
 }
 
+func (a *Array[T]) AtPtr(indices ...int) *T {
+	offset := a.offset(indices)
+	return &a.data[offset]
+}
+
 // Set sets the element at the given indices (using Fortran indexing with custom bounds)
 // Implements the subscript value formula from F77 Table 1 / F95 Table 6.1.
 //

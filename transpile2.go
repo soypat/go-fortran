@@ -414,21 +414,22 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 			})
 		} else if vi.decl.Type.Token == f90token.CHARACTER {
 			// Generate CHARACTER initialization: str = intrinsic.NewCharacterArray(len)
-			charLen := ent.Charlen()
-			if charLen != nil {
-				lenExpr, _, err := tg.transformExpression(_tgtInt, charLen)
+			// Default to length 1 if no LEN attribute (Fortran standard)
+			var lenExpr ast.Expr = _astOne
+			if charLen := ent.Charlen(); charLen != nil {
+				lenExpr, _, err = tg.transformExpression(_tgtInt, charLen)
 				if err != nil {
 					return nil, err
 				}
-				arrayInits = append(arrayInits, &ast.AssignStmt{
-					Lhs: []ast.Expr{ident},
-					Tok: token.ASSIGN,
-					Rhs: []ast.Expr{&ast.CallExpr{
-						Fun:  _astFnNewCharArray,
-						Args: []ast.Expr{lenExpr},
-					}},
-				})
 			}
+			arrayInits = append(arrayInits, &ast.AssignStmt{
+				Lhs: []ast.Expr{ident},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{&ast.CallExpr{
+					Fun:  _astFnNewCharArray,
+					Args: []ast.Expr{lenExpr},
+				}},
+			})
 		}
 	}
 	if len(decl.Specs) == 0 {
@@ -1135,17 +1136,28 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 						}
 						offsetArgs = append(offsetArgs, arg)
 					}
-					offsetCall := &ast.CallExpr{
-						Fun:  &ast.SelectorExpr{X: varExpr, Sel: ast.NewIdent("AtOffset")},
-						Args: offsetArgs,
+					var arg ast.Expr
+					if isCharacter {
+						// CharacterArray implements PointerSetter interface.
+						arg = &ast.CallExpr{
+							Fun:  &ast.SelectorExpr{X: varExpr, Sel: ast.NewIdent("AtPtr")},
+							Args: offsetArgs,
+						}
+					} else {
+						offsetCall := &ast.CallExpr{
+							Fun:  &ast.SelectorExpr{X: varExpr, Sel: ast.NewIdent("AtOffset")},
+							Args: offsetArgs,
+						}
+						arg = &ast.CallExpr{
+							Fun: &ast.SelectorExpr{
+								X:   _astIntrinsic,
+								Sel: ast.NewIdent("PointerOff"),
+							},
+							Args: []ast.Expr{varExpr, offsetCall},
+						}
+
 					}
-					args[i] = &ast.CallExpr{
-						Fun: &ast.SelectorExpr{
-							X:   _astIntrinsic,
-							Sel: ast.NewIdent("PointerOff"),
-						},
-						Args: []ast.Expr{varExpr, offsetCall},
-					}
+					args[i] = arg
 				}
 			}
 
