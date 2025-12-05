@@ -255,7 +255,6 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		dst, err = tg.transformIfStmt(dst, s)
 	case *f90.DoLoop:
 		dst, err = tg.transformDoLoop(dst, s)
-
 	case *f90.ReturnStmt:
 		// RETURN statement in functions will be handled by convertFunctionResultToReturn
 		// For now, just generate empty return (will be filled with result value later)
@@ -284,16 +283,12 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		dst, err = tg.transformSelectCaseStmt(dst, s)
 	case *f90.CommonStmt:
 		// COMMON blocks are processed separately, no code generation in function body
-		return nil, nil
 	case *f90.DimensionStmt:
 		// DIMENSION statements are processed in preScanCommonBlocks, no code generation in function body
-		return nil, nil
 	case *f90.EquivalenceStmt:
-		// EQUIVALENCE statements are processed in preScanEquivalences, no code generation in function body
-		return nil, nil
+		dst, err = tg.transformEquivalenceStmt(dst, s)
 	case *f90.PointerCrayStmt:
 		// Cray-style POINTER statements are processed in preScanCommonBlocks, no code generation in function body
-		return nil, nil
 	case *f90.DataStmt:
 		dst, err = tg.transformDataStmt(dst, s)
 	case *f90.ArithmeticIfStmt:
@@ -309,22 +304,16 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		// gostmt = tg.transformWriteStmt(s)
 	case *f90.FormatStmt:
 		// FORMAT statements are compile-time format definitions, no runtime code
-		return nil, nil
 	case *f90.OpenStmt, *f90.CloseStmt, *f90.ReadStmt, *f90.BackspaceStmt, *f90.RewindStmt, *f90.EndfileStmt, *f90.InquireStmt:
 		// File I/O statements - not yet implemented, skip silently
-		return nil, nil
 	case *f90.EntryStmt:
 		// ENTRY statements (multiple entry points) - not supported
-		return nil, nil
 	case *f90.AssignStmt:
 		// ASSIGN label TO variable (Fortran 77 feature) - not supported, skip silently
-		return nil, nil
 	case *f90.AssignedGotoStmt:
 		// GOTO variable (assigned GOTO using label from ASSIGN statement) - not supported
-		return nil, nil
 	case *f90.ImplicitStatement, *f90.UseStatement, *f90.ExternalStmt, *f90.IntrinsicStmt:
-		// Specification statement - no code generation (intentionally nil)
-		return nil, nil
+		// Specification statement - no code generation
 	default:
 		// For now, unsupported statements are skipped
 		err = tg.makeErr(s, "unsupported transpile statement")
@@ -347,6 +336,7 @@ func (tg *ToGo) makeArrayInitializer(typ *varinfo, initializer ast.Expr) (ast.Ex
 		}
 		args = append(args, size)
 	}
+	// Get element type - handle CHARACTER specially
 	elemType := tg.baseGotype(typ.typeToken(), tg.resolveKind(typ))
 	expr := &ast.CallExpr{
 		Fun: &ast.IndexExpr{
@@ -894,6 +884,14 @@ func (tg *ToGo) transformComputedGotoStmt(dst []ast.Stmt, stmt *f90.ComputedGoto
 	return dst, nil
 }
 
+func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceStmt) (_ []ast.Stmt, err error) {
+	for _, set := range stmt.Sets {
+		// Us
+		_ = set
+	}
+	return dst, nil
+}
+
 // goType converts a varinfo to Go type, considering KIND parameter.
 // KIND mappings:
 //
@@ -906,11 +904,6 @@ func (tg *ToGo) goType(v *varinfo) ast.Expr {
 	tok := v.typeToken()
 	dim := v.Dimensions()
 	isArray := dim != nil && len(dim.Bounds) > 0
-
-	// Handle CHARACTER specially - always returns CharacterArray
-	if tok == f90token.CHARACTER {
-		return _astTypeCharArray
-	}
 
 	// Handle TYPE
 	if tok == f90token.TYPE {
@@ -941,17 +934,11 @@ func (tg *ToGo) goType(v *varinfo) ast.Expr {
 	}
 }
 
-func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType *ast.Ident) {
+func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) {
 	switch tok {
 	default:
-		// Unknown type - skip with warning rather than fail
-		tokenStr := tok.String()
-		if tokenStr != "<undefined>" && tokenStr != "TYPE" {
-			// tg.addError(fmt.Sprintf("unable to resolve token as go type: %s", tokenStr))
-		}
-		return nil // Skip this declaration
-	case f90token.TYPE:
-		return nil // TYPE without name - skip
+		err := tg.makeErrAtStmt("unsupported type token: " + tok.String())
+		panic(err)
 	case f90token.INTEGER:
 		switch kindValue {
 		case 1:
@@ -974,6 +961,8 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType *ast.Ident
 		default: // 4 or unspecified
 			goType = ast.NewIdent("float32")
 		}
+	case f90token.CHARACTER:
+		goType = _astTypeCharArray
 	}
 	return goType
 }

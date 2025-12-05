@@ -721,7 +721,7 @@
         INTEGER :: N, M, MAXMUM, MAXDM1, MAXDEF
         INTEGER :: MAT(2,2)
         CHARACTER A, B
-        CHARACTER :: C(4)*4
+        CHARACTER, DIMENSION(4) :: C
         EQUIVALENCE (A,B, MAT(1,2))
         EQUIVALENCE (C, MAT(1,1))
         ! Initialize with hex values (Cray-style hex literals)

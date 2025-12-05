@@ -196,6 +196,10 @@ func (a *Array[T]) UpperDim(dim int) int {
 	return a.upper[dim-1]
 }
 
+func (a *Array[T]) AtOffset(indices ...int) int {
+	return a.offset(indices)
+}
+
 // offset calculates the flat index for multi-dimensional access using column-major layout
 // Implements the subscript value formula from F77 Table 1 (line 2436-2459) and F95 Table 6.1.
 //
@@ -227,24 +231,31 @@ func (a *Array[T]) offset(indices []int) int {
 }
 
 // Pointer returns the pointer to the underlying flat buffer.
-func (a *Array[T]) Pointer() Pointer[T] {
+func (a *Array[T]) Pointer() PointerTo[T] {
 	return NewPointerFromSlice(a.data)
 }
 
-var _ pointer = (*Array[float32])(nil)
+var _ Pointer = (*Array[float32])(nil) // compile time check of interface implementation.
 
-// SizeElement implements [pointer] interface.
+// SizeElement implements [Pointer] interface.
 func (a *Array[T]) SizeElement() int {
 	var z T
 	return int(unsafe.Sizeof(z))
 }
 
-// DataUnsafe implements [pointer] interface.
+// DataUnsafe implements [Pointer] interface.
 func (a *Array[T]) DataUnsafe() unsafe.Pointer {
 	return unsafe.Pointer(&a.data[0])
 }
 
-// SizeBuffer implements [pointer] interface.
+// DataUnsafe implements [Pointer] interface.
+//
+// Deprecated: Extremely unsafe.
+func (a *Array[T]) SetDataUnsafe(v unsafe.Pointer) {
+	a.data = unsafe.Slice((*T)(v), len(a.data))
+}
+
+// SizeBuffer implements [Pointer] interface.
 func (a *Array[T]) LenBuffer() int {
 	return len(a.data)
 }

@@ -525,11 +525,29 @@ func LEVEL19() {
 	PRINT_COMMON_VALUES()
 }
 func SET_COMMON_VALUES() {
+	var (
+		x    int32
+		y    int32
+		_, _ = x, y
+	)
+	var (
+		z float32
+		_ = z
+	)
 	shared.x = 42
 	shared.y = 99
 	shared.z = 3.14159
 }
 func PRINT_COMMON_VALUES() {
+	var (
+		x    int32
+		y    int32
+		_, _ = x, y
+	)
+	var (
+		z float32
+		_ = z
+	)
 	intrinsic.Print("LEVEL 19: x =", shared.x)
 	intrinsic.Print("LEVEL 19: y =", shared.y)
 	intrinsic.Print("LEVEL 19: z =", shared.z)
@@ -754,6 +772,25 @@ func LEVEL27() {
 	intrinsic.Print("LEVEL 27: result =", result)
 }
 func LEVEL28() {
+	var (
+		yqr     *intrinsic.Array[float32]
+		sumxrq  *intrinsic.Array[float32]
+		ymnrt   *intrinsic.Array[float32]
+		_, _, _ = yqr, sumxrq, ymnrt
+	)
+	yqr = intrinsic.NewArray[float32](nil, 256)
+	sumxrq = intrinsic.NewArray[float32](nil, 512)
+	ymnrt = intrinsic.NewArray[float32](nil, 3)
+	var (
+		matrix *intrinsic.Array[float32]
+		_      = matrix
+	)
+	matrix = intrinsic.NewArray[float32](nil, 10, 20)
+	var (
+		counts *intrinsic.Array[int32]
+		_      = counts
+	)
+	counts = intrinsic.NewArray[int32](nil, 100)
 	intrinsic.Print("LEVEL 28: COMMON block arrays initialized")
 	holdrt.yqr.Set(1.5, 1)
 	holdrt.sumxrq.Set(99.90000000000001, 512)
@@ -767,6 +804,36 @@ func LEVEL28() {
 	intrinsic.Print("LEVEL 28: COUNTS(50) =", stats.counts.At(50))
 }
 func LEVEL29() {
+	var (
+		n             int32
+		m             int32
+		maxmum        int32
+		maxdm1        int32
+		maxdef        int32
+		_, _, _, _, _ = n, m, maxmum, maxdm1, maxdef
+	)
+	var (
+		mat *intrinsic.Array[int32]
+		_   = mat
+	)
+	mat = intrinsic.NewArray[int32](nil, 2, 2)
+	var (
+		a    intrinsic.CharacterArray
+		b    intrinsic.CharacterArray
+		_, _ = a, b
+	)
+	var (
+		c *intrinsic.Array[intrinsic.CharacterArray]
+		_ = c
+	)
+	c = intrinsic.NewArray[intrinsic.CharacterArray](nil, 4)
+	var (
+		i_defalt *intrinsic.Array[int32]
+		_        = i_defalt
+	)
+	i_defalt = intrinsic.NewArray[int32](nil, 2)
+	i_defalt.Set(125269879, 1)
+	i_defalt.Set(125269879, 2)
 	intrinsic.Print("LEVEL 29: Advanced features test")
 	mat.Set(64, 1, 2)
 	maxdm1 = 100

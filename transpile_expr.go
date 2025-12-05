@@ -388,6 +388,9 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 		return dst, tg.makeErr(fexpr, "chained ArrayRef assignment not yet implemented")
 	}
 	vitgt := tg.repl.Var(fexpr.Name)
+	if vitgt == nil {
+		return dst, tg.makeErr(fexpr, "unknown array variable: "+fexpr.Name)
+	}
 	switch vitgt.decl.Type.Token {
 	case f90token.CHARACTER:
 		return tg.transformSetCharacterArray(dst, fexpr, rhs)

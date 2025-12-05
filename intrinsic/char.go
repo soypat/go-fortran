@@ -32,9 +32,19 @@ func NewCharacterArray(len int) CharacterArray {
 	return ch
 }
 
-var _ pointer = CharacterArray{}
+var _ Pointer = CharacterArray{} // compile time check of interface implementation.
+var _ PointerSetter = (*CharacterArray)(nil)
 
-// DataUnsafe implements [pointer] interface.
+// SetDataUnsafe implements [Pointer] interface.
+//
+// Deprecated: Extremely unsafe.
+func (ch *CharacterArray) SetDataUnsafe(v unsafe.Pointer) {
+	l := len(ch.data)
+	ch.data = unsafe.Slice((*byte)(v), cap(ch.data))
+	ch.data = ch.data[:l]
+}
+
+// DataUnsafe implements [Pointer] interface.
 func (ch CharacterArray) DataUnsafe() unsafe.Pointer {
 	return unsafe.Pointer(&ch.data[0])
 }
