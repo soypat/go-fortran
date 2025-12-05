@@ -911,23 +911,17 @@ func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.S
 		switch v := varExpr.(type) {
 		case *f90.Identifier:
 			targetVinfo = tg.repl.Var(v.Value)
-			lhs = tg.astVarExpr(targetVinfo)
 		case *f90.ArrayRef:
 			targetVinfo = tg.repl.Var(v.Name)
 			if len(v.Subscripts) > 0 {
 				// Array element with indices: use Set method
 				isArrayElement = true
-			} else {
-				// No subscripts - treat as scalar variable
-				lhs = tg.astVarExpr(targetVinfo)
 			}
 		case *f90.FunctionCall:
 			// May be parsed as function call for array access
 			targetVinfo = tg.repl.Var(v.Name)
 			if len(v.Args) > 0 {
 				isArrayElement = true
-			} else {
-				lhs = tg.astVarExpr(targetVinfo)
 			}
 		default:
 			return dst, tg.makeErr(stmt, "unsupported DATA statement variable type")
@@ -935,6 +929,9 @@ func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.S
 
 		if targetVinfo == nil {
 			return dst, tg.makeErr(stmt, "unknown variable in DATA statement")
+		}
+		if !isArrayElement {
+			lhs = tg.astVarExpr(targetVinfo)
 		}
 
 		// Transform the value expression

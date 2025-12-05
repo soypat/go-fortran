@@ -3073,6 +3073,11 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 				}
 				stmt.Variables = append(stmt.Variables, impliedDoLoop)
 			} else if p.expectIdentifier(&varName, "DATA statement") {
+				// Register implicit variable if not already declared.
+				if p.vars.Var(varName) == nil && !p.vars.isImplicitNone() {
+					implicitDecl := p.vars.implicitDeclFor(varName)
+					p.varInit(varName, implicitDecl, VFlagImplicit, "")
+				}
 				// Array subscript: arr(1,2,3)
 				var subscripts []ast.Expression
 				if p.consumeIf(token.LParen) {
