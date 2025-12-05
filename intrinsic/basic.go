@@ -285,6 +285,37 @@ func Equivalence(toEquiv ...PointerSetter) {
 	}
 }
 
+func EquivOff(ptr PointerSetter, elemOff int) PointerSetter {
+	q := equivOffset{ptr: ptr, elemOffset: elemOff}
+	if q.LenBuffer() < 0 {
+		panic("elemOff exceeds size")
+	}
+	return &q
+}
+
+type equivOffset struct {
+	ptr        PointerSetter
+	elemOffset int
+}
+
+var _ PointerSetter = (*equivOffset)(nil)
+
+func (q *equivOffset) SetDataUnsafe(v unsafe.Pointer) {
+	q.ptr.SetDataUnsafe(unsafe.Add(v, -q.Offset()))
+}
+func (q *equivOffset) DataUnsafe() unsafe.Pointer {
+	return unsafe.Add(q.ptr.DataUnsafe(), q.Offset())
+}
+func (q *equivOffset) SizeElement() int {
+	return q.ptr.SizeElement()
+}
+func (q *equivOffset) LenBuffer() int {
+	return q.ptr.LenBuffer() - q.elemOffset
+}
+func (q *equivOffset) Offset() int {
+	return q.ptr.SizeElement() * q.elemOffset
+}
+
 // PointerFrom creates a type-punned view of an existing [Pointer], reinterpreting
 // the same memory as a different element type. This is useful for Fortran
 // EQUIVALENCE semantics where the same memory is accessed with different types.

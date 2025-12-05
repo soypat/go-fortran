@@ -806,6 +806,40 @@ func LEVEL28() {
 }
 func LEVEL29() {
 	var (
+		firstletter int8 = 97
+		_                = firstletter
+	)
+	var (
+		letters int32
+		_       = letters
+	)
+	var (
+		mat *intrinsic.Array[int8]
+		_   = mat
+	)
+	mat = intrinsic.NewArray[int8](nil, 2, 2)
+	var (
+		mat4 *intrinsic.Array[int32]
+		_    = mat4
+	)
+	mat4 = intrinsic.NewArray[int32](nil, 1, 2)
+	var (
+		a intrinsic.CharacterArray
+		_ = a
+	)
+	a = intrinsic.NewCharacterArray(4)
+	intrinsic.Equivalence(&a, mat, intrinsic.EquivOff(mat4, mat4.AtOffset(1, 2)))
+	letters = 1633837924
+	mat.Set(firstletter, 1, 1)
+	mat.Set(firstletter+1, 1, 2)
+	mat.Set(firstletter+2, 2, 1)
+	mat.Set(firstletter+3, 2, 2)
+	intrinsic.Print("LEVEL 29: byte mat ", a)
+	mat4.Set(letters, 1, 1)
+	intrinsic.Print("LEVEL 29: uint32 mat ", a)
+}
+func LEVEL30() {
+	var (
 		npaa intrinsic.PointerTo[float64]
 		aa   intrinsic.PointerTo[float64]
 		_, _ = npaa, aa
@@ -854,11 +888,14 @@ func LEVEL29() {
 	mat.Set(64, 1, 2)
 	maxdm1 = 100
 	npaa = intrinsic.MALLOC[float64](maxdm1 * 8)
+	aa = npaa
 	if npaa.DataUnsafe() == nil {
 		intrinsic.Stop(69)
 	}
 	npii = intrinsic.PointerFrom[int32](npaa)
+	ii = npii
 	npll = intrinsic.PointerFrom[bool](npii)
+	ll = npll
 	m = 1
 	maxdef = intrinsic.MIN[int32](200000, maxdm1)
 	for m = 1; m <= maxdef; m += 32768 {

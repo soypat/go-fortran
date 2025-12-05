@@ -28,7 +28,7 @@ func NewCharacterArray(len int) CharacterArray {
 	ch := CharacterArray{
 		data: make([]byte, 0, len),
 	}
-	ch.setUnusedToSpace()
+	// Fortran does NOT set character array on initialization.
 	return ch
 }
 
@@ -95,7 +95,7 @@ func (ch *CharacterArray) SetConcat(toJoin ...CharacterArray) {
 		}
 	}
 	ch.data = ch.data[:off]
-	ch.setUnusedToSpace()
+	ch.setToSpace(off)
 }
 
 func (ch *CharacterArray) SetConcatString(toJoin ...string) {
@@ -108,11 +108,11 @@ func (ch *CharacterArray) SetConcatString(toJoin ...string) {
 		}
 	}
 	ch.data = ch.data[:off]
-	ch.setUnusedToSpace()
+	ch.setToSpace(off)
 }
 
-func (ch *CharacterArray) setUnusedToSpace() {
-	raw := ch.data[len(ch.data):cap(ch.data)]
+func (ch *CharacterArray) setToSpace(after int) {
+	raw := ch.data[after:cap(ch.data)]
 	for i := range raw {
 		raw[i] = ' '
 	}
@@ -143,7 +143,8 @@ func (ch CharacterArray) LenTrim() int {
 func (ch CharacterArray) Trim() CharacterArray {
 	lenTrim := ch.LenTrim()
 	result := NewCharacterArray(cap(ch.data))
-	copy(result.data[:cap(result.data)], ch.data[:lenTrim])
+	n := copy(result.data[:cap(result.data)], ch.data[:lenTrim])
+	result.setToSpace(n)
 	// Rest is already spaces from NewCharacterArray
 	return result
 }
@@ -171,8 +172,8 @@ func (ch CharacterArray) AdjustL() CharacterArray {
 	}
 
 	// Copy non-leading-space portion to start of result
-	copy(result.data[:cap(result.data)], s[firstNonSpace:])
-	// Rest is already spaces from NewCharacterArray
+	n := copy(result.data[:cap(result.data)], s[firstNonSpace:])
+	result.setToSpace(n)
 	return result
 }
 
@@ -185,6 +186,10 @@ func (ch CharacterArray) AdjustR() CharacterArray {
 	// Copy trimmed content to end of result
 	offset := cap(ch.data) - lenTrim
 	copy(result.data[offset:cap(result.data)], ch.data[:lenTrim])
+	toSpace := result.data[:offset]
+	for i := range toSpace {
+		toSpace[i] = ' '
+	}
 	// Leading portion is already spaces from NewCharacterArray
 	return result
 }

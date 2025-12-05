@@ -561,6 +561,20 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		Lhs: []ast.Expr{lhs},
 	}
 	dst = append(dst, gstmt)
+
+	// If target is a Cray pointer variable and RHS is not another pointer,
+	// also assign to the pointee variable so it shares the same memory.
+	// e.g., NPAA = MALLOC(...) → npaa = ...; aa = npaa
+	if targetVinfo.pointee != "" {
+		pointeeIdent := ast.NewIdent(targetVinfo.pointee)
+		ptrIdent := ast.NewIdent(targetVinfo.Identifier())
+		dst = append(dst, &ast.AssignStmt{
+			Tok: token.ASSIGN,
+			Lhs: []ast.Expr{pointeeIdent},
+			Rhs: []ast.Expr{ptrIdent},
+		})
+	}
+
 	return dst, nil
 }
 

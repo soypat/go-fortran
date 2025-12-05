@@ -710,8 +710,23 @@
           PRINT *, 'LEVEL 28: COUNTS(50) =', COUNTS(50)
       END SUBROUTINE LEVEL28
 
-
     SUBROUTINE LEVEL29()
+        INTEGER(1), PARAMETER :: firstLetter = 97 ! 97 is ascii for 'a'
+        INTEGER :: letters
+        INTEGER(1) :: MAT(2,2)
+        INTEGER :: MAT4(1,2)
+        CHARACTER(4) A
+        EQUIVALENCE (A, MAT(1,1), MAT4(1,2))
+        DATA letters /Z'61626364'/
+        MAT(1,1) = firstLetter
+        MAT(1,2) = firstLetter+1
+        MAT(2,1) = firstLetter+2
+        MAT(2,2) = firstLetter+3
+        PRINT *, 'LEVEL 29: byte mat ', A
+        MAT4(1,2) = letters
+        PRINT *, 'LEVEL 29: uint32 mat ', A
+    END SUBROUTINE LEVEL29
+    SUBROUTINE LEVEL30()
         ! Test advanced features: DIMENSION, MALLOC, DATA with hex, labeled DO
       !   DOUBLE PRECISION ,ALLOCATABLE,  DIMENSION(:) :: AA
       !   INTEGER   ,ALLOCATABLE,  DIMENSION(:) :: II
@@ -753,7 +768,7 @@
         PRINT *, 'CHAR C', C(1)
         PRINT *, 'LEVEL 29: AA(2) ', AA(2), 'MAT(1,2)', MAT(1,2)
         PRINT *, 'LEVEL 29: Initialized', MAXMUM - M + 1, 'elements'
-    END SUBROUTINE LEVEL29
+    END SUBROUTINE LEVEL30
 
 ! ==============================================================================
 ! Helper Subroutines and Functions
