@@ -24,32 +24,32 @@ type (
 	statementParseFn func() ast.Statement // For statement-level constructs
 )
 
-// symflags for parser.
-type symflags uint64
+// VarFlags for parser.
+type VarFlags uint64
 
 const (
-	flagImplicit     symflags = 1 << iota // Type inferred from IMPLICIT rules
-	flagUsed                              // Symbol is referenced in code
-	flagPointer                           // Has POINTER attribute
-	flagTarget                            // Has TARGET attribute
-	flagParameter                         // Is a function/subroutine parameter
-	flagPointerParam                      // OUT/INOUT scalar parameter (needs dereference)
-	flagAllocatable                       // Has ALLOCATABLE attribute
-	flagCommon                            // Variable is in a COMMON block
-	flagPointee                           // Cray-style pointee (accessed through pointer variable)
-	flagDimension                         // DIMENSION attribute or implicit dimension set. Variable is an array type.
-	flagIntentOut
-	flagIntentIn
-	flagArrayInit
-	flagArraySpec // ArraySpec used in type declaration.
-	flagReturned
-	flagRecursive
-	flagEquivalenced // Participates in EQUIVALENCE statement (scalars become PointerTo[T])
+	VFlagImplicit     VarFlags = 1 << iota // Type inferred from IMPLICIT rules
+	VFlagUsed                              // Symbol is referenced in code
+	VFlagPointer                           // Has POINTER attribute
+	VFlagTarget                            // Has TARGET attribute
+	VFlagParameter                         // Is a function/subroutine parameter
+	VFlagPointerParam                      // OUT/INOUT scalar parameter (needs dereference)
+	VFlagAllocatable                       // Has ALLOCATABLE attribute
+	VFlagCommon                            // Variable is in a COMMON block
+	VFlagPointee                           // Cray-style pointee (accessed through pointer variable)
+	VFlagDimension                         // DIMENSION attribute or implicit dimension set. Variable is an array type.
+	VFlagIntentOut
+	VFlagIntentIn
+	VFlagArrayInit
+	VFlagArraySpec // ArraySpec used in type declaration.
+	VFlagReturned
+	VFlagRecursive
+	VFlagEquivalenced // Participates in EQUIVALENCE statement (scalars become PointerTo[T])
 )
 
-func (f symflags) HasAny(hasBits symflags) bool { return f&hasBits != 0 }
-func (f symflags) HasAll(hasBits symflags) bool { return f&hasBits == hasBits }
-func (f symflags) With(mask symflags, setBits bool) symflags {
+func (f VarFlags) HasAny(hasBits VarFlags) bool { return f&hasBits != 0 }
+func (f VarFlags) HasAll(hasBits VarFlags) bool { return f&hasBits == hasBits }
+func (f VarFlags) With(mask VarFlags, setBits bool) VarFlags {
 	if setBits {
 		return f | mask
 	} else {
@@ -57,7 +57,7 @@ func (f symflags) With(mask symflags, setBits bool) symflags {
 	}
 }
 
-func flagsFromTypespec(ts *ast.TypeSpec) (flags symflags) {
+func flagsFromTypespec(ts *ast.TypeSpec) (flags VarFlags) {
 	for i := range ts.Attributes {
 		attr := &ts.Attributes[i]
 		switch attr.Token {
@@ -65,24 +65,24 @@ func flagsFromTypespec(ts *ast.TypeSpec) (flags symflags) {
 			if tok, ok := attr.Expr.(*ast.TokenExpr); ok {
 				switch tok.Token {
 				case token.IN:
-					flags |= flagIntentIn
+					flags |= VFlagIntentIn
 				case token.OUT:
-					flags |= flagIntentOut
+					flags |= VFlagIntentOut
 				case token.INOUT:
-					flags |= flagIntentIn | flagIntentOut
+					flags |= VFlagIntentIn | VFlagIntentOut
 				}
 			}
 		case token.POINTER:
-			flags |= flagPointer
+			flags |= VFlagPointer
 		case token.ALLOCATABLE:
-			flags |= flagAllocatable
+			flags |= VFlagAllocatable
 		case token.TARGET:
-			flags |= flagTarget
+			flags |= VFlagTarget
 		case token.RECURSIVE:
-			flags |= flagRecursive
+			flags |= VFlagRecursive
 		case token.DIMENSION:
 			if len(attr.Dimension.Bounds) > 0 {
-				flags |= flagDimension
+				flags |= VFlagDimension
 			}
 		}
 	}
@@ -178,7 +178,7 @@ func (p *ParserUnitData) AppendVarinfo(dst []Varinfo) []Varinfo {
 // ProcedureParams returns the varinfos corresponding to parameters of the function, in order.
 func (p *ParserUnitData) ProcedureParams() []Varinfo {
 	for i := range p.vars {
-		if !p.vars[i].flags.HasAny(flagParameter) {
+		if !p.vars[i].flags.HasAny(VFlagParameter) {
 			return p.vars[:i] // First varinfo are always function parameters.
 		}
 	}
@@ -228,7 +228,7 @@ func (pud *ParserUnitData) copyFrom(src *ParserUnitData) {
 		implicits:  append(pud.implicits[:0], src.implicits...),
 	}
 	for i := range pud.vars {
-		if pud.vars[i].flags.HasAny(flagReturned) {
+		if pud.vars[i].flags.HasAny(VFlagReturned) {
 			pud.returnType = &pud.vars[i]
 			break
 		}
@@ -258,7 +258,7 @@ func (pud *ParserUnitData) resolveImplicitTypes() {
 			ts := impl.ImplicitTypeFor(ident)
 			if ts != nil {
 				implicitType = ts
-				vi.flags |= flagImplicit
+				vi.flags |= VFlagImplicit
 				break
 			}
 		}
@@ -299,7 +299,7 @@ var (
 	}
 )
 
-func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEntity, initFlags symflags, namespace string) (vi *Varinfo, err error) {
+func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEntity, initFlags VarFlags, namespace string) (vi *Varinfo, err error) {
 	if decl != nil && name != decl.Name {
 		panic("bad varInit name argument mismatch with decl")
 	}
@@ -322,11 +322,11 @@ func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEnti
 		vi._varname = name
 		vi.declPos = sp
 	}
-	if initFlags&flagCommon != 0 {
+	if initFlags&VFlagCommon != 0 {
 		vi.common = namespace
-	} else if initFlags&flagPointer != 0 {
+	} else if initFlags&VFlagPointer != 0 {
 		vi.pointee = namespace
-	} else if initFlags&flagReturned != 0 {
+	} else if initFlags&VFlagReturned != 0 {
 		pud.returnType = vi
 	}
 
@@ -335,7 +335,7 @@ func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEnti
 
 type Varinfo struct {
 	decl     *ast.DeclEntity
-	flags    symflags
+	flags    VarFlags
 	_varname string
 	common   string // set to COMMON block name if found in COMMON statement
 	pointee  string // the pointer alias this variable references in EQUIVALENCE or cray style POINTER statement.
@@ -344,18 +344,19 @@ type Varinfo struct {
 	kindFlag int   // 0 when uninitialized. -1 when unspecified, -2..-99 error. else is kind value.
 }
 
+func (p *Varinfo) Flags() VarFlags                    { return p.flags }
 func (p *Varinfo) Value() Value                       { return p.val }
 func (p *Varinfo) Charlen() ast.Expression            { return p.decl.Charlen() }
 func (p *Varinfo) Kind() ast.Expression               { return p.decl.Kind() }
 func (p *Varinfo) Dimensions() *ast.ArraySpec         { return p.decl.Dimension() }
 func (p *Varinfo) Identifier() string                 { return p._varname }
-func (p *Varinfo) IsParameter() bool                  { return p.flags.HasAny(flagParameter) }
-func (p *Varinfo) IsAllocatable() bool                { return p.flags.HasAny(flagAllocatable) }
+func (p *Varinfo) IsParameter() bool                  { return p.flags.HasAny(VFlagParameter) }
+func (p *Varinfo) IsAllocatable() bool                { return p.flags.HasAny(VFlagAllocatable) }
 func (p *Varinfo) reset()                             { *p = Varinfo{} }
 func (p *Parser90) varResetAll()                      { p.vars.reset() }
 func (p *Parser90) varGet(name []byte) (vi *Varinfo)  { return p.vars.Varb(name) }
 func (p *Parser90) varSGet(name string) (vi *Varinfo) { return p.vars.Var(name) }
-func (p *Parser90) varInit(name string, decl *ast.DeclEntity, initFlags symflags, namespace string) (vi *Varinfo) {
+func (p *Parser90) varInit(name string, decl *ast.DeclEntity, initFlags VarFlags, namespace string) (vi *Varinfo) {
 	vi, err := p.vars.varInit(p.sourcePos(), name, decl, initFlags, namespace)
 	if err != nil {
 		p.addError(err.Error())
@@ -691,7 +692,7 @@ func (p *Parser90) parseFunction() ast.Statement {
 	if p.consumeIf(token.RESULT) {
 		if p.expect(token.LParen, "RESULT open") {
 			if p.expectIdentifier(&fn.ResultVariable, "function RESULT variable specification") {
-				p.varInit(fn.ResultVariable, nil, flagReturned, "")
+				p.varInit(fn.ResultVariable, nil, VFlagReturned, "")
 				hasResult = true
 			}
 			p.expect(token.RParen, "RESULT close")
@@ -708,7 +709,7 @@ func (p *Parser90) parseFunction() ast.Statement {
 	fn.Data = pud
 	if hasResult {
 		for i := range pud.vars {
-			if pud.vars[i].flags.HasAny(flagReturned) {
+			if pud.vars[i].flags.HasAny(VFlagReturned) {
 				pud.returnType = &pud.vars[i]
 				break
 			}
@@ -970,10 +971,10 @@ func (p *Parser90) currentLiteral() string {
 	return p.current.tok.String()
 }
 
-func (p *Parser90) currentAsVarString(bitset symflags, common string) string {
+func (p *Parser90) currentAsVarString(bitset VarFlags, common string) string {
 	v := p.varGet(p.current.lit)
 	if v != nil {
-		if bitset&flagCommon != 0 {
+		if bitset&VFlagCommon != 0 {
 			v.common = common
 		}
 		v.flags |= bitset
@@ -1022,7 +1023,7 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 			p.addError(err.Error())
 			break
 		}
-		p.varInit(param.Name, nil, flagParameter, "") // parameters have no type.
+		p.varInit(param.Name, nil, VFlagParameter, "") // parameters have no type.
 		params = append(params, param)
 		if p.currentTokenIs(token.Comma) {
 			p.nextToken()
@@ -2487,7 +2488,7 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 	} else {
 		// Counter-controlled DO loop
 		if p.canUseAsIdentifier() {
-			stmt.Var = p.currentAsVarString(flagUsed, "")
+			stmt.Var = p.currentAsVarString(VFlagUsed, "")
 			p.nextToken()
 			p.expect(token.Equals, "after loop variable")
 
@@ -3396,7 +3397,7 @@ func (p *Parser90) parseTypeDecl() ast.Statement {
 		if p.currentTokenIs(token.LParen) {
 			entity.ArraySpec = p.parseArraySpec()
 			if len(entity.ArraySpec.Bounds) > 0 {
-				entFlags |= flagDimension
+				entFlags |= VFlagDimension
 			}
 		}
 		if p.currentTokenIs(token.Asterisk) {
@@ -3408,13 +3409,13 @@ func (p *Parser90) parseTypeDecl() ast.Statement {
 		case token.Comma:
 			p.nextToken() // No initializer.
 		case token.PointerAssign:
-			entFlags |= flagPointer
+			entFlags |= VFlagPointer
 			fallthrough
 		case token.Equals:
 			p.nextToken()
 			if p.currentTokenIs(token.LParen) && p.peekTokenIs(token.Slash) {
 				entity.Init = p.parseArrayConstructor()
-				entFlags |= flagArrayInit
+				entFlags |= VFlagArrayInit
 			} else {
 				entity.Init = p.parseExpression(0, token.Comma)
 			}
@@ -4142,7 +4143,7 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 		var err error
 		vinfo := pud.Var(fn.Name)
 		if vinfo == nil {
-			vinfo, err = pud.varInit(start, fn.Name, decl, flagReturned, "")
+			vinfo, err = pud.varInit(start, fn.Name, decl, VFlagReturned, "")
 			if err != nil {
 				panic(err)
 			}
@@ -4324,7 +4325,7 @@ func (p *Parser90) parseCommonStmt() ast.Statement {
 	// Parse comma-separated variable list
 	var commonVar string
 	for p.consumeIdentifier(&commonVar) {
-		p.varInit(commonVar, nil, flagCommon, stmt.BlockName)
+		p.varInit(commonVar, nil, VFlagCommon, stmt.BlockName)
 		stmt.Variables = append(stmt.Variables, commonVar)
 
 		// Check for array specification: var(dims)
@@ -4402,9 +4403,9 @@ func (p *Parser90) parseEquivalenceStmt() ast.Statement {
 			}
 			// Flag the variable as participating in EQUIVALENCE
 			if vi := p.varSGet(ref.Name); vi != nil {
-				vi.flags |= flagEquivalenced
+				vi.flags |= VFlagEquivalenced
 			} else {
-				p.varInit(ref.Name, nil, flagEquivalenced, "")
+				p.varInit(ref.Name, nil, VFlagEquivalenced, "")
 			}
 			set = append(set, *ref)
 			// Check for comma (more variables) or closing paren
@@ -4510,18 +4511,18 @@ func (p *Parser90) parsePointerCrayStmt() ast.Statement {
 			Pointee:          pointeeVar,
 			PointeeArraySpec: arraySpec,
 		})
-		p.varInit(ptrVar, nil, flagPointer, pointeeVar)
+		p.varInit(ptrVar, nil, VFlagPointer, pointeeVar)
 		// Create partial DeclEntity with ArraySpec if present.
 		// Type will be filled in by resolveImplicitTypes.
 		// TODO: what? is this really necessary?
 		var pointeeDecl *ast.DeclEntity
-		pointeeFlags := flagPointee
+		pointeeFlags := VFlagPointee
 		if arraySpec != nil {
 			pointeeDecl = &ast.DeclEntity{
 				Name:      pointeeVar,
 				ArraySpec: arraySpec,
 			}
-			pointeeFlags |= flagDimension
+			pointeeFlags |= VFlagDimension
 		}
 		p.varInit(pointeeVar, pointeeDecl, pointeeFlags, "")
 		// Check for comma (more pairs) or end of statement

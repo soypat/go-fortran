@@ -636,7 +636,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	// CHARACTER types are excluded as they use SetFromString
 	isArray := tg.varIsArray(targetVinfo)
 	isCharacter := targetVinfo.typeToken() == f90token.CHARACTER
-	if !isArray && !isCharacter && targetVinfo.flags.HasAny(flagEquivalenced) {
+	if !isArray && !isCharacter && targetVinfo.flags.HasAny(VFlagEquivalenced) {
 		dst = append(dst, &ast.ExprStmt{
 			X: &ast.CallExpr{
 				Fun:  &ast.SelectorExpr{X: lhs, Sel: ast.NewIdent("Set")},
@@ -1299,7 +1299,7 @@ func (tg *ToGo) goType(v *Varinfo) ast.Expr {
 
 	// Handle equivalenced scalars - they become PointerTo[T] for memory sharing
 	// CHARACTER types are excluded as they have their own memory management (CharacterArray)
-	if !isArray && tok != f90token.CHARACTER && v.flags.HasAny(flagEquivalenced) {
+	if !isArray && tok != f90token.CHARACTER && v.flags.HasAny(VFlagEquivalenced) {
 		return goTypePointerTo(baseType)
 	}
 
@@ -1361,7 +1361,7 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 // This applies to Fortran variables declared with DIMENSION attribute or
 // explicit array bounds in their type declaration.
 func (tg *ToGo) varIsArray(v *Varinfo) bool {
-	return v.flags.HasAny(flagDimension)
+	return v.flags.HasAny(VFlagDimension)
 }
 
 // varIsPointerTo returns true if the variable's Go type is intrinsic.PointerTo[T]
@@ -1378,10 +1378,10 @@ func (tg *ToGo) varIsArray(v *Varinfo) bool {
 func (tg *ToGo) varIsPointerTo(v *Varinfo) bool {
 	// Pointer variables (like NPAA) represent the address holder, not the data.
 	// They should not be auto-dereferenced.
-	if v.flags.HasAny(flagPointer) {
+	if v.flags.HasAny(VFlagPointer) {
 		return false
 	}
-	return v.flags.HasAny(flagEquivalenced|flagPointee) && !tg.varIsArray(v) && v.typeToken() != f90token.CHARACTER
+	return v.flags.HasAny(VFlagEquivalenced|VFlagPointee) && !tg.varIsArray(v) && v.typeToken() != f90token.CHARACTER
 }
 
 func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, root *f90.BinaryExpr) (_ []ast.Stmt, err error) {

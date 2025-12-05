@@ -91,7 +91,7 @@ func (repl *REPL) Reset() {
 func (tg *REPL) collectCommonBlocks(vars []Varinfo) {
 	for i := range vars {
 		v := &vars[i]
-		if !v.flags.HasAny(flagCommon) {
+		if !v.flags.HasAny(VFlagCommon) {
 			continue // Not in a COMMON block
 		}
 		block := tg.getCommon(v.common)
@@ -168,7 +168,7 @@ func (repl *REPL) ContainedOrExtern(name string) *ParserUnitData {
 
 func (repl *REPL) ScopeParams() []Varinfo {
 	for i, v := range repl.scope.vars {
-		if !v.flags.HasAny(flagParameter) {
+		if !v.flags.HasAny(VFlagParameter) {
 			return repl.scope.vars[:i]
 		}
 	}
