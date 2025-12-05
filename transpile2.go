@@ -309,7 +309,11 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		dst, err = tg.transformComputedGotoStmt(dst, s)
 	case *f90.StopStmt:
 		var code ast.Expr
-		code, _, err = tg.transformExpression(_tgtInt, s.Code)
+		if s.Code != nil {
+			code, _, err = tg.transformExpression(_tgtInt, s.Code)
+		} else {
+			code = &ast.BasicLit{Kind: token.INT, Value: "0"}
+		}
 		dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{Fun: _astIntrinsicStop, Args: []ast.Expr{code}}})
 
 	case *f90.WriteStmt:

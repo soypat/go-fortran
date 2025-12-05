@@ -276,7 +276,6 @@ func (pud *ParserUnitData) resolveImplicitTypes() {
 	if pud.isImplicitNone() {
 		return // No type resolving.
 	}
-
 	for i := range pud.vars {
 		vi := &pud.vars[i]
 		// Skip variables that already have explicit type declarations.
@@ -2677,6 +2676,10 @@ func (p *Parser90) parseCallStmt() ast.Statement {
 		}
 		stmt.Args = args
 		p.consumeIf(token.RParen) // TODO: should be expect?
+		// Register implicit variables from CALL arguments.
+		for _, arg := range args {
+			p.registerImplicitFromTarget(arg)
+		}
 	}
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt

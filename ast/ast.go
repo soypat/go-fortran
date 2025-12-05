@@ -1363,6 +1363,20 @@ func (ara *AlternateReturnArg) AppendString(dst []byte) []byte {
 	return dst
 }
 
+type parensExpr interface {
+	Expression
+	AppendStringParens([]byte) []byte
+}
+
+func appendParenExpr(dst []byte, expr Expression) []byte {
+	if p, ok := expr.(parensExpr); ok {
+		dst = p.AppendStringParens(dst)
+	} else {
+		dst = expr.AppendString(dst)
+	}
+	return dst
+}
+
 // BinaryExpr represents a binary operation with two operands. Fortran supports
 // arithmetic operators (+, -, *, /, **), relational operators (.LT., .GT., etc.),
 // and logical operators (.AND., .OR., .NOT.).
@@ -1382,6 +1396,7 @@ type BinaryExpr struct {
 }
 
 var _ Expression = (*BinaryExpr)(nil) // compile time check of interface implementation.
+var _ parensExpr = (*BinaryExpr)(nil)
 
 func (be *BinaryExpr) expressionNode() {}
 func (be *BinaryExpr) AppendTokenLiteral(dst []byte) []byte {
@@ -1393,6 +1408,21 @@ func (be *BinaryExpr) AppendString(dst []byte) []byte {
 	dst = append(dst, be.Op.String()...)
 	dst = append(dst, ' ')
 	dst = be.Right.AppendString(dst)
+	return dst
+}
+func (be *BinaryExpr) AppendStringParens(dst []byte) []byte {
+	dst = append(dst, '(')
+	dst = appendParenExpr(dst, be.Left)
+	dst = append(dst, be.Op.String()...)
+	dst = appendParenExpr(dst, be.Right)
+	dst = append(dst, ')')
+	return dst
+}
+func (ue *UnaryExpr) AppendStringParens(dst []byte) []byte {
+	dst = append(dst, '(')
+	dst = append(dst, ue.Op.String()...)
+	dst = appendParenExpr(dst, ue.Operand)
+	dst = append(dst, ')')
 	return dst
 }
 
@@ -1413,6 +1443,7 @@ type UnaryExpr struct {
 }
 
 var _ Expression = (*UnaryExpr)(nil) // compile time check of interface implementation.
+var _ parensExpr = (*UnaryExpr)(nil)
 
 func (ue *UnaryExpr) expressionNode() {}
 func (ue *UnaryExpr) AppendTokenLiteral(dst []byte) []byte {

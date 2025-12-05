@@ -13,6 +13,7 @@ import (
 	_ "embed"
 
 	f90 "github.com/soypat/go-fortran/ast"
+	f90token "github.com/soypat/go-fortran/token"
 )
 
 //go:generate gfortran -o testdata/golden testdata/golden.f90
@@ -191,5 +192,61 @@ END PROGRAM`,
 				t.Errorf("TransformProgram failed: %v", err)
 			}
 		})
+	}
+}
+
+// TestComparisonOperatorReturnsLogical verifies that comparison operators (.GT., .LT., etc.)
+// return LOGICAL type, not the operand type. This was causing "unpromotable combo INTEGER LOGICAL"
+// when expressions like `NTIDE.GT.0.AND..NOT.LRAY` were transpiled - the .GT. was incorrectly
+// returning INTEGER instead of LOGICAL.
+func TestComparisonOperatorReturnsLogical(t *testing.T) {
+	src := `      PROGRAM TEST
+      IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L)
+      COMMON/TIDALC/LRAY,LOLDST,NXTIDL
+      COMMON/CTIDES/NTIDE,NSTADJ
+      IF(NTIDE.GT.0.AND..NOT.LRAY) THEN
+        PRINT *, 'TEST'
+      ENDIF
+      END PROGRAM`
+
+	var parser Parser90
+	err := parser.Reset("test.f90", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unit := parser.ParseNextProgramUnit()
+	if unit == nil {
+		t.Fatal("ParseNextProgramUnit returned nil")
+	}
+
+	program := unit.(*f90.ProgramBlock)
+	data := program.Data.(*ParserUnitData)
+
+	// Verify LRAY gets LOGICAL type from IMPLICIT LOGICAL(L)
+	lray := data.Var("LRAY")
+	if lray == nil {
+		t.Fatal("LRAY not found")
+	}
+	if lray.decl == nil || lray.decl.Type == nil || lray.decl.Type.Token != f90token.LOGICAL {
+		t.Errorf("LRAY should be LOGICAL via IMPLICIT LOGICAL(L), got %v", lray.decl)
+	}
+
+	// Verify NTIDE gets INTEGER type (I-N default)
+	ntide := data.Var("NTIDE")
+	if ntide == nil {
+		t.Fatal("NTIDE not found")
+	}
+	if ntide.decl == nil || ntide.decl.Type == nil || ntide.decl.Type.Token != f90token.INTEGER {
+		t.Errorf("NTIDE should be INTEGER, got %v", ntide.decl)
+	}
+
+	// Transpile - this was failing with "unpromotable combo INTEGER LOGICAL"
+	// because .GT. returned INTEGER instead of LOGICAL
+	var tg ToGo
+	tg.SetSource("test.f90", strings.NewReader(src))
+	_, err = tg.TransformProgram(program)
+	if err != nil {
+		t.Errorf("TransformProgram failed: %v", err)
 	}
 }

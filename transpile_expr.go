@@ -13,6 +13,9 @@ import (
 
 // transformExpression transforms a single Fortran expression to a Go expression
 func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result ast.Expr, resultType *Varinfo, err error) {
+	if expr == nil {
+		return nil, nil, tg.makeErrAtStmt("nil expression")
+	}
 	switch e := expr.(type) {
 	case *f90.StringLiteral:
 		resultType = _tgtStringLit
@@ -83,7 +86,7 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 		err = tg.makeErr(expr, "unsupported expression")
 	}
 	if (result == nil || resultType == nil) && err == nil {
-		err = tg.makeErr(expr, "unhandled expression type, result or result type is nil")
+		err = tg.makeErr(expr, "unhandled expression type, result or result type is nil: "+string(expr.AppendString(nil)))
 	}
 	if err != nil {
 		return nil, nil, err
@@ -202,6 +205,8 @@ func normalizeTokenKind(tok f90token.Token, kind int) (f90token.Token, int) {
 		defaultKind = 4
 	case f90token.INTEGER:
 		defaultKind = 4
+	case f90token.LOGICAL:
+		defaultKind = 4
 	}
 	if kind == 0 {
 		kind = defaultKind
@@ -221,6 +226,13 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 	lpromote, rpromote, err := tg.checkPromotion(leftType, rightType)
 	if err != nil {
 		return nil, nil, err
+	}
+	// Result type is result of promotion. In switch/case statement boolean returnType is set for logical operations.
+	resultType = leftType
+	if lpromote != nil {
+		resultType = lpromote
+	} else if rpromote != nil {
+		resultType = rpromote
 	}
 	needsPromotion := lpromote != nil || rpromote != nil
 	// Map Fortran operator to Go operator
@@ -252,6 +264,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 			return tg.pointerNilComparison(right, token.EQL), _tgtBool, nil
 		}
 		op = token.EQL
+		resultType = _tgtBool
 	case f90token.NE, f90token.NotEquals:
 		// Special case: pointer comparison to 0 → ptr.DataUnsafe() != nil
 		if isPointerZeroComparison(leftType, rightType, e.Right) {
@@ -261,20 +274,27 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 			return tg.pointerNilComparison(right, token.NEQ), _tgtBool, nil
 		}
 		op = token.NEQ
+		resultType = _tgtBool
 	case f90token.LT, f90token.Less:
 		op = token.LSS
+		resultType = _tgtBool
 	case f90token.LE, f90token.LessEq:
 		op = token.LEQ
+		resultType = _tgtBool
 	case f90token.GT, f90token.Greater:
 		op = token.GTR
+		resultType = _tgtBool
 	case f90token.GE, f90token.GreaterEq:
 		op = token.GEQ
+		resultType = _tgtBool
 	case f90token.AND:
 		op = token.LAND
 		needsPromotion = false
+		resultType = _tgtBool
 	case f90token.OR:
 		op = token.LOR
 		needsPromotion = false
+		resultType = _tgtBool
 	case f90token.StringConcat:
 		return nil, nil, tg.makeErr(e, "string concat handled in transformExpression")
 	default:
@@ -282,13 +302,11 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 	}
 
 	// Promote operands to common type for arithmetic/comparison ops
-	resultType = leftType
+
 	if needsPromotion {
 		if lpromote != nil {
-			resultType = lpromote
 			left = tg.wrapConversion(lpromote, leftType, left)
 		} else if rpromote != nil {
-			resultType = rpromote
 			right = tg.wrapConversion(rpromote, rightType, right)
 		}
 	}
