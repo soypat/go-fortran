@@ -1092,10 +1092,16 @@ func (de *DeclEntity) Kind() Expression {
 	if de.KindOrLen != nil {
 		return de.KindOrLen
 	}
+	if de.Type == nil {
+		return nil
+	}
 	return de.Type.Kind()
 }
 
 func (de *DeclEntity) Charlen() Expression {
+	if de.Type == nil {
+		return nil
+	}
 	if de.Type.Token == token.CHARACTER && de.KindOrLen != nil {
 		return de.KindOrLen
 	}
@@ -1105,6 +1111,9 @@ func (de *DeclEntity) Charlen() Expression {
 func (de *DeclEntity) Dimension() *ArraySpec {
 	if de.ArraySpec != nil {
 		return de.ArraySpec
+	}
+	if de.Type == nil {
+		return nil
 	}
 	return de.Type.Dimension()
 }

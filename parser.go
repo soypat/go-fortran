@@ -2766,6 +2766,8 @@ func (p *Parser90) parseAssignmentStmt() ast.Statement {
 		p.addError("invalid target for assignment")
 		return nil
 	}
+	// Register implicit variable if the target is an undeclared identifier.
+	p.registerImplicitFromTarget(target)
 	assignment := &ast.AssignmentStmt{
 		Target: target,
 	}
@@ -2773,6 +2775,34 @@ func (p *Parser90) parseAssignmentStmt() ast.Statement {
 		return nil
 	}
 	return assignment
+}
+
+// registerImplicitFromTarget registers implicit variables found in assignment targets.
+func (p *Parser90) registerImplicitFromTarget(target ast.Expression) {
+	if p.vars.isImplicitNone() {
+		return // IMPLICIT NONE - don't auto-register
+	}
+	var name string
+	switch t := target.(type) {
+	case *ast.Identifier:
+		name = t.Value
+	case *ast.ArrayRef:
+		name = t.Name
+	case *ast.FunctionCall:
+		// Function call targets (like substring: str(1:5) = 'x') are handled differently.
+		// The function/array name should already be registered.
+		return
+	default:
+		return
+	}
+	vi := p.vars.Var(name)
+	if vi == nil {
+		implicitDecl := p.vars.implicitDeclFor(name)
+		p.varInit(name, implicitDecl, VFlagImplicit, "")
+	} else if vi.flags.HasAny(VFlagReturned) {
+		// This is the function return variable - don't override its type.
+		return
+	}
 }
 
 func (p *Parser90) parseAssignmentRHS(dst *ast.AssignmentStmt, startPos int) bool {
@@ -4217,6 +4247,12 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 			if err != nil {
 				panic(err)
 			}
+		} else if !vinfo.flags.HasAny(VFlagReturned) {
+			// Variable exists (from implicit registration) but not as return type.
+			// Update it to be the function return variable with correct type.
+			vinfo.decl = decl
+			vinfo.flags |= VFlagReturned
+			vinfo.flags &^= VFlagImplicit // Clear implicit flag
 		}
 		pud.returnType = vinfo
 	}
@@ -4395,7 +4431,6 @@ func (p *Parser90) parseCommonStmt() ast.Statement {
 	// Parse comma-separated variable list
 	var commonVar string
 	for p.consumeIdentifier(&commonVar) {
-		p.varInit(commonVar, nil, VFlagCommon, stmt.BlockName)
 		stmt.Variables = append(stmt.Variables, commonVar)
 
 		// Check for array specification: var(dims)
@@ -4406,6 +4441,16 @@ func (p *Parser90) parseCommonStmt() ast.Statement {
 			arraySpec = p.parseArraySpec()
 		}
 		stmt.ArraySpecs = append(stmt.ArraySpecs, arraySpec)
+
+		// Initialize variable with array spec if present
+		var decl *ast.DeclEntity
+		if arraySpec != nil {
+			decl = &ast.DeclEntity{
+				Name:      commonVar,
+				ArraySpec: arraySpec,
+			}
+		}
+		p.varInit(commonVar, decl, VFlagCommon, stmt.BlockName)
 
 		// Check for comma (more variables) or end of statement
 		if !p.consumeIf(token.Comma) {

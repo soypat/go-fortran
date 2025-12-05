@@ -135,6 +135,18 @@ func (repl *REPL) AddExtern(pu []f90.ProgramUnit) error {
 			return fmt.Errorf("extern program unit %s with namespace %s already added", pu[i].UnitName(), data.name)
 		}
 		repl._extern = append(repl._extern, data)
+		// Also register module-contained procedures so they can be found by ContainedOrExtern.
+		if mod, ok := pu[i].(*f90.Module); ok {
+			for _, contained := range mod.Contains {
+				cdata, ok := contained.UnitData().(*ParserUnitData)
+				if !ok {
+					continue
+				}
+				if repl.Extern(cdata.name) == nil {
+					repl._extern = append(repl._extern, cdata)
+				}
+			}
+		}
 	}
 	repl.externUnits = append(repl.externUnits, pu...)
 	return nil

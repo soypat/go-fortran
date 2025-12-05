@@ -538,21 +538,13 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_ []ast.Stmt, err error) {
 	var targetVinfo *Varinfo
 	var lhs ast.Expr
+	var isIdentifier bool
 	switch tgt := stmt.Target.(type) {
 	case *f90.ArrayRef:
 		targetVinfo = tg.repl.Var(tgt.Name)
 	case *f90.Identifier:
 		targetVinfo = tg.repl.Var(tgt.Value)
-		lhs = tg.astVarExpr(targetVinfo)
-		// Dereference INTENT(OUT/INOUT) non-array scalar parameters
-		intent := targetVinfo.decl.Type.Intent()
-		isArray := tg.varIsArray(targetVinfo)
-		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
-			lhs = &ast.StarExpr{X: lhs}
-		}
-		if binop, ok := stmt.Value.(*f90.BinaryExpr); ok && binop.Op == f90token.StringConcat {
-			return tg.transformStringConcat(dst, targetVinfo._varname, binop)
-		}
+		isIdentifier = true
 	case *f90.FunctionCall:
 		// FunctionCall as assignment target occurs for CHARACTER substring: str(1:5) = 'x'
 		targetVinfo = tg.repl.Var(tgt.Name)
@@ -565,6 +557,18 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		return nil, tg.makeErr(stmt.Target, "unknown identifier in target expression of assignment")
 	} else if targetVinfo.decl == nil {
 		return nil, tg.makeErr(stmt.Target, "identifier with no corresponding type declaration:"+targetVinfo.Identifier())
+	}
+	if isIdentifier {
+		lhs = tg.astVarExpr(targetVinfo)
+		// Dereference INTENT(OUT/INOUT) non-array scalar parameters
+		intent := targetVinfo.decl.Type.Intent()
+		isArray := tg.varIsArray(targetVinfo)
+		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
+			lhs = &ast.StarExpr{X: lhs}
+		}
+		if binop, ok := stmt.Value.(*f90.BinaryExpr); ok && binop.Op == f90token.StringConcat {
+			return tg.transformStringConcat(dst, targetVinfo._varname, binop)
+		}
 	}
 	rhs, _, err := tg.transformExpression(targetVinfo, stmt.Value)
 	if err != nil {
