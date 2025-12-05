@@ -214,20 +214,22 @@ func (pud *ParserUnitData) reset() {
 		implicits: pud.implicits[:0],
 	}
 }
-func (pud *ParserUnitData) clone() ParserUnitData {
-	copy := ParserUnitData{
-		name:      pud.name,
-		tok:       pud.tok,
-		vars:      slices.Clone(pud.vars),
-		implicits: slices.Clone(pud.implicits),
+
+func (pud *ParserUnitData) copyFrom(src *ParserUnitData) {
+	*pud = ParserUnitData{
+		name:       src.name,
+		tok:        src.tok,
+		vars:       append(pud.vars[:0], src.vars...),
+		returnType: src.returnType,
+		implicits:  append(pud.implicits[:0], src.implicits...),
 	}
-	for i := range copy.vars {
-		if copy.vars[i].flags.HasAny(flagReturned) {
-			copy.returnType = &copy.vars[i]
+	for i := range pud.vars {
+		if pud.vars[i].flags.HasAny(flagReturned) {
+			pud.returnType = &pud.vars[i]
 			break
 		}
 	}
-	return copy
+
 }
 
 // resolveImplicitTypes assigns types to variables with nil decl based on IMPLICIT rules.

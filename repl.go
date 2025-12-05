@@ -72,6 +72,18 @@ type REPL struct {
 	_contains         []*ParserUnitData
 	commonblocks      []commonBlockInfo // COMMON block name -> info (file-level, not reset per procedure)
 	noValueResolution bool              // When true, Eval skips value computation (type inference only)
+	externUnits       []f90.ProgramUnit
+}
+
+func (repl *REPL) Reset() {
+	*repl = REPL{
+		_extern:      repl._extern[:0],
+		_contains:    repl._contains[:0],
+		scope:        repl.scope,
+		commonblocks: repl.commonblocks[:0],
+		externUnits:  repl.externUnits[:0],
+	}
+	repl.scope.reset()
 }
 
 // collectCommonBlocks scans program unit variables for COMMON block membership
@@ -124,6 +136,7 @@ func (repl *REPL) AddExtern(pu []f90.ProgramUnit) error {
 		}
 		repl._extern = append(repl._extern, data)
 	}
+	repl.externUnits = append(repl.externUnits, pu...)
 	return nil
 }
 
@@ -168,7 +181,7 @@ func (repl *REPL) SetScope(pu f90.ProgramUnit) error {
 		return errors.New("missing parser unit data")
 	}
 
-	repl.scope = data.clone()
+	repl.scope.copyFrom(data)
 	for i := range repl.scope.vars {
 		v := &repl.scope.vars[i]
 		if v.decl == nil {

@@ -74,7 +74,20 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 	// Append COMMON block declarations at start.
 
 	// Transform contained procedures (CONTAINS section)
-	for _, contained := range prog.Contains {
+	decls, err = tg.transformProcedures(decls, prog.Contains)
+	if err != nil {
+		return decls, fmt.Errorf("in CONTAINS of %s: %w", prog.Name, err)
+	}
+	decls, err = tg.transformProcedures(decls, tg.repl.externUnits)
+	if err != nil {
+		return decls, fmt.Errorf("in externally added routine for %s: %w", prog.Name, err)
+	}
+	decls = tg.AppendCommonDecls(decls)
+	return decls, nil
+}
+
+func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.ProgramUnit) ([]ast.Decl, error) {
+	for _, contained := range pus {
 		switch c := contained.(type) {
 		case *f90.Subroutine:
 			funcDecl, err := tg.TransformSubroutine(c)
@@ -82,7 +95,7 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 				return nil, err
 			}
 			if funcDecl != nil {
-				decls = append(decls, funcDecl)
+				dst = append(dst, funcDecl)
 			}
 		case *f90.Function:
 			funcDecl, err := tg.TransformFunction(c)
@@ -90,14 +103,13 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 				return nil, err
 			}
 			if funcDecl != nil {
-				decls = append(decls, funcDecl)
+				dst = append(dst, funcDecl)
 			}
 		default:
-			return decls, fmt.Errorf("unknown CONTAINS declaration: %T", c)
+			return dst, fmt.Errorf("expected function/subroutine, got name=%s type=%T", c.UnitName(), c)
 		}
 	}
-	decls = tg.AppendCommonDecls(decls)
-	return decls, nil
+	return dst, nil
 }
 
 func (tg *ToGo) astIdent(name string) *ast.Ident {
