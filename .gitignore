@@ -6,7 +6,7 @@ go.work.sum
 coverage.txt
 # Dependency directories after running `go mod vendor`
 vendor/
-CLAUDE.md
+# CLAUDE.md
 _old*
 # Binaries for programs and plugins
 *.elf

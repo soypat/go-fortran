@@ -513,6 +513,29 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs ast.Expr) (_ []ast.Stmt, err error) {
 	vi := tg.repl.Var(fexpr.Name)
 	isRanged := fexpr.IsRanged()
+
+	// If this is an array of characters with integer subscripts (not range), use regular Set method
+	if len(fexpr.Subscripts) > 0 && !isRanged {
+		// Regular element assignment for CHARACTER array: arr(i) = v
+		args := []ast.Expr{rhs}
+		for _, expr := range fexpr.Subscripts {
+			arg, _, err := tg.transformExpression(_tgtInt, expr)
+			if err != nil {
+				return dst, err
+			}
+			args = append(args, arg)
+		}
+		receiver := tg.astVarExpr(vi)
+		gstmt := &ast.ExprStmt{
+			X: &ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("Set")},
+				Args: args,
+			},
+		}
+		dst = append(dst, gstmt)
+		return dst, nil
+	}
+
 	if tg.varIsArray(vi) || isRanged && len(fexpr.Subscripts) > 1 || fexpr.Base != nil {
 		return dst, tg.makeErrWithPos(fexpr.Position, "unsupported character type attributes for range set")
 	}

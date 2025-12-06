@@ -901,33 +901,38 @@ func (tg *ToGo) transformSelectCaseStmt(dst []ast.Stmt, stmt *f90.SelectCaseStmt
 }
 
 func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.Stmt, err error) {
-	// DATA statements initialize variables: DATA a, b, c / 10, 20, 30 /
-	// Generate assignment statements for each variable-value pair
-	if len(stmt.Variables) != len(stmt.Values) {
-		return dst, tg.makeErr(stmt, "DATA statement variable/value count mismatch")
-	}
+	// DATA statements initialize variables in several ways:
+	// 1. DATA a, b, c / 10, 20, 30 /       - multiple scalars
+	//    → a = 10; b = 20; c = 30
+	// 2. DATA arr / 1, 2, 3, 4, 5 /        - whole array initialization
+	//    → arr.Set(1, 1); arr.Set(2, 2); ... arr.Set(5, 5)
+	// 3. DATA arr(1), arr(2) / 1, 2 /      - specific array elements
+	//    → arr.Set(1, 1); arr.Set(2, 2)
+	// When var count < value count, distribute values across array variables
 
-	for i := range stmt.Variables {
-		varExpr := stmt.Variables[i]
-		valExpr := stmt.Values[i]
+	valueIdx := 0 // Track current position in values list
 
-		// Get target variable info and LHS expression
+	for _, varExpr := range stmt.Variables {
+		// Get target variable info
 		var targetVinfo *Varinfo
-		var lhs ast.Expr
+		var varName string
 		var isArrayElement bool
 
 		switch v := varExpr.(type) {
 		case *f90.Identifier:
 			targetVinfo = tg.repl.Var(v.Value)
+			varName = v.Value
 		case *f90.ArrayRef:
 			targetVinfo = tg.repl.Var(v.Name)
+			varName = v.Name
 			if len(v.Subscripts) > 0 {
-				// Array element with indices: use Set method
+				// Array element with explicit indices: arr(1,2)
 				isArrayElement = true
 			}
 		case *f90.FunctionCall:
 			// May be parsed as function call for array access
 			targetVinfo = tg.repl.Var(v.Name)
+			varName = v.Name
 			if len(v.Args) > 0 {
 				isArrayElement = true
 			}
@@ -938,18 +943,22 @@ func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.S
 		if targetVinfo == nil {
 			return dst, tg.makeErr(stmt, "unknown variable in DATA statement")
 		}
-		if !isArrayElement {
-			lhs = tg.astVarExpr(targetVinfo)
-		}
-
-		// Transform the value expression
-		rhs, _, err := tg.transformExpression(targetVinfo, valExpr)
-		if err != nil {
-			return dst, err
-		}
 
 		if isArrayElement {
-			// Array element: generate arr.Set(value, indices)
+			// Specific array element: arr(i,j) - use one value
+			if valueIdx >= len(stmt.Values) {
+				return dst, tg.makeErr(stmt, "not enough values in DATA statement")
+			}
+			valExpr := stmt.Values[valueIdx]
+			valueIdx++
+
+			// Transform the value expression
+			rhs, _, err := tg.transformExpression(targetVinfo, valExpr)
+			if err != nil {
+				return dst, err
+			}
+
+			// Generate arr.Set(value, indices)
 			switch v := varExpr.(type) {
 			case *f90.ArrayRef:
 				dst, err = tg.transformSetArrayRef(dst, v, rhs)
@@ -965,13 +974,100 @@ func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.S
 				return dst, err
 			}
 		} else {
-			// Scalar: generate simple assignment
-			dst = append(dst, &ast.AssignStmt{
-				Lhs: []ast.Expr{lhs},
-				Tok: token.ASSIGN,
-				Rhs: []ast.Expr{rhs},
-			})
+			// Whole variable or array without subscripts
+			isArray := tg.varIsArray(targetVinfo)
+
+			// Heuristic: if we have more values than variables, treat as array initialization
+			// This handles cases where DIMENSION statement info isn't propagated properly
+			hasMultipleValues := (len(stmt.Values) - valueIdx) > (len(stmt.Variables) - len(stmt.Variables[:0]))
+
+			if !isArray && !hasMultipleValues {
+				// Scalar variable - use one value
+				if valueIdx >= len(stmt.Values) {
+					return dst, tg.makeErr(stmt, "not enough values in DATA statement")
+				}
+				valExpr := stmt.Values[valueIdx]
+				valueIdx++
+
+				lhs := tg.astVarExpr(targetVinfo)
+				rhs, _, err := tg.transformExpression(targetVinfo, valExpr)
+				if err != nil {
+					return dst, err
+				}
+
+				dst = append(dst, &ast.AssignStmt{
+					Lhs: []ast.Expr{lhs},
+					Tok: token.ASSIGN,
+					Rhs: []ast.Expr{rhs},
+				})
+			} else {
+				// Array variable - consume multiple values to fill array elements
+				// For now, we'll initialize elements sequentially
+				// TODO: Handle multidimensional arrays properly
+				// This assumes 1D array or column-major order for N-D arrays
+
+				// We need to know how many values to consume
+				// For simple case, consume remaining values or until we fill the array
+				// Since we don't easily compute total array size here,
+				// we'll consume values one-by-one until we run out
+				// TODO: We should calculate the array size to know exactly how many values
+				// to consume. For now, consume all remaining values for the last variable
+				// or distribute evenly if multiple variables remain.
+
+				// Calculate values per variable
+				varsRemaining := len(stmt.Variables) - len(stmt.Variables[:0]) // Count vars from current position
+				valuesRemaining := len(stmt.Values) - valueIdx
+
+				// For simplicity: if this is the only variable, consume all values
+				// Otherwise, calculate how many values this array should get
+				var valuesToConsume int
+				if len(stmt.Variables) == 1 {
+					valuesToConsume = valuesRemaining
+				} else {
+					// Need to compute array size - for now, just take values until we match expected count
+					// This is where we need proper array size calculation
+					// As a heuristic: consume remaining values divided by remaining variables
+					varsRemaining = len(stmt.Variables)
+					for i := range stmt.Variables {
+						if stmt.Variables[i] == varExpr {
+							varsRemaining = len(stmt.Variables) - i
+							break
+						}
+					}
+					valuesToConsume = valuesRemaining / varsRemaining
+				}
+
+				for i := 0; i < valuesToConsume && valueIdx < len(stmt.Values); i++ {
+					valExpr := stmt.Values[valueIdx]
+
+					// Transform the value
+					rhs, _, err := tg.transformExpression(targetVinfo, valExpr)
+					if err != nil {
+						return dst, err
+					}
+
+					// Create array reference with 1-based index (Fortran convention)
+					// For multidimensional arrays, this is simplified
+					syntheticRef := &f90.ArrayRef{
+						Name:       varName,
+						Subscripts: []f90.Expression{&f90.IntegerLiteral{Value: int64(i + 1)}},
+						Position:   varExpr.SourcePos(),
+					}
+
+					dst, err = tg.transformSetArrayRef(dst, syntheticRef, rhs)
+					if err != nil {
+						return dst, err
+					}
+
+					valueIdx++
+				}
+			}
 		}
+	}
+
+	// Verify we consumed all values
+	if valueIdx != len(stmt.Values) {
+		return dst, tg.makeErr(stmt, fmt.Sprintf("DATA statement has %d unused values", len(stmt.Values)-valueIdx))
 	}
 
 	return dst, nil
