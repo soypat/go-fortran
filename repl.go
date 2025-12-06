@@ -67,21 +67,24 @@ func (cb *commonBlockInfo) addField(v *Varinfo) {
 }
 
 type REPL struct {
-	scope             ParserUnitData // currentScope variable data.
-	_extern           []*ParserUnitData
+	scope ParserUnitData // currentScope variable data.
+	// use stores modules/subroutines/functions/data blocks that have been loaded via Use.
+	// The used modules are flattened here, so _use contains functions/subroutines contained within modules as well.
+	_use              []*ParserUnitData
 	_contains         []*ParserUnitData
 	commonblocks      []commonBlockInfo // COMMON block name -> info (file-level, not reset per procedure)
 	noValueResolution bool              // When true, Eval skips value computation (type inference only)
-	externUnits       []f90.ProgramUnit
+	// used contains flat used program units. Contains modules are not added here.
+	used []f90.ProgramUnit
 }
 
 func (repl *REPL) Reset() {
 	*repl = REPL{
-		_extern:      repl._extern[:0],
+		_use:         repl._use[:0],
 		_contains:    repl._contains[:0],
 		scope:        repl.scope,
 		commonblocks: repl.commonblocks[:0],
-		externUnits:  repl.externUnits[:0],
+		used:         repl.used[:0],
 	}
 	repl.scope.reset()
 }
@@ -121,41 +124,48 @@ func (tg *REPL) getCommon(name string) *commonBlockInfo {
 }
 
 func (repl *REPL) Var(name string) *Varinfo {
-	return repl.scope.Var(name)
+	vi := repl.scope.Var(name)
+	if vi != nil {
+		return vi
+	}
+	for _, mod := range repl._use {
+		vi = mod.Var(name)
+		if vi != nil {
+			return vi
+		}
+	}
+	return nil
 }
 
-func (repl *REPL) AddExtern(pu []f90.ProgramUnit) error {
+func (repl *REPL) AddUsed(pu ...f90.ProgramUnit) error {
 	for i := range pu {
 		data, ok := pu[i].UnitData().(*ParserUnitData)
 		if !ok {
-			return fmt.Errorf("extern program unit %s has incompatible UnitData", pu[i].UnitName())
+			return fmt.Errorf("extern program unit %s has incompatible UnitData %T", pu[i].UnitName(), pu[i].UnitData())
 		}
-		exists := repl.Extern(data.name) != nil
-		if exists {
-			return fmt.Errorf("extern program unit %s with namespace %s already added", pu[i].UnitName(), data.name)
+		exists := repl.GetUsed(data.name)
+		if exists != nil {
+			return fmt.Errorf("%s(%T) already added as %s(%s)", pu[i].UnitName(), pu[i], exists.name, exists.tok.String())
 		}
-		repl._extern = append(repl._extern, data)
+		repl._use = append(repl._use, data)
 		// Also register module-contained procedures so they can be found by ContainedOrExtern.
 		if mod, ok := pu[i].(*f90.Module); ok {
 			for _, contained := range mod.Contains {
-				cdata, ok := contained.UnitData().(*ParserUnitData)
-				if !ok {
-					continue
-				}
-				if repl.Extern(cdata.name) == nil {
-					repl._extern = append(repl._extern, cdata)
+				err := repl.AddUsed(contained)
+				if err != nil {
+					return fmt.Errorf("%s contained within %s: %w", contained.UnitName(), mod.Name, err)
 				}
 			}
 		}
 	}
-	repl.externUnits = append(repl.externUnits, pu...)
+	repl.used = append(repl.used, pu...)
 	return nil
 }
 
-func (repl *REPL) Extern(name string) *ParserUnitData {
-	for i := range repl._extern {
-		if strings.EqualFold(repl._extern[i].name, name) {
-			return repl._extern[i]
+func (repl *REPL) GetUsed(name string) *ParserUnitData {
+	for i := range repl._use {
+		if strings.EqualFold(repl._use[i].name, name) {
+			return repl._use[i]
 		}
 	}
 	return nil
@@ -170,10 +180,10 @@ func (repl *REPL) Contained(name string) *ParserUnitData {
 	return nil
 }
 
-func (repl *REPL) ContainedOrExtern(name string) *ParserUnitData {
+func (repl *REPL) ContainedOrUsed(name string) *ParserUnitData {
 	data := repl.Contained(name)
 	if data == nil {
-		data = repl.Extern(name)
+		data = repl.GetUsed(name)
 	}
 	return data
 }
@@ -494,7 +504,7 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.FunctionCall) error {
 		err = repl.assignInt(dst, arg0.val.Int()%arg1.val.Int())
 	default:
 		// Check for user-defined functions
-		if fn := repl.ContainedOrExtern(e.Name); fn != nil && fn.returnType != nil {
+		if fn := repl.ContainedOrUsed(e.Name); fn != nil && fn.returnType != nil {
 			dst.val.tok = fn.returnType.typeToken()
 			return nil
 		}

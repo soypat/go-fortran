@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/printer"
 	"go/token"
+
 	"os"
 	"os/exec"
 	"strings"
@@ -115,6 +116,71 @@ func helperFormatGoSrc(t testing.TB, filePath string) {
 	if err != nil {
 		t.Error(string(out), err)
 	}
+}
+
+func helperTranspile(t testing.TB, dstfile string, programPath string, modules ...string) {
+	var tg ToGo
+	var ps Parser90
+	for _, module := range modules {
+		file, err := os.Open(module)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = ps.Reset(module, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tg.SetSource(module, file)
+		for {
+			unit := ps.ParseNextProgramUnit()
+			if unit == nil {
+				break
+			}
+			err = tg.AddUsed(unit)
+			if err != nil {
+				t.Fatal("failed to use unit", unit.UnitName(), module, err)
+			}
+		}
+		file.Close()
+		helperFatalErrors(t, &ps, "parsing file")
+	}
+	file, err := os.Open(programPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	ps.Reset(programPath, file)
+	tg.SetSource(programPath, file)
+	var mainBlock *f90.ProgramBlock
+	for {
+		unit := ps.ParseNextProgramUnit()
+		if unit == nil {
+			break
+		} else if pb, ok := unit.(*f90.ProgramBlock); ok {
+			if mainBlock != nil {
+				t.Fatal("two main blocks found")
+			}
+			mainBlock = pb
+			continue
+		}
+		err = tg.AddUsed(unit)
+		if err != nil {
+			err2 := tg.makeErr(unit, "failed to add")
+			t.Fatal("adding main program unit failed:", err, err2)
+		}
+	}
+	decls, err := tg.TransformProgram(mainBlock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dst bytes.Buffer
+	helperWriteGoAST(t, &dst, &ast.File{
+		Name:  ast.NewIdent("main"),
+		Decls: decls,
+	})
+	os.WriteFile(dstfile, dst.Bytes(), 0777)
+	t.Logf("formatting Go source for %s", dstfile)
+	helperFormatGoSrc(t, dstfile)
 }
 
 // TestDataStmtTranspilation verifies that DATA statements with implicit variables
@@ -296,7 +362,7 @@ func TestModuleVariableImport(t *testing.T) {
 	// Transpile with module as extern
 	var tg ToGo
 	tg.SetSource("test.f90", strings.NewReader(src))
-	err = tg.AddExtern([]f90.ProgramUnit{mod})
+	err = tg.AddUsed(mod)
 	if err != nil {
 		t.Fatal(err)
 	}

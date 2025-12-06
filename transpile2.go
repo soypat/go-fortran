@@ -24,12 +24,12 @@ func (tg *ToGo) SetSource(source string, r io.ReaderAt) {
 	tg.sourceFile = r
 }
 
-func (tg *ToGo) AddExtern(pu []f90.ProgramUnit) error {
-	return tg.repl.AddExtern(pu)
+func (tg *ToGo) AddUsed(pu ...f90.ProgramUnit) error {
+	return tg.repl.AddUsed(pu...)
 }
 
-func (tg *ToGo) Extern(name string) *ParserUnitData {
-	return tg.repl.Extern(name)
+func (tg *ToGo) GetUsed(name string) *ParserUnitData {
+	return tg.repl.GetUsed(name)
 }
 
 func (tg *ToGo) Contained(name string) *ParserUnitData {
@@ -37,7 +37,7 @@ func (tg *ToGo) Contained(name string) *ParserUnitData {
 }
 
 func (tg *ToGo) ContainedOrExtern(name string) *ParserUnitData {
-	return tg.repl.ContainedOrExtern(name)
+	return tg.repl.ContainedOrUsed(name)
 }
 
 func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
@@ -78,35 +78,35 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 	if err != nil {
 		return decls, fmt.Errorf("in CONTAINS of %s: %w", prog.Name, err)
 	}
-	decls, err = tg.transformProcedures(decls, tg.repl.externUnits)
+	decls, err = tg.transformProcedures(decls, tg.repl.used)
 	if err != nil {
-		return decls, fmt.Errorf("in externally added routine for %s: %w", prog.Name, err)
+		return decls, fmt.Errorf("in USE added routines for %s: %w", prog.Name, err)
 	}
 	decls = tg.AppendCommonDecls(decls)
 	return decls, nil
 }
 
-func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.ProgramUnit) ([]ast.Decl, error) {
+func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.ProgramUnit) (_ []ast.Decl, err error) {
 	for _, contained := range pus {
+		var decl ast.Decl
 		switch c := contained.(type) {
 		case *f90.Subroutine:
-			funcDecl, err := tg.TransformSubroutine(c)
-			if err != nil {
-				return nil, err
-			}
-			if funcDecl != nil {
-				dst = append(dst, funcDecl)
-			}
+			decl, err = tg.TransformSubroutine(c)
 		case *f90.Function:
-			funcDecl, err := tg.TransformFunction(c)
-			if err != nil {
-				return nil, err
-			}
-			if funcDecl != nil {
-				dst = append(dst, funcDecl)
-			}
+			decl, err = tg.TransformFunction(c)
+		case *f90.Module:
+			dst, err = tg.transformProcedures(dst, c.Contains)
+		case *f90.BlockData:
+			// TODO: add block data.
+			err = fmt.Errorf("block data unsupported")
 		default:
-			return dst, fmt.Errorf("expected function/subroutine, got name=%s type=%T", c.UnitName(), c)
+			panic(fmt.Sprintf("unexpected program unit %s", c))
+
+		}
+		if err != nil {
+			return dst, err
+		} else if decl != nil {
+			dst = append(dst, decl)
 		}
 	}
 	return dst, nil

@@ -826,14 +826,14 @@ func TestExpressionParsing(t *testing.T) {
 	}
 }
 
-func helperPrintErrors(t *testing.T, p *Parser90) {
+func helperPrintErrors(t testing.TB, p *Parser90) {
 	t.Helper()
 	for _, err := range p.Errors() {
 		t.Error(&err)
 	}
 }
 
-func helperFatalErrors(t *testing.T, p *Parser90, msg string) {
+func helperFatalErrors(t testing.TB, p *Parser90, msg string) {
 	t.Helper()
 	helperPrintErrors(t, p)
 	if len(p.Errors()) > 0 {
