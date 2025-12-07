@@ -255,6 +255,9 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 	if err != nil {
 		return nil, nil, err
 	}
+	if tg.varIsCharlike(rightType) || tg.varIsCharlike(leftType) {
+		return tg.transformBinaryExprChar(vitgt, e.Op, left, right, leftType, rightType)
+	}
 	lpromote, rpromote, err := tg.checkPromotion(leftType, rightType)
 	if err != nil {
 		return nil, nil, err
@@ -346,6 +349,55 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 		Op: op,
 		Y:  right,
 	}, resultType, nil
+}
+
+func (tg *ToGo) transformBinaryExprChar(vitgt *Varinfo, op f90token.Token, left, right ast.Expr, leftType, rightType *Varinfo) (result ast.Expr, resultType *Varinfo, err error) {
+	// Convert operands to Go strings for comparison
+	// - String literals are already Go strings
+	// - CharacterArray variables need .String() method call
+	leftStr := tg.charToGoString(left, leftType)
+	rightStr := tg.charToGoString(right, rightType)
+
+	// Map Fortran comparison operator to Go operator
+	var goOp token.Token
+	switch op {
+	case f90token.EQ, f90token.EqEq:
+		goOp = token.EQL
+	case f90token.NE, f90token.NotEquals:
+		goOp = token.NEQ
+	case f90token.LT, f90token.Less:
+		goOp = token.LSS
+	case f90token.LE, f90token.LessEq:
+		goOp = token.LEQ
+	case f90token.GT, f90token.Greater:
+		goOp = token.GTR
+	case f90token.GE, f90token.GreaterEq:
+		goOp = token.GEQ
+	default:
+		return nil, nil, tg.makeErrAtStmt("unsupported operator for character types: " + op.String())
+	}
+
+	return &ast.BinaryExpr{
+		X:  leftStr,
+		Op: goOp,
+		Y:  rightStr,
+	}, _tgtBool, nil
+}
+
+// charToGoString converts a character expression to a Go string expression.
+// String literals are already Go strings, CharacterArray variables need .String() call.
+func (tg *ToGo) charToGoString(expr ast.Expr, exprType *Varinfo) ast.Expr {
+	if exprType.typeToken() == f90token.StringLit {
+		// Already a Go string literal
+		return expr
+	}
+	// CharacterArray - call .String() method
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   expr,
+			Sel: ast.NewIdent("String"),
+		},
+	}
 }
 
 // isPointerZeroComparison checks if ptrType is a Cray pointer and other is literal 0.

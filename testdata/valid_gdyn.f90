@@ -137,6 +137,7 @@ END !
 
 PROGRAM GDYN2S
          INTEGER :: I
+         CHARACTER*80 CARD
          WRITE(1,1) s,END,t
          IF(CARD(1:4).EQ.'DATA'.OR.CARD(1:6).EQ.'ENDARC') THEN
          DO 40 I=1,80

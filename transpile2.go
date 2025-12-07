@@ -104,8 +104,7 @@ func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.ProgramUnit) (_ []
 		case *f90.Module:
 			dst, err = tg.transformProcedures(dst, c.Contains)
 		case *f90.BlockData:
-			// TODO: add block data.
-			err = fmt.Errorf("block data unsupported")
+			// TODO: handle block data.
 		default:
 			panic(fmt.Sprintf("unexpected program unit %s", c))
 
@@ -1566,6 +1565,10 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 // explicit array bounds in their type declaration.
 func (tg *ToGo) varIsArray(v *Varinfo) bool {
 	return v.flags.HasAny(VFlagDimension)
+}
+
+func (tg *ToGo) varIsCharlike(v *Varinfo) bool {
+	return !tg.varIsArray(v) && (v.typeToken() == f90token.CHARACTER || v.typeToken() == f90token.StringLit)
 }
 
 // varIsPointerTo returns true if the variable's Go type is intrinsic.PointerTo[T]
