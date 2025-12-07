@@ -82,6 +82,9 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 		// Range expressions in subscripts (e.g., arr(1:5), str(2:3))
 		// TODO: implement proper range transformation
 		err = tg.makeErr(expr, "RangeExpr not yet implemented in transpiler")
+	case *f90.ComponentAccess:
+		// Component access: p%age → p.age
+		result, resultType, err = tg.transformComponentAccess(vitgt, e)
 	default:
 		err = tg.makeErr(expr, "unsupported expression")
 	}
@@ -134,6 +137,35 @@ func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructo
 			&ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(len(e.Values))},
 		},
 	}, nil
+}
+
+// transformComponentAccess transforms Fortran component access (p%age) to Go field access (p.age).
+func (tg *ToGo) transformComponentAccess(vitgt *Varinfo, e *f90.ComponentAccess) (result ast.Expr, resultType *Varinfo, err error) {
+	// Get the base variable info for transformation
+	var baseVinfo *Varinfo
+	if ident, ok := e.Base.(*f90.Identifier); ok {
+		baseVinfo = tg.repl.Var(ident.Value)
+	}
+
+	// Transform the base expression using the base variable info
+	base, _, err := tg.transformExpression(baseVinfo, e.Base)
+	if err != nil {
+		return nil, nil, err
+	}
+	// TODO: add field ot varinfo: fields []struct{name string; type *TypeDeclaration} and search for field matches in case insensitive fashion.
+	// Create Go selector expression: base.Component
+	result = &ast.SelectorExpr{
+		X:   base,
+		Sel: ast.NewIdent(e.Component), // This can fail on a field case mismatch. Varinfo should have a fields slice and then component be searched in there.
+	}
+
+	// For now, return vitgt as resultType since we don't track derived type field types
+	// This works for simple cases where the target type is known
+	if vitgt != nil {
+		return result, vitgt, nil
+	}
+	// If no target type, use base variable info
+	return result, baseVinfo, nil
 }
 
 func (tg *ToGo) transformUnaryExpr(vitgt *Varinfo, e *f90.UnaryExpr) (result ast.Expr, resultType *Varinfo, err error) {

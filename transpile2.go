@@ -262,8 +262,8 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	switch s := stmt.(type) {
 	case *f90.TypeDeclaration:
 		dst, err = tg.transformTypeDeclaration(dst, s)
-	// case *f90.DerivedTypeStmt:
-	// 	gostmt = tg.transformDerivedType(s)
+	case *f90.DerivedTypeStmt:
+		dst, err = tg.transformDerivedType(dst, s)
 	case *f90.AssignmentStmt:
 		dst, err = tg.transformAssignment(dst, s)
 	case *f90.CallStmt:
@@ -466,6 +466,82 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	return dst, nil
 }
 
+// transformDerivedType transforms a Fortran TYPE definition into a Go struct type.
+// Example:
+//
+//	TYPE :: person
+//	  CHARACTER(LEN=50) :: name
+//	  INTEGER :: age
+//	END TYPE person
+//
+// Becomes:
+//
+//	type person struct {
+//	    name *intrinsic.CharacterArray
+//	    age  int32
+//	}
+func (tg *ToGo) transformDerivedType(dst []ast.Stmt, stmt *f90.DerivedTypeStmt) (_ []ast.Stmt, err error) {
+	fields := &ast.FieldList{
+		List: make([]*ast.Field, 0, len(stmt.Components)),
+	}
+
+	for _, comp := range stmt.Components {
+		for _, ent := range comp.Components {
+			fieldType := tg.componentGoType(&comp.Type, &ent)
+			field := &ast.Field{
+				Names: []*ast.Ident{ast.NewIdent(ent.Name)},
+				Type:  fieldType,
+			}
+			fields.List = append(fields.List, field)
+		}
+	}
+
+	typeSpec := &ast.TypeSpec{
+		Name: ast.NewIdent(stmt.Name),
+		Type: &ast.StructType{
+			Fields: fields,
+		},
+	}
+
+	decl := &ast.GenDecl{
+		Tok:   token.TYPE,
+		Specs: []ast.Spec{typeSpec},
+	}
+
+	dst = append(dst, &ast.DeclStmt{Decl: decl})
+	return dst, nil
+}
+
+// componentGoType returns the Go type for a derived type component.
+func (tg *ToGo) componentGoType(ts *f90.TypeSpec, ent *f90.DeclEntity) ast.Expr {
+	// TODO: integrate with goType method likely candidate for simplification.
+	tok := ts.Token
+	kind := 0
+	if kindExpr := ts.Kind(); kindExpr != nil {
+		if lit, ok := kindExpr.(*f90.IntegerLiteral); ok {
+			kind = int(lit.Value)
+		}
+	}
+
+	// Handle CHARACTER type
+	if tok == f90token.CHARACTER {
+		return &ast.StarExpr{X: _astTypeCharArray}
+	}
+
+	// Handle arrays
+	if ent.ArraySpec != nil && len(ent.ArraySpec.Bounds) > 0 {
+		baseType := tg.baseGotype(tok, kind)
+		return &ast.StarExpr{
+			X: &ast.IndexExpr{
+				X:     _astTypeArray,
+				Index: baseType,
+			},
+		}
+	}
+
+	return tg.baseGotype(tok, kind)
+}
+
 func (tg *ToGo) transformAllocateStmt(dst []ast.Stmt, stmt *f90.AllocateStmt) (_ []ast.Stmt, err error) {
 	for _, obj := range stmt.Objects {
 		arrRef, ok := obj.(*f90.ArrayRef)
@@ -559,6 +635,12 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	case *f90.FunctionCall:
 		// FunctionCall as assignment target occurs for CHARACTER substring: str(1:5) = 'x'
 		targetVinfo = tg.repl.Var(tgt.Name)
+	case *f90.ComponentAccess:
+		// Component access: p%age = 30 → p.age = 30
+		// Get the base variable for type info
+		if ident, ok := tgt.Base.(*f90.Identifier); ok {
+			targetVinfo = tg.repl.Var(ident.Value)
+		}
 	default:
 		err = tg.makeErr(tgt, "unknown target expression in assignment")
 	}
@@ -609,6 +691,20 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 			Position:   tgt.Position,
 		}
 		return tg.transformSetArrayRef(dst, syntheticRef, rhs)
+	case *f90.ComponentAccess:
+		// Component access: p%age = 30 → p.age = 30
+		// Handle component access directly and return - no type conversion needed
+		lhs, _, err = tg.transformComponentAccess(nil, tgt)
+		if err != nil {
+			return dst, err
+		}
+		gstmt := &ast.AssignStmt{
+			Tok: token.ASSIGN,
+			Lhs: []ast.Expr{lhs},
+			Rhs: []ast.Expr{rhs},
+		}
+		dst = append(dst, gstmt)
+		return dst, nil
 	default:
 		if lhs == nil {
 			return dst, tg.makeErr(stmt.Target, "unsupported assignment target")
