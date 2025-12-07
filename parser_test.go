@@ -20,6 +20,7 @@ func TestData_valid(t *testing.T) {
 		t.Fatal(err)
 	}
 	var parser Parser90
+	var tg ToGo
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasPrefix(name, "valid_") {
@@ -31,7 +32,10 @@ func TestData_valid(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			testParse(t, &parser, path, string(src), false)
+			ssrc := string(src)
+			units := testParse(t, &parser, path, ssrc, false)
+			tg.Reset()
+			testTranspile(t, &tg, units, path, ssrc)
 		})
 	}
 }
@@ -53,7 +57,9 @@ func TestData_invalid(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			testParse(t, &parser, srcpath, string(src), true)
+			ssrc := string(src)
+			testParse(t, &parser, srcpath, ssrc, true)
+
 		})
 	}
 }
@@ -73,6 +79,33 @@ func expectedErrors(src string) map[int]string {
 		}
 	}
 	return errors
+}
+
+func testTranspile(t testing.TB, tg *ToGo, pus []f90.ProgramUnit, srcPath string, src string) {
+	tg.SetSource(srcPath, strings.NewReader(src))
+	var mainProg *f90.ProgramBlock
+	for _, unit := range pus {
+		if block, ok := unit.(*f90.ProgramBlock); ok {
+			mainProg = block
+			continue
+		}
+		err := tg.AddUsed(unit)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if mainProg != nil {
+		_, err := tg.TransformProgram(mainProg)
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		_, err := tg.transformProcedures(nil, pus)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
 }
 
 func testParse(t testing.TB, p *Parser90, srcPath string, src string, expectErrors bool) []f90.ProgramUnit {

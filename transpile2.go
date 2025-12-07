@@ -19,6 +19,13 @@ type ToGo struct {
 	currentStmt f90.Statement
 }
 
+func (tg *ToGo) Reset() {
+	*tg = ToGo{
+		repl: tg.repl,
+	}
+	tg.repl.Reset()
+}
+
 func (tg *ToGo) SetSource(source string, r io.ReaderAt) {
 	tg.source = source
 	tg.sourceFile = r
