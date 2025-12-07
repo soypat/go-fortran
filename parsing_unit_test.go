@@ -79,6 +79,272 @@ END SUBROUTINE`,
 				}
 			},
 		},
+		{
+			name: "declared array produces ArrayRef not FunctionCall",
+			src: `SUBROUTINE test()
+  INTEGER, DIMENSION(10) :: arr
+  INTEGER :: x
+  x = arr(5)
+  x = UNKNOWN_FUNC(5)
+END SUBROUTINE`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				sub, ok := unit.(*ast.Subroutine)
+				if !ok {
+					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
+				}
+
+				// Verify arr is registered with VFlagDimension
+				vi := data.Var("arr")
+				if vi == nil {
+					t.Fatalf("arr not registered in variable table")
+				}
+				if !vi.Flags().HasAny(VFlagDimension) {
+					t.Errorf("arr missing VFlagDimension flag")
+				}
+
+				// Find the assignment statements
+				var assignStmts []*ast.AssignmentStmt
+				for _, stmt := range sub.Body {
+					if assign, ok := stmt.(*ast.AssignmentStmt); ok {
+						assignStmts = append(assignStmts, assign)
+					}
+				}
+				if len(assignStmts) != 2 {
+					t.Fatalf("expected 2 assignment statements, got %d", len(assignStmts))
+				}
+
+				// First assignment: x = arr(5) - arr should be ArrayRef
+				arrRef, ok := assignStmts[0].Value.(*ast.ArrayRef)
+				if !ok {
+					t.Errorf("expected arr(5) to be *ast.ArrayRef, got %T", assignStmts[0].Value)
+				} else if arrRef.Name != "arr" {
+					t.Errorf("expected ArrayRef name 'arr', got %s", arrRef.Name)
+				}
+
+				// Second assignment: x = UNKNOWN_FUNC(5) - should be FunctionCall
+				funcCall, ok := assignStmts[1].Value.(*ast.FunctionCall)
+				if !ok {
+					t.Errorf("expected UNKNOWN_FUNC(5) to be *ast.FunctionCall, got %T", assignStmts[1].Value)
+				} else if funcCall.Name != "UNKNOWN_FUNC" {
+					t.Errorf("expected FunctionCall name 'UNKNOWN_FUNC', got %s", funcCall.Name)
+				}
+			},
+		},
+		{
+			name: "DATA with undeclared scalar variable uses implicit typing",
+			src: `PROGRAM test
+      DATA D40/1.0D40/
+      PRINT *, D40
+END PROGRAM`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				// Verify D40 is registered
+				vi := data.Var("D40")
+				if vi == nil {
+					t.Errorf("Variable D40 not registered")
+					return
+				}
+				if vi.decl == nil || vi.decl.Type == nil {
+					t.Errorf("Variable D40 has no type declaration")
+					return
+				}
+				gotType := vi.decl.Type.Token.String()
+				if !strings.EqualFold(gotType, "REAL") {
+					t.Errorf("Variable D40: expected type REAL, got %q", gotType)
+				}
+			},
+		},
+		{
+			name: "DATA with multiple undeclared variables uses implicit typing",
+			src: `PROGRAM test
+      DATA HALF/0.5D0/
+      DATA NPREPW/0/,NORBVX/0/
+      PRINT *, HALF, NPREPW, NORBVX
+END PROGRAM`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				expectedVars := []struct {
+					name     string
+					typeName string
+				}{
+					{name: "HALF", typeName: "REAL"},       // H -> REAL
+					{name: "NPREPW", typeName: "INTEGER"},  // N -> INTEGER (I-N rule)
+					{name: "NORBVX", typeName: "INTEGER"},  // N -> INTEGER
+				}
+				for _, expected := range expectedVars {
+					vi := data.Var(expected.name)
+					if vi == nil {
+						t.Errorf("Variable %q not registered", expected.name)
+						continue
+					}
+					if vi.decl == nil || vi.decl.Type == nil {
+						t.Errorf("Variable %q has no type declaration", expected.name)
+						continue
+					}
+					gotType := vi.decl.Type.Token.String()
+					if !strings.EqualFold(gotType, expected.typeName) {
+						t.Errorf("Variable %q: expected type %q, got %q", expected.name, expected.typeName, gotType)
+					}
+				}
+			},
+		},
+		{
+			name: "DATA with array element registers array with implicit typing",
+			src: `PROGRAM test
+      DATA I_DEFALT(1) /777/
+      PRINT *, I_DEFALT(1)
+END PROGRAM`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				vi := data.Var("I_DEFALT")
+				if vi == nil {
+					t.Errorf("Variable I_DEFALT not registered")
+					return
+				}
+				if vi.decl == nil || vi.decl.Type == nil {
+					t.Errorf("Variable I_DEFALT has no type declaration")
+					return
+				}
+				gotType := vi.decl.Type.Token.String()
+				if !strings.EqualFold(gotType, "INTEGER") {
+					t.Errorf("Variable I_DEFALT: expected type INTEGER, got %q", gotType)
+				}
+			},
+		},
+		{
+			name: "DATA with mix of declared and undeclared variables",
+			src: `PROGRAM test
+      DOUBLE PRECISION :: DECLARED
+      DATA DECLARED/1.0D0/
+      DATA UNDECLARED/2.0D0/
+      PRINT *, DECLARED, UNDECLARED
+END PROGRAM`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				expectedVars := []struct {
+					name     string
+					typeName string
+				}{
+					{name: "DECLARED", typeName: "DOUBLEPRECISION"},
+					{name: "UNDECLARED", typeName: "REAL"}, // U -> REAL
+				}
+				for _, expected := range expectedVars {
+					vi := data.Var(expected.name)
+					if vi == nil {
+						t.Errorf("Variable %q not registered", expected.name)
+						continue
+					}
+					if vi.decl == nil || vi.decl.Type == nil {
+						t.Errorf("Variable %q has no type declaration", expected.name)
+						continue
+					}
+					gotType := vi.decl.Type.Token.String()
+					if !strings.EqualFold(gotType, expected.typeName) {
+						t.Errorf("Variable %q: expected type %q, got %q", expected.name, expected.typeName, gotType)
+					}
+				}
+			},
+		},
+		{
+			name: "END as parameter name in subroutine",
+			src: `SUBROUTINE TOBNRY(IN,HDATAS,END,INTYPE,IDAT,MWORDS)
+   X = 1
+END SUBROUTINE`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				sub, ok := unit.(*ast.Subroutine)
+				if !ok {
+					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
+				}
+				params := sub.Parameters
+				if len(params) != 6 {
+					t.Errorf("Expected 6 parameters, got %d", len(params))
+				}
+				// Check that END is the third parameter
+				if len(params) >= 3 && params[2].Name != "END" {
+					t.Errorf("Expected third parameter to be 'END', got '%s'", params[2].Name)
+				}
+				// Verify END is registered as parameter variable
+				vi := data.Var("END")
+				if vi == nil {
+					t.Errorf("Parameter END not registered in variable table")
+				} else if !vi.Flags().HasAny(VFlagParameter) {
+					t.Errorf("Parameter END missing VFlagParameter flag")
+				}
+			},
+		},
+		{
+			name: "DATA as parameter name in subroutine",
+			src: `SUBROUTINE EXAMPLE(IN,DATA,OUT)
+   X = 1
+END SUBROUTINE`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				sub, ok := unit.(*ast.Subroutine)
+				if !ok {
+					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
+				}
+				params := sub.Parameters
+				if len(params) != 3 {
+					t.Errorf("Expected 3 parameters, got %d", len(params))
+				}
+				// Check that DATA is the second parameter
+				if len(params) >= 2 && params[1].Name != "DATA" {
+					t.Errorf("Expected second parameter to be 'DATA', got '%s'", params[1].Name)
+				}
+				// Verify DATA is registered as parameter variable
+				vi := data.Var("DATA")
+				if vi == nil {
+					t.Errorf("Parameter DATA not registered in variable table")
+				} else if !vi.Flags().HasAny(VFlagParameter) {
+					t.Errorf("Parameter DATA missing VFlagParameter flag")
+				}
+			},
+		},
+		{
+			name: "Both END and DATA as parameter names",
+			src: `SUBROUTINE TESTFUNC(START,END,DATA,RESULT)
+   X = 1
+END SUBROUTINE`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				sub, ok := unit.(*ast.Subroutine)
+				if !ok {
+					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
+				}
+				params := sub.Parameters
+				if len(params) != 4 {
+					t.Errorf("Expected 4 parameters, got %d", len(params))
+				}
+				// Check parameter names
+				expectedNames := []string{"START", "END", "DATA", "RESULT"}
+				for i, expected := range expectedNames {
+					if i < len(params) && params[i].Name != expected {
+						t.Errorf("Expected parameter %d to be '%s', got '%s'", i, expected, params[i].Name)
+					}
+				}
+			},
+		},
+		{
+			name: "END as parameter in function",
+			src: `FUNCTION CALCULATE(BEGIN,END) RESULT(VALUE)
+   VALUE = 1
+END FUNCTION`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				fn, ok := unit.(*ast.Function)
+				if !ok {
+					t.Fatalf("Expected *ast.Function, got %T", unit)
+				}
+				params := fn.Parameters
+				if len(params) != 2 {
+					t.Errorf("Expected 2 parameters, got %d", len(params))
+				}
+				// Check that END is the second parameter
+				if len(params) >= 2 && params[1].Name != "END" {
+					t.Errorf("Expected second parameter to be 'END', got '%s'", params[1].Name)
+				}
+				// Verify END is registered as parameter variable
+				vi := data.Var("END")
+				if vi == nil {
+					t.Errorf("Parameter END not registered in variable table")
+				} else if !vi.Flags().HasAny(VFlagParameter) {
+					t.Errorf("Parameter END missing VFlagParameter flag")
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
