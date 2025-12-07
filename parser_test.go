@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	f90 "github.com/soypat/go-fortran/ast"
 )
 
 //go:embed testdata
@@ -17,6 +19,7 @@ func TestData_valid(t *testing.T) {
 	if err != nil || len(entries) == 0 {
 		t.Fatal(err)
 	}
+	var parser Parser90
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasPrefix(name, "valid_") {
@@ -28,7 +31,7 @@ func TestData_valid(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			checkErrors(t, path, string(src), false)
+			testParse(t, &parser, path, string(src), false)
 		})
 	}
 }
@@ -38,6 +41,7 @@ func TestData_invalid(t *testing.T) {
 	if err != nil || len(entries) == 0 {
 		t.Fatal(err)
 	}
+	var parser Parser90
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasPrefix(name, "invalid_") {
@@ -49,7 +53,7 @@ func TestData_invalid(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			checkErrors(t, srcpath, string(src), true)
+			testParse(t, &parser, srcpath, string(src), true)
 		})
 	}
 }
@@ -71,41 +75,35 @@ func expectedErrors(src string) map[int]string {
 	return errors
 }
 
-// checkErrors is a test helper that parses source code and verifies errors match annotations.
-// If expectErrors is false, it verifies that no errors occurred.
-func checkErrors(t *testing.T, srcpath, src string, expectErrors bool) {
-	t.Helper()
-
+func testParse(t testing.TB, p *Parser90, srcPath string, src string, expectErrors bool) []f90.ProgramUnit {
 	expected := map[int]string{}
 	if expectErrors {
 		expected = expectedErrors(src)
 	}
-
-	parser := Parser90{}
-	err := parser.Reset(srcpath, strings.NewReader(src))
+	err := p.Reset(srcPath, strings.NewReader(src))
 	if err != nil {
 		t.Fatalf("Failed to reset parser: %v", err)
 	}
-
 	// Parse all units
+	var units []f90.ProgramUnit
 	for {
-		unit := parser.ParseNextProgramUnit()
+		unit := p.ParseNextProgramUnit()
 		if unit == nil {
 			break
 		}
+		units = append(units, unit)
 	}
-
-	actual := parser.Errors()
-
+	actualErrs := p.Errors()
 	// Compare errors
-	if err := compareErrors(t, srcpath, expected, actual); err != nil {
+	if err := compareErrors(t, srcPath, expected, actualErrs); err != nil {
 		t.Error(err)
 	}
+	return units
 }
 
 // compareErrors compares expected errors (from annotations) with actual parser errors.
 // It returns an error describing any mismatches.
-func compareErrors(t *testing.T, srcpath string, expected map[int]string, actual []ParserError) error {
+func compareErrors(t testing.TB, srcpath string, expected map[int]string, actual []ParserError) error {
 	t.Helper()
 	actualAreExpected := make([]bool, len(actual))
 	for line, pattern := range expected {
