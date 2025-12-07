@@ -235,7 +235,7 @@ func LEVEL09() {
 		_, _, _, _ = i, n, fib_result, sum_val
 	)
 	n = 7
-	fib_result = FIBONACCI(n)
+	fib_result = int32(FIBONACCI(n))
 	intrinsic.Print("LEVEL 9: FIBONACCI(7) =", fib_result)
 	i = 1
 	sum_val = 0
@@ -969,7 +969,7 @@ func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 	}
 	intrinsic.Print("LEVEL 7: Inside MODIFY_ARRAY")
 }
-func FACTORIAL(n int32) (factorial int32) {
+func FACTORIAL(n int32) (FACTORIAL float32) {
 	var (
 		i      int32
 		result int32
@@ -979,14 +979,14 @@ func FACTORIAL(n int32) (factorial int32) {
 	for i = 1; i <= n; i++ {
 		result = result * i
 	}
-	factorial = result
+	factorial = float32(result)
 	return
 }
-func SQUARE_ROOT(x float32) (square_root float32) {
+func SQUARE_ROOT(x float32) (SQUARE_ROOT float32) {
 	square_root = intrinsic.SQRT(x)
 	return
 }
-func FIBONACCI(n int32) (fibonacci int32) {
+func FIBONACCI(n int32) (FIBONACCI float32) {
 	var (
 		a          int32
 		b          int32
@@ -995,7 +995,7 @@ func FIBONACCI(n int32) (fibonacci int32) {
 		_, _, _, _ = a, b, temp, i
 	)
 	if n <= 1 {
-		fibonacci = n
+		fibonacci = float32(n)
 	}
 	a = 0
 	b = 1
@@ -1004,7 +1004,7 @@ func FIBONACCI(n int32) (fibonacci int32) {
 		a = b
 		b = temp
 	}
-	fibonacci = b
+	fibonacci = float32(b)
 	return
 }
 

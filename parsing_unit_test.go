@@ -345,6 +345,84 @@ END FUNCTION`,
 				}
 			},
 		},
+		{
+			name: "bare FUNCTION sets returnType via function name",
+			src: `FUNCTION add(x, y)
+	INTEGER :: x, y, add
+	add = x + y
+END FUNCTION`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				fn, ok := unit.(*ast.Function)
+				if !ok {
+					t.Fatalf("Expected *ast.Function, got %T", unit)
+				}
+				if fn.Name != "add" {
+					t.Errorf("Expected function name 'add', got %q", fn.Name)
+				}
+				// CRITICAL: returnType must be set for bare functions
+				if data.returnType == nil {
+					t.Fatal("BUG: returnType is nil for bare FUNCTION - transpiler will crash")
+				}
+				// Verify the return type variable is the function name
+				if data.returnType.Identifier() != "add" {
+					t.Errorf("Expected returnType identifier 'add', got %q", data.returnType.Identifier())
+				}
+				// Verify it has VFlagReturned
+				if !data.returnType.Flags().HasAny(VFlagReturned) {
+					t.Errorf("Return variable missing VFlagReturned flag")
+				}
+			},
+		},
+		{
+			name: "type-prefixed FUNCTION sets returnType",
+			src: `INTEGER FUNCTION square(n)
+	INTEGER :: n
+	square = n * n
+END FUNCTION`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				fn, ok := unit.(*ast.Function)
+				if !ok {
+					t.Fatalf("Expected *ast.Function, got %T", unit)
+				}
+				if fn.Name != "square" {
+					t.Errorf("Expected function name 'square', got %q", fn.Name)
+				}
+				// returnType must be set for type-prefixed functions
+				if data.returnType == nil {
+					t.Fatal("BUG: returnType is nil for INTEGER FUNCTION")
+				}
+				if data.returnType.Identifier() != "square" {
+					t.Errorf("Expected returnType identifier 'square', got %q", data.returnType.Identifier())
+				}
+			},
+		},
+		{
+			name: "FUNCTION with RESULT clause sets returnType",
+			src: `FUNCTION compute(x) RESULT(res)
+	REAL :: x, res
+	res = x * 2.0
+END FUNCTION`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				fn, ok := unit.(*ast.Function)
+				if !ok {
+					t.Fatalf("Expected *ast.Function, got %T", unit)
+				}
+				if fn.Name != "compute" {
+					t.Errorf("Expected function name 'compute', got %q", fn.Name)
+				}
+				if fn.ResultVariable != "res" {
+					t.Errorf("Expected ResultVariable 'res', got %q", fn.ResultVariable)
+				}
+				// returnType must be set for RESULT functions
+				if data.returnType == nil {
+					t.Fatal("BUG: returnType is nil for FUNCTION with RESULT")
+				}
+				// Return type should be the RESULT variable, not the function name
+				if data.returnType.Identifier() != "res" {
+					t.Errorf("Expected returnType identifier 'res', got %q", data.returnType.Identifier())
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

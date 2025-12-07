@@ -729,12 +729,11 @@ func (p *Parser90) parseFunction() ast.Statement {
 	}
 
 	// Check for RESULT clause
-	hasResult := false
+	pud := p.makeUnitData(fn.Name, token.FUNCTION)
 	if p.consumeIf(token.RESULT) {
 		if p.expect(token.LParen, "RESULT open") {
 			if p.expectIdentifier(&fn.ResultVariable, "function RESULT variable specification") {
-				p.varInit(fn.ResultVariable, nil, VFlagReturned, "")
-				hasResult = true
+				pud.returnType = p.varInit(fn.ResultVariable, nil, VFlagReturned, "")
 			}
 			p.expect(token.RParen, "RESULT close")
 		}
@@ -746,8 +745,9 @@ func (p *Parser90) parseFunction() ast.Statement {
 	p.expectEndProgramUnit(token.FUNCTION, token.ENDFUNCTION, start, fn.Name)
 	p.consumeIf(token.Identifier)
 	fn.Position = ast.Pos(start.Pos, p.current.start)
-	pud := p.makeUnitData(fn.Name, token.FUNCTION)
+
 	fn.Data = pud
+	hasResult := pud.returnType != nil
 	if hasResult {
 		for i := range pud.vars {
 			if pud.vars[i].flags.HasAny(VFlagReturned) {
@@ -755,6 +755,25 @@ func (p *Parser90) parseFunction() ast.Statement {
 				break
 			}
 		}
+	} else {
+		// For bare FUNCTION without RESULT clause, the function name is the return variable.
+		// Look for the variable with the function name and mark it as returned.
+		vinfo := pud.Var(fn.Name)
+		if vinfo != nil {
+			vinfo.flags |= VFlagReturned
+		} else {
+			decl := &ast.DeclEntity{
+				Name:     fn.Name,
+				Type:     &fn.Type,
+				Position: fn.Position,
+			}
+			var err error
+			vinfo, err = pud.varInit(start, fn.Name, decl, VFlagReturned, "")
+			if err != nil {
+				panic(err)
+			}
+		}
+		pud.returnType = vinfo
 	}
 	return fn
 }
@@ -4238,6 +4257,7 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 	pud := p.makeUnitData(fn.Name, token.FUNCTION)
 	fn.Data = pud
 	if pud.returnType == nil {
+		p.addErrorWithPos(start, "function missing return type")
 		decl := &ast.DeclEntity{
 			Name:     fn.Name,
 			Type:     &fn.Type,
@@ -4250,12 +4270,6 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 			if err != nil {
 				panic(err)
 			}
-		} else if !vinfo.flags.HasAny(VFlagReturned) {
-			// Variable exists (from implicit registration) but not as return type.
-			// Update it to be the function return variable with correct type.
-			vinfo.decl = decl
-			vinfo.flags |= VFlagReturned
-			vinfo.flags &^= VFlagImplicit // Clear implicit flag
 		}
 		pud.returnType = vinfo
 	}
