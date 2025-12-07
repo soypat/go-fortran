@@ -4481,7 +4481,28 @@ func (p *Parser90) parseDimensionStmt() ast.Statement {
 
 		// Array specification is required for DIMENSION statement
 		if p.currentTokenIs(token.LParen) {
-			stmt.ArraySpecs = append(stmt.ArraySpecs, p.parseArraySpec())
+			arraySpec := p.parseArraySpec()
+			stmt.ArraySpecs = append(stmt.ArraySpecs, arraySpec)
+
+			// Register the variable as an array so parser recognizes it later
+			// Check if variable already exists (might have prior type declaration)
+			vi := p.varSGet(varName)
+			if vi == nil {
+				// Create new declaration with implicit type
+				implicitDecl := p.vars.implicitDeclFor(varName)
+				decl := &ast.DeclEntity{
+					Name:      varName,
+					Type:      implicitDecl.Type,
+					ArraySpec: arraySpec,
+				}
+				p.varInit(varName, decl, VFlagDimension, "")
+			} else {
+				// Variable exists, update with dimension info
+				if vi.decl != nil {
+					vi.decl.ArraySpec = arraySpec
+				}
+				vi.flags |= VFlagDimension
+			}
 		} else {
 			p.addError("expected array dimension specification after variable in DIMENSION statement")
 		}

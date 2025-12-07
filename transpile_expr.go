@@ -361,7 +361,7 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.FunctionCall) (resu
 		return tg.transformMALLOC(vitgt, e)
 	}
 
-	fi := tg.ContainedOrExtern(e.Name)
+	fi := tg.ContainedOrUsed(e.Name)
 	if fi == nil {
 		fn := getIntrinsic(e.Name, len(e.Args))
 		if fn == nil {

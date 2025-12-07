@@ -36,7 +36,7 @@ func (tg *ToGo) Contained(name string) *ParserUnitData {
 	return tg.repl.Contained(name)
 }
 
-func (tg *ToGo) ContainedOrExtern(name string) *ParserUnitData {
+func (tg *ToGo) ContainedOrUsed(name string) *ParserUnitData {
 	return tg.repl.ContainedOrUsed(name)
 }
 
@@ -508,7 +508,7 @@ func (tg *ToGo) transformDeallocateStmt(dst []ast.Stmt, stmt *f90.DeallocateStmt
 }
 
 func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.Stmt, err error) {
-	fninfo := tg.ContainedOrExtern(stmt.Name)
+	fninfo := tg.ContainedOrUsed(stmt.Name)
 	if fninfo == nil {
 		return dst, tg.makeErr(stmt, "subroutine not found: "+stmt.Name)
 	}

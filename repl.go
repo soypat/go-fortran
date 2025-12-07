@@ -508,10 +508,6 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.FunctionCall) error {
 			dst.val.tok = fn.returnType.typeToken()
 			return nil
 		}
-		// Also check if it's a declared variable (might be array reference parsed as function call)
-		if repl.Var(e.Name) != nil {
-			return fmt.Errorf("%s tried to be interpreted as an intrinsic but was variable", e.Name)
-		}
 		err = fmt.Errorf("unknown intrinsic: %s", name)
 	}
 	return err
