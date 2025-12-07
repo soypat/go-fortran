@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/soypat/go-fortran/ast"
+	"github.com/soypat/go-fortran/token"
 )
 
 // TestProgramUnitParsing verifies that program units are parsed correctly,
@@ -394,6 +395,17 @@ END FUNCTION`,
 				if data.returnType.Identifier() != "square" {
 					t.Errorf("Expected returnType identifier 'square', got %q", data.returnType.Identifier())
 				}
+				// CRITICAL: returnType must have INTEGER type, not default REAL
+				retDecl := data.returnType.decl
+				if retDecl == nil {
+					t.Fatal("BUG: returnType.decl is nil")
+				}
+				if retDecl.Type == nil {
+					t.Fatal("BUG: returnType.decl.Type is nil")
+				}
+				if retDecl.Type.Token != token.INTEGER {
+					t.Errorf("BUG: returnType should be INTEGER, got %v", retDecl.Type.Token)
+				}
 			},
 		},
 		{
@@ -421,6 +433,79 @@ END FUNCTION`,
 				if data.returnType.Identifier() != "res" {
 					t.Errorf("Expected returnType identifier 'res', got %q", data.returnType.Identifier())
 				}
+			},
+		},
+		{
+			name: "MODULE CONTAINS FUNCTION with parameter has decl for parameter",
+			src: `MODULE test_mod
+  IMPLICIT NONE
+  CONTAINS
+  FUNCTION public_func(x) RESULT(res)
+    REAL, INTENT(IN) :: x
+    REAL :: res
+    res = x * 2.0
+  END FUNCTION public_func
+END MODULE test_mod`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				mod, ok := unit.(*ast.Module)
+				if !ok {
+					t.Fatalf("Expected *ast.Module, got %T", unit)
+				}
+				if len(mod.Contains) != 1 {
+					t.Fatalf("Expected 1 contained unit, got %d", len(mod.Contains))
+				}
+				fn, ok := mod.Contains[0].(*ast.Function)
+				if !ok {
+					t.Fatalf("Expected *ast.Function in Contains, got %T", mod.Contains[0])
+				}
+				fnData, ok := fn.Data.(*ParserUnitData)
+				if !ok {
+					t.Fatalf("Expected *ParserUnitData for function, got %T", fn.Data)
+				}
+				// Debug: print all variables in function
+				t.Logf("Function %s variables:", fn.Name)
+				vars := fnData.AppendVarinfo(nil)
+				for i, v := range vars {
+					t.Logf("  [%d] %s: decl=%v flags=%v", i, v.Identifier(), v.decl != nil, v.Flags())
+				}
+				// Check that parameter x has a declaration
+				xVar := fnData.Var("x")
+				if xVar == nil {
+					t.Fatal("BUG: parameter 'x' not found in function's variable table")
+				}
+				if xVar.decl == nil {
+					t.Fatal("BUG: parameter 'x' has nil decl - SetScope will fail")
+				}
+				t.Logf("x decl: %+v", xVar.decl)
+			},
+		},
+		{
+			name: "standalone FUNCTION with parameter has decl for parameter",
+			src: `FUNCTION standalone_func(x) RESULT(res)
+    REAL, INTENT(IN) :: x
+    REAL :: res
+    res = x * 2.0
+END FUNCTION standalone_func`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				fn, ok := unit.(*ast.Function)
+				if !ok {
+					t.Fatalf("Expected *ast.Function, got %T", unit)
+				}
+				// Debug: print all variables in function
+				t.Logf("Function %s variables:", fn.Name)
+				vars := data.AppendVarinfo(nil)
+				for i, v := range vars {
+					t.Logf("  [%d] %s: decl=%v flags=%v", i, v.Identifier(), v.decl != nil, v.Flags())
+				}
+				// Check that parameter x has a declaration
+				xVar := data.Var("x")
+				if xVar == nil {
+					t.Fatal("BUG: parameter 'x' not found in function's variable table")
+				}
+				if xVar.decl == nil {
+					t.Fatal("BUG: parameter 'x' has nil decl - SetScope will fail")
+				}
+				t.Logf("x decl: %+v", xVar.decl)
 			},
 		},
 	}

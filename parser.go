@@ -729,11 +729,11 @@ func (p *Parser90) parseFunction() ast.Statement {
 	}
 
 	// Check for RESULT clause
-	pud := p.makeUnitData(fn.Name, token.FUNCTION)
+	var returnType *Varinfo
 	if p.consumeIf(token.RESULT) {
 		if p.expect(token.LParen, "RESULT open") {
 			if p.expectIdentifier(&fn.ResultVariable, "function RESULT variable specification") {
-				pud.returnType = p.varInit(fn.ResultVariable, nil, VFlagReturned, "")
+				returnType = p.varInit(fn.ResultVariable, nil, VFlagReturned, "")
 			}
 			p.expect(token.RParen, "RESULT close")
 		}
@@ -746,34 +746,19 @@ func (p *Parser90) parseFunction() ast.Statement {
 	p.consumeIf(token.Identifier)
 	fn.Position = ast.Pos(start.Pos, p.current.start)
 
+	// Create unit data AFTER parseBody so type declarations are captured
+	pud := p.makeUnitData(fn.Name, token.FUNCTION)
+	pud.returnType = returnType
 	fn.Data = pud
-	hasResult := pud.returnType != nil
-	if hasResult {
-		for i := range pud.vars {
-			if pud.vars[i].flags.HasAny(VFlagReturned) {
-				pud.returnType = &pud.vars[i]
-				break
-			}
-		}
-	} else {
+	missingResult := returnType == nil
+	if missingResult {
 		// For bare FUNCTION without RESULT clause, the function name is the return variable.
 		// Look for the variable with the function name and mark it as returned.
 		vinfo := pud.Var(fn.Name)
 		if vinfo != nil {
 			vinfo.flags |= VFlagReturned
-		} else {
-			decl := &ast.DeclEntity{
-				Name:     fn.Name,
-				Type:     &fn.Type,
-				Position: fn.Position,
-			}
-			var err error
-			vinfo, err = pud.varInit(start, fn.Name, decl, VFlagReturned, "")
-			if err != nil {
-				panic(err)
-			}
+			pud.returnType = vinfo
 		}
-		pud.returnType = vinfo
 	}
 	return fn
 }
@@ -4251,30 +4236,38 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 	// Save the type token
 	start := p.sourcePos()
 	ts := p.expectTypeSpecIntrinsic()
-	// Parse as function
+	// Parse as function - this creates fn.Data with variable info
 	fn := p.parseFunction().(*ast.Function)
 	fn.Type = ts
-	pud := p.makeUnitData(fn.Name, token.FUNCTION)
-	fn.Data = pud
+	pud := fn.Data.(*ParserUnitData)
+
+	// For type-prefixed functions, the function name is the return variable with the prefix type.
+	// Create the declaration with the correct type from the prefix.
+	decl := &ast.DeclEntity{
+		Name:     fn.Name,
+		Type:     &fn.Type,
+		Position: fn.Position,
+	}
+
 	if pud.returnType == nil {
-		p.addErrorWithPos(start, "function missing return type")
-		decl := &ast.DeclEntity{
-			Name:     fn.Name,
-			Type:     &fn.Type,
-			Position: fn.Position,
-		}
-		var err error
+		// returnType not set - create or find the variable
 		vinfo := pud.Var(fn.Name)
 		if vinfo == nil {
+			var err error
 			vinfo, err = pud.varInit(start, fn.Name, decl, VFlagReturned, "")
 			if err != nil {
 				panic(err)
 			}
+		} else {
+			vinfo.decl = decl
+			vinfo.flags |= VFlagReturned
 		}
 		pud.returnType = vinfo
+	} else {
+		// returnType already set by parseFunction - update its decl with the correct type
+		pud.returnType.decl = decl
 	}
 	return fn
-
 }
 
 // parseProcedureWithAttributes handles procedures with attributes like RECURSIVE, PURE, ELEMENTAL
