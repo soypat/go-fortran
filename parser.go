@@ -703,9 +703,10 @@ func (p *Parser90) parseSubroutine() ast.Statement {
 
 	p.expectEndProgramUnit(token.SUBROUTINE, token.ENDSUBROUTINE, start, sub.Name)
 	p.consumeIf(token.Identifier)
-
-	sub.Data = p.makeUnitData(sub.Name, token.SUBROUTINE)
+	pud := p.makeUnitData(sub.Name, token.SUBROUTINE)
+	sub.Data = pud
 	sub.Position = ast.Pos(start.Pos, p.current.start)
+	pud.resolveImplicitTypes()
 	return sub
 }
 
@@ -759,10 +760,12 @@ func (p *Parser90) parseFunction() ast.Statement {
 			vinfo.flags |= VFlagReturned
 			pud.returnType = vinfo
 		} else {
-			// TODO: this would break for recursive functions, luckily not all too common (?)
+			// Function name not used in body - create return variable with nil decl.
+			// resolveImplicitTypes will assign the correct implicit type.
 			pud.returnType, _ = pud.varInit(start, fn.Name, nil, VFlagReturned, "")
 		}
 	}
+	pud.resolveImplicitTypes()
 	return fn
 }
 
