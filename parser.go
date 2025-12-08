@@ -758,6 +758,9 @@ func (p *Parser90) parseFunction() ast.Statement {
 		if vinfo != nil {
 			vinfo.flags |= VFlagReturned
 			pud.returnType = vinfo
+		} else {
+			// TODO: this would break for recursive functions, luckily not all too common (?)
+			pud.returnType, _ = pud.varInit(start, fn.Name, nil, VFlagReturned, "")
 		}
 	}
 	return fn

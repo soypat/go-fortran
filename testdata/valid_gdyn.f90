@@ -136,7 +136,8 @@ END !
 
 
 PROGRAM GDYN2S
-         INTEGER :: I
+         INTEGER :: I, IYS, IHS, IYE, IHE, JNREXC, IEXCG
+         DIMENSION II1(1)
          CHARACTER*80 CARD
          WRITE(1,1) s,END,t
          IF(CARD(1:4).EQ.'DATA'.OR.CARD(1:6).EQ.'ENDARC') THEN
@@ -144,9 +145,6 @@ PROGRAM GDYN2S
          CARD(I:I)=' '
    40    CONTINUE
          CARD(1:6)='ORBTVU'
-         CALL MJDYMD(IET,IYE,IHE,4)
-         ITS=IET-10
-         CALL MJDYMD(ITS,IYS,IHS,4)
          START=1000000.D0*DBLE(IYS)+DBLE(IHS)
          END=1000000.D0*DBLE(IYE)+DBLE(IHE)
          TINC=10.D0

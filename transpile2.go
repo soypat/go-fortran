@@ -16,7 +16,7 @@ type ToGo struct {
 	repl        REPL
 	source      string
 	sourceFile  io.ReaderAt
-	currentStmt f90.Statement
+	currentNode f90.Node
 }
 
 func (tg *ToGo) Reset() {
@@ -95,11 +95,13 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 
 func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.ProgramUnit) (_ []ast.Decl, err error) {
 	for _, contained := range pus {
+		tg.currentNode = contained
 		var decl ast.Decl
 		switch c := contained.(type) {
 		case *f90.Subroutine:
 			decl, err = tg.TransformSubroutine(c)
 		case *f90.Function:
+			fmt.Println(c.Name)
 			decl, err = tg.TransformFunction(c)
 		case *f90.Module:
 			dst, err = tg.transformProcedures(dst, c.Contains)
@@ -133,6 +135,7 @@ func (tg *ToGo) TransformFunction(fn *f90.Function) (_ *ast.FuncDecl, err error)
 }
 
 func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.FuncDecl, err error) {
+	tg.currentNode = subroutineOrFunc
 	err = tg.repl.SetScope(subroutineOrFunc)
 	if err != nil {
 		return nil, err
@@ -206,7 +209,7 @@ func (tg *ToGo) getReturnParam() *ast.Field {
 func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("label" + f90Label) }
 
 func (tg *ToGo) makeErrAtStmt(msg string) error {
-	return tg.makeErr(tg.currentStmt, msg)
+	return tg.makeErr(tg.currentNode, msg)
 }
 
 func (tg *ToGo) makeErr(node f90.Node, msg string) error {
@@ -256,7 +259,7 @@ func (tg *ToGo) transformStatements(dst []ast.Stmt, stmts []f90.Statement) (_ []
 
 func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.Stmt, err error) {
 	if stmt != nil {
-		tg.currentStmt = stmt
+		tg.currentNode = stmt
 	}
 	switch s := stmt.(type) {
 	case *f90.TypeDeclaration:

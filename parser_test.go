@@ -27,6 +27,12 @@ func TestData_valid(t *testing.T) {
 			continue
 		}
 		t.Run(entry.Name(), func(t *testing.T) {
+			finishedNormally := false
+			defer func() {
+				if !finishedNormally {
+					t.Log(tg.makeErrAtStmt("panic/t.Fatal at statement"))
+				}
+			}()
 			path := "testdata/" + name
 			src, err := fs.ReadFile(testdatadir, path)
 			if err != nil {
@@ -36,6 +42,7 @@ func TestData_valid(t *testing.T) {
 			units := testParse(t, &parser, path, ssrc, false)
 			tg.Reset()
 			testTranspile(t, &tg, units, path, ssrc)
+			finishedNormally = true
 		})
 	}
 }
@@ -91,18 +98,19 @@ func testTranspile(t testing.TB, tg *ToGo, pus []f90.ProgramUnit, srcPath string
 		}
 		err := tg.AddUsed(unit)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal(srcPath, err)
 		}
 	}
 	if mainProg != nil {
 		_, err := tg.TransformProgram(mainProg)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal(srcPath, err)
 		}
+		// TODO: add other routines here.
 	} else {
 		_, err := tg.transformProcedures(nil, pus)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal(srcPath, err)
 		}
 	}
 
