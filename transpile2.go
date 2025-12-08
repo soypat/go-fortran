@@ -101,7 +101,6 @@ func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.ProgramUnit) (_ []
 		case *f90.Subroutine:
 			decl, err = tg.TransformSubroutine(c)
 		case *f90.Function:
-			fmt.Println(c.Name)
 			decl, err = tg.TransformFunction(c)
 		case *f90.Module:
 			dst, err = tg.transformProcedures(dst, c.Contains)

@@ -136,13 +136,14 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 			if unit == nil {
 				break
 			}
+			helperFatalErrors(t, &ps, "parsing unit "+unit.UnitName())
 			err = tg.AddUsed(unit)
 			if err != nil {
 				t.Fatal("failed to use unit", unit.UnitName(), module, err)
 			}
 		}
 		file.Close()
-		helperFatalErrors(t, &ps, "parsing file")
+		helperFatalErrors(t, &ps, "parsing module "+module)
 	}
 	file, err := os.Open(programPath)
 	if err != nil {
@@ -156,7 +157,8 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 		unit := ps.ParseNextProgramUnit()
 		if unit == nil {
 			break
-		} else if pb, ok := unit.(*f90.ProgramBlock); ok {
+		}
+		if pb, ok := unit.(*f90.ProgramBlock); ok {
 			if mainBlock != nil {
 				t.Fatal("two main blocks found")
 			}
@@ -169,6 +171,7 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 			t.Fatal("adding main program unit failed:", err, err2)
 		}
 	}
+	// helperFatalErrors(t, &ps, "parsing") // Temporarily disabled to see transpile errors
 	decls, err := tg.TransformProgram(mainBlock)
 	if err != nil {
 		t.Fatal(err)

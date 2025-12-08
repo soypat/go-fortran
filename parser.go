@@ -414,7 +414,7 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 		p.stmtFns = make(map[token.Token]statementParseFn)
 	}
 	if p.maxErrs == 0 {
-		p.maxErrs = 20
+		p.maxErrs = 100 // Increased from 20 to handle large legacy codebases with many warnings
 		p.maxStatements = 1_000_000
 	}
 	*p = Parser90{

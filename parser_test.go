@@ -135,6 +135,9 @@ func testParse(t testing.TB, p *Parser90, srcPath string, src string, expectErro
 		units = append(units, unit)
 	}
 	actualErrs := p.Errors()
+	if !expectErrors {
+		helperFatalErrors(t, p, srcPath)
+	}
 	// Compare errors
 	if err := compareErrors(t, srcPath, expected, actualErrs); err != nil {
 		t.Error(err)
