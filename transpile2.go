@@ -336,13 +336,68 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		// ASSIGN label TO variable (Fortran 77 feature) - not supported, skip silently
 	case *f90.AssignedGotoStmt:
 		// GOTO variable (assigned GOTO using label from ASSIGN statement) - not supported
-	case *f90.ImplicitStatement, *f90.UseStatement, *f90.ExternalStmt, *f90.IntrinsicStmt:
+	case *f90.ImplicitStatement, *f90.UseStatement, *f90.ExternalStmt, *f90.IntrinsicStmt, *f90.ParameterStmt:
 		// Specification statement - no code generation
+	case *f90.StmtFuncStmt:
+		// Statement function definition - transformed to a closure at the start of the function
+		dst, err = tg.transformStmtFuncDef(dst, s)
 	default:
 		// For now, unsupported statements are skipped
 		err = tg.makeErr(s, "unsupported transpile statement")
 	}
 	return dst, err
+}
+
+// transformStmtFuncDef transforms a Fortran statement function definition into a Go closure.
+// Example: INDXNO(M) = MAPARM*(M-1)-(M*(M-1))/2
+// becomes: INDXNO := func(M int) int { return MAPARM*(M-1)-(M*(M-1))/2 }
+func (tg *ToGo) transformStmtFuncDef(dst []ast.Stmt, stmt *f90.StmtFuncStmt) (_ []ast.Stmt, err error) {
+	// Get the return type from the function name (implicit typing)
+	vi := tg.repl.Var(stmt.Name)
+	if vi == nil {
+		return dst, tg.makeErr(stmt, "statement function not registered: "+stmt.Name)
+	}
+	returnType := tg.goType(vi)
+
+	// Build parameter list - use implicit typing for each dummy argument
+	params := &ast.FieldList{List: make([]*ast.Field, len(stmt.Args))}
+	for i, argName := range stmt.Args {
+		argDecl := tg.repl.scope.implicitDeclFor(argName)
+		var argVi Varinfo
+		argVi.decl = argDecl
+		params.List[i] = &ast.Field{
+			Names: []*ast.Ident{ast.NewIdent(argName)},
+			Type:  tg.goType(&argVi),
+		}
+	}
+
+	// Transform the body expression
+	bodyExpr, _, err := tg.transformExpression(vi, stmt.Expr)
+	if err != nil {
+		return dst, err
+	}
+
+	// Create the closure: func(args) returnType { return expr }
+	closure := &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params:  params,
+			Results: &ast.FieldList{List: []*ast.Field{{Type: returnType}}},
+		},
+		Body: &ast.BlockStmt{
+			List: []ast.Stmt{
+				&ast.ReturnStmt{Results: []ast.Expr{bodyExpr}},
+			},
+		},
+	}
+
+	// Create assignment: funcName := closure
+	assign := &ast.AssignStmt{
+		Lhs: []ast.Expr{ast.NewIdent(stmt.Name)},
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{closure},
+	}
+	dst = append(dst, assign)
+	return dst, nil
 }
 
 func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Expr, error) {
@@ -597,23 +652,30 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 		return dst, tg.makeErr(stmt, "subroutine not found: "+stmt.Name)
 	}
 	params := fninfo.ProcedureParams()
-	if len(params) != len(stmt.Args) {
-		return dst, tg.makeErr(stmt, "mismatched number of args with declaration")
+	// Legacy Fortran allows calling with fewer arguments (undefined behavior but permitted).
+	// We handle this by using type inference for excess arguments.
+	if len(stmt.Args) > len(params) {
+		return dst, tg.makeErr(stmt, fmt.Sprintf("too many args in call (expected %d, got %d)", len(params), len(stmt.Args)))
 	}
 	gstmt := &ast.CallExpr{
 		Fun: tg.astIdent(fninfo.name),
 	}
 	for i := range stmt.Args {
-		info := &params[i]
+		var info *Varinfo
+		if i < len(params) {
+			info = &params[i]
+		}
 		goexpr, _, err := tg.transformExpression(info, stmt.Args[i])
 		if err != nil {
 			return dst, err
 		}
 		// For INTENT(OUT/INOUT) non-array scalar parameters, pass address
-		intent := info.decl.Type.Intent()
-		isArray := tg.varIsArray(info)
-		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
-			goexpr = &ast.UnaryExpr{Op: token.AND, X: goexpr}
+		if info != nil && info.decl != nil {
+			intent := info.decl.Type.Intent()
+			isArray := tg.varIsArray(info)
+			if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
+				goexpr = &ast.UnaryExpr{Op: token.AND, X: goexpr}
+			}
 		}
 		gstmt.Args = append(gstmt.Args, goexpr)
 	}
@@ -715,7 +777,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	// Convert RHS to target type if needed
 	var rhsType Varinfo
 	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
-		return dst, err
+		return dst, tg.makeErr(stmt, "inferring type: "+err.Error())
 	}
 
 	// Special case: cross-type pointer assignment (npii = npaa where types differ)

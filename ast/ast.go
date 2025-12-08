@@ -713,6 +713,26 @@ func (is *IntrinsicStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// ParameterStmt declares named constants using F77 PARAMETER statement syntax.
+//
+// Example:
+//
+//	PARAMETER (PI=3.14159, MAXN=100)
+type ParameterStmt struct {
+	Position
+}
+
+var _ Statement = (*ParameterStmt)(nil)
+
+func (ps *ParameterStmt) GetLabel() string { return "" }
+func (ps *ParameterStmt) statementNode()   {}
+func (ps *ParameterStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "PARAMETER"...)
+}
+func (ps *ParameterStmt) AppendString(dst []byte) []byte {
+	return append(dst, "PARAMETER (...)"...)
+}
+
 // DimensionStmt declares array dimensions for variables using IMPLICIT typing.
 // Standalone DIMENSION statements are common in F77 code.
 //

@@ -374,3 +374,4 @@ func TestModuleVariableImport(t *testing.T) {
 		t.Errorf("TransformProgram failed: %v", err)
 	}
 }
+

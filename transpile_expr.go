@@ -573,6 +573,26 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 		return tg.transformSetCharacterArray(dst, fexpr, rhs)
 	}
 
+	// Check for whole-array assignment: arr(:) = v → arr.SetAll(v)
+	isRanged := fexpr.IsRanged()
+	if isRanged {
+		// Check if it's a simple whole-array assignment (single ":" subscript with no bounds)
+		if len(fexpr.Subscripts) == 1 {
+			if rng, ok := fexpr.Subscripts[0].(*f90.RangeExpr); ok && rng.Start == nil && rng.End == nil {
+				receiver := tg.astVarExpr(vitgt)
+				gstmt := &ast.ExprStmt{
+					X: &ast.CallExpr{
+						Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("SetAll")},
+						Args: []ast.Expr{rhs},
+					},
+				}
+				dst = append(dst, gstmt)
+				return dst, nil
+			}
+		}
+		return dst, tg.makeErr(fexpr, "partial range array assignment not yet implemented")
+	}
+
 	// Regular element assignment: arr(i) = v → arr.Set(value, int(indices)...)
 	args := []ast.Expr{rhs}
 	for _, expr := range fexpr.Subscripts {

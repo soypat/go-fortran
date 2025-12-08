@@ -19,5 +19,7 @@ And examine errors. When we find bugs we add a minimal working example to our te
 - More complex parser bugs shall first be reproduced in testdata/valid_temp.f90. use cmd/fortrangrep to copy parts of a program without comments.
 - transpiler bugs are fixed by examining errors and editing transpilation code
 
-make fix as simple and direct as possible.
+You will not fix code that does not have an associated failing test. Test Driven Development is the name of the game. Use fortrangrep with -c flag to extract fortran code without extraneous comments.
+
+After observing failing test make fix as simple and direct as possible.
 

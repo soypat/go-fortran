@@ -501,7 +501,11 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.FunctionCall) error {
 		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
 			return err
 		}
-		err = repl.assignInt(dst, arg0.val.Int()%arg1.val.Int())
+		if repl.noValueResolution || arg1.val.Int() == 0 {
+			err = repl.assignInt(dst, 0)
+		} else {
+			err = repl.assignInt(dst, arg0.val.Int()%arg1.val.Int())
+		}
 	default:
 		// Check for user-defined functions
 		if fn := repl.ContainedOrUsed(e.Name); fn != nil && fn.returnType != nil {

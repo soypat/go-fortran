@@ -44,7 +44,8 @@ const (
 	VFlagArraySpec // ArraySpec used in type declaration.
 	VFlagReturned
 	VFlagRecursive
-	VFlagEquivalenced // Participates in EQUIVALENCE statement (scalars become PointerTo[T])
+	VFlagEquivalenced      // Participates in EQUIVALENCE statement (scalars become PointerTo[T])
+	VFlagConstantParameter // Declared with PARAMETER attribute or part of PARAMETER statement
 )
 
 func (f VarFlags) HasAny(hasBits VarFlags) bool { return f&hasBits != 0 }
@@ -414,7 +415,7 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 		p.stmtFns = make(map[token.Token]statementParseFn)
 	}
 	if p.maxErrs == 0 {
-		p.maxErrs = 100 // Increased from 20 to handle large legacy codebases with many warnings
+		p.maxErrs = 10000 // Increased from 20 to handle large legacy codebases with many warnings
 		p.maxStatements = 1_000_000
 	}
 	*p = Parser90{
@@ -502,7 +503,8 @@ func (p *Parser90) currentAstPos() ast.Position {
 // IsDone returns true if the parser is done parsing, whether it be by EOF or error(s) encountered.
 func (p *Parser90) IsDone() bool {
 	p.posCheck()
-	return p.died || p.current.tok == token.EOF || len(p.errors) >= p.maxErrs
+	errExceed := p.maxErrs > 0 && len(p.errors) >= p.maxErrs
+	return p.died || p.current.tok == token.EOF || errExceed
 }
 
 func (p *Parser90) registerStatement(tokenType token.Token, fn statementParseFn) {
@@ -2768,7 +2770,10 @@ func (p *Parser90) parseExitStmt() ast.Statement {
 	return stmt
 }
 
-// parseAssignmentStmt parses an assignment statement
+// parseAssignmentStmt parses an assignment statement or statement function definition.
+// Statement functions look like: FUNCNAME(ARG1, ARG2) = expr
+// They are distinguished from assignments by having an undeclared function name
+// with simple identifier arguments.
 func (p *Parser90) parseAssignmentStmt() ast.Statement {
 	startPos := p.current.start
 
@@ -3081,6 +3086,8 @@ func (p *Parser90) parseSpecStatement(sawDecl *bool) ast.Statement {
 		return p.parseExternalStmt()
 	case token.INTRINSIC:
 		return p.parseIntrinsicStmt()
+	case token.PARAMETER:
+		return p.parseParameterStmt()
 	default:
 		return nil // Unknown statement, caller will skip
 	}
@@ -4054,7 +4061,9 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 				isDeclared := vi != nil && vi.decl != nil
 				isArray := isDeclared && vi.decl.Dimension() != nil
 				isChar := isDeclared && vi.decl.Charlen() != nil
-				if isArray || isChar {
+				// Also check VFlagDimension for parameters with DIMENSION statement
+				hasDimensionFlag := vi != nil && vi.flags.HasAny(VFlagDimension)
+				if isArray || isChar || hasDimensionFlag {
 					result = &ast.ArrayRef{
 						Name:       name,
 						Subscripts: args,
@@ -4630,6 +4639,50 @@ func (p *Parser90) parseIntrinsicStmt() ast.Statement {
 
 	stmt.Position = ast.Pos(startPos, p.current.start)
 	return stmt
+}
+
+// parseParameterStmt parses an F77 standalone PARAMETER statement
+// Precondition: current token is PARAMETER
+// Syntax: PARAMETER (name=value, name2=value2, ...)
+// Example: PARAMETER (NUMET=20, NUMGRP=4)
+func (p *Parser90) parseParameterStmt() ast.Statement {
+	startPos := p.current.start
+	p.nextToken() // consume PARAMETER
+
+	// Expect opening parenthesis
+	if !p.expect(token.LParen, "PARAMETER statement") {
+		return nil
+	}
+
+	// Parse comma-separated list of name=value pairs
+	// Each parameter is stored as a variable via varInit
+	for p.loopUntil(token.RParen) {
+		var name string
+		if !p.expectIdentifier(&name, "PARAMETER name") {
+			break
+		}
+		if !p.expect(token.Equals, "PARAMETER assignment") {
+			break
+		}
+		initVal := p.parseExpression(0, token.Comma, token.RParen)
+
+		// Create a DeclEntity with the init value so the variable is properly registered
+		// Type will be resolved by resolveImplicitTypes later based on IMPLICIT rules
+		entity := &ast.DeclEntity{
+			Name:     name,
+			Init:     initVal,
+			Position: p.currentAstPos(),
+		}
+		p.varInit(name, entity, VFlagConstantParameter, "")
+
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+
+	p.expect(token.RParen, "closing PARAMETER statement")
+
+	return &ast.ParameterStmt{Position: ast.Pos(startPos, p.current.start)}
 }
 
 // parsePointerCrayStmt parses a Cray-style POINTER statement (Fortran 77 extension)

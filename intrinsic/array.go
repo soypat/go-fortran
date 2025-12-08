@@ -161,6 +161,14 @@ func (a *Array[T]) Set(value T, indices ...int) {
 	a.data[offset] = value
 }
 
+// SetAll sets all elements of the array to the given value.
+// Corresponds to Fortran array(:) = value or array = value syntax.
+func (a *Array[T]) SetAll(value T) {
+	for i := range a.data {
+		a.data[i] = value
+	}
+}
+
 // Len returns the size of the first dimension
 // Corresponds to Fortran SIZE(array, 1) intrinsic
 func (a *Array[T]) Len() int {
