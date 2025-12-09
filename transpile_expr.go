@@ -623,9 +623,9 @@ func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, 
 	vi := tg.repl.Var(fexpr.Name)
 	isRanged := fexpr.IsRanged()
 
-	// If this is an array of characters with integer subscripts (not range), use regular Set method
+	// If this is an array of characters with integer subscripts (not range), use AtPtr().SetFromString()
 	if len(fexpr.Subscripts) > 0 && !isRanged {
-		// Regular element assignment for CHARACTER array: arr(i) = v
+		// CHARACTER array element assignment: arr(i,j) = 'ABC' → arr.AtPtr(i,j).SetFromString("ABC")
 		indices := make([]ast.Expr, 0, len(fexpr.Subscripts))
 		for _, expr := range fexpr.Subscripts {
 			arg, _, err := tg.transformExpression(_tgtInt, expr)
@@ -635,7 +635,17 @@ func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, 
 			indices = append(indices, arg)
 		}
 		receiver := tg.astVarExpr(vi)
-		dst = append(dst, &ast.ExprStmt{X: tg.astSetCall(receiver, rhs, indices...)})
+		// Generate: arr.AtPtr(indices...).SetFromString(rhs)
+		atPtrCall := &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("AtPtr")},
+			Args: indices,
+		}
+		dst = append(dst, &ast.ExprStmt{
+			X: &ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: atPtrCall, Sel: ast.NewIdent("SetFromString")},
+				Args: []ast.Expr{rhs},
+			},
+		})
 		return dst, nil
 	}
 

@@ -469,7 +469,7 @@ func LEVEL16() {
 	intrinsic.Print("LEVEL 16: ADJUSTR =", str3)
 	str1.SetFromString("abcdef")
 	str3.SetFromString(str1.Substring(2, 4))
-	str1.SetFromString("z")
+	str1.SetSubstring(2, 3, "z")
 	intrinsic.Print("LEVEL 16: str3 =", str3)
 }
 func LEVEL17() {
@@ -927,6 +927,18 @@ func LEVEL31() {
 	intrinsic.Print("LEVEL 31: AA(1),AA(2),AA(3),AA(4)", aa.At(1), aa.At(2), aa.At(3), aa.At(4))
 }
 func LEVEL32() {
+	var (
+		a *intrinsic.Array[intrinsic.CharacterArray]
+		_ = a
+	)
+	a = intrinsic.NewArray[intrinsic.CharacterArray](nil, 2, 2)
+	a.AtPtr(1, 1).SetFromString("ABC")
+	a.AtPtr(1, 2).SetFromString("DEF")
+	a.AtPtr(2, 1).SetFromString("GHI")
+	a.AtPtr(2, 2).SetFromString("JKL")
+	intrinsic.Print("LEVEL 32:", a.At(1, 1), a.At(1, 2), a.At(2, 1), a.At(2, 2))
+}
+func LEVEL33() {
 	var (
 		npaa intrinsic.PointerTo[float64]
 		aa   intrinsic.PointerTo[float64]

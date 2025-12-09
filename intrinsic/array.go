@@ -143,8 +143,7 @@ func (a *Array[T]) Allocated() bool {
 //	arr.At(0, 5) accesses element at indices (0, 5)
 //	offset = (0 - (-5))*1 + (5 - 0)*11 = 5 + 55 = 60
 func (a *Array[T]) At(indices ...int) T {
-	offset := a.offset(indices)
-	return a.data[offset]
+	return *a.AtPtr(indices...)
 }
 
 func (a *Array[T]) AtPtr(indices ...int) *T {

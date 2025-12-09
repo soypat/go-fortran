@@ -768,6 +768,14 @@
         PRINT *, 'LEVEL 31: AA(1),AA(2),AA(3),AA(4)',AA(1),AA(2),AA(3),AA(4)
     END SUBROUTINE LEVEL31
     SUBROUTINE LEVEL32()
+        CHARACTER(LEN=10) :: A(2,2)
+        A(1,1) = 'ABC'
+        A(1,2) = 'DEF'
+        A(2,1) = 'GHI'
+        A(2,2) = 'JKL'
+        PRINT *, 'LEVEL 32:', A(1,1),A(1,2),A(2,1),A(2,2)
+    END SUBROUTINE LEVEL32
+    SUBROUTINE LEVEL33()
         ! Test advanced features: DIMENSION, MALLOC, DATA with hex, labeled DO
         IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L),INTEGER (I)
         POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1)) ! cray style pointer, implicit initialization.
@@ -798,7 +806,7 @@
 900      END DO
         PRINT *, 'LEVEL 32: AA(2) ', AA(2)
         PRINT *, 'LEVEL 32: Initialized', MAXMUM - M + 1, 'elements'
-    END SUBROUTINE LEVEL32
+    END SUBROUTINE LEVEL33
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

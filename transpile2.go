@@ -676,7 +676,8 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	if err != nil {
 		return dst, err
 	}
-	if targetVinfo.decl.Type.Token == f90token.CHARACTER {
+	// SetFromString only for scalar CHARACTER (identifier target), not array elements
+	if targetVinfo.decl.Type.Token == f90token.CHARACTER && isIdentifier {
 		receiver := tg.astVarExpr(targetVinfo)
 		stmt := &ast.ExprStmt{
 			X: &ast.CallExpr{

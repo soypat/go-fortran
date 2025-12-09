@@ -1477,6 +1477,43 @@ func (ue *UnaryExpr) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// CallExpr represents an expression called on a set of arguments with parentheses.
+// Fortran allows for a great variety of statements/expressions to be represented as call expressions
+// and their specialization depends on several factors which make identification hard without
+// context, thus CallExpr expresses this ambiguitity of Fortran source code. Examples:
+//   - function call: <funcion>(<argument-list>)
+//   - subroutine call: <subroutine>(<argument list>)
+//   - array access: <array>(<indices>)
+//   - array range access: <array>(<range spec>)
+//   - character access: <character>(<index>)
+//   - character range access: <character>(<range spec>)
+//   - statement function declaration: <function>(<dummy arguments>)
+type CallExpr struct {
+	Name string
+	// Args are the comma-separated expressions contained within parentheses.
+	Args []Expression
+	Position
+}
+
+var _ Expression = (*CallExpr)(nil)  // compile time check of interface implementation.
+func (pb *CallExpr) expressionNode() {}
+
+func (pb *CallExpr) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "CALLEXPR"...)
+}
+func (pb *CallExpr) AppendString(dst []byte) []byte {
+	dst = append(dst, pb.Name...)
+	dst = append(dst, '(')
+	for i, arg := range pb.Args {
+		if i != 0 {
+			dst = append(dst, ',')
+		}
+		dst = arg.AppendString(dst)
+	}
+	dst = append(dst, ')')
+	return dst
+}
+
 // FunctionCall represents an invocation of a function that returns a value.
 // Functions can be intrinsic (built-in) or user-defined. Unlike [CallStmt]
 // for subroutines, function calls appear in expressions.
