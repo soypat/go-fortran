@@ -912,7 +912,7 @@ func LEVEL31() {
 		inits int32
 		_, _  = m, inits
 	)
-	npaa = intrinsic.MALLOC[float64](k * 2)
+	npaa = intrinsic.MALLOC[float64](k * 8)
 	aa = npaa
 	if npaa.DataUnsafe() == nil {
 		intrinsic.Stop(69)
@@ -921,7 +921,7 @@ func LEVEL31() {
 	ii = npii
 	for m = 1; m <= k; m += 2 {
 		inits = inits + 1
-		aa.Set(inits, int(m))
+		aa.Set(float64(inits), int(m))
 	}
 	intrinsic.Print("LEVEL 31: INITS", inits)
 	intrinsic.Print("LEVEL 31: AA(1),AA(2),AA(3),AA(4)", aa.At(1), aa.At(2), aa.At(3), aa.At(4))

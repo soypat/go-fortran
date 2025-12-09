@@ -754,8 +754,8 @@
         IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L),INTEGER (I,K)
         PARAMETER (K=16)
         POINTER (NPAA, AA(1)), (NPII, II(1))
-        INTEGER :: M, INITS
-        NPAA = MALLOC(K*2)
+        INTEGER :: M, INITS=0
+        NPAA = MALLOC(K*8)
         if (NPAA.EQ.0) THEN
             STOP 69
         ENDIF

@@ -688,8 +688,15 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		return dst, nil
 	}
 
+	// Infer RHS type for conversions (needed by ArrayRef/FunctionCall and default path)
+	var rhsType Varinfo
+	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
+		return dst, tg.makeErr(stmt, "inferring type: "+err.Error())
+	}
+
 	switch tgt := stmt.Target.(type) {
 	case *f90.ArrayRef:
+		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
 		return tg.transformSetArrayRef(dst, tgt, rhs)
 	case *f90.FunctionCall:
 		// FunctionCall as target: COMMON block arrays or undeclared arrays
@@ -699,6 +706,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 			Subscripts: tgt.Args,
 			Position:   tgt.Position,
 		}
+		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
 		return tg.transformSetArrayRef(dst, syntheticRef, rhs)
 	case *f90.ComponentAccess:
 		// Component access: p%age = 30 → p.age = 30
@@ -718,12 +726,6 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		if lhs == nil {
 			return dst, tg.makeErr(stmt.Target, "unsupported assignment target")
 		}
-	}
-
-	// Convert RHS to target type if needed
-	var rhsType Varinfo
-	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
-		return dst, tg.makeErr(stmt, "inferring type: "+err.Error())
 	}
 
 	// Special case: cross-type pointer assignment (npii = npaa where types differ)
