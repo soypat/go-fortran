@@ -70,7 +70,7 @@ func (ch CharacterArray) At(i int) byte {
 	return ch.data[i-1]
 }
 
-func (ch CharacterArray) Set(i int, v byte) {
+func (ch CharacterArray) Set(v byte, i int) {
 	ch.data[i-1] = v
 }
 

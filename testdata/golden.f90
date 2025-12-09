@@ -764,6 +764,7 @@
             INITS = INITS + 1
             AA(M) = INITS
 900     END DO
+        PRINT *, 'LEVEL 31: INITS', INITS 
         PRINT *, 'LEVEL 31: AA(1),AA(2),AA(3),AA(4)',AA(1),AA(2),AA(3),AA(4)
     END SUBROUTINE LEVEL31
     SUBROUTINE LEVEL32()

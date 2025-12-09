@@ -748,28 +748,23 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 				Args: []ast.Expr{rhs},
 			}
 		}
-	} else {
-		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
 	}
-
-	// Handle equivalenced scalar assignment: f = value → f.Set(1, value)
+	rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
+	// Handle equivalenced scalar assignment: f = value → f.Set(value, 1)
 	// CHARACTER types are excluded as they use SetFromString
 	isArray := tg.varIsArray(targetVinfo)
 	isCharacter := targetVinfo.typeToken() == f90token.CHARACTER
 	if !isArray && !isCharacter && targetVinfo.flags.HasAny(VFlagEquivalenced) {
 		dst = append(dst, &ast.ExprStmt{
-			X: &ast.CallExpr{
-				Fun:  &ast.SelectorExpr{X: lhs, Sel: ast.NewIdent("Set")},
-				Args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "1"}, rhs},
-			},
+			X: tg.astSetCall(lhs, rhs, &ast.BasicLit{Kind: token.INT, Value: "1"}),
 		})
 		return dst, nil
 	}
 
 	gstmt := &ast.AssignStmt{
 		Tok: token.ASSIGN,
-		Rhs: []ast.Expr{rhs},
 		Lhs: []ast.Expr{lhs},
+		Rhs: []ast.Expr{rhs},
 	}
 	dst = append(dst, gstmt)
 

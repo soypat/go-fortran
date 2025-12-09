@@ -560,6 +560,18 @@ func (tg *ToGo) astVarExpr(vi *Varinfo) ast.Expr {
 	return ast.NewIdent(vi.Identifier())
 }
 
+// astSetCall generates: receiver.Set(value, indices...)
+// Works for Array[T], PointerTo[T], and CharacterArray.
+func (tg *ToGo) astSetCall(receiver, value ast.Expr, indices ...ast.Expr) *ast.CallExpr {
+	args := make([]ast.Expr, 0, 1+len(indices))
+	args = append(args, value)
+	args = append(args, indices...)
+	return &ast.CallExpr{
+		Fun:  &ast.SelectorExpr{X: receiver, Sel: _astSet},
+		Args: args,
+	}
+}
+
 func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs ast.Expr) (_ []ast.Stmt, err error) {
 	if fexpr.Base != nil {
 		return dst, tg.makeErr(fexpr, "chained ArrayRef assignment not yet implemented")
@@ -594,23 +606,16 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 	}
 
 	// Regular element assignment: arr(i) = v → arr.Set(value, int(indices)...)
-	args := []ast.Expr{rhs}
+	indices := make([]ast.Expr, 0, len(fexpr.Subscripts))
 	for _, expr := range fexpr.Subscripts {
 		arg, _, err := tg.transformExpression(_tgtInt, expr)
 		if err != nil {
 			return dst, err
 		}
-		// Wrap in int() conversion for Go's array methods
-		args = append(args, arg)
+		indices = append(indices, arg)
 	}
 	receiver := tg.astVarExpr(vitgt)
-	gstmt := &ast.ExprStmt{
-		X: &ast.CallExpr{
-			Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("Set")},
-			Args: args,
-		},
-	}
-	dst = append(dst, gstmt)
+	dst = append(dst, &ast.ExprStmt{X: tg.astSetCall(receiver, rhs, indices...)})
 	return dst, nil
 }
 
@@ -621,22 +626,16 @@ func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, 
 	// If this is an array of characters with integer subscripts (not range), use regular Set method
 	if len(fexpr.Subscripts) > 0 && !isRanged {
 		// Regular element assignment for CHARACTER array: arr(i) = v
-		args := []ast.Expr{rhs}
+		indices := make([]ast.Expr, 0, len(fexpr.Subscripts))
 		for _, expr := range fexpr.Subscripts {
 			arg, _, err := tg.transformExpression(_tgtInt, expr)
 			if err != nil {
 				return dst, err
 			}
-			args = append(args, arg)
+			indices = append(indices, arg)
 		}
 		receiver := tg.astVarExpr(vi)
-		gstmt := &ast.ExprStmt{
-			X: &ast.CallExpr{
-				Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("Set")},
-				Args: args,
-			},
-		}
-		dst = append(dst, gstmt)
+		dst = append(dst, &ast.ExprStmt{X: tg.astSetCall(receiver, rhs, indices...)})
 		return dst, nil
 	}
 
@@ -1036,6 +1035,7 @@ func defaultVarinfo(tok f90token.Token) *Varinfo {
 var (
 	_astFalse        = ast.NewIdent("false")
 	_astTrue         = ast.NewIdent("true")
+	_astSet          = ast.NewIdent("Set")
 	_astOne          = &ast.BasicLit{Kind: token.INT, Value: "1"}
 	_tgtInt32        = defaultVarinfo(f90token.INTEGER)
 	_tgtInt          = defaultVarinfo(f90token.INTEGER)
