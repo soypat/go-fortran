@@ -273,7 +273,15 @@ func (repl *REPL) Eval(dst *Varinfo, expr f90.Expression) (err error) {
 	case *f90.ParenExpr:
 		err = repl.Eval(dst, e.Expr)
 	case *f90.FunctionCall:
-		err = repl.evalIntrinsic(dst, e)
+		// Check if this is actually an array access (arr(i) looks like func(i))
+		if vi := repl.Var(e.Name); vi != nil && vi.flags.HasAny(VFlagDimension) {
+			// It's an array, not a function - infer element type
+			// TODO: array access.
+			dst.decl = vi.decl
+			dst.val.tok = vi.typeToken()
+		} else {
+			err = repl.evalIntrinsic(dst, e)
+		}
 	case *f90.ArrayConstructor:
 		err = repl.evalArrayConstructor(dst, e)
 	case *f90.ArrayRef:

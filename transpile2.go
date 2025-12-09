@@ -323,7 +323,8 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 			code = &ast.BasicLit{Kind: token.INT, Value: "0"}
 		}
 		dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{Fun: _astIntrinsicStop, Args: []ast.Expr{code}}})
-
+	case *f90.ParameterStmt:
+		dst, err = tg.transformParameterStmt(dst, s)
 	case *f90.WriteStmt:
 		// gostmt = tg.transformWriteStmt(s)
 	case *f90.FormatStmt:
@@ -336,68 +337,13 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		// ASSIGN label TO variable (Fortran 77 feature) - not supported, skip silently
 	case *f90.AssignedGotoStmt:
 		// GOTO variable (assigned GOTO using label from ASSIGN statement) - not supported
-	case *f90.ImplicitStatement, *f90.UseStatement, *f90.ExternalStmt, *f90.IntrinsicStmt, *f90.ParameterStmt:
+	case *f90.ImplicitStatement, *f90.UseStatement, *f90.ExternalStmt, *f90.IntrinsicStmt:
 		// Specification statement - no code generation
-	case *f90.StmtFuncStmt:
-		// Statement function definition - transformed to a closure at the start of the function
-		dst, err = tg.transformStmtFuncDef(dst, s)
 	default:
 		// For now, unsupported statements are skipped
 		err = tg.makeErr(s, "unsupported transpile statement")
 	}
 	return dst, err
-}
-
-// transformStmtFuncDef transforms a Fortran statement function definition into a Go closure.
-// Example: INDXNO(M) = MAPARM*(M-1)-(M*(M-1))/2
-// becomes: INDXNO := func(M int) int { return MAPARM*(M-1)-(M*(M-1))/2 }
-func (tg *ToGo) transformStmtFuncDef(dst []ast.Stmt, stmt *f90.StmtFuncStmt) (_ []ast.Stmt, err error) {
-	// Get the return type from the function name (implicit typing)
-	vi := tg.repl.Var(stmt.Name)
-	if vi == nil {
-		return dst, tg.makeErr(stmt, "statement function not registered: "+stmt.Name)
-	}
-	returnType := tg.goType(vi)
-
-	// Build parameter list - use implicit typing for each dummy argument
-	params := &ast.FieldList{List: make([]*ast.Field, len(stmt.Args))}
-	for i, argName := range stmt.Args {
-		argDecl := tg.repl.scope.implicitDeclFor(argName)
-		var argVi Varinfo
-		argVi.decl = argDecl
-		params.List[i] = &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(argName)},
-			Type:  tg.goType(&argVi),
-		}
-	}
-
-	// Transform the body expression
-	bodyExpr, _, err := tg.transformExpression(vi, stmt.Expr)
-	if err != nil {
-		return dst, err
-	}
-
-	// Create the closure: func(args) returnType { return expr }
-	closure := &ast.FuncLit{
-		Type: &ast.FuncType{
-			Params:  params,
-			Results: &ast.FieldList{List: []*ast.Field{{Type: returnType}}},
-		},
-		Body: &ast.BlockStmt{
-			List: []ast.Stmt{
-				&ast.ReturnStmt{Results: []ast.Expr{bodyExpr}},
-			},
-		},
-	}
-
-	// Create assignment: funcName := closure
-	assign := &ast.AssignStmt{
-		Lhs: []ast.Expr{ast.NewIdent(stmt.Name)},
-		Tok: token.DEFINE,
-		Rhs: []ast.Expr{closure},
-	}
-	dst = append(dst, assign)
-	return dst, nil
 }
 
 func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Expr, error) {
@@ -1236,6 +1182,30 @@ func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.S
 		return dst, tg.makeErr(stmt, fmt.Sprintf("DATA statement has %d unused values", len(stmt.Values)-valueIdx))
 	}
 
+	return dst, nil
+}
+
+func (tg *ToGo) transformParameterStmt(dst []ast.Stmt, stmt *f90.ParameterStmt) ([]ast.Stmt, error) {
+	decl := &ast.GenDecl{
+		Tok: token.CONST,
+	}
+	for _, v := range stmt.Decls {
+		vi := tg.repl.Var(v.Name)
+		if vi == nil {
+			return dst, tg.makeErr(stmt, "undeclared parameter?")
+		}
+		tp := tg.goType(vi)
+		initVal, _, err := tg.transformExpression(vi, vi.decl.Init)
+		if err != nil {
+			return dst, err
+		}
+		decl.Specs = append(decl.Specs, &ast.ValueSpec{
+			Names:  []*ast.Ident{ast.NewIdent(vi.Identifier())},
+			Type:   tp,
+			Values: []ast.Expr{initVal},
+		})
+	}
+	dst = append(dst, &ast.DeclStmt{Decl: decl})
 	return dst, nil
 }
 

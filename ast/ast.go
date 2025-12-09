@@ -719,6 +719,7 @@ func (is *IntrinsicStmt) AppendString(dst []byte) []byte {
 //
 //	PARAMETER (PI=3.14159, MAXN=100)
 type ParameterStmt struct {
+	Decls []DeclEntity
 	Position
 }
 

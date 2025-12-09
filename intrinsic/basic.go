@@ -269,7 +269,7 @@ func (p PointerTo[T]) At(idx int) T {
 	return p.Slice()[idx-1]
 }
 
-func (p PointerTo[T]) Set(idx int, v T) {
+func (p PointerTo[T]) Set(v T, idx int) {
 	p.Slice()[idx-1] = v
 }
 

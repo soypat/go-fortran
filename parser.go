@@ -4646,43 +4646,40 @@ func (p *Parser90) parseIntrinsicStmt() ast.Statement {
 // Syntax: PARAMETER (name=value, name2=value2, ...)
 // Example: PARAMETER (NUMET=20, NUMGRP=4)
 func (p *Parser90) parseParameterStmt() ast.Statement {
-	startPos := p.current.start
-	p.nextToken() // consume PARAMETER
-
-	// Expect opening parenthesis
-	if !p.expect(token.LParen, "PARAMETER statement") {
+	start := p.sourcePos()
+	if !p.expect(token.PARAMETER, "") ||
+		!p.expect(token.LParen, "PARAMETER statement") { // Expect opening parenthesis
 		return nil
 	}
-
+	stmt := &ast.ParameterStmt{}
 	// Parse comma-separated list of name=value pairs
 	// Each parameter is stored as a variable via varInit
 	for p.loopUntil(token.RParen) {
 		var name string
-		if !p.expectIdentifier(&name, "PARAMETER name") {
-			break
-		}
-		if !p.expect(token.Equals, "PARAMETER assignment") {
+		declStart := p.current.start
+		if !p.expectIdentifier(&name, "PARAMETER name") || !p.expect(token.Equals, "PARAMETER assignment") {
 			break
 		}
 		initVal := p.parseExpression(0, token.Comma, token.RParen)
-
-		// Create a DeclEntity with the init value so the variable is properly registered
-		// Type will be resolved by resolveImplicitTypes later based on IMPLICIT rules
-		entity := &ast.DeclEntity{
+		declEnd := p.current.start
+		stmt.Decls = append(stmt.Decls, ast.DeclEntity{
 			Name:     name,
 			Init:     initVal,
-			Position: p.currentAstPos(),
+			Position: ast.Pos(declStart, declEnd),
+		})
+		vi := p.varInit(name, nil, VFlagConstantParameter, "")
+		if vi.decl == nil {
+			vi.decl = &stmt.Decls[len(stmt.Decls)-1]
+		} else if vi.decl.Init == nil {
+			vi.decl.Init = stmt.Decls[len(stmt.Decls)-1].Init
 		}
-		p.varInit(name, entity, VFlagConstantParameter, "")
-
 		if !p.consumeIf(token.Comma) {
 			break
 		}
 	}
-
 	p.expect(token.RParen, "closing PARAMETER statement")
-
-	return &ast.ParameterStmt{Position: ast.Pos(startPos, p.current.start)}
+	stmt.Position = ast.Pos(start.Pos, p.current.start)
+	return stmt
 }
 
 // parsePointerCrayStmt parses a Cray-style POINTER statement (Fortran 77 extension)

@@ -86,3 +86,13 @@ SUBROUTINE array_decl()
   INTEGER, DIMENSION(3) :: a
   a = (/ 1, 2, 3 /)
 END SUBROUTINE
+
+SUBROUTINE test_parameter_stmt()
+  ! Test standalone PARAMETER statements (F77 style)
+  INTEGER X, Y
+  REAL PI
+  PARAMETER (X=42, Y=100)
+  PARAMETER (PI=3.14159)
+  INTEGER Z
+  Z = X + Y
+END SUBROUTINE

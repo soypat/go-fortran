@@ -751,6 +751,22 @@
         PRINT *, 'LEVEL 30: CHAR C:', C(1)
     END SUBROUTINE LEVEL30
     SUBROUTINE LEVEL31()
+        IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L),INTEGER (I,K)
+        PARAMETER (K=16)
+        POINTER (NPAA, AA(1)), (NPII, II(1))
+        INTEGER :: M, INITS
+        NPAA = MALLOC(K*2)
+        if (NPAA.EQ.0) THEN
+            STOP 69
+        ENDIF
+        NPII = NPAA
+        DO 900 M=1,K,2
+            INITS = INITS + 1
+            AA(M) = INITS
+900     END DO
+        PRINT *, 'LEVEL 31: AA(1),AA(2),AA(3),AA(4)',AA(1),AA(2),AA(3),AA(4)
+    END SUBROUTINE LEVEL31
+    SUBROUTINE LEVEL32()
         ! Test advanced features: DIMENSION, MALLOC, DATA with hex, labeled DO
         IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L),INTEGER (I)
         POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1)) ! cray style pointer, implicit initialization.
@@ -761,7 +777,7 @@
         DATA I_DEFALT(1) /Z'7777777'/
         DATA I_DEFALT(2) /Z'7777777'/
         EQUIVALENCE ( DEFALT, I_DEFALT )
-        PRINT *, 'LEVEL 29: Advanced features test'
+        PRINT *, 'LEVEL 32: Advanced features test'
         ! Test MALLOC intrinsic
         MAXDM1 = 100
         NPAA = MALLOC(MAXDM1 * 8)
@@ -779,9 +795,9 @@
         !  AA(N)=DEFALT
 800      END DO
 900      END DO
-        PRINT *, 'LEVEL 29: AA(2) ', AA(2)
-        PRINT *, 'LEVEL 29: Initialized', MAXMUM - M + 1, 'elements'
-    END SUBROUTINE LEVEL31
+        PRINT *, 'LEVEL 32: AA(2) ', AA(2)
+        PRINT *, 'LEVEL 32: Initialized', MAXMUM - M + 1, 'elements'
+    END SUBROUTINE LEVEL32
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

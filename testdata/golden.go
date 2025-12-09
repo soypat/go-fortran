@@ -896,6 +896,36 @@ func LEVEL30() {
 	intrinsic.Print("LEVEL 30: CHAR C:", c.At(1))
 }
 func LEVEL31() {
+	const k int32 = 16
+	var (
+		npaa intrinsic.PointerTo[float64]
+		aa   intrinsic.PointerTo[float64]
+		_, _ = npaa, aa
+	)
+	var (
+		npii intrinsic.PointerTo[int32]
+		ii   intrinsic.PointerTo[int32]
+		_, _ = npii, ii
+	)
+	var (
+		m     int32
+		inits int32
+		_, _  = m, inits
+	)
+	npaa = intrinsic.MALLOC[float64](k * 2)
+	aa = npaa
+	if npaa.DataUnsafe() == nil {
+		intrinsic.Stop(69)
+	}
+	npii = intrinsic.PointerFrom[int32](npaa)
+	ii = npii
+	for m = 1; m <= k; m += 2 {
+		inits = inits + 1
+		aa.Set(inits, int(m))
+	}
+	intrinsic.Print("LEVEL 31: AA(1),AA(2),AA(3),AA(4)", aa.At(1), aa.At(2), aa.At(3), aa.At(4))
+}
+func LEVEL32() {
 	var (
 		npaa intrinsic.PointerTo[float64]
 		aa   intrinsic.PointerTo[float64]
@@ -931,7 +961,7 @@ func LEVEL31() {
 	i_defalt.Set(125269879, 1)
 	i_defalt.Set(125269879, 2)
 	intrinsic.Equivalence(&defalt, i_defalt)
-	intrinsic.Print("LEVEL 29: Advanced features test")
+	intrinsic.Print("LEVEL 32: Advanced features test")
 	maxdm1 = 100
 	npaa = intrinsic.MALLOC[float64](maxdm1 * 8)
 	aa = npaa
@@ -949,8 +979,8 @@ func LEVEL31() {
 		for n = m; n <= maxmum; n++ {
 		}
 	}
-	intrinsic.Print("LEVEL 29: AA(2) ", aa.At(2))
-	intrinsic.Print("LEVEL 29: Initialized", maxmum-m+1, "elements")
+	intrinsic.Print("LEVEL 32: AA(2) ", aa.At(2))
+	intrinsic.Print("LEVEL 32: Initialized", maxmum-m+1, "elements")
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")

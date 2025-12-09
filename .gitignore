@@ -60,6 +60,6 @@ claude-test
 *.zip
 *.gz
 *.tar
-
+*.diff
 # If running a python script.
 */__pycache__/*
