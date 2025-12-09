@@ -336,7 +336,7 @@ func TestStatementParsing(t *testing.T) {
 					t.Fatalf("Expected *ast.AssignmentStmt in ThenPart, got %T", ifStmt.ThenPart[0])
 				}
 				// Verify target is a function call (array reference)
-				helperWantNode[*ast.CallExpr](t, assignStmt.Target)
+				helperWantNode[*ast.CallExpr](t, assignStmt.Target, "RESULT(N)")
 			},
 		},
 
@@ -364,14 +364,10 @@ func TestStatementParsing(t *testing.T) {
 			name: "keyword as array variable assignment",
 			src:  "RESULT(N)=1",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignStmt, ok := stmt.(*ast.AssignmentStmt)
+				assignStmt := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
+				funcCall, ok := assignStmt.Target.(*ast.CallExpr)
 				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
-
-				funcCall, ok := assignStmt.Target.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected Target to be *ast.FunctionCall (array ref), got %T", assignStmt.Target)
+					t.Fatalf("Expected Target to be *ast.CallExpr (array ref), got %T", assignStmt.Target)
 				}
 
 				if funcCall.Name != "RESULT" {
@@ -392,9 +388,9 @@ func TestStatementParsing(t *testing.T) {
 					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
 				}
 
-				funcCall, ok := assignStmt.Target.(*ast.FunctionCall)
+				funcCall, ok := assignStmt.Target.(*ast.CallExpr)
 				if !ok {
-					t.Fatalf("Expected Target to be *ast.FunctionCall (array ref), got %T", assignStmt.Target)
+					t.Fatalf("Expected Target to be *ast.CallExpr (array ref), got %T", assignStmt.Target)
 				}
 
 				if funcCall.Name != "STOP" {
@@ -1200,13 +1196,13 @@ func TestStatementParsing(t *testing.T) {
 				}
 
 				// Left side should be chained ArrayRef: ASAVE(isave)(1:1)
-				chainedRef, ok := binExpr.Left.(*ast.ArrayRef)
+				chainedRef, ok := binExpr.Left.(*ast.CallExpr)
 				if !ok {
-					t.Fatalf("Expected left side to be *ast.ArrayRef, got %T", binExpr.Left)
+					t.Fatalf("Expected left side to be *ast.CallExpr, got %T", binExpr.Left)
 				}
 
 				// For chained access, Base should be set
-				if chainedRef.Base == nil {
+				if chainedRef.SecondaryAccess == nil {
 					t.Error("Expected Base to be set for chained access")
 				}
 			},
@@ -1221,13 +1217,13 @@ func TestStatementParsing(t *testing.T) {
 				}
 
 				// Value should be a chained ArrayRef
-				chainedRef, ok := assignStmt.Value.(*ast.ArrayRef)
+				chainedRef, ok := assignStmt.Value.(*ast.CallExpr)
 				if !ok {
-					t.Fatalf("Expected value to be *ast.ArrayRef, got %T", assignStmt.Value)
+					t.Fatalf("Expected value to be *ast.CallExpr, got %T", assignStmt.Value)
 				}
 
 				// Should have Base set (the chained structure)
-				if chainedRef.Base == nil {
+				if chainedRef.SecondaryAccess == nil {
 					t.Error("Expected Base to be set for chained access")
 				}
 			},
@@ -1334,9 +1330,9 @@ func TestStatementParsing(t *testing.T) {
 				}
 
 				// Target should be a function call with one argument (the range)
-				funcCall, ok := assignment.Target.(*ast.FunctionCall)
+				funcCall, ok := assignment.Target.(*ast.CallExpr)
 				if !ok {
-					t.Fatalf("Expected Target to be *ast.FunctionCall, got %T", assignment.Target)
+					t.Fatalf("Expected Target to be *ast.CallExpr, got %T", assignment.Target)
 				}
 
 				if funcCall.Name != "LEDIT_EXTRA" {
@@ -1369,9 +1365,9 @@ func TestStatementParsing(t *testing.T) {
 			validate: func(t *testing.T, stmt ast.Statement) {
 				assignment := stmt.(*ast.AssignmentStmt)
 
-				funcCall, ok := assignment.Value.(*ast.FunctionCall)
+				funcCall, ok := assignment.Value.(*ast.CallExpr)
 				if !ok {
-					t.Fatalf("Expected Value to be *ast.FunctionCall, got %T", assignment.Value)
+					t.Fatalf("Expected Value to be *ast.CallExpr, got %T", assignment.Value)
 				}
 
 				if len(funcCall.Args) != 1 {
@@ -1400,7 +1396,7 @@ func TestStatementParsing(t *testing.T) {
 			validate: func(t *testing.T, stmt ast.Statement) {
 				assignment := stmt.(*ast.AssignmentStmt)
 
-				funcCall := assignment.Value.(*ast.FunctionCall)
+				funcCall := assignment.Value.(*ast.CallExpr)
 				rangeExpr := funcCall.Args[0].(*ast.RangeExpr)
 
 				if rangeExpr.Start == nil {
@@ -1420,7 +1416,7 @@ func TestStatementParsing(t *testing.T) {
 			validate: func(t *testing.T, stmt ast.Statement) {
 				assignment := stmt.(*ast.AssignmentStmt)
 
-				funcCall := assignment.Value.(*ast.FunctionCall)
+				funcCall := assignment.Value.(*ast.CallExpr)
 				rangeExpr := funcCall.Args[0].(*ast.RangeExpr)
 
 				if rangeExpr.Start != nil {
@@ -1437,7 +1433,7 @@ func TestStatementParsing(t *testing.T) {
 			validate: func(t *testing.T, stmt ast.Statement) {
 				assignment := stmt.(*ast.AssignmentStmt)
 
-				funcCall := assignment.Value.(*ast.FunctionCall)
+				funcCall := assignment.Value.(*ast.CallExpr)
 				rangeExpr := funcCall.Args[0].(*ast.RangeExpr)
 
 				if rangeExpr.Start == nil {
@@ -1897,9 +1893,9 @@ END SELECT`,
 				}
 
 				// Check the value is a function call
-				funcCall, ok := assign.Value.(*ast.FunctionCall)
+				funcCall, ok := assign.Value.(*ast.CallExpr)
 				if !ok {
-					t.Fatalf("Expected value to be *ast.FunctionCall, got %T", assign.Value)
+					t.Fatalf("Expected value to be *ast.CallExpr, got %T", assign.Value)
 				}
 
 				if funcCall.Name != "REAL" {
@@ -1931,9 +1927,9 @@ END SELECT`,
 				}
 
 				// Right side should be a function call KIND(result)
-				rightFunc, ok := binExpr.Right.(*ast.FunctionCall)
+				rightFunc, ok := binExpr.Right.(*ast.CallExpr)
 				if !ok {
-					t.Fatalf("Expected right side to be *ast.FunctionCall, got %T", binExpr.Right)
+					t.Fatalf("Expected right side to be *ast.CallExpr, got %T", binExpr.Right)
 				}
 				if rightFunc.Name != "KIND" {
 					t.Errorf("Expected function name 'KIND', got %q", rightFunc.Name)
@@ -2273,9 +2269,9 @@ END SELECT`,
 				}
 
 				// Third argument should be function call htrng(6)
-				funcCall, ok := call.Args[2].(*ast.FunctionCall)
+				funcCall, ok := call.Args[2].(*ast.CallExpr)
 				if !ok {
-					t.Fatalf("Expected third arg to be *ast.FunctionCall, got %T", call.Args[2])
+					t.Fatalf("Expected third arg to be *ast.CallExpr, got %T", call.Args[2])
 				}
 				if funcCall.Name != "htrng" {
 					t.Errorf("Expected function name 'htrng', got %q", funcCall.Name)
@@ -2506,7 +2502,7 @@ END SELECT`,
 					t.Errorf("Expected target 'accX1', got '%s'", target.Value)
 				}
 				// Check value is data(i,j) - a function call
-				funcCall, ok := assign.Value.(*ast.FunctionCall)
+				funcCall, ok := assign.Value.(*ast.CallExpr)
 				if !ok {
 					t.Errorf("Expected value to be FunctionCall, got %T", assign.Value)
 				} else if funcCall.Name != "data" {
@@ -2523,12 +2519,9 @@ END SELECT`,
 				if !ok {
 					t.Fatalf("Expected AssignmentStmt, got %T", stmt)
 				}
-				// Check that target is array reference or function call (same syntax in Fortran)
-				switch assign.Target.(type) {
-				case *ast.ArrayRef, *ast.FunctionCall:
-					// OK - both are valid representations
-				default:
-					t.Errorf("Expected target to be ArrayRef or FunctionCall, got %T", assign.Target)
+				// Check that target is CallExpr (array reference or function call share same syntax in Fortran)
+				if _, ok := assign.Target.(*ast.CallExpr); !ok {
+					t.Errorf("Expected target to be CallExpr, got %T", assign.Target)
 				}
 				// Check that value is parsed (continuation worked)
 				if assign.Value == nil {

@@ -112,11 +112,11 @@ func TestREPL_EvalErrors(t *testing.T) {
 	tests := []struct {
 		expr f90.Expression
 	}{
-		0: {binInt(f90token.Slash, 5, 0)},                                                // division by zero int
-		1: {binFloat(f90token.Slash, 5.0, 0.0)},                                          // division by zero float
-		2: {&f90.Identifier{Value: "UNDEFINED"}},                                         // undefined variable
-		3: {&f90.FunctionCall{Name: "NOTAFUNCTION", Args: []f90.Expression{exprInt(1)}}}, // unknown intrinsic
-		4: {&f90.FunctionCall{Name: "SQRT", Args: []f90.Expression{}}},                   // intrinsic no args
+		0: {binInt(f90token.Slash, 5, 0)},                                            // division by zero int
+		1: {binFloat(f90token.Slash, 5.0, 0.0)},                                      // division by zero float
+		2: {&f90.Identifier{Value: "UNDEFINED"}},                                     // undefined variable
+		3: {&f90.CallExpr{Name: "NOTAFUNCTION", Args: []f90.Expression{exprInt(1)}}}, // unknown intrinsic
+		4: {&f90.CallExpr{Name: "SQRT", Args: []f90.Expression{}}},                   // intrinsic no args
 	}
 	var r REPL
 	for i, test := range tests {
@@ -227,24 +227,24 @@ func exprDouble(v float64) *f90.RealLiteral {
 	return &f90.RealLiteral{Value: v, Raw: strconv.FormatFloat(v, 'f', 16, 64) + "D0"}
 }
 
-func intrinsicF(arg float64, name string) *f90.FunctionCall {
-	return &f90.FunctionCall{Name: name, Args: []f90.Expression{exprFloat(arg)}}
+func intrinsicF(arg float64, name string) *f90.CallExpr {
+	return &f90.CallExpr{Name: name, Args: []f90.Expression{exprFloat(arg)}}
 }
 
-func maxInt(vals ...int64) *f90.FunctionCall {
+func maxInt(vals ...int64) *f90.CallExpr {
 	args := make([]f90.Expression, len(vals))
 	for i, v := range vals {
 		args[i] = exprInt(v)
 	}
-	return &f90.FunctionCall{Name: "MAX", Args: args}
+	return &f90.CallExpr{Name: "MAX", Args: args}
 }
 
-func minInt(vals ...int64) *f90.FunctionCall {
+func minInt(vals ...int64) *f90.CallExpr {
 	args := make([]f90.Expression, len(vals))
 	for i, v := range vals {
 		args[i] = exprInt(v)
 	}
-	return &f90.FunctionCall{Name: "MIN", Args: args}
+	return &f90.CallExpr{Name: "MIN", Args: args}
 }
 
 func binLogical(op f90token.Token, l, r bool) *f90.BinaryExpr {

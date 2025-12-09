@@ -59,10 +59,10 @@ END SUBROUTINE`,
 				}
 
 				// CRITICAL: IPTBEG(ICENTR) must be parsed as ArrayRef, not FunctionCall
-				arrayRef, ok := assignStmt.Value.(*ast.ArrayRef)
+				arrayRef, ok := assignStmt.Value.(*ast.CallExpr)
 				if !ok {
-					t.Errorf("BUG: IPTBEG(ICENTR) parsed as %T, should be *ast.ArrayRef", assignStmt.Value)
-					if funcCall, isFuncCall := assignStmt.Value.(*ast.FunctionCall); isFuncCall {
+					t.Errorf("BUG: IPTBEG(ICENTR) parsed as %T, should be *ast.CallExpr", assignStmt.Value)
+					if funcCall, isFuncCall := assignStmt.Value.(*ast.CallExpr); isFuncCall {
 						t.Errorf("Incorrectly parsed as FunctionCall with name=%q", funcCall.Name)
 					}
 					t.Errorf("This happens because parseDimensionStmt() doesn't call varInit()")
@@ -75,8 +75,8 @@ END SUBROUTINE`,
 				}
 
 				// Verify it has subscripts
-				if len(arrayRef.Subscripts) != 1 {
-					t.Errorf("Expected 1 subscript, got %d", len(arrayRef.Subscripts))
+				if len(arrayRef.Args) != 1 {
+					t.Errorf("Expected 1 subscript, got %d", len(arrayRef.Args))
 				}
 			},
 		},
@@ -115,17 +115,17 @@ END SUBROUTINE`,
 				}
 
 				// First assignment: x = arr(5) - arr should be ArrayRef
-				arrRef, ok := assignStmts[0].Value.(*ast.ArrayRef)
+				arrRef, ok := assignStmts[0].Value.(*ast.CallExpr)
 				if !ok {
-					t.Errorf("expected arr(5) to be *ast.ArrayRef, got %T", assignStmts[0].Value)
+					t.Errorf("expected arr(5) to be *ast.CallExpr, got %T", assignStmts[0].Value)
 				} else if arrRef.Name != "arr" {
 					t.Errorf("expected ArrayRef name 'arr', got %s", arrRef.Name)
 				}
 
 				// Second assignment: x = UNKNOWN_FUNC(5) - should be FunctionCall
-				funcCall, ok := assignStmts[1].Value.(*ast.FunctionCall)
+				funcCall, ok := assignStmts[1].Value.(*ast.CallExpr)
 				if !ok {
-					t.Errorf("expected UNKNOWN_FUNC(5) to be *ast.FunctionCall, got %T", assignStmts[1].Value)
+					t.Errorf("expected UNKNOWN_FUNC(5) to be *ast.CallExpr, got %T", assignStmts[1].Value)
 				} else if funcCall.Name != "UNKNOWN_FUNC" {
 					t.Errorf("expected FunctionCall name 'UNKNOWN_FUNC', got %s", funcCall.Name)
 				}

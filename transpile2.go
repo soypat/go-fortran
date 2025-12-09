@@ -546,7 +546,7 @@ func (tg *ToGo) componentGoType(ts *f90.TypeSpec, ent *f90.DeclEntity) ast.Expr 
 
 func (tg *ToGo) transformAllocateStmt(dst []ast.Stmt, stmt *f90.AllocateStmt) (_ []ast.Stmt, err error) {
 	for _, obj := range stmt.Objects {
-		arrRef, ok := obj.(*f90.ArrayRef)
+		arrRef, ok := obj.(*f90.CallExpr)
 		if !ok {
 			return dst, tg.makeErr(stmt, "ALLOCATE requires array reference")
 		}
@@ -555,7 +555,7 @@ func (tg *ToGo) transformAllocateStmt(dst []ast.Stmt, stmt *f90.AllocateStmt) (_
 			return dst, tg.makeErr(stmt, "unknown variable: "+arrRef.Name)
 		}
 		var args []ast.Expr
-		for _, sub := range arrRef.Subscripts {
+		for _, sub := range arrRef.Args {
 			arg, _, err := tg.transformExpression(_tgtInt, sub)
 			if err != nil {
 				return dst, err
@@ -578,7 +578,7 @@ func (tg *ToGo) transformDeallocateStmt(dst []ast.Stmt, stmt *f90.DeallocateStmt
 		switch e := obj.(type) {
 		case *f90.Identifier:
 			vi = tg.repl.Var(e.Value)
-		case *f90.ArrayRef:
+		case *f90.CallExpr:
 			vi = tg.repl.Var(e.Name)
 		default:
 			return dst, tg.makeErr(stmt, "DEALLOCATE requires variable")
@@ -636,14 +636,12 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	var lhs ast.Expr
 	var isIdentifier bool
 	switch tgt := stmt.Target.(type) {
-	case *f90.ArrayRef:
+	case *f90.CallExpr:
+		// CallExpr as assignment target: array access or substring
 		targetVinfo = tg.repl.Var(tgt.Name)
 	case *f90.Identifier:
 		targetVinfo = tg.repl.Var(tgt.Value)
 		isIdentifier = true
-	case *f90.FunctionCall:
-		// FunctionCall as assignment target occurs for CHARACTER substring: str(1:5) = 'x'
-		targetVinfo = tg.repl.Var(tgt.Name)
 	case *f90.ComponentAccess:
 		// Component access: p%age = 30 → p.age = 30
 		// Get the base variable for type info
@@ -696,19 +694,10 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	}
 
 	switch tgt := stmt.Target.(type) {
-	case *f90.ArrayRef:
+	case *f90.CallExpr:
+		// CallExpr as target: array element access or substring
 		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
 		return tg.transformSetArrayRef(dst, tgt, rhs)
-	case *f90.FunctionCall:
-		// FunctionCall as target: COMMON block arrays or undeclared arrays
-		// Convert to ArrayRef-like handling
-		syntheticRef := &f90.ArrayRef{
-			Name:       tgt.Name,
-			Subscripts: tgt.Args,
-			Position:   tgt.Position,
-		}
-		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
-		return tg.transformSetArrayRef(dst, syntheticRef, rhs)
 	case *f90.ComponentAccess:
 		// Component access: p%age = 30 → p.age = 30
 		// Handle component access directly and return - no type conversion needed
@@ -1032,18 +1021,11 @@ func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.S
 		case *f90.Identifier:
 			targetVinfo = tg.repl.Var(v.Value)
 			varName = v.Value
-		case *f90.ArrayRef:
-			targetVinfo = tg.repl.Var(v.Name)
-			varName = v.Name
-			if len(v.Subscripts) > 0 {
-				// Array element with explicit indices: arr(1,2)
-				isArrayElement = true
-			}
-		case *f90.FunctionCall:
-			// May be parsed as function call for array access
+		case *f90.CallExpr:
 			targetVinfo = tg.repl.Var(v.Name)
 			varName = v.Name
 			if len(v.Args) > 0 {
+				// Array element with explicit indices: arr(1,2)
 				isArrayElement = true
 			}
 		default:
@@ -1069,19 +1051,11 @@ func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.S
 			}
 
 			// Generate arr.Set(value, indices)
-			switch v := varExpr.(type) {
-			case *f90.ArrayRef:
-				dst, err = tg.transformSetArrayRef(dst, v, rhs)
-			case *f90.FunctionCall:
-				syntheticRef := &f90.ArrayRef{
-					Name:       v.Name,
-					Subscripts: v.Args,
-					Position:   v.Position,
+			if callExpr, ok := varExpr.(*f90.CallExpr); ok {
+				dst, err = tg.transformSetArrayRef(dst, callExpr, rhs)
+				if err != nil {
+					return dst, err
 				}
-				dst, err = tg.transformSetArrayRef(dst, syntheticRef, rhs)
-			}
-			if err != nil {
-				return dst, err
 			}
 		} else {
 			// Whole variable or array without subscripts
@@ -1158,10 +1132,10 @@ func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.S
 
 					// Create array reference with 1-based index (Fortran convention)
 					// For multidimensional arrays, this is simplified
-					syntheticRef := &f90.ArrayRef{
-						Name:       varName,
-						Subscripts: []f90.Expression{&f90.IntegerLiteral{Value: int64(i + 1)}},
-						Position:   varExpr.SourcePos(),
+					syntheticRef := &f90.CallExpr{
+						Name:     varName,
+						Args:     []f90.Expression{&f90.IntegerLiteral{Value: int64(i + 1)}},
+						Position: varExpr.SourcePos(),
 					}
 
 					dst, err = tg.transformSetArrayRef(dst, syntheticRef, rhs)
@@ -1362,7 +1336,7 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 				isCharacter := vinfo.typeToken() == f90token.CHARACTER
 				isPointerTo := tg.varIsPointerTo(vinfo)
 
-				if len(ref.Subscripts) == 0 {
+				if len(ref.Args) == 0 {
 					if isArray {
 						args[i] = varExpr // *Array implements PointerSetter
 					} else if isCharacter {
@@ -1376,7 +1350,7 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 				} else {
 					// Subscripted: PointerOff(var, var.AtOffset(...))
 					var offsetArgs []ast.Expr
-					for _, sub := range ref.Subscripts {
+					for _, sub := range ref.Args {
 						arg, _, err := tg.transformExpression(_tgtInt, sub)
 						if err != nil {
 							return dst, err

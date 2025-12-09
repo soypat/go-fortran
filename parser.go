@@ -2804,12 +2804,10 @@ func (p *Parser90) registerImplicitFromTarget(target ast.Expression) {
 	switch t := target.(type) {
 	case *ast.Identifier:
 		name = t.Value
-	case *ast.ArrayRef:
+	case *ast.CallExpr:
 		name = t.Name
-	case *ast.FunctionCall:
-		// Function call targets (like substring: str(1:5) = 'x') are handled differently.
-		// The function/array name should already be registered.
-		return
+		// Register ALL CallExpr targets - transpiler will disambiguate
+		// between array access, function calls, and intrinsics.
 	default:
 		return
 	}
@@ -3588,16 +3586,16 @@ func (p *Parser90) parseTypeAttributess() (attrs []ast.TypeAttribute) {
 	return attrs
 }
 
-func (p *Parser90) parseArrayRef() *ast.ArrayRef {
+func (p *Parser90) parseArrayRef() *ast.CallExpr {
 	var varname string
 	if !p.expectIdentifier(&varname, "array reference variable name") {
 		return nil
 	}
-	stmt := &ast.ArrayRef{Name: varname}
+	stmt := &ast.CallExpr{Name: varname}
 	if p.consumeIf(token.LParen) {
 		for {
 			expr := p.parseExpression(0, token.Comma)
-			stmt.Subscripts = append(stmt.Subscripts, expr)
+			stmt.Args = append(stmt.Args, expr)
 			if !p.consumeIf(token.Comma) {
 				break
 			}
@@ -4056,33 +4054,28 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 			}
 
 			if result == nil {
-				// Check if identifier is a declared variable (array or CHARACTER for substring)
-				vi := p.varSGet(name)
-				isDeclared := vi != nil && vi.decl != nil
-				isArray := isDeclared && vi.decl.Dimension() != nil
-				isChar := isDeclared && vi.decl.Charlen() != nil
-				// Also check VFlagDimension for parameters with DIMENSION statement
-				hasDimensionFlag := vi != nil && vi.flags.HasAny(VFlagDimension)
-				if isArray || isChar || hasDimensionFlag {
-					result = &ast.ArrayRef{
-						Name:       name,
-						Subscripts: args,
-						Position:   ast.Pos(startPos, endPos),
-					}
-				} else {
-					// Function call or unknown identifier (external function)
-					result = &ast.FunctionCall{
-						Name:     name,
-						Args:     args,
-						Position: ast.Pos(startPos, endPos),
-					}
+				// Always create CallExpr - transpiler will disambiguate
+				// between array access, function calls, and intrinsics.
+				result = &ast.CallExpr{
+					Name:     name,
+					Args:     args,
+					Position: ast.Pos(startPos, endPos),
 				}
 			} else {
 				// Chained subscript/substring: arr(i)(2:3), func()(i), etc.
-				result = &ast.ArrayRef{
-					Base:       result,
-					Subscripts: args,
-					Position:   ast.Pos(startPos, endPos),
+				// SecondaryAccess handles single expression (range or index).
+				// For multiple subscripts, this is a parsing error.
+				if prevCall, ok := result.(*ast.CallExpr); ok && len(args) == 1 {
+					prevCall.SecondaryAccess = args[0]
+				} else if prevCall, ok := result.(*ast.CallExpr); ok {
+					// Multiple chained subscripts - create new CallExpr wrapper
+					// This handles cases like func()(i,j) where result is from function call
+					result = &ast.CallExpr{
+						Args:     args,
+						Position: ast.Pos(startPos, endPos),
+					}
+					// TODO: handle properly if needed
+					_ = prevCall
 				}
 			}
 		}
@@ -4555,7 +4548,7 @@ func (p *Parser90) parseEquivalenceStmt() ast.Statement {
 			break
 		}
 		// Parse variable list within this set
-		var set []ast.ArrayRef
+		var set []ast.CallExpr
 		for {
 			// Parse variable (can be simple identifier or array reference)
 			ref := p.parseArrayRef()

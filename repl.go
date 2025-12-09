@@ -272,28 +272,18 @@ func (repl *REPL) Eval(dst *Varinfo, expr f90.Expression) (err error) {
 		err = repl.evalBinary(dst, e)
 	case *f90.ParenExpr:
 		err = repl.Eval(dst, e.Expr)
-	case *f90.FunctionCall:
-		// Check if this is actually an array access (arr(i) looks like func(i))
-		if vi := repl.Var(e.Name); vi != nil && vi.flags.HasAny(VFlagDimension) {
-			// It's an array, not a function - infer element type
-			// TODO: array access.
+	case *f90.CallExpr:
+		// CallExpr can be array access or function call - disambiguate
+		if vi := repl.Var(e.Name); vi != nil {
+			// It's a variable (array element access) - infer element type
 			dst.decl = vi.decl
 			dst.val.tok = vi.typeToken()
 		} else {
+			// It's a function call (intrinsic or external)
 			err = repl.evalIntrinsic(dst, e)
 		}
 	case *f90.ArrayConstructor:
 		err = repl.evalArrayConstructor(dst, e)
-	case *f90.ArrayRef:
-		// Array element access: arr(i) - infer type from array variable
-		vi := repl.Var(e.Name)
-		if vi == nil {
-			err = fmt.Errorf("var %s undefined", e.Name)
-		} else {
-			// Copy the type information but mark as element access (scalar)
-			dst.decl = vi.decl
-			dst.val.tok = vi.typeToken()
-		}
 	default:
 		err = fmt.Errorf("unsupported expression: %T", expr)
 	}
@@ -438,7 +428,7 @@ func (repl *REPL) evalFloatBinary(dst, typ *Varinfo, l float64, op f90token.Toke
 	return repl.assignFloatLike(dst, typ, result)
 }
 
-func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.FunctionCall) error {
+func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 	name := strings.ToUpper(e.Name)
 	if len(e.Args) == 0 {
 		return fmt.Errorf("%s intrinsic requires arguments", name)
