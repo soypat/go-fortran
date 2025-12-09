@@ -3145,10 +3145,10 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 					subscripts = exprs
 					p.expect(token.RParen, "closing parentheses for DATA array reference")
 				}
-				stmt.Variables = append(stmt.Variables, &ast.ArrayRef{
-					Name:       varName,
-					Subscripts: subscripts,
-					Position:   ast.Pos(varStart.Pos, p.currentAstPos().End()),
+				stmt.Variables = append(stmt.Variables, &ast.CallExpr{
+					Name:     varName,
+					Args:     subscripts,
+					Position: ast.Pos(varStart.Pos, p.currentAstPos().End()),
 				})
 			}
 			p.consumeIf(token.Comma)

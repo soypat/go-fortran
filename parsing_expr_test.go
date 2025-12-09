@@ -428,10 +428,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "function call with no arguments",
 			src:  "random()",
 			validate: func(t *testing.T, expr ast.Expression) {
-				funcCall, ok := expr.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected *ast.FunctionCall, got %T", expr)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, expr)
 				if funcCall.Name != "random" {
 					t.Errorf("Expected function name 'random', got %s", funcCall.Name)
 				}
@@ -444,10 +441,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "function call with one argument",
 			src:  "sqrt(x)",
 			validate: func(t *testing.T, expr ast.Expression) {
-				funcCall, ok := expr.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected *ast.FunctionCall, got %T", expr)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, expr)
 				if funcCall.Name != "sqrt" {
 					t.Errorf("Expected function name 'sqrt', got %s", funcCall.Name)
 				}
@@ -460,10 +454,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "function call with multiple arguments",
 			src:  "max(a, b, c)",
 			validate: func(t *testing.T, expr ast.Expression) {
-				funcCall, ok := expr.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected *ast.FunctionCall, got %T", expr)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, expr)
 				if funcCall.Name != "max" {
 					t.Errorf("Expected function name 'max', got %s", funcCall.Name)
 				}
@@ -476,10 +467,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "nested function calls: sqrt(x*x + y*y)",
 			src:  "sqrt(x*x + y*y)",
 			validate: func(t *testing.T, expr ast.Expression) {
-				funcCall, ok := expr.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected *ast.FunctionCall, got %T", expr)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, expr)
 				if funcCall.Name != "sqrt" {
 					t.Errorf("Expected function name 'sqrt', got %s", funcCall.Name)
 				}
@@ -501,10 +489,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "function call with expression argument: fact(n-1, result)",
 			src:  "fact(n-1, result)",
 			validate: func(t *testing.T, expr ast.Expression) {
-				funcCall, ok := expr.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected *ast.FunctionCall, got %T", expr)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, expr)
 				if funcCall.Name != "fact" {
 					t.Errorf("Expected function name 'fact', got %s", funcCall.Name)
 				}
@@ -539,10 +524,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "array reference 1D",
 			src:  "arr(i)",
 			validate: func(t *testing.T, expr ast.Expression) {
-				funcCall, ok := expr.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected *ast.FunctionCall, got %T", expr)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, expr)
 				if funcCall.Name != "arr" {
 					t.Errorf("Expected name 'arr', got %s", funcCall.Name)
 				}
@@ -555,10 +537,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "array reference 2D",
 			src:  "matrix(i, j)",
 			validate: func(t *testing.T, expr ast.Expression) {
-				funcCall, ok := expr.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected *ast.FunctionCall, got %T", expr)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, expr)
 				if funcCall.Name != "matrix" {
 					t.Errorf("Expected name 'matrix', got %s", funcCall.Name)
 				}
@@ -571,10 +550,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "array reference with expression subscript",
 			src:  "arr(i + 1)",
 			validate: func(t *testing.T, expr ast.Expression) {
-				funcCall, ok := expr.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected *ast.FunctionCall, got %T", expr)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, expr)
 				if len(funcCall.Args) != 1 {
 					t.Fatalf("Expected 1 argument, got %d", len(funcCall.Args))
 				}
@@ -595,11 +571,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "parenthesized expression: (a + b)",
 			src:  "(a + b)",
 			validate: func(t *testing.T, expr ast.Expression) {
-				parenExpr, ok := expr.(*ast.ParenExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.ParenExpr, got %T", expr)
-				}
-
+				parenExpr := helperWantNode[*ast.ParenExpr](t, expr)
 				// Inner should be (a + b)
 				innerExpr, ok := parenExpr.Expr.(*ast.BinaryExpr)
 				if !ok {
@@ -687,9 +659,9 @@ func TestExpressionParsing(t *testing.T) {
 			src:  "sqrt(arr(i)**2 + arr(j)**2)",
 			validate: func(t *testing.T, expr ast.Expression) {
 				// Top level should be function call
-				funcCall, ok := expr.(*ast.FunctionCall)
+				funcCall, ok := expr.(*ast.CallExpr)
 				if !ok {
-					t.Fatalf("Expected *ast.FunctionCall, got %T", expr)
+					t.Fatalf("Expected *ast.CallExpr, got %T", expr)
 				}
 				if funcCall.Name != "sqrt" {
 					t.Errorf("Expected function name 'sqrt', got %s", funcCall.Name)
@@ -717,7 +689,7 @@ func TestExpressionParsing(t *testing.T) {
 				}
 
 				// Left of exponentiation should be function call (array reference without symbol table)
-				_, ok = leftExp.Left.(*ast.FunctionCall)
+				_, ok = leftExp.Left.(*ast.CallExpr)
 				if !ok {
 					t.Fatalf("Expected left.left to be *ast.FunctionCall, got %T", leftExp.Left)
 				}
@@ -839,4 +811,13 @@ func helperFatalErrors(t testing.TB, p *Parser90, msg string) {
 	if len(p.Errors()) > 0 {
 		t.Fatal(msg)
 	}
+}
+
+func helperWantNode[T ast.Node](t testing.TB, v ast.Node) T {
+	var z T
+	vt, ok := v.(T)
+	if !ok {
+		t.Fatalf("want %T, got %T", z, v)
+	}
+	return vt
 }

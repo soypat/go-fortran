@@ -917,8 +917,8 @@ func exprEqual(t *testing.T, got, want ast.Expression) bool {
 	case *ast.BinaryExpr:
 		w := want.(*ast.BinaryExpr)
 		return g.Op == w.Op && exprEqual(t, g.Left, w.Left) && exprEqual(t, g.Right, w.Right)
-	case *ast.FunctionCall:
-		w := want.(*ast.FunctionCall)
+	case *ast.CallExpr:
+		w := want.(*ast.CallExpr)
 		if g.Name != w.Name {
 			t.Errorf("function call name mismatch: got %s, want %s", g.Name, w.Name)
 			return false

@@ -335,12 +335,8 @@ func TestStatementParsing(t *testing.T) {
 				if !ok {
 					t.Fatalf("Expected *ast.AssignmentStmt in ThenPart, got %T", ifStmt.ThenPart[0])
 				}
-
 				// Verify target is a function call (array reference)
-				_, ok = assignStmt.Target.(*ast.FunctionCall)
-				if !ok {
-					t.Errorf("Expected Target to be *ast.FunctionCall (array ref), got %T", assignStmt.Target)
-				}
+				helperWantNode[*ast.CallExpr](t, assignStmt.Target)
 			},
 		},
 

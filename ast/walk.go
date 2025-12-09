@@ -339,12 +339,11 @@ func Walk(v Visitor, node Node) {
 	case *UnaryExpr:
 		Walk(v, n.Operand)
 
-	case *FunctionCall:
+	case *CallExpr:
 		for _, arg := range n.Args {
 			Walk(v, arg)
 		}
-
-	case *ArrayRef:
+		Walk(v, n.SecondaryAccess)
 
 	case *ArraySection:
 		// n.Name is a string, not a Node
