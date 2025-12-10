@@ -21,10 +21,7 @@ func TestExpressionParsing(t *testing.T) {
 			src:  "42",
 			validate: func(t *testing.T, expr ast.Expression) {
 				// Integer literals are parsed as IntegerLiteral nodes
-				_, ok := expr.(*ast.IntegerLiteral)
-				if !ok {
-					t.Fatalf("Expected *ast.IntegerLiteral, got %T", expr)
-				}
+				_ = helperWantNode[*ast.IntegerLiteral](t, expr, "")
 				// TODO: Parse actual integer value
 			},
 		},
@@ -34,22 +31,15 @@ func TestExpressionParsing(t *testing.T) {
 			name: "real literal",
 			src:  "3.14159",
 			validate: func(t *testing.T, expr ast.Expression) {
-				lit, ok := expr.(*ast.RealLiteral)
-				if !ok {
-					t.Fatalf("Expected *ast.RealLiteral, got %T", expr)
-				}
+				_ = helperWantNode[*ast.RealLiteral](t, expr, "")
 				// TODO: Parse actual real value
-				_ = lit
 			},
 		},
 		{
 			name: "real literal with exponent",
 			src:  "1.23e-4",
 			validate: func(t *testing.T, expr ast.Expression) {
-				lit, ok := expr.(*ast.RealLiteral)
-				if !ok {
-					t.Fatalf("Expected *ast.RealLiteral, got %T", expr)
-				}
+				lit := helperWantNode[*ast.RealLiteral](t, expr, "")
 				if lit.Raw != "1.23e-4" {
 					t.Errorf("Expected raw '1.23e-4', got %s", lit.Raw)
 				}
@@ -61,10 +51,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "string literal",
 			src:  "'hello world'",
 			validate: func(t *testing.T, expr ast.Expression) {
-				lit, ok := expr.(*ast.StringLiteral)
-				if !ok {
-					t.Fatalf("Expected *ast.StringLiteral, got %T", expr)
-				}
+				lit := helperWantNode[*ast.StringLiteral](t, expr, "")
 				if lit.Value != "hello world" {
 					t.Errorf("Expected value 'hello world', got %s", lit.Value)
 				}
@@ -76,10 +63,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "logical literal TRUE",
 			src:  ".TRUE.",
 			validate: func(t *testing.T, expr ast.Expression) {
-				lit, ok := expr.(*ast.LogicalLiteral)
-				if !ok {
-					t.Fatalf("Expected *ast.LogicalLiteral, got %T", expr)
-				}
+				lit := helperWantNode[*ast.LogicalLiteral](t, expr, "")
 				if !lit.Value {
 					t.Errorf("Expected value true, got false")
 				}
@@ -89,10 +73,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "logical literal FALSE",
 			src:  ".FALSE.",
 			validate: func(t *testing.T, expr ast.Expression) {
-				lit, ok := expr.(*ast.LogicalLiteral)
-				if !ok {
-					t.Fatalf("Expected *ast.LogicalLiteral, got %T", expr)
-				}
+				lit := helperWantNode[*ast.LogicalLiteral](t, expr, "")
 				if lit.Value {
 					t.Errorf("Expected value false, got true")
 				}
@@ -105,28 +86,19 @@ func TestExpressionParsing(t *testing.T) {
 			src:  "a + b * c",
 			validate: func(t *testing.T, expr ast.Expression) {
 				// Should parse as: a + (b * c)
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != "+" {
 					t.Errorf("Expected top-level op '+', got %s", binExpr.Op)
 				}
 
 				// Left should be identifier 'a'
-				leftId, ok := binExpr.Left.(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected left to be *ast.Identifier, got %T", binExpr.Left)
-				}
+				leftId := helperWantNode[*ast.Identifier](t, binExpr.Left, "left")
 				if leftId.Value != "a" {
 					t.Errorf("Expected left identifier 'a', got %s", leftId.Value)
 				}
 
 				// Right should be (b * c)
-				rightMul, ok := binExpr.Right.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected right to be *ast.BinaryExpr, got %T", binExpr.Right)
-				}
+				rightMul := helperWantNode[*ast.BinaryExpr](t, binExpr.Right, "right")
 				if rightMul.Op.String() != "*" {
 					t.Errorf("Expected right op '*', got %s", rightMul.Op)
 				}
@@ -137,19 +109,13 @@ func TestExpressionParsing(t *testing.T) {
 			src:  "a - b / c",
 			validate: func(t *testing.T, expr ast.Expression) {
 				// Should parse as: a - (b / c)
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != "-" {
 					t.Errorf("Expected top-level op '-', got %s", binExpr.Op)
 				}
 
 				// Right should be (b / c)
-				rightDiv, ok := binExpr.Right.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected right to be *ast.BinaryExpr, got %T", binExpr.Right)
-				}
+				rightDiv := helperWantNode[*ast.BinaryExpr](t, binExpr.Right, "right")
 				if rightDiv.Op.String() != "/" {
 					t.Errorf("Expected right op '/', got %s", rightDiv.Op)
 				}
@@ -162,19 +128,13 @@ func TestExpressionParsing(t *testing.T) {
 			src:  "2 ** 3 ** 4",
 			validate: func(t *testing.T, expr ast.Expression) {
 				// Should parse as: 2 ** (3 ** 4)
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != "**" {
 					t.Errorf("Expected top-level op '**', got %s", binExpr.Op)
 				}
 
 				// Right should be (3 ** 4)
-				rightExp, ok := binExpr.Right.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected right to be *ast.BinaryExpr, got %T", binExpr.Right)
-				}
+				rightExp := helperWantNode[*ast.BinaryExpr](t, binExpr.Right, "right")
 				if rightExp.Op.String() != "**" {
 					t.Errorf("Expected right op '**', got %s", rightExp.Op)
 				}
@@ -185,19 +145,13 @@ func TestExpressionParsing(t *testing.T) {
 			src:  "a * b ** c",
 			validate: func(t *testing.T, expr ast.Expression) {
 				// Should parse as: a * (b ** c) because ** has higher precedence
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != "*" {
 					t.Errorf("Expected top-level op '*', got %s", binExpr.Op)
 				}
 
 				// Right should be (b ** c)
-				rightExp, ok := binExpr.Right.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected right to be *ast.BinaryExpr, got %T", binExpr.Right)
-				}
+				rightExp := helperWantNode[*ast.BinaryExpr](t, binExpr.Right, "right")
 				if rightExp.Op.String() != "**" {
 					t.Errorf("Expected right op '**', got %s", rightExp.Op)
 				}
@@ -209,17 +163,11 @@ func TestExpressionParsing(t *testing.T) {
 			name: "unary minus",
 			src:  "-x",
 			validate: func(t *testing.T, expr ast.Expression) {
-				unaryExpr, ok := expr.(*ast.UnaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.UnaryExpr, got %T", expr)
-				}
+				unaryExpr := helperWantNode[*ast.UnaryExpr](t, expr, "")
 				if unaryExpr.Op.String() != "-" {
 					t.Errorf("Expected op '-', got %s", unaryExpr.Op)
 				}
-				operand, ok := unaryExpr.Operand.(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected operand to be *ast.Identifier, got %T", unaryExpr.Operand)
-				}
+				operand := helperWantNode[*ast.Identifier](t, unaryExpr.Operand, "operand")
 				if operand.Value != "x" {
 					t.Errorf("Expected operand 'x', got %s", operand.Value)
 				}
@@ -229,10 +177,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "unary plus",
 			src:  "+y",
 			validate: func(t *testing.T, expr ast.Expression) {
-				unaryExpr, ok := expr.(*ast.UnaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.UnaryExpr, got %T", expr)
-				}
+				unaryExpr := helperWantNode[*ast.UnaryExpr](t, expr, "")
 				if unaryExpr.Op.String() != "+" {
 					t.Errorf("Expected op '+', got %s", unaryExpr.Op)
 				}
@@ -242,17 +187,11 @@ func TestExpressionParsing(t *testing.T) {
 			name: "logical NOT",
 			src:  ".NOT. flag",
 			validate: func(t *testing.T, expr ast.Expression) {
-				unaryExpr, ok := expr.(*ast.UnaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.UnaryExpr, got %T", expr)
-				}
+				unaryExpr := helperWantNode[*ast.UnaryExpr](t, expr, "")
 				if unaryExpr.Op.String() != ".NOT." {
 					t.Errorf("Expected op '.NOT.', got %s", unaryExpr.Op)
 				}
-				operand, ok := unaryExpr.Operand.(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected operand to be *ast.Identifier, got %T", unaryExpr.Operand)
-				}
+				operand := helperWantNode[*ast.Identifier](t, unaryExpr.Operand, "operand")
 				if operand.Value != "flag" {
 					t.Errorf("Expected operand 'flag', got %s", operand.Value)
 				}
@@ -264,10 +203,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "logical AND",
 			src:  "a .AND. b",
 			validate: func(t *testing.T, expr ast.Expression) {
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != ".AND." {
 					t.Errorf("Expected op '.AND.', got %s", binExpr.Op)
 				}
@@ -277,10 +213,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "logical OR",
 			src:  "x .OR. y",
 			validate: func(t *testing.T, expr ast.Expression) {
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != ".OR." {
 					t.Errorf("Expected op '.OR.', got %s", binExpr.Op)
 				}
@@ -291,19 +224,13 @@ func TestExpressionParsing(t *testing.T) {
 			src:  "a .OR. b .AND. c",
 			validate: func(t *testing.T, expr ast.Expression) {
 				// Should parse as: a .OR. (b .AND. c) because .AND. has higher precedence
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != ".OR." {
 					t.Errorf("Expected top-level op '.OR.', got %s", binExpr.Op)
 				}
 
 				// Right should be (b .AND. c)
-				rightAnd, ok := binExpr.Right.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected right to be *ast.BinaryExpr, got %T", binExpr.Right)
-				}
+				rightAnd := helperWantNode[*ast.BinaryExpr](t, binExpr.Right, "right")
 				if rightAnd.Op.String() != ".AND." {
 					t.Errorf("Expected right op '.AND.', got %s", rightAnd.Op)
 				}
@@ -315,10 +242,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "F77 greater than: x .GT. y",
 			src:  "x .GT. y",
 			validate: func(t *testing.T, expr ast.Expression) {
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != ".GT." {
 					t.Errorf("Expected op '.GT.', got %s", binExpr.Op)
 				}
@@ -328,10 +252,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "F77 less than: a .LT. b",
 			src:  "a .LT. b",
 			validate: func(t *testing.T, expr ast.Expression) {
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != ".LT." {
 					t.Errorf("Expected op '.LT.', got %s", binExpr.Op)
 				}
@@ -341,10 +262,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "F77 equals: x .EQ. 0",
 			src:  "x .EQ. 0",
 			validate: func(t *testing.T, expr ast.Expression) {
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != ".EQ." {
 					t.Errorf("Expected op '.EQ.', got %s", binExpr.Op)
 				}
@@ -354,10 +272,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "F90 greater than: x > y",
 			src:  "x > y",
 			validate: func(t *testing.T, expr ast.Expression) {
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != ">" {
 					t.Errorf("Expected op '>', got %s", binExpr.Op)
 				}
@@ -367,10 +282,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "F90 less than: a < b",
 			src:  "a < b",
 			validate: func(t *testing.T, expr ast.Expression) {
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != "<" {
 					t.Errorf("Expected op '<', got %s", binExpr.Op)
 				}
@@ -380,10 +292,7 @@ func TestExpressionParsing(t *testing.T) {
 			name: "F90 equals: x == 0",
 			src:  "x == 0",
 			validate: func(t *testing.T, expr ast.Expression) {
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != "==" {
 					t.Errorf("Expected op '==', got %s", binExpr.Op)
 				}
@@ -395,28 +304,19 @@ func TestExpressionParsing(t *testing.T) {
 			validate: func(t *testing.T, expr ast.Expression) {
 				// Should parse as: (x > 0) .AND. (y < 10)
 				// .AND. has lower precedence than relational operators
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != ".AND." {
 					t.Errorf("Expected top-level op '.AND.', got %s", binExpr.Op)
 				}
 
 				// Left should be (x > 0)
-				leftRel, ok := binExpr.Left.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected left to be *ast.BinaryExpr, got %T", binExpr.Left)
-				}
+				leftRel := helperWantNode[*ast.BinaryExpr](t, binExpr.Left, "left")
 				if leftRel.Op.String() != ">" {
 					t.Errorf("Expected left op '>', got %s", leftRel.Op)
 				}
 
 				// Right should be (y < 10)
-				rightRel, ok := binExpr.Right.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected right to be *ast.BinaryExpr, got %T", binExpr.Right)
-				}
+				rightRel := helperWantNode[*ast.BinaryExpr](t, binExpr.Right, "right")
 				if rightRel.Op.String() != "<" {
 					t.Errorf("Expected right op '<', got %s", rightRel.Op)
 				}
@@ -476,10 +376,7 @@ func TestExpressionParsing(t *testing.T) {
 				}
 
 				// Argument should be (x*x + y*y)
-				argExpr, ok := funcCall.Args[0].(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected argument to be *ast.BinaryExpr, got %T", funcCall.Args[0])
-				}
+				argExpr := helperWantNode[*ast.BinaryExpr](t, funcCall.Args[0], "argument")
 				if argExpr.Op.String() != "+" {
 					t.Errorf("Expected argument op '+', got %s", argExpr.Op)
 				}
@@ -498,19 +395,13 @@ func TestExpressionParsing(t *testing.T) {
 				}
 
 				// First argument should be binary expression (n-1)
-				binExpr, ok := funcCall.Args[0].(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected first arg to be *ast.BinaryExpr, got %T", funcCall.Args[0])
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, funcCall.Args[0], "first arg")
 				if binExpr.Op.String() != "-" {
 					t.Errorf("Expected first arg op '-', got %s", binExpr.Op)
 				}
 
 				// Second argument should be identifier 'result'
-				ident, ok := funcCall.Args[1].(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected second arg to be *ast.Identifier, got %T", funcCall.Args[1])
-				}
+				ident := helperWantNode[*ast.Identifier](t, funcCall.Args[1], "second arg")
 				if ident.Value != "result" {
 					t.Errorf("Expected identifier 'result', got %s", ident.Value)
 				}
@@ -556,10 +447,7 @@ func TestExpressionParsing(t *testing.T) {
 				}
 
 				// Argument should be (i + 1)
-				arg, ok := funcCall.Args[0].(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected argument to be *ast.BinaryExpr, got %T", funcCall.Args[0])
-				}
+				arg := helperWantNode[*ast.BinaryExpr](t, funcCall.Args[0], "argument")
 				if arg.Op.String() != "+" {
 					t.Errorf("Expected argument op '+', got %s", arg.Op)
 				}
@@ -573,10 +461,7 @@ func TestExpressionParsing(t *testing.T) {
 			validate: func(t *testing.T, expr ast.Expression) {
 				parenExpr := helperWantNode[*ast.ParenExpr](t, expr, "")
 				// Inner should be (a + b)
-				innerExpr, ok := parenExpr.Expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected inner to be *ast.BinaryExpr, got %T", parenExpr.Expr)
-				}
+				innerExpr := helperWantNode[*ast.BinaryExpr](t, parenExpr.Expr, "inner")
 				if innerExpr.Op.String() != "+" {
 					t.Errorf("Expected inner op '+', got %s", innerExpr.Op)
 				}
@@ -587,25 +472,16 @@ func TestExpressionParsing(t *testing.T) {
 			src:  "(a + b) * c",
 			validate: func(t *testing.T, expr ast.Expression) {
 				// Should parse as: (a + b) * c, not a + (b * c)
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != "*" {
 					t.Errorf("Expected top-level op '*', got %s", binExpr.Op)
 				}
 
 				// Left should be parenthesized (a + b)
-				leftParen, ok := binExpr.Left.(*ast.ParenExpr)
-				if !ok {
-					t.Fatalf("Expected left to be *ast.ParenExpr, got %T", binExpr.Left)
-				}
+				leftParen := helperWantNode[*ast.ParenExpr](t, binExpr.Left, "left")
 
 				// Inner of paren should be (a + b)
-				innerAdd, ok := leftParen.Expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected paren inner to be *ast.BinaryExpr, got %T", leftParen.Expr)
-				}
+				innerAdd := helperWantNode[*ast.BinaryExpr](t, leftParen.Expr, "paren inner")
 				if innerAdd.Op.String() != "+" {
 					t.Errorf("Expected paren inner op '+', got %s", innerAdd.Op)
 				}
@@ -618,37 +494,25 @@ func TestExpressionParsing(t *testing.T) {
 			src:  "a + b * c - d / e",
 			validate: func(t *testing.T, expr ast.Expression) {
 				// Should parse as: (a + (b * c)) - (d / e)
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != "-" {
 					t.Errorf("Expected top-level op '-', got %s", binExpr.Op)
 				}
 
 				// Left should be (a + (b * c))
-				leftAdd, ok := binExpr.Left.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected left to be *ast.BinaryExpr, got %T", binExpr.Left)
-				}
+				leftAdd := helperWantNode[*ast.BinaryExpr](t, binExpr.Left, "left")
 				if leftAdd.Op.String() != "+" {
 					t.Errorf("Expected left op '+', got %s", leftAdd.Op)
 				}
 
 				// Right of left should be (b * c)
-				leftRight, ok := leftAdd.Right.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected left.right to be *ast.BinaryExpr, got %T", leftAdd.Right)
-				}
+				leftRight := helperWantNode[*ast.BinaryExpr](t, leftAdd.Right, "left.right")
 				if leftRight.Op.String() != "*" {
 					t.Errorf("Expected left.right op '*', got %s", leftRight.Op)
 				}
 
 				// Right should be (d / e)
-				rightDiv, ok := binExpr.Right.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected right to be *ast.BinaryExpr, got %T", binExpr.Right)
-				}
+				rightDiv := helperWantNode[*ast.BinaryExpr](t, binExpr.Right, "right")
 				if rightDiv.Op.String() != "/" {
 					t.Errorf("Expected right op '/', got %s", rightDiv.Op)
 				}
@@ -659,10 +523,7 @@ func TestExpressionParsing(t *testing.T) {
 			src:  "sqrt(arr(i)**2 + arr(j)**2)",
 			validate: func(t *testing.T, expr ast.Expression) {
 				// Top level should be function call
-				funcCall, ok := expr.(*ast.CallExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.CallExpr, got %T", expr)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, expr, "")
 				if funcCall.Name != "sqrt" {
 					t.Errorf("Expected function name 'sqrt', got %s", funcCall.Name)
 				}
@@ -671,19 +532,13 @@ func TestExpressionParsing(t *testing.T) {
 				}
 
 				// Argument should be addition
-				argAdd, ok := funcCall.Args[0].(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected argument to be *ast.BinaryExpr, got %T", funcCall.Args[0])
-				}
+				argAdd := helperWantNode[*ast.BinaryExpr](t, funcCall.Args[0], "argument")
 				if argAdd.Op.String() != "+" {
 					t.Errorf("Expected argument op '+', got %s", argAdd.Op)
 				}
 
 				// Left of addition should be exponentiation
-				leftExp, ok := argAdd.Left.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected left to be *ast.BinaryExpr, got %T", argAdd.Left)
-				}
+				leftExp := helperWantNode[*ast.BinaryExpr](t, argAdd.Left, "left")
 				if leftExp.Op.String() != "**" {
 					t.Errorf("Expected left op '**', got %s", leftExp.Op)
 				}
@@ -700,14 +555,9 @@ func TestExpressionParsing(t *testing.T) {
 				// Array constructor is parsed as a special kind of expression
 				// For now, we just verify it parses without error
 				// The structure depends on how the parser handles array constructors
-				constr, ok := expr.(*ast.ArrayConstructor)
-				if !ok {
-					t.Fatalf("failed to convert %T", expr)
-				}
-				v, ok := constr.Values[0].(*ast.IntegerLiteral)
-				if !ok {
-					t.Fatalf("failed to convert %T", v)
-				} else if v.Raw != "0" {
+				constr := helperWantNode[*ast.ArrayConstructor](t, expr, "")
+				v := helperWantNode[*ast.IntegerLiteral](t, constr.Values[0], "values[0]")
+				if v.Raw != "0" {
 					t.Errorf("expected raw 0, got %s", v.Raw)
 				}
 			},
@@ -716,19 +566,13 @@ func TestExpressionParsing(t *testing.T) {
 			name: "array constructor in comparison: k == (/ 0 /)",
 			src:  "k == (/ 0 /)",
 			validate: func(t *testing.T, expr ast.Expression) {
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != "==" {
 					t.Errorf("Expected op '==', got %s", binExpr.Op)
 				}
 
 				// Left should be identifier 'k'
-				ident, ok := binExpr.Left.(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected left to be *ast.Identifier, got %T", binExpr.Left)
-				}
+				ident := helperWantNode[*ast.Identifier](t, binExpr.Left, "left")
 				if ident.Value != "k" {
 					t.Errorf("Expected identifier 'k', got %s", ident.Value)
 				}
@@ -744,28 +588,19 @@ func TestExpressionParsing(t *testing.T) {
 			src:  "'Hello' // ' ' // 'World'",
 			validate: func(t *testing.T, expr ast.Expression) {
 				// Should parse as: ('Hello' // ' ') // 'World' (left-associative)
-				binExpr, ok := expr.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected *ast.BinaryExpr, got %T", expr)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, expr, "")
 				if binExpr.Op.String() != "//" {
 					t.Errorf("Expected top-level op '//', got %s", binExpr.Op)
 				}
 
 				// Left should be another concatenation
-				leftConcat, ok := binExpr.Left.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected left to be *ast.BinaryExpr, got %T", binExpr.Left)
-				}
+				leftConcat := helperWantNode[*ast.BinaryExpr](t, binExpr.Left, "left")
 				if leftConcat.Op.String() != "//" {
 					t.Errorf("Expected left op '//', got %s", leftConcat.Op)
 				}
 
 				// Right should be string literal
-				_, ok = binExpr.Right.(*ast.StringLiteral)
-				if !ok {
-					t.Fatalf("Expected right to be *ast.StringLiteral, got %T", binExpr.Right)
-				}
+				_ = helperWantNode[*ast.StringLiteral](t, binExpr.Right, "right")
 			},
 		},
 	}
@@ -807,17 +642,4 @@ func helperFatalErrors(t testing.TB, p *Parser90, msg string) {
 	if len(p.Errors()) > 0 {
 		t.Fatal(msg)
 	}
-}
-
-func helperWantNode[T ast.Node](t testing.TB, v ast.Node, context string) T {
-	var z T
-	vt, ok := v.(T)
-	if !ok {
-		if context != "" {
-			t.Fatalf("%s: want %T, got %T", context, z, v)
-		} else {
-			t.Fatalf("want %T, got %T", z, v)
-		}
-	}
-	return vt
 }

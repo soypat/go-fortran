@@ -122,16 +122,10 @@ END SUBROUTINE old_style
 			var params []ast.Parameter
 			switch tt.unitType {
 			case "subroutine":
-				sub, ok := unit.(*ast.Subroutine)
-				if !ok {
-					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
-				}
+				sub := helperWantNode[*ast.Subroutine](t, unit, "")
 				params = sub.Parameters
 			case "function":
-				fn, ok := unit.(*ast.Function)
-				if !ok {
-					t.Fatalf("Expected *ast.Function, got %T", unit)
-				}
+				fn := helperWantNode[*ast.Function](t, unit, "")
 				params = fn.Parameters
 			default:
 				t.Fatalf("Unknown unit type: %s", tt.unitType)
@@ -470,10 +464,7 @@ END SUBROUTINE test
 		t.Fatalf("Parse errors: %v", parser.Errors())
 	}
 
-	sub, ok := unit.(*ast.Subroutine)
-	if !ok {
-		t.Fatalf("Expected *ast.Subroutine, got %T", unit)
-	}
+	sub := helperWantNode[*ast.Subroutine](t, unit, "")
 
 	// Check that arr has DIMENSION attribute
 	if len(sub.Parameters) < 1 {
@@ -749,10 +740,7 @@ END PROGRAM test
 
 			switch tt.unitType {
 			case "subroutine":
-				sub, ok := unit.(*ast.Subroutine)
-				if !ok {
-					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
-				}
+				sub := helperWantNode[*ast.Subroutine](t, unit, "")
 				// Extract entities from type declarations in body
 				for _, stmt := range sub.Body {
 					if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
@@ -760,10 +748,7 @@ END PROGRAM test
 					}
 				}
 			case "program":
-				prog, ok := unit.(*ast.ProgramBlock)
-				if !ok {
-					t.Fatalf("Expected *ast.ProgramBlock, got %T", unit)
-				}
+				prog := helperWantNode[*ast.ProgramBlock](t, unit, "")
 				// Extract entities from type declarations in body
 				for _, stmt := range prog.Body {
 					if typeDecl, ok := stmt.(*ast.TypeDeclaration); ok {
@@ -1011,10 +996,7 @@ END PROGRAM`,
 				t.Fatalf("Parse errors: %v", parser.Errors())
 			}
 
-			prog, ok := unit.(*ast.ProgramBlock)
-			if !ok {
-				t.Fatalf("Expected ProgramBlock, got %T", unit)
-			}
+			prog := helperWantNode[*ast.ProgramBlock](t, unit, "")
 
 			if len(prog.Body) == 0 {
 				t.Fatal("Expected at least one statement in body")
@@ -1041,11 +1023,7 @@ END PROGRAM`,
 				}
 
 				if tt.kindIsLiteral {
-					lit, ok := typeDecl.Type.KindOrLen.(*ast.IntegerLiteral)
-					if !ok {
-						t.Errorf("Expected KIND to be IntegerLiteral, got %T", typeDecl.Type.KindOrLen)
-						return
-					}
+					lit := helperWantNode[*ast.IntegerLiteral](t, typeDecl.Type.KindOrLen, "KIND")
 					if lit.Value != tt.kindValue {
 						t.Errorf("Expected KIND value %d, got %d", tt.kindValue, lit.Value)
 					}
@@ -1111,10 +1089,7 @@ END PROGRAM`,
 				t.Fatalf("Parse errors: %v", parser.Errors())
 			}
 
-			prog, ok := unit.(*ast.ProgramBlock)
-			if !ok {
-				t.Fatalf("Expected ProgramBlock, got %T", unit)
-			}
+			prog := helperWantNode[*ast.ProgramBlock](t, unit, "")
 
 			// Find the type declaration
 			var typeDecl *ast.TypeDeclaration
@@ -1141,11 +1116,7 @@ END PROGRAM`,
 					return
 				}
 
-				lit, ok := entity.Type.KindOrLen.(*ast.IntegerLiteral)
-				if !ok {
-					t.Errorf("Expected CharLen to be IntegerLiteral, got %T", entity.Type.KindOrLen)
-					return
-				}
+				lit := helperWantNode[*ast.IntegerLiteral](t, entity.Type.KindOrLen, "CharLen")
 
 				if lit.Value != tt.lengthValue {
 					t.Errorf("Expected length %d, got %d", tt.lengthValue, lit.Value)
@@ -1177,10 +1148,7 @@ END FUNCTION`
 		t.Fatalf("Parse errors: %v", parser.Errors())
 	}
 
-	fn, ok := unit.(*ast.Function)
-	if !ok {
-		t.Fatalf("Expected Function, got %T", unit)
-	}
+	fn := helperWantNode[*ast.Function](t, unit, "")
 
 	if fn.Type.Token.String() != "REAL" {
 		t.Errorf("Expected Type 'REAL', got '%s'", fn.Type.Token)
@@ -1191,11 +1159,7 @@ END FUNCTION`
 		return
 	}
 
-	lit, ok := fn.Type.KindOrLen.(*ast.IntegerLiteral)
-	if !ok {
-		t.Errorf("Expected KindOrLen to be IntegerLiteral, got %T", fn.Type.KindOrLen)
-		return
-	}
+	lit := helperWantNode[*ast.IntegerLiteral](t, fn.Type.KindOrLen, "KindOrLen")
 
 	if lit.Value != 8 {
 		t.Errorf("Expected KindOrLen value 8, got %d", lit.Value)
@@ -1224,10 +1188,7 @@ END SUBROUTINE`
 		t.Fatalf("Parse errors: %v", parser.Errors())
 	}
 
-	sub, ok := unit.(*ast.Subroutine)
-	if !ok {
-		t.Fatalf("Expected Subroutine, got %T", unit)
-	}
+	sub := helperWantNode[*ast.Subroutine](t, unit, "")
 
 	if len(sub.Parameters) != 2 {
 		t.Fatalf("Expected 2 parameters, got %d", len(sub.Parameters))
@@ -1244,10 +1205,8 @@ END SUBROUTINE`
 	if param0.Decl.Type.KindOrLen == nil {
 		t.Errorf("Expected parameter 0 KindOrLen to be non-nil")
 	} else {
-		lit, ok := param0.Decl.Type.KindOrLen.(*ast.IntegerLiteral)
-		if !ok {
-			t.Errorf("Expected parameter 0 KindOrLen to be IntegerLiteral, got %T", param0.Decl.Type.KindOrLen)
-		} else if lit.Value != 4 {
+		lit := helperWantNode[*ast.IntegerLiteral](t, param0.Decl.Type.KindOrLen, "param0 KindOrLen")
+		if lit.Value != 4 {
 			t.Errorf("Expected parameter 0 KindOrLen value 4, got %d", lit.Value)
 		}
 	}
@@ -1263,10 +1222,8 @@ END SUBROUTINE`
 	if param1.Decl.Type.KindOrLen == nil {
 		t.Errorf("Expected parameter 1 KindOrLen to be non-nil")
 	} else {
-		lit, ok := param1.Decl.Type.KindOrLen.(*ast.IntegerLiteral)
-		if !ok {
-			t.Errorf("Expected parameter 1 KindOrLen to be IntegerLiteral, got %T", param1.Decl.Type.KindOrLen)
-		} else if lit.Value != 8 {
+		lit := helperWantNode[*ast.IntegerLiteral](t, param1.Decl.Type.KindOrLen, "param1 KindOrLen")
+		if lit.Value != 8 {
 			t.Errorf("Expected parameter 1 KindOrLen value 8, got %d", lit.Value)
 		}
 	}
@@ -1355,10 +1312,7 @@ END PROGRAM
 				t.Fatalf("Parse errors: %v", parser.Errors())
 			}
 
-			prog, ok := unit.(*ast.ProgramBlock)
-			if !ok {
-				t.Fatalf("Expected ProgramBlock, got %T", unit)
-			}
+			prog := helperWantNode[*ast.ProgramBlock](t, unit, "")
 
 			// Find the COMMON statement in the program body
 			var commonStmt *ast.CommonStmt
@@ -1473,10 +1427,7 @@ END PROGRAM
 				t.Fatalf("Parse errors: %v", parser.Errors())
 			}
 
-			prog, ok := unit.(*ast.ProgramBlock)
-			if !ok {
-				t.Fatalf("Expected ProgramBlock, got %T", unit)
-			}
+			prog := helperWantNode[*ast.ProgramBlock](t, unit, "")
 
 			// Find the EXTERNAL or INTRINSIC statement in the program body
 			var names []string
@@ -1664,10 +1615,7 @@ END PROGRAM
 				t.Fatalf("Parse errors: %v", parser.Errors())
 			}
 
-			prog, ok := unit.(*ast.ProgramBlock)
-			if !ok {
-				t.Fatalf("Expected ProgramBlock, got %T", unit)
-			}
+			prog := helperWantNode[*ast.ProgramBlock](t, unit, "")
 
 			// Find the IMPLICIT statement in the program body
 			var implicitStmt *ast.ImplicitStatement

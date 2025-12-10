@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/soypat/go-fortran/ast"
 	f90 "github.com/soypat/go-fortran/ast"
 )
 
@@ -197,4 +198,19 @@ func newParser(t *testing.T, code string) *Parser90 {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// helperWantNode asserts that v is of type T and returns it.
+// Fails the test with a descriptive message if the type assertion fails.
+func helperWantNode[T ast.Node](t testing.TB, v ast.Node, context string) T {
+	var z T
+	vt, ok := v.(T)
+	if !ok {
+		if context != "" {
+			t.Fatalf("%s: want %T, got %T", context, z, v)
+		} else {
+			t.Fatalf("want %T, got %T", z, v)
+		}
+	}
+	return vt
 }
