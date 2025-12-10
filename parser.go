@@ -283,7 +283,7 @@ func (pud *ParserUnitData) resolveImplicitTypes() {
 		vi := &pud.vars[i]
 		// Skip variables that already have explicit type declarations.
 		// But handle partial decls (e.g., from Cray POINTER with ArraySpec but no Type).
-		if vi.decl != nil && vi.decl.Type != nil {
+		if vi.decl != nil && vi.decl.Type != nil || vi._varname == "" {
 			continue // Already has explicit type
 		}
 		ident := vi.Identifier()
@@ -560,20 +560,21 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.ProgramUnit) {
 		return nil
 	}
 	switch p.current.tok {
-	case token.BLOCK:
-		unit = p.parseBlockData()
-	case token.PROGRAM:
-		unit = p.parseProgramBlock()
 	case token.SUBROUTINE:
 		unit = p.parseSubroutine()
 	case token.FUNCTION:
 		unit = p.parseFunction()
+	case token.RECURSIVE, token.PURE, token.ELEMENTAL:
+		unit = p.parseProcedureWithAttributes()
+	case token.INTEGER, token.REAL, token.LOGICAL, token.CHARACTER,
+		token.DOUBLEPRECISION, token.DOUBLE, token.COMPLEX:
+		unit = p.parseTypePrefixedConstruct()
 	case token.MODULE:
 		unit = p.parseModule()
-	case token.RECURSIVE, token.PURE, token.ELEMENTAL,
-		token.INTEGER, token.REAL, token.LOGICAL, token.CHARACTER,
-		token.DOUBLEPRECISION, token.COMPLEX:
-		unit = p.parseTypePrefixedConstruct()
+	case token.BLOCK:
+		unit = p.parseBlockData()
+	case token.PROGRAM:
+		unit = p.parseProgramBlock()
 	default:
 		p.addError("unexpected token at top level: " + p.current.String())
 		p.nextToken()
@@ -585,6 +586,19 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.ProgramUnit) {
 	return unit
 }
 
+func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramUnit {
+	for p.loopUntil(token.END, token.ENDMODULE, token.ENDPROGRAM, token.ENDFUNCTION, token.ENDSUBROUTINE) {
+		unit := p.parseTopLevelUnit()
+		if unit != nil {
+			dst = append(dst, unit)
+		} else {
+			// parseTopLevelUnit returns nil when it encounters END tokens
+			break
+		}
+	}
+	return dst
+}
+
 // Semantic parsing functions for top-level constructs
 
 // parseProgramBlock parses a PROGRAM...END PROGRAM block
@@ -592,14 +606,12 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.ProgramUnit) {
 func (p *Parser90) parseProgramBlock() ast.ProgramUnit {
 	p.varResetAll()
 	start := p.sourcePos()
-	block := &ast.ProgramBlock{}
-
-	p.expect(token.PROGRAM, "")
-
-	// Parse program name (keywords can be used as program names)
-	if !p.expectIdentifier(&block.Name, "program name") {
+	if !p.expect(token.PROGRAM, "") {
 		return nil
 	}
+	block := &ast.ProgramBlock{}
+	// Parse program name (keywords can be used as program names)
+	p.expectIdentifier(&block.Name, "program name")
 
 	p.skipNewlinesAndComments()
 
@@ -622,17 +634,13 @@ func (p *Parser90) parseProgramBlock() ast.ProgramUnit {
 // Precondition: current token is MODULE
 func (p *Parser90) parseModule() ast.ProgramUnit {
 	start := p.sourcePos()
-	mod := &ast.Module{}
-
-	p.expect(token.MODULE, "")
-
-	// Parse module name (keywords can be used as module names)
-	if !p.expectIdentifier(&mod.Name, "module name") {
+	if !p.expect(token.MODULE, "") {
 		return nil
 	}
-
+	mod := &ast.Module{}
+	// Parse module name (keywords can be used as module names)
+	p.expectIdentifier(&mod.Name, "module name")
 	p.skipNewlinesAndComments()
-
 	// Parse body statements
 	mod.Body = p.parseBody(nil)
 	mod.Data = p.makeUnitData(mod.Name, token.MODULE)
@@ -648,19 +656,6 @@ func (p *Parser90) parseModule() ast.ProgramUnit {
 	return mod
 }
 
-func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramUnit {
-	for p.loopUntil(token.END, token.ENDMODULE, token.ENDPROGRAM, token.ENDFUNCTION, token.ENDSUBROUTINE) {
-		unit := p.parseTopLevelUnit()
-		if unit != nil {
-			dst = append(dst, unit)
-		} else {
-			// parseTopLevelUnit returns nil when it encounters END tokens
-			break
-		}
-	}
-	return dst
-}
-
 // parseSubroutine parses a SUBROUTINE...END SUBROUTINE block
 // Precondition: current token is SUBROUTINE
 func (p *Parser90) parseSubroutine() ast.ProgramUnit {
@@ -671,9 +666,7 @@ func (p *Parser90) parseSubroutine() ast.ProgramUnit {
 	p.expect(token.SUBROUTINE, "")
 
 	// Parse subroutine name (keywords can be used as subroutine names)
-	if !p.expectIdentifier(&sub.Name, "subroutine name") {
-		return nil
-	}
+	p.expectIdentifier(&sub.Name, "subroutine name")
 
 	// Parse parameter list if present
 	if p.currentTokenIs(token.LParen) {
@@ -699,15 +692,12 @@ func (p *Parser90) parseSubroutine() ast.ProgramUnit {
 func (p *Parser90) parseFunction() ast.ProgramUnit {
 	p.varResetAll()
 	start := p.sourcePos()
-	fn := &ast.Function{}
 	if !p.expect(token.FUNCTION, "") {
 		return nil
 	}
-
+	fn := &ast.Function{}
 	// Parse function name (can be Identifier, FormatSpec, or keyword used as identifier)
-	if !p.expectIdentifier(&fn.Name, "function name") {
-		return nil
-	}
+	p.expectIdentifier(&fn.Name, "function name")
 	// Parse parameter list
 	if p.currentTokenIs(token.LParen) {
 		fn.Parameters = p.parseParameterList()
@@ -756,13 +746,12 @@ func (p *Parser90) parseFunction() ast.ProgramUnit {
 // parseBlockData parses a BLOCK DATA...END [BLOCK DATA] block
 func (p *Parser90) parseBlockData() ast.ProgramUnit {
 	start := p.current.start
-	bd := &ast.BlockData{}
 	// Consume BLOCK identifier
 	if !p.consumeIf2(token.BLOCK, token.DATA) {
 		p.addError("DATA BLOCK expected: " + p.current.String())
 		return nil
 	}
-
+	bd := &ast.BlockData{}
 	// Parse optional block data name
 	p.consumeIdentifier(&bd.Name)
 	p.skipNewlinesAndComments()
@@ -773,8 +762,7 @@ func (p *Parser90) parseBlockData() ast.ProgramUnit {
 	p.expect(token.END, "expected END after DATA BLOCK body")
 
 	// Consume optional BLOCK DATA after END
-	if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "BLOCK" {
-		p.nextToken()
+	if p.consumeIf(token.BLOCK) {
 		p.consumeIf(token.DATA)
 	}
 	p.consumeIf(token.Identifier) // Optional name after END BLOCK DATA

@@ -320,7 +320,7 @@ func IsEndProgramUnit(current, next Token) int {
 		return 0
 	}
 	switch next {
-	case PROGRAM, SUBROUTINE, FUNCTION, MODULE:
+	case PROGRAM, SUBROUTINE, FUNCTION, MODULE, BLOCK:
 		return 2
 	case NewLine, EOF, LineComment:
 		// Bare END (common in older Fortran)
