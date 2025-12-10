@@ -191,15 +191,6 @@ func compareErrors(t testing.TB, srcpath string, expected map[int]string, actual
 	return nil
 }
 
-func newParser(t *testing.T, code string) *Parser90 {
-	p := &Parser90{}
-	err := p.Reset("test.f90", strings.NewReader(code))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
 // helperWantNode asserts that v is of type T and returns it.
 // Fails the test with a descriptive message if the type assertion fails.
 func helperWantNode[T ast.Node](t testing.TB, v ast.Node, context string) T {
