@@ -44,6 +44,7 @@ const (
 	ENDMODULE     // ENDMODULE
 	CONTAINS      // CONTAINS
 	ENTRY         // ENTRY
+	BLOCK         // BLOCK
 
 	// Control flow keywords
 	IF        // IF

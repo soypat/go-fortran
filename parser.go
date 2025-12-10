@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -441,10 +440,6 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 	p.nextToken()
 	p.nextToken()
 	p.nextToken()
-
-	// Register all parsing functions
-	p.registerTopLevelParsers()
-
 	return nil
 }
 
@@ -557,64 +552,44 @@ func (p *Parser90) ParseNextProgramUnit() (unit ast.ProgramUnit) {
 }
 
 // registerTopLevelParsers registers all statement-level parsing functions
-func (p *Parser90) registerTopLevelParsers() {
-	// Register top-level keywords
-	p.registerStatement(token.PROGRAM, p.parseProgramBlock)
-	p.registerStatement(token.SUBROUTINE, p.parseSubroutine)
-	p.registerStatement(token.FUNCTION, p.parseFunction)
-	p.registerStatement(token.MODULE, p.parseModule)
-
-	// Register type keywords that can prefix FUNCTION
-	p.registerStatement(token.INTEGER, p.parseTypePrefixedConstruct)
-	p.registerStatement(token.REAL, p.parseTypePrefixedConstruct)
-	p.registerStatement(token.LOGICAL, p.parseTypePrefixedConstruct)
-	p.registerStatement(token.CHARACTER, p.parseTypePrefixedConstruct)
-	p.registerStatement(token.DOUBLE, p.parseTypePrefixedConstruct)
-	p.registerStatement(token.DOUBLEPRECISION, p.parseTypePrefixedConstruct)
-	p.registerStatement(token.COMPLEX, p.parseTypePrefixedConstruct)
-
-	// Register attributes that can prefix procedures
-	p.registerStatement(token.RECURSIVE, p.parseProcedureWithAttributes)
-	p.registerStatement(token.PURE, p.parseProcedureWithAttributes)
-	p.registerStatement(token.ELEMENTAL, p.parseProcedureWithAttributes)
-}
 
 // parseTopLevelUnit dispatches to the appropriate registered statement parser
-func (p *Parser90) parseTopLevelUnit() ast.ProgramUnit {
+func (p *Parser90) parseTopLevelUnit() (unit ast.ProgramUnit) {
 	p.skipNewlinesAndComments()
 	if p.IsDone() || p.current.tok.IsEnd() {
 		return nil
 	}
-
-	// Special case: BLOCK DATA (BLOCK is an identifier, DATA is a keyword)
-	if p.currentTokenIs(token.Identifier) && string(p.current.lit) == "BLOCK" && p.peekTokenIs(token.DATA) {
-		return p.parseBlockData()
-	}
-
-	stmtFn := p.stmtFns[p.current.tok]
-	if stmtFn == nil {
-		p.addError("unexpected token at top level: " + p.current.tok.String())
-		p.nextToken() // Skip unexpected token
+	switch p.current.tok {
+	case token.BLOCK:
+		unit = p.parseBlockData()
+	case token.PROGRAM:
+		unit = p.parseProgramBlock()
+	case token.SUBROUTINE:
+		unit = p.parseSubroutine()
+	case token.FUNCTION:
+		unit = p.parseFunction()
+	case token.MODULE:
+		unit = p.parseModule()
+	case token.RECURSIVE, token.PURE, token.ELEMENTAL,
+		token.INTEGER, token.REAL, token.LOGICAL, token.CHARACTER,
+		token.DOUBLEPRECISION, token.COMPLEX:
+		unit = p.parseTypePrefixedConstruct()
+	default:
+		p.addError("unexpected token at top level: " + p.current.String())
+		p.nextToken()
 		return nil
 	}
-
-	stmt := stmtFn()
-	if unit, ok := stmt.(ast.ProgramUnit); ok {
-		return unit
+	if unit == nil {
+		p.addError("nil program unit for token: " + p.current.String())
 	}
-
-	// If stmt is nil, the parser already added an error
-	if stmt != nil {
-		p.addError("statement is not a program unit")
-	}
-	return nil
+	return unit
 }
 
 // Semantic parsing functions for top-level constructs
 
 // parseProgramBlock parses a PROGRAM...END PROGRAM block
 // Precondition: current token is PROGRAM
-func (p *Parser90) parseProgramBlock() ast.Statement {
+func (p *Parser90) parseProgramBlock() ast.ProgramUnit {
 	p.varResetAll()
 	start := p.sourcePos()
 	block := &ast.ProgramBlock{}
@@ -645,7 +620,7 @@ func (p *Parser90) parseProgramBlock() ast.Statement {
 
 // parseModule parses a MODULE...END MODULE block
 // Precondition: current token is MODULE
-func (p *Parser90) parseModule() ast.Statement {
+func (p *Parser90) parseModule() ast.ProgramUnit {
 	start := p.sourcePos()
 	mod := &ast.Module{}
 
@@ -688,7 +663,7 @@ func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramU
 
 // parseSubroutine parses a SUBROUTINE...END SUBROUTINE block
 // Precondition: current token is SUBROUTINE
-func (p *Parser90) parseSubroutine() ast.Statement {
+func (p *Parser90) parseSubroutine() ast.ProgramUnit {
 	p.varResetAll()
 	start := p.sourcePos()
 	sub := &ast.Subroutine{}
@@ -721,7 +696,7 @@ func (p *Parser90) parseSubroutine() ast.Statement {
 
 // parseFunction parses a FUNCTION...END FUNCTION block
 // Precondition: current token is FUNCTION
-func (p *Parser90) parseFunction() ast.Statement {
+func (p *Parser90) parseFunction() ast.ProgramUnit {
 	p.varResetAll()
 	start := p.sourcePos()
 	fn := &ast.Function{}
@@ -783,10 +758,8 @@ func (p *Parser90) parseBlockData() ast.ProgramUnit {
 	start := p.current.start
 	bd := &ast.BlockData{}
 	// Consume BLOCK identifier
-	p.nextToken()
-
-	// Expect and consume DATA keyword
-	if !p.expect(token.DATA, "DATA BLOCK expected") {
+	if !p.consumeIf2(token.BLOCK, token.DATA) {
+		p.addError("DATA BLOCK expected: " + p.current.String())
 		return nil
 	}
 
@@ -1104,16 +1077,22 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 	return params
 }
 
-func (p *Parser90) parseBody2(params []ast.Parameter) []ast.Statement {
+// parseBody parses specification statements, then executable statements
+// If parameters are provided, it will populate their type information when type declarations are found
+func (p *Parser90) parseBody(params []ast.Parameter) []ast.Statement {
 	defer p.vars.resolveParameterTypes(params)
 	var stmts []ast.Statement
 	inExec := false
 	p.vars.implicits = p.vars.implicits[:0] // TODO: shouldn't anytime vars is reset implicits also be reset? This seems like an edge case.
-	for p.loopUntil(token.CONTAINS, token.END) && !p.isEndOfProgramUnit() {
+	for {
 		if p.skipUnexpectedEndConstructs("at body parsing spec statements") {
 			return stmts
 		}
 		p.skipNewlinesAndComments()
+		// Check loop condition AFTER skipping newlines so we see CONTAINS/END tokens.
+		if !p.loopUntil(token.CONTAINS) || p.isEndOfProgramUnit() {
+			break
+		}
 		stmt := p.parseStatement(inExec)
 		if stmt == nil {
 			// p.addError("nil statement, skipping")
@@ -1134,233 +1113,7 @@ func (p *Parser90) parseBody2(params []ast.Parameter) []ast.Statement {
 	return stmts
 }
 
-// parseBody parses specification statements, then executable statements
-// If parameters are provided, it will populate their type information when type declarations are found
-func (p *Parser90) parseBody(params []ast.Parameter) []ast.Statement {
-	return p.parseBody2(params)
-	defer p.vars.resolveParameterTypes(params)
-	var stmts []ast.Statement
-	// var sawDecl bool
-	// Create a map for quick parameter lookup
-	p.vars.implicits = p.vars.implicits[:0] // TODO: shouldn't anytime vars is reset implicits also be reset? This seems like an edge case.
-	p.skipNewlinesAndComments()
-	// Phase 2: Parse specification statements
-	for p.loopUntil(token.CONTAINS, token.END) {
-		if p.currentTokenIs(token.CONTAINS) || p.currentTokenIs(token.EOF) {
-			break
-		}
-		if p.skipUnexpectedEndConstructs("at body parsing spec statements") {
-			return stmts
-		}
-
-		// Check if this is an executable statement (execution part starts here)
-		if p.isExecutableStatement() {
-			break
-		}
-
-		if stmt := p.parseStatement(false); stmt != nil {
-			stmts = append(stmts, stmt)
-		} else {
-			// Not a parseable spec statement - skip the construct
-			p.skipToNextStatement()
-		}
-		p.skipNewlinesAndComments()
-	}
-	p.nStatements += len(stmts) // Add specification statements.
-	p.vars.resolveImplicitTypes()
-
-	// Phase 3: Parse executable statements
-	for !p.isEndOfProgramUnit() && p.loopUntil(token.CONTAINS) {
-		p.skipNewlinesAndComments()
-		if p.currentTokenIs(token.CONTAINS) || p.isEndOfProgramUnit() {
-			break
-		}
-		if p.skipUnexpectedEndConstructs("at body parsing executable statements") {
-			return stmts
-		}
-		if stmt := p.parseExecutableStatement(); stmt != nil {
-			p.nStatements++
-			stmts = append(stmts, stmt)
-		} else {
-			// Not a parseable executable statement - skip the construct
-			p.skipToNextStatement()
-			var endlabel string
-			if false && len(stmts) > 0 && p.consumeEndLabelIfPresent(&endlabel, token.IF, "") ||
-				p.consumeEndLabelIfPresent(&endlabel, token.DO, "") {
-				switch stmt := stmts[len(stmts)-1].(type) {
-				case *ast.DoLoop:
-					stmt.EndLabel = endlabel
-				case *ast.IfStmt:
-					stmt.EndLabel = endlabel
-				default:
-					p.addError("labelled END does not correspond to a labellable node: " + reflect.TypeOf(stmt).String())
-				}
-			}
-		}
-	}
-
-	return stmts
-}
-
-// currentIsGOTO check for "GO TO" (two separate tokens) returning 2
-// or for simpler conjoined GOTO returning 1. Returns 0 if not GOTO found.
-func (p *Parser90) currentIsGOTO() int {
-	switch {
-	case p.current.tok == token.GOTO: // captures both GOTO and goto.
-		return 1
-	case p.current.tok == token.GO && p.peek.tok == token.TO:
-		return 2
-	case string(p.current.lit) == "GO" && string(p.peek.lit) == "TO":
-		return 2
-	case string(p.current.lit) == "go" && string(p.peek.lit) == "to":
-		return 2
-	}
-	return 0
-}
-
-// isLikelyAssignment checks if current token starts an assignment statement.
-// It handles both simple assignments (RESULT=1) and array assignments (RESULT(N)=1).
-// This requires lookahead beyond the standard 3-token window for cases like KEYWORD(...=.
-//
-// Postcondition: Does not consume any tokens; parser state unchanged.
-func (p *Parser90) isLikelyAssignment(inExec bool) bool {
-	if inExec && len(p.vars.usesKeywordAsIdentifiers) > 0 {
-		if (p.peek.tok == token.Equals || p.peek.tok == token.PointerAssign ||
-			(p.peek.tok == token.LParen && p.current.tok != token.IF)) &&
-			slices.Contains(p.vars.usesKeywordAsIdentifiers, p.current.tok) {
-			return true
-		}
-	}
-	return token.IsAssignment(p.current.tok, p.peek.tok)
-}
-
-// parseExecutableStatement parses a single executable statement
-func (p *Parser90) parseExecutableStatement() ast.Statement {
-	return p.parseStatement(true)
-	// Check for "END FILE" before generic END check
-	if p.current.tok == token.END && p.peek.tok == token.FILE {
-		return p.parseEndfileStmt()
-	}
-	// Check for END tokens (program unit endings and construct endings)
-	// But allow END when used as variable name (e.g., "END = a(j)+d")
-	if p.current.tok.IsEnd() && !(p.current.tok == token.END && p.peek.tok == token.Equals) {
-		return nil // End of program unit or construct - let parent handle it
-	}
-	var stmt ast.Statement
-	var label string
-	var constructLabel string
-	if p.currentTokenIs(token.IntLit) {
-		if p.peek.tok.IsEnd() {
-			return nil // Is a Label to an END, should be parsed in parent
-		}
-		label = string(p.current.lit)
-		p.nextToken()
-	} else if p.currentTokenIs(token.Identifier) && p.peekTokenIs(token.Colon) && p.uberpeek.tok.IsConstruct() {
-		constructLabel = string(p.current.lit)
-		p.nextToken()
-		p.nextToken()
-	}
-	// Check for GOTO first (handles both "GO TO" and "GOTO" and computed goto patterns)
-	if ngotoToks := p.currentIsGOTO(); ngotoToks > 0 {
-		stmt = p.parseGotoStmt()
-	} else if p.current.tok == token.POINTER && p.peek.tok == token.LParen {
-		// Ambiguous case: POINTER(...) could be assignment or would be declaration in spec section
-		// Use parseIndexCallOrAssignment to resolve by looking past the parentheses
-		p.nextToken()
-		expr, assign := p.parseIndexCallOrAssignment("pointer open parens")
-		if assign != nil {
-			stmt = assign // pointer(i) = value
-		} else {
-			// POINTER(...) without assignment in executable section is an error
-			// (would be valid in specification section, but we're in executable section)
-			p.addError("POINTER statement only valid in specification section")
-			_ = expr // parsed expression is discarded
-		}
-	} else if p.isLikelyAssignment(true) {
-		stmt = p.parseAssignmentStmt()
-	} else {
-		switch p.current.tok {
-		default:
-			if p.current.tok.IsExecutableStatement() {
-				p.addError(p.current.tok.String() + " is an unsupported executable statement")
-			} else {
-				p.addError(p.current.tok.String() + " unable to be parsed as executable statement")
-			}
-		case token.IF:
-			stmt = p.parseIfStmt()
-		case token.DO:
-			stmt = p.parseDoLoop()
-		case token.SELECT:
-			stmt = p.parseSelectCaseStmt()
-		case token.CALL:
-			stmt = p.parseCallStmt()
-		case token.ENTRY:
-			stmt = p.parseEntryStmt()
-		case token.RETURN:
-			stmt = p.parseReturnStmt()
-		case token.CYCLE:
-			stmt = p.parseCycleStmt()
-		case token.EXIT:
-			stmt = p.parseExitStmt()
-		case token.CONTINUE:
-			stmt = p.parseContinueStmt()
-		case token.ASSIGN:
-			stmt = p.parseAssignStmt()
-		case token.READ, token.WRITE, token.INQUIRE:
-			stmt = p.parseIOStmt()
-		case token.PRINT:
-			stmt = p.parsePrintStmt()
-		case token.OPEN:
-			stmt = p.parseOpenStmt()
-		case token.CLOSE:
-			stmt = p.parseCloseStmt()
-		case token.BACKSPACE:
-			stmt = p.parseBackspaceStmt()
-		case token.REWIND:
-			stmt = p.parseRewindStmt()
-		case token.ENDFILE:
-			stmt = p.parseEndfileStmt()
-		case token.STOP:
-			stmt = p.parseStopStmt()
-		case token.FORMAT:
-			stmt = p.parseFormatStmt()
-		case token.ALLOCATE, token.DEALLOCATE:
-			stmt = p.parseAllocateOrDeallocateStmt()
-		case token.DATA:
-			// DATA statement appearing in executable section (non-standard but handle gracefully)
-			stmt = p.parseDataStmt()
-		case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
-			stmt = p.parseAssignmentStmt()
-		}
-	}
-
-	if stmt != nil {
-		p.nStatements++ // add normal statement.
-		if label != "" {
-			labelPtr := stmt.GetLabel()
-			if labelPtr != nil {
-				*labelPtr = label
-			} else {
-				p.addError(fmt.Sprintf("statement %T does not support labels", stmt))
-			}
-		}
-		if constructLabel != "" {
-			switch s := stmt.(type) {
-			case *ast.IfStmt:
-				s.ConstructLabel = constructLabel
-			case *ast.DoLoop:
-				s.ConstructLabel = constructLabel
-			case *ast.SelectCaseStmt:
-				s.ConstructLabel = constructLabel
-			}
-			if string(p.current.lit) == constructLabel {
-				p.nextToken() // Consume ending construct label.
-			}
-		}
-	}
-
-	return stmt
-}
+func (p *Parser90) parseExecutableStatement() ast.Statement { return p.parseStatement(true) }
 
 func (p *Parser90) parseStatement(inExec bool) ast.Statement {
 	var label, constructLabel string
@@ -1500,6 +1253,22 @@ func (p *Parser90) parseStatement(inExec bool) ast.Statement {
 		}
 	}
 	return stmt
+}
+
+// isLikelyAssignment checks if current token starts an assignment statement.
+// It handles both simple assignments (RESULT=1) and array assignments (RESULT(N)=1).
+// This requires lookahead beyond the standard 3-token window for cases like KEYWORD(...=.
+//
+// Postcondition: Does not consume any tokens; parser state unchanged.
+func (p *Parser90) isLikelyAssignment(inExec bool) bool {
+	if inExec && len(p.vars.usesKeywordAsIdentifiers) > 0 {
+		if (p.peek.tok == token.Equals || p.peek.tok == token.PointerAssign ||
+			(p.peek.tok == token.LParen && p.current.tok != token.IF)) &&
+			slices.Contains(p.vars.usesKeywordAsIdentifiers, p.current.tok) {
+			return true
+		}
+	}
+	return token.IsAssignment(p.current.tok, p.peek.tok)
 }
 
 // parseContinueStmt parses a CONTINUE statement
@@ -4369,7 +4138,7 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 }
 
 // parseTypePrefixedConstruct handles type-prefixed functions like "INTEGER FUNCTION foo()"
-func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
+func (p *Parser90) parseTypePrefixedConstruct() ast.ProgramUnit {
 	// Save the type token
 	start := p.sourcePos()
 	ts := p.expectTypeSpecIntrinsic()
@@ -4408,7 +4177,7 @@ func (p *Parser90) parseTypePrefixedConstruct() ast.Statement {
 }
 
 // parseProcedureWithAttributes handles procedures with attributes like RECURSIVE, PURE, ELEMENTAL
-func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
+func (p *Parser90) parseProcedureWithAttributes() ast.ProgramUnit {
 	// Collect all attributes
 	attributes := []token.Token{}
 	for p.current.tok.IsAttributeKeyword() && !p.IsDone() {
@@ -4421,7 +4190,7 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 	}
 
 	// Now must be SUBROUTINE or FUNCTION
-	var stmt ast.Statement
+	var stmt ast.ProgramUnit
 	if p.currentTokenIs(token.SUBROUTINE) {
 		stmt = p.parseSubroutine()
 		if sub, ok := stmt.(*ast.Subroutine); ok {
@@ -4436,7 +4205,6 @@ func (p *Parser90) parseProcedureWithAttributes() ast.Statement {
 		p.addError("expected SUBROUTINE after attributes")
 		return nil
 	}
-
 	return stmt
 }
 
