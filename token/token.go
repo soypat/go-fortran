@@ -2,6 +2,8 @@ package token
 
 import (
 	"bytes"
+	"strings"
+	"unsafe"
 )
 
 type Token int
@@ -20,6 +22,7 @@ const (
 	// ==================== KEYWORDS ====================
 
 	// Type declaration keywords
+	keywordBeg      // invalid
 	INTEGER         // INTEGER
 	REAL            // REAL
 	COMPLEX         // COMPLEX
@@ -58,6 +61,8 @@ const (
 	CYCLE     // CYCLE
 	EXIT      // EXIT
 	GOTO      // GOTO
+	GO        // GO
+	TO        // TO
 	CONTINUE  // CONTINUE
 	RETURN    // RETURN
 	STOP      // STOP
@@ -69,6 +74,7 @@ const (
 	OPEN      // OPEN
 	CLOSE     // CLOSE
 	INQUIRE   // INQUIRE
+	FILE      // FILE
 	BACKSPACE // BACKSPACE
 	REWIND    // REWIND
 	ENDFILE   // ENDFILE
@@ -111,6 +117,7 @@ const (
 	ENDWHERE  // ENDWHERE
 
 	// ==================== ATTRIBUTES (F90) ====================
+	attrStart
 
 	INTENT      // INTENT
 	IN          // IN
@@ -130,7 +137,11 @@ const (
 	KIND        // KIND
 	LEN         // LEN
 
+	keywordEnd // invalid
+
 	// ==================== OPERATORS ====================
+
+	opStart
 
 	// Arithmetic operators
 	Plus       // +
@@ -169,7 +180,10 @@ const (
 	// String operator
 	StringConcat // //
 
+	opEnd
+
 	// ==================== DELIMITERS / PUNCTUATION ====================
+	delimStart
 
 	LParen      // (
 	RParen      // )
@@ -183,7 +197,9 @@ const (
 	Ampersand   // &
 	Dollar      // $
 
+	delimEnd
 	// ==================== LITERALS ====================
+	litStart
 
 	// Logical constants
 	TRUE  // .TRUE.
@@ -200,6 +216,7 @@ const (
 
 	// Label       // <label> // REMOVE TEMPORARILY UNTIL IMPLEMENTED IN LEXER UNAMBIGUOUSLY.
 	LineComment // <linecomment>
+	litEnd
 	// ENDPARSE is for internal debugging purposes. User may insert ENDPARSE and it shall end parsing immediately.
 	EndParse // <EOF_ARTIFICIAL>
 	NewLine  // <newline>
@@ -207,6 +224,44 @@ const (
 	Illegal  // <illegal>
 	numToks
 )
+
+const keywordPower = 8
+
+var keywordMap [1 << keywordPower]Token // must be power of 2.
+
+// kwhash is a perfect hash function for keywords.
+// It assumes that s has at least length 2.
+func kwhash(id string) uint {
+	h := uint(toUpper(id[0]))*29 + uint(toUpper(id[1]))*21 + uint(toUpper(id[len(id)-1]))*13 + uint(len(id))*8
+	if len(id) > 2 {
+		h += uint(toUpper(id[2])) * 10
+	}
+	if len(id) > 3 {
+		h += uint(toUpper(id[3])) * 15
+	}
+	return h & uint(len(keywordMap)-1)
+}
+
+func toUpper(r byte) byte {
+	if 'a' <= r && r <= 'z' {
+		r -= 'a' - 'A'
+	}
+	return r
+}
+
+func init() {
+	// populate keywordMap
+	for tok := keywordBeg + 1; tok < keywordEnd; tok++ {
+		h := kwhash(tok.String())
+		if !tok.IsKeyword() {
+			continue // Avoid internal markers.
+		}
+		if keywordMap[h] != 0 {
+			// panic(fmt.Sprintf("imperfect hash at %0x %s collides with %s (%d/%d ok)", h, keywordMap[h].String(), tok.String(), tok-keywordBeg-1, keywordEnd-keywordBeg-1))
+		}
+		keywordMap[h] = tok
+	}
+}
 
 func IsAssignment(current, next Token) bool {
 	maybeIdent, maybeEqOrLParen := current, next
@@ -319,7 +374,26 @@ func (tok Token) IsEndConstruct() bool {
 
 // IsKeyword returns true if the token is a Fortran keyword.
 func (tok Token) IsKeyword() bool {
-	return tok >= INTEGER && tok <= ENDWHERE
+	return tok > keywordBeg && tok < keywordEnd && tok != attrStart
+}
+
+func (tok Token) IsAttributeKeyword() bool {
+	return tok > attrStart && tok < keywordEnd
+}
+
+// IsOperator returns true if the token is an operator.
+func (tok Token) IsOperator() bool {
+	return tok > opStart && tok < opEnd
+}
+
+// IsDelimiter returns true if the token is a delimiter or punctuation.
+func (tok Token) IsDelimiter() bool {
+	return tok > delimStart && tok < delimEnd
+}
+
+// IsLiteral returns true if the token is a literal value (logical constant or user-defined literal).
+func (tok Token) IsLiteral() bool {
+	return tok > litStart && tok < litEnd
 }
 
 // IsConstructWithParens returns true if the construct has parentheses
@@ -353,12 +427,8 @@ func (tok Token) CanBeUsedAsIdentifier() bool {
 		return false
 	default:
 		// Most other keywords and attributes can be used as identifiers
-		return tok.IsKeyword() || tok.IsAttribute()
+		return tok.IsKeyword()
 	}
-}
-
-func (tok Token) IsAttributeKeyword() bool {
-	return tok == PURE || tok == RECURSIVE || tok == ELEMENTAL
 }
 
 func (tok Token) EndConstructComposite() Token {
@@ -380,7 +450,7 @@ func (tok Token) IsExecutableStatement() bool {
 	case IF, DO, SELECT, CALL, ENTRY, RETURN, STOP, EXIT,
 		ALLOCATE, DEALLOCATE, READ, WRITE, OPEN, PRINT,
 		CLOSE, BACKSPACE, REWIND, ENDFILE, INQUIRE,
-		GOTO, CONTINUE, CYCLE, ASSIGN:
+		GOTO, CONTINUE, CYCLE, ASSIGN, GO:
 		return true
 	}
 	return false
@@ -416,257 +486,54 @@ func (tok Token) IsTypeDeclaration() bool {
 	return tok.IsTypeIntrinsic() || tok == TYPE
 }
 
-// IsAttribute returns true if the token is a Fortran 90 attribute.
-func (tok Token) IsAttribute() bool {
-	// F90 attributes that can appear in type declarations
-	switch tok {
-	case PARAMETER, DIMENSION, SAVE, EXTERNAL, INTRINSIC, PUBLIC, PRIVATE:
-		return true
-	default:
-		return tok >= INTENT && tok <= LEN
-	}
-}
-
-// IsOperator returns true if the token is an operator.
-func (tok Token) IsOperator() bool {
-	return tok >= Plus && tok <= StringConcat
-}
-
-// IsDelimiter returns true if the token is a delimiter or punctuation.
-func (tok Token) IsDelimiter() bool {
-	return tok >= LParen && tok <= Dollar
-}
-
-// IsLiteral returns true if the token is a literal value (logical constant or user-defined literal).
-func (tok Token) IsLiteral() bool {
-	return tok >= TRUE && tok <= FormatSpec
-}
-
 // LookupKeyword returns [Identifier] or the token for keyword maybeKeyword represents if found.
-func LookupKeyword(maybeKeyword []byte) Token {
+func LookupKeyword(maybeKeyword []byte) (tok Token) {
 	// Convert to uppercase for case-insensitive comparison
-	upper := bytes.ToUpper(maybeKeyword)
-	switch string(upper) {
-	default:
+	if len(maybeKeyword) < 2 {
 		return Identifier
-	case "ENDPARSE":
-		return EndParse
-	case "PROGRAM":
-		return PROGRAM
-	case "SUBROUTINE":
-		return SUBROUTINE
-	case "INTEGER":
-		return INTEGER
-	case "CHARACTER":
-		return CHARACTER
-	case "COMPLEX":
-		return COMPLEX
-	case "LOGICAL":
-		return LOGICAL
-	case "REAL":
-		return REAL
-	case "DATA":
-		return DATA
-	case "EXTERNAL":
-		return EXTERNAL
-	case "IMPLICIT":
-		return IMPLICIT
-	case "FUNCTION":
-		return FUNCTION
-	case "END":
-		return END
-	case "ELSEIF", "ELSE IF":
-		return ELSEIF
-	case "DO":
-		return DO
-	case "DIMENSION":
-		return DIMENSION
-	case "DOUBLE":
-		return DOUBLE
-	case "DOUBLEPRECISION":
-		return DOUBLEPRECISION
-	case "CALL":
-		return CALL
-	case "THEN":
-		return THEN
-	case "WRITE":
-		return WRITE
-	case "PRINT":
-		return PRINT
-	case "WHILE":
-		return WHILE
-	case "PARAMETER":
-		return PARAMETER
-	case "PRECISION":
-		return PRECISION
-	case "INTRINSIC":
-		return INTRINSIC
-	case "FORMAT":
-		return FORMAT
-	case "STOP":
-		return STOP
-	case "SAVE":
-		return SAVE
-	case "OPEN":
-		return OPEN
-	case "READ":
-		return READ
-	case "ASSIGN":
-		return ASSIGN
-	case "DEFINE":
-		return DEFINE
-	case "CLOSE":
-		return CLOSE
-	case "EQUIVALENCE":
-		return EQUIVALENCE
-	case "COMMON":
-		return COMMON
-	case "REWIND":
-		return REWIND
-	case "INCLUDE":
-		return INCLUDE
-	case "IF":
-		return IF
-	case "ELSE":
-		return ELSE
-	case "ENDIF", "END IF":
-		return ENDIF
-	case "GOTO", "GO TO":
-		return GOTO
-	case "CONTINUE":
-		return CONTINUE
-	case "RETURN":
-		return RETURN
-	case "SELECT":
-		return SELECT
-	case "CASE":
-		return CASE
-	case "DEFAULT":
-		return DEFAULT
-	case "CYCLE":
-		return CYCLE
-	case "EXIT":
-		return EXIT
-	case "ENDDO", "END DO":
-		return ENDDO
-	case "ENDPROGRAM", "END PROGRAM":
-		return ENDPROGRAM
-	case "ENDSUBROUTINE", "END SUBROUTINE":
-		return ENDSUBROUTINE
-	case "ENDFUNCTION", "END FUNCTION":
-		return ENDFUNCTION
-	case "ENDSELECT", "END SELECT":
-		return ENDSELECT
-	case "MODULE":
-		return MODULE
-	case "ENDMODULE", "END MODULE":
-		return ENDMODULE
-	case "USE":
-		return USE
-	case "ONLY":
-		return ONLY
-	case "CONTAINS":
-		return CONTAINS
-	case "ENTRY":
-		return ENTRY
-	case "INTERFACE":
-		return INTERFACE
-	case "ENDINTERFACE", "END INTERFACE":
-		return ENDINTERFACE
-	case "TYPE":
-		return TYPE
-	case "ENDTYPE", "END TYPE":
-		return ENDTYPE
-	case "SEQUENCE":
-		return SEQUENCE
-	case "PRIVATE":
-		return PRIVATE
-	case "PUBLIC":
-		return PUBLIC
-	case "INTENT":
-		return INTENT
-	case "IN":
-		return IN
-	case "OUT":
-		return OUT
-	case "INOUT":
-		return INOUT
-	case "OPTIONAL":
-		return OPTIONAL
-	case "POINTER":
-		return POINTER
-	case "TARGET":
-		return TARGET
-	case "ALLOCATABLE":
-		return ALLOCATABLE
-	case "RECURSIVE":
-		return RECURSIVE
-	case "ELEMENTAL":
-		return ELEMENTAL
-	case "PURE":
-		return PURE
-	case "RESULT":
-		return RESULT
-	case "KIND":
-		return KIND
-	case "LEN":
-		return LEN
-	case "ALLOCATE":
-		return ALLOCATE
-	case "DEALLOCATE":
-		return DEALLOCATE
-	case "NULLIFY":
-		return NULLIFY
-	case "WHERE":
-		return WHERE
-	case "ELSEWHERE", "ELSE WHERE":
-		return ELSEWHERE
-	case "ENDWHERE", "END WHERE":
-		return ENDWHERE
-	case "INQUIRE":
-		return INQUIRE
-	case "BACKSPACE":
-		return BACKSPACE
-	case "ENDFILE":
-		return ENDFILE
-	case "NAMELIST":
-		return NAMELIST
 	}
+	s := unsafe.String(&maybeKeyword[0], len(maybeKeyword))
+	tok = keywordMap[kwhash(s)]
+	if tok != 0 && strings.EqualFold(s, tok.String()) {
+		return tok
+	}
+	return Identifier
 }
 
 // LookupDotOperator checks if the internal characters in a dot operator
 // match with a token. Returns [Illegal] if no match found.
-func LookupDotOperator(ident []byte) Token {
+func LookupDotOperator(ident []byte) (tok Token) {
 	// Convert to uppercase for case-insensitive comparison
 	upper := bytes.ToUpper(ident)
 	switch string(upper) {
 	default:
-		return Illegal
+		tok = Illegal
 	case "TRUE":
-		return TRUE
+		tok = TRUE
 	case "FALSE":
-		return FALSE
+		tok = FALSE
 	case "EQ":
-		return EQ
+		tok = EQ
 	case "NE":
-		return NE
+		tok = NE
 	case "LT":
-		return LT
+		tok = LT
 	case "LE":
-		return LE
+		tok = LE
 	case "GT":
-		return GT
+		tok = GT
 	case "GE":
-		return GE
+		tok = GE
 	case "AND":
-		return AND
+		tok = AND
 	case "OR":
-		return OR
+		tok = OR
 	case "NOT":
-		return NOT
+		tok = NOT
 	case "EQV":
-		return EQV
+		tok = EQV
 	case "NEQV":
-		return NEQV
+		tok = NEQV
 	}
+	return tok
 }
