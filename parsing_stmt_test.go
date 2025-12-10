@@ -111,7 +111,25 @@ func TestStatementParsing(t *testing.T) {
 				}
 			},
 		},
-
+		{
+			name: "inline IF with assignment",
+			src:  "IF (INDEX(TITLE(1,I),NAMES(I)).EQ.0) STOP = .TRUE.",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
+				if len(ifStmt.ThenPart) != 1 {
+					t.Fatalf("Expected 1 statement in ThenPart, got %d", len(ifStmt.ThenPart))
+				}
+				// ThenPart should contain a CALL statement
+				assignment := helperWantNode[*ast.AssignmentStmt](t, ifStmt.ThenPart[0], "ThenPart[0]")
+				id := helperWantNode[*ast.Identifier](t, assignment.Target, "assignment target")
+				if id.Value != "STOP" {
+					t.Errorf("Expected STOP var, got %q", id.Value)
+				}
+				if !helperWantNode[*ast.LogicalLiteral](t, assignment.Value, ".TRUE.").Value {
+					t.Errorf("Expected true var, got false")
+				}
+			},
+		},
 		// ===== GOTO Statements =====
 		{
 			name: "GOTO statement (single token)",
@@ -185,7 +203,7 @@ func TestStatementParsing(t *testing.T) {
 			},
 		},
 		{
-			name: "computed GOTO with comma before variable",
+			name: "computed GO TO with comma before variable",
 			src:  "GO TO (1000,1300,1700,1900,2100,2300),MCALL",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				computedGoto := helperWantNode[*ast.ComputedGotoStmt](t, stmt, "")
@@ -1880,7 +1898,7 @@ END SELECT`,
 
 		// ===== Assigned GOTO Statements =====
 		{
-			name: "Assigned GOTO from valid_gdyn.f90 line 110",
+			name: "Assigned GO TO from valid_gdyn.f90 line 110",
 			src:  "GO TO IGOTO,(500,2000)",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				assignedGoto := helperWantNode[*ast.AssignedGotoStmt](t, stmt, "")
@@ -1901,7 +1919,7 @@ END SELECT`,
 			},
 		},
 		{
-			name: "Assigned GOTO without label list",
+			name: "Assigned GO TO without label list",
 			src:  "GO TO jump_var",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				assignedGoto := helperWantNode[*ast.AssignedGotoStmt](t, stmt, "")

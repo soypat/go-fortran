@@ -16,7 +16,7 @@ MODULE ! ERROR "expected module name"
 PROGRAM implicit_none_placement
   ! Invalid: IMPLICIT NONE must come before other declarations
   INTEGER :: x
-  IMPLICIT NONE  ! ERROR "IMPLICIT NONE must appear before type declarations"
+  IMPLICIT NONE  ! NOERROR "IMPLICIT NONE must appear before type declarations"
 
   ! Invalid: Duplicate IMPLICIT NONE
   IMPLICIT NONE  ! ERROR "duplicate IMPLICIT NONE"

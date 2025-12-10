@@ -194,6 +194,7 @@ func compareErrors(t testing.TB, srcpath string, expected map[int]string, actual
 // helperWantNode asserts that v is of type T and returns it.
 // Fails the test with a descriptive message if the type assertion fails.
 func helperWantNode[T ast.Node](t testing.TB, v ast.Node, context string) T {
+	t.Helper()
 	var z T
 	vt, ok := v.(T)
 	if !ok {

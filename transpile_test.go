@@ -17,9 +17,6 @@ import (
 	f90token "github.com/soypat/go-fortran/token"
 )
 
-//go:generate gfortran -o testdata/golden testdata/golden.f90
-//go:generate sh -c "./testdata/golden > testdata/golden.out"
-
 //go:embed testdata/golden.f90
 var goldensrc string
 
@@ -374,4 +371,3 @@ func TestModuleVariableImport(t *testing.T) {
 		t.Errorf("TransformProgram failed: %v", err)
 	}
 }
-

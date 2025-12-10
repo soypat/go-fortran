@@ -156,20 +156,22 @@ type Parser90 struct {
 
 func (p *Parser90) makeUnitData(name string, token token.Token) *ParserUnitData {
 	return &ParserUnitData{
-		name:       name,
-		tok:        token,
-		vars:       slices.Clone(p.vars.vars),
-		implicits:  slices.Clone(p.vars.implicits),
-		returnType: p.vars.returnType,
+		name:                     name,
+		tok:                      token,
+		vars:                     slices.Clone(p.vars.vars),
+		implicits:                slices.Clone(p.vars.implicits),
+		usesKeywordAsIdentifiers: slices.Clone(p.vars.usesKeywordAsIdentifiers),
+		returnType:               p.vars.returnType,
 	}
 }
 
 type ParserUnitData struct {
-	name       string
-	tok        token.Token
-	vars       []Varinfo
-	returnType *Varinfo
-	implicits  []*ast.ImplicitStatement
+	name                     string
+	tok                      token.Token
+	vars                     []Varinfo
+	returnType               *Varinfo
+	implicits                []*ast.ImplicitStatement
+	usesKeywordAsIdentifiers []token.Token
 }
 
 func (p *ParserUnitData) AppendVarinfo(dst []Varinfo) []Varinfo {
@@ -215,8 +217,9 @@ func (p *ParserUnitData) Var(name string) (vi *Varinfo) {
 }
 func (pud *ParserUnitData) reset() {
 	*pud = ParserUnitData{
-		vars:      pud.vars[:0],
-		implicits: pud.implicits[:0],
+		vars:                     pud.vars[:0],
+		implicits:                pud.implicits[:0],
+		usesKeywordAsIdentifiers: pud.usesKeywordAsIdentifiers[:0],
 	}
 }
 
@@ -342,6 +345,10 @@ func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEnti
 			return vi, err
 		}
 	} else {
+		maybeIdentifier := token.LookupKeyword(unsafe.Slice(unsafe.StringData(name), len(name)))
+		if maybeIdentifier != token.Identifier {
+			pud.usesKeywordAsIdentifiers = append(pud.usesKeywordAsIdentifiers, maybeIdentifier)
+		}
 		pud.vars = slices.Grow(pud.vars, 1)
 		pud.vars = pud.vars[:len(pud.vars)+1]
 		vi = &pud.vars[len(pud.vars)-1]
@@ -1097,9 +1104,34 @@ func (p *Parser90) parseParameterList() []ast.Parameter {
 	return params
 }
 
+func (p *Parser90) parseBody2(params []ast.Parameter) []ast.Statement {
+	defer p.vars.resolveParameterTypes(params)
+	var stmts []ast.Statement
+	inExec := false
+	for p.loopUntil(token.CONTAINS, token.END) && !p.isEndOfProgramUnit() {
+		if p.skipUnexpectedEndConstructs("at body parsing spec statements") {
+			return stmts
+		}
+		p.skipNewlinesAndComments()
+		stmt := p.parseStatement(inExec)
+		if stmt == nil {
+			p.addError("nil statement, skipping")
+			p.skipToNextStatement() // Should never happen, but likely a bug.
+			continue
+		}
+		stmts = append(stmts, stmt)
+		if !inExec {
+			p.vars.resolveImplicitTypes()
+			inExec = stmt.IsExecutable()
+		}
+	}
+	return nil
+}
+
 // parseBody parses specification statements, then executable statements
 // If parameters are provided, it will populate their type information when type declarations are found
 func (p *Parser90) parseBody(params []ast.Parameter) []ast.Statement {
+	// return p.parseBody2(params)
 	defer p.vars.resolveParameterTypes(params)
 	var stmts []ast.Statement
 	var sawDecl bool
@@ -1170,6 +1202,8 @@ func (p *Parser90) currentIsGOTO() int {
 	switch {
 	case p.current.tok == token.GOTO: // captures both GOTO and goto.
 		return 1
+	case p.current.tok == token.GO && p.peek.tok == token.TO:
+		return 2
 	case string(p.current.lit) == "GO" && string(p.peek.lit) == "TO":
 		return 2
 	case string(p.current.lit) == "go" && string(p.peek.lit) == "to":
@@ -1183,22 +1217,22 @@ func (p *Parser90) currentIsGOTO() int {
 // This requires lookahead beyond the standard 3-token window for cases like KEYWORD(...=.
 //
 // Postcondition: Does not consume any tokens; parser state unchanged.
-func (p *Parser90) isLikelyAssignment() bool {
+func (p *Parser90) isLikelyAssignment(inExec bool) bool {
+	if inExec && len(p.vars.usesKeywordAsIdentifiers) > 0 {
+		if (p.peek.tok == token.Equals || p.peek.tok == token.PointerAssign ||
+			(p.peek.tok == token.LParen && p.current.tok != token.IF)) &&
+			slices.Contains(p.vars.usesKeywordAsIdentifiers, p.current.tok) {
+			return true
+		}
+	}
 	return token.IsAssignment(p.current.tok, p.peek.tok)
 }
 
 // parseExecutableStatement parses a single executable statement
 func (p *Parser90) parseExecutableStatement() ast.Statement {
-	if p.nStatements >= p.maxStatements {
-		if p.nStatements == p.maxStatements {
-			return nil
-		}
-		panic("too many statements parsed")
-	}
+	return p.parseStatement(true)
 	// Check for "END FILE" before generic END check
-	if p.current.tok == token.END && p.peek.tok == token.Identifier && strings.EqualFold(string(p.peek.lit), "FILE") {
-		// Handle "END FILE" as ENDFILE statement (two-word form)
-		p.nextToken() // consume END
+	if p.current.tok == token.END && p.peek.tok == token.FILE {
 		return p.parseEndfileStmt()
 	}
 	// Check for END tokens (program unit endings and construct endings)
@@ -1236,7 +1270,7 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 			p.addError("POINTER statement only valid in specification section")
 			_ = expr // parsed expression is discarded
 		}
-	} else if p.isLikelyAssignment() {
+	} else if p.isLikelyAssignment(true) {
 		stmt = p.parseAssignmentStmt()
 	} else {
 		switch p.current.tok {
@@ -1292,62 +1326,173 @@ func (p *Parser90) parseExecutableStatement() ast.Statement {
 		case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
 			stmt = p.parseAssignmentStmt()
 		}
-
 	}
+
 	if stmt != nil {
 		p.nStatements++ // add normal statement.
-		switch s := stmt.(type) {
-		case *ast.IfStmt:
-			s.Label = label
-			s.ConstructLabel = constructLabel
-		case *ast.DoLoop:
-			s.Label = label
-			s.ConstructLabel = constructLabel
-		case *ast.SelectCaseStmt:
-			s.Label = label
-			s.ConstructLabel = constructLabel
-		case *ast.CallStmt:
-			s.Label = label
-		case *ast.ReturnStmt:
-			s.Label = label
-		case *ast.CycleStmt:
-			s.Label = label
-		case *ast.ExitStmt:
-			s.Label = label
-		case *ast.ContinueStmt:
-			s.Label = label
-		case *ast.AssignmentStmt:
-			s.Label = label
-		case *ast.PrintStmt:
-			s.Label = label
-		case *ast.OpenStmt:
-			s.Label = label
-		case *ast.CloseStmt:
-			s.Label = label
-		case *ast.BackspaceStmt:
-			s.Label = label
-		case *ast.RewindStmt:
-			s.Label = label
-		case *ast.StopStmt:
-			s.Label = label
-		case *ast.FormatStmt:
-			s.Label = label
-		case *ast.AllocateStmt:
-			s.Label = label
-		case *ast.DeallocateStmt:
-			s.Label = label
-		case *ast.InquireStmt:
-			s.Label = label
-		case *ast.ReadStmt:
-			s.Label = label
-		case *ast.WriteStmt:
-			s.Label = label
+		if label != "" {
+			labelPtr := stmt.GetLabel()
+			if labelPtr != nil {
+				*labelPtr = label
+			} else {
+				p.addError(fmt.Sprintf("statement %T does not support labels", stmt))
+			}
 		}
-		if constructLabel != "" && string(p.current.lit) == constructLabel {
-			p.nextToken() // Consume ending construct label.
+		if constructLabel != "" {
+			switch s := stmt.(type) {
+			case *ast.IfStmt:
+				s.ConstructLabel = constructLabel
+			case *ast.DoLoop:
+				s.ConstructLabel = constructLabel
+			case *ast.SelectCaseStmt:
+				s.ConstructLabel = constructLabel
+			}
+			if string(p.current.lit) == constructLabel {
+				p.nextToken() // Consume ending construct label.
+			}
 		}
 	}
 
+	return stmt
+}
+
+func (p *Parser90) parseStatement(inExec bool) ast.Statement {
+	var label, constructLabel string
+	var stmt ast.Statement
+	if p.currentTokenIs(token.IntLit) {
+		if p.peek.tok.IsEnd() {
+			return nil // Is a Label to an END, should be parsed in parent
+		}
+		label = string(p.current.lit)
+		p.nextToken()
+	} else if p.currentTokenIs(token.Identifier) && p.peekTokenIs(token.Colon) && p.uberpeek.tok.IsConstruct() {
+		constructLabel = string(p.current.lit)
+		p.nextToken()
+		p.nextToken()
+	} else if p.isLikelyAssignment(inExec) {
+		stmt = p.parseAssignmentStmt()
+		if label != "" && stmt != nil {
+			*stmt.GetLabel() = label
+		}
+		return stmt
+	}
+	switch p.current.tok {
+	// SPECIFICATION STATEMENTS:
+	case token.IMPLICIT:
+		stmt = p.parseImplicit()
+	case token.USE:
+		stmt = p.parseUse()
+	case token.FORMAT:
+		stmt = p.parseFormatStmt()
+	case token.INTEGER, token.REAL, token.DOUBLE, token.DOUBLEPRECISION, token.COMPLEX, token.LOGICAL, token.CHARACTER:
+		stmt = p.parseTypeDecl()
+	case token.TYPE:
+		// Distinguish between TYPE definition and TYPE(typename) declaration
+		if p.peekTokenIs(token.LParen) {
+			// TYPE(typename) :: var - treat as type declaration
+			return p.parseTypeDecl()
+		} else {
+			// TYPE :: name ... END TYPE - parse derived type definition
+			return p.parseDerivedTypeStmt()
+		}
+	case token.INTERFACE:
+		// INTERFACE block - skip entire block
+		p.skipConstruct(token.INTERFACE, token.ENDINTERFACE)
+		return &ast.InterfaceStmt{} // Return non-nil to indicate success
+	case token.DATA:
+		// DATA statement - skip to end of statement (complex to parse fully)
+		stmt = p.parseDataStmt()
+	case token.COMMON:
+		stmt = p.parseCommonStmt()
+	case token.DIMENSION:
+		stmt = p.parseDimensionStmt()
+	case token.EQUIVALENCE:
+		stmt = p.parseEquivalenceStmt()
+	case token.POINTER:
+		stmt = p.parsePointerCrayStmt()
+	case token.EXTERNAL:
+		stmt = p.parseExternalStmt()
+	case token.INTRINSIC:
+		stmt = p.parseIntrinsicStmt()
+	case token.PARAMETER:
+		stmt = p.parseParameterStmt()
+
+	// EXECUTABLE STATEMENTS
+	case token.END:
+		if p.peek.tok != token.FILE {
+			return nil // END construct? let parent handle it.
+		}
+		fallthrough
+	case token.ENDFILE:
+		stmt = p.parseEndfileStmt()
+	case token.GOTO, token.GO:
+		stmt = p.parseGotoStmt()
+	case token.IF:
+		stmt = p.parseIfStmt()
+	case token.DO:
+		stmt = p.parseDoLoop()
+	case token.SELECT:
+		stmt = p.parseSelectCaseStmt()
+	case token.CALL:
+		stmt = p.parseCallStmt()
+	case token.ENTRY:
+		stmt = p.parseEntryStmt()
+	case token.RETURN:
+		stmt = p.parseReturnStmt()
+	case token.CYCLE:
+		stmt = p.parseCycleStmt()
+	case token.EXIT:
+		stmt = p.parseExitStmt()
+	case token.CONTINUE:
+		stmt = p.parseContinueStmt()
+	case token.ASSIGN:
+		stmt = p.parseAssignStmt()
+	case token.READ, token.WRITE, token.INQUIRE:
+		stmt = p.parseIOStmt()
+	case token.PRINT:
+		stmt = p.parsePrintStmt()
+	case token.OPEN:
+		stmt = p.parseOpenStmt()
+	case token.CLOSE:
+		stmt = p.parseCloseStmt()
+	case token.BACKSPACE:
+		stmt = p.parseBackspaceStmt()
+	case token.REWIND:
+		stmt = p.parseRewindStmt()
+
+	case token.STOP:
+		stmt = p.parseStopStmt()
+	case token.ALLOCATE, token.DEALLOCATE:
+		stmt = p.parseAllocateOrDeallocateStmt()
+
+	case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
+		stmt = p.parseAssignmentStmt()
+	}
+	if stmt != nil {
+		if label != "" {
+			ptrToLabel := stmt.GetLabel()
+			if ptrToLabel == nil {
+				p.addError(fmt.Sprintf("statement %T does not support labelling", stmt))
+			} else {
+				*ptrToLabel = label
+			}
+		}
+		if constructLabel != "" {
+			switch s := stmt.(type) {
+			default:
+				p.addError(fmt.Sprintf("statement %T does not support construct labels", stmt))
+			case *ast.IfStmt:
+				s.ConstructLabel = constructLabel
+			case *ast.DoLoop:
+				s.ConstructLabel = constructLabel
+			case *ast.SelectCaseStmt:
+				s.ConstructLabel = constructLabel
+			}
+			if string(p.current.lit) == constructLabel {
+				p.nextToken() // Consume ending construct label.
+			}
+		}
+	}
 	return stmt
 }
 
@@ -1365,17 +1510,10 @@ func (p *Parser90) parseContinueStmt() ast.Statement {
 // Handles both GOTO (single token) and GO (identifier) followed by TO
 func (p *Parser90) parseGotoStmt() ast.Statement {
 	start := p.current.start
-	ngoto := p.currentIsGOTO()
-	switch ngoto {
-	case 0:
-		p.addError("invalid goto parsing")
-	case 1:
-		p.expect(token.GOTO, "")
-	case 2:
-		p.expect(token.Identifier, "expected GO")
-		p.expect(token.Identifier, "expected TO")
+	ok := p.consumeIf2(token.GO, token.TO) || p.expect(token.GOTO, "")
+	if !ok {
+		return nil
 	}
-
 	// Check for computed GOTO: GOTO (label-list) expression
 	if p.currentTokenIs(token.LParen) {
 		computedStmt := &ast.ComputedGotoStmt{}
@@ -1485,13 +1623,7 @@ func (p *Parser90) parseAssignStmt() ast.Statement {
 	}
 	stmt.LabelValue = string(p.current.lit)
 	p.nextToken()
-
-	// Expect TO keyword
-	if !p.currentTokenIs(token.Identifier) || !strings.EqualFold(string(p.current.lit), "TO") {
-		p.addError("expected TO after ASSIGN label")
-		return nil
-	}
-	p.nextToken() // consume TO
+	p.expect(token.TO, "after ASSIGN label")
 
 	// Parse the variable
 	if !p.currentTokenIs(token.Identifier) {
@@ -2040,13 +2172,7 @@ func (p *Parser90) parseRewindStmt() ast.Statement {
 // Precondition: current token is ENDFILE or FILE (if END was already consumed)
 func (p *Parser90) parseEndfileStmt() ast.Statement {
 	start := p.current.start
-	// Handle both "ENDFILE" and "END FILE" forms
-	if p.currentTokenIs(token.ENDFILE) {
-		p.nextToken()
-	} else if p.current.tok == token.Identifier && strings.EqualFold(string(p.current.lit), "FILE") {
-		p.nextToken() // consume FILE
-	} else {
-		p.addError("expected ENDFILE or FILE")
+	if !p.consumeIf2(token.END, token.FILE) && !p.expect(token.ENDFILE, "") {
 		return nil
 	}
 
@@ -2614,9 +2740,9 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 			// Check if this statement has the target label (F77 DO loop termination)
 			// This handles both direct labeled statements and shared DO termination
 			if stmt.TargetLabel != "" {
-				// Check if the statement itself has the target labe
+				// Check if the statement itself has the target label
 				label := s.GetLabel()
-				if label == stmt.TargetLabel {
+				if label != nil && *label == stmt.TargetLabel {
 					break
 				}
 				// Check for shared DO termination: nested DO that ends at our target
@@ -3047,7 +3173,7 @@ func (p *Parser90) parseSpecStatement(sawDecl *bool) ast.Statement {
 
 	switch p.current.tok {
 	case token.IMPLICIT:
-		return p.parseImplicit(sawDecl)
+		return p.parseImplicit()
 	case token.USE:
 		return p.parseUse()
 	case token.FORMAT:
@@ -3195,7 +3321,7 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 //	IMPLICIT REAL (A-H, O-Z)
 //	IMPLICIT INTEGER (I-N)
 //	IMPLICIT REAL(KIND=8) (A-C, X-Z), INTEGER (I-N)
-func (p *Parser90) parseImplicit(sawDecl *bool) ast.Statement {
+func (p *Parser90) parseImplicit() ast.Statement {
 	start := p.current.start
 	stmt := &ast.ImplicitStatement{}
 	p.expect(token.IMPLICIT, "")
@@ -3207,9 +3333,6 @@ func (p *Parser90) parseImplicit(sawDecl *bool) ast.Statement {
 			} else {
 				p.addError("IMPLICIT NONE not allowed after IMPLICIT type-spec")
 			}
-		} else if *sawDecl {
-			// Only check sawDecl for the first IMPLICIT NONE
-			p.addError("IMPLICIT NONE must appear before type declarations")
 		}
 		stmt.IsNone = true
 		p.vars.implicits = append(p.vars.implicits, stmt)
@@ -3559,7 +3682,7 @@ func (p *Parser90) currentTokenExpr() *ast.TokenExpr {
 func (p *Parser90) parseTypeAttributess() (attrs []ast.TypeAttribute) {
 	for p.loopWhile(token.Comma) {
 		p.nextToken() // consume Comma.
-		if !p.current.tok.IsAttribute() {
+		if !p.current.tok.IsAttributeKeyword() {
 			p.addError("parsing type decl attributes: " + p.current.String())
 			break
 		}
@@ -3573,7 +3696,7 @@ func (p *Parser90) parseTypeAttributess() (attrs []ast.TypeAttribute) {
 		case p.consumeIf(token.DIMENSION):
 			attr.Dimension = p.parseArraySpec()
 		default:
-			if p.current.tok.IsAttribute() {
+			if p.current.tok.IsAttributeKeyword() {
 				attr.Expr = p.currentTokenExpr()
 			} else {
 				p.addError("unexpected attribute: " + p.current.String())
@@ -4032,7 +4155,7 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 	}
 
 	// Handle identifiers, function calls, and array references
-	if p.current.tok.IsKeyword() || p.current.tok.IsAttribute() || p.canUseAsIdentifier() {
+	if p.current.tok.IsKeyword() || p.canUseAsIdentifier() {
 		name := string(p.current.lit)
 		endPos := p.current.start + len(p.current.lit)
 		p.nextToken()

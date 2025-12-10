@@ -83,14 +83,11 @@ const (
 
 	// Declaration and specification keywords
 	IMPLICIT    // IMPLICIT
-	PARAMETER   // PARAMETER
-	DIMENSION   // DIMENSION
 	DATA        // DATA
 	EQUIVALENCE // EQUIVALENCE
 	COMMON      // COMMON
 	EXTERNAL    // EXTERNAL
 	INTRINSIC   // INTRINSIC
-	SAVE        // SAVE
 	SEQUENCE    // SEQUENCE
 
 	// Interface and type keywords (F90)
@@ -100,10 +97,8 @@ const (
 	ENDTYPE      // ENDTYPE
 
 	// Module and visibility keywords (F90)
-	USE     // USE
-	ONLY    // ONLY
-	PRIVATE // PRIVATE
-	PUBLIC  // PUBLIC
+	USE  // USE
+	ONLY // ONLY
 
 	// Miscellaneous keywords
 	CALL    // CALL
@@ -119,6 +114,11 @@ const (
 	// ==================== ATTRIBUTES (F90) ====================
 	attrStart
 
+	SAVE        // SAVE
+	PRIVATE     // PRIVATE
+	PUBLIC      // PUBLIC
+	PARAMETER   // PARAMETER
+	DIMENSION   // DIMENSION
 	INTENT      // INTENT
 	IN          // IN
 	OUT         // OUT

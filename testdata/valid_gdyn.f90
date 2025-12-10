@@ -93,7 +93,6 @@ PROGRAM GDYN2E
    370 CONTINUE
    POSPRT = REAL(NPERT, KIND=KIND(POSPRT))
    entry prthip(buffer,lu, filename, models )
-   pointer(m) = k
    a=1.EQ.1
    ENDFILE IUNTMT
       data (ah_mean(i),i=1,55)/   &

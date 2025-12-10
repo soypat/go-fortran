@@ -233,12 +233,12 @@ func (tg *ToGo) makeErrWithPos(pos f90.Position, msg string) error {
 func (tg *ToGo) transformStatements(dst []ast.Stmt, stmts []f90.Statement) (_ []ast.Stmt, err error) {
 	for _, stmt := range stmts {
 		label := stmt.GetLabel()
-		if label == "" {
+		if label == nil || *label == "" {
 			dst, err = tg.transformStatement(dst, stmt)
 		} else {
 			var gstmts []ast.Stmt
 			gstmts, err = tg.transformStatement(nil, stmt)
-			lab := tg.astLabel(label)
+			lab := tg.astLabel(*label)
 			useGoto := &ast.BranchStmt{
 				Label: lab,
 				Tok:   token.GOTO, // Use the goto label so compiler does not complain.
