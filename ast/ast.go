@@ -806,7 +806,7 @@ func (ds *DimensionStmt) AppendString(dst []byte) []byte {
 // This makes DEFALT and I_DEFALT(1) occupy the same 8 bytes of memory,
 // allowing the same memory to be viewed as either a float64 or two int32 values.
 type EquivalenceStmt struct {
-	Sets [][]ArrayRef
+	Sets [][]CallExpr
 	// Sets  [][]Expression // Each set is a list of variable names/refs that share memory
 	Label string
 	Position
@@ -1481,17 +1481,22 @@ func (ue *UnaryExpr) AppendString(dst []byte) []byte {
 // Fortran allows for a great variety of statements/expressions to be represented as call expressions
 // and their specialization depends on several factors which make identification hard without
 // context, thus CallExpr expresses this ambiguitity of Fortran source code. Examples:
-//   - function call: <funcion>(<argument-list>)
+//   - function/intrinsic call: <funcion>(<argument-list>)
 //   - subroutine call: <subroutine>(<argument list>)
 //   - array access: <array>(<indices>)
 //   - array range access: <array>(<range spec>)
 //   - character access: <character>(<index>)
 //   - character range access: <character>(<range spec>)
+//   - array-character range access: <character array>(<indices>)(<range spec or index>)
 //   - statement function declaration: <function>(<dummy arguments>)
 type CallExpr struct {
 	Name string
 	// Args are the comma-separated expressions contained within parentheses.
 	Args []Expression
+	// Character arrays can have two calls, first one is indices Args
+	// and the secondary access is into the resulting character array at said indices.
+	// SecondaryAccess can be a integer expression or a [RangeExpr].
+	SecondaryAccess Expression
 	Position
 }
 
@@ -1514,100 +1519,14 @@ func (pb *CallExpr) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// FunctionCall represents an invocation of a function that returns a value.
-// Functions can be intrinsic (built-in) or user-defined. Unlike [CallStmt]
-// for subroutines, function calls appear in expressions.
-//
-// Example:
-//
-//	<function-name>([<argument-list>])
-//	sqrt(x)
-//	max(a, b, c)
-//	my_function(i, j)
-type FunctionCall struct {
-	Name string
-	Args []Expression
-	Position
-}
-
-var _ Expression = (*FunctionCall)(nil) // compile time check of interface implementation.
-
-func (fc *FunctionCall) expressionNode() {}
-func (fc *FunctionCall) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "CALL"...)
-}
-func (fc *FunctionCall) AppendString(dst []byte) []byte {
-	dst = append(dst, fc.Name...)
-	dst = append(dst, '(')
-	for i, arg := range fc.Args {
-		if i > 0 {
-			dst = append(dst, ", "...)
-		}
-		dst = arg.AppendString(dst)
-	}
-	dst = append(dst, ')')
-	return dst
-}
-
-// ArrayRef represents array element access, array sections, or substrings.
-// Either Name or Base is set, not both:
-//   - Name: direct variable access like arr(i) or str(2:5)
-//   - Base: chained access like arr(i)(2:3) where Base is the preceding expression
-//
-// Subscripts can be integers (element access) or RangeExpr (section/substring).
-//
-// Examples:
-//
-//	arr(i)           → ArrayRef{Name: "arr", Subscripts: [i]}
-//	arr(1:5)         → ArrayRef{Name: "arr", Subscripts: [RangeExpr]}
-//	arr(i)(2:3)      → ArrayRef{Base: ArrayRef{...}, Subscripts: [RangeExpr]}
-type ArrayRef struct {
-	Name       string     // Variable name (empty if Base is set)
-	Base       Expression // Preceding expression for chained access
-	Subscripts []Expression
-	Position
-}
-
-var _ Expression = (*ArrayRef)(nil) // compile time check of interface implementation.
-
-func (ar *ArrayRef) expressionNode() {}
-func (ar *ArrayRef) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "ARRAYREF"...)
-}
-func (ar *ArrayRef) AppendString(dst []byte) []byte {
-	if ar.Base != nil {
-		dst = ar.Base.AppendString(dst)
-	} else {
-		dst = append(dst, ar.Name...)
-	}
-	if len(ar.Subscripts) > 0 {
-		dst = append(dst, '(')
-		for i, sub := range ar.Subscripts {
-			if i > 0 {
-				dst = append(dst, ", "...)
-			}
-			dst = sub.AppendString(dst)
-		}
-		dst = append(dst, ')')
-	}
-	return dst
-}
-
-func (ar *ArrayRef) IsRanged() bool {
-	if IsRanged(ar.Base) {
-		return true
-	}
-	for i := range ar.Subscripts {
-		if IsRanged(ar.Subscripts[i]) {
+func IsRanged(expr ...Expression) bool {
+	for i := range expr {
+		_, ok := expr[i].(*RangeExpr)
+		if ok {
 			return true
 		}
 	}
 	return false
-}
-
-func IsRanged(expr Expression) bool {
-	_, ok := expr.(*RangeExpr)
-	return ok
 }
 
 // ParenExpr represents an expression enclosed in parentheses for grouping or

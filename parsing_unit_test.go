@@ -25,10 +25,7 @@ func TestProgramUnitParsing(t *testing.T) {
       IBEG=IPTBEG(ICENTR)
 END SUBROUTINE`,
 			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				sub, ok := unit.(*ast.Subroutine)
-				if !ok {
-					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
-				}
+				sub := helperWantNode[*ast.Subroutine](t, unit, "")
 
 				// CRITICAL: Verify IPTBEG is registered as an array variable
 				vi := data.Var("IPTBEG")
@@ -59,15 +56,7 @@ END SUBROUTINE`,
 				}
 
 				// CRITICAL: IPTBEG(ICENTR) must be parsed as ArrayRef, not FunctionCall
-				arrayRef, ok := assignStmt.Value.(*ast.ArrayRef)
-				if !ok {
-					t.Errorf("BUG: IPTBEG(ICENTR) parsed as %T, should be *ast.ArrayRef", assignStmt.Value)
-					if funcCall, isFuncCall := assignStmt.Value.(*ast.FunctionCall); isFuncCall {
-						t.Errorf("Incorrectly parsed as FunctionCall with name=%q", funcCall.Name)
-					}
-					t.Errorf("This happens because parseDimensionStmt() doesn't call varInit()")
-					return
-				}
+				arrayRef := helperWantNode[*ast.CallExpr](t, assignStmt.Value, "IPTBEG(ICENTR)")
 
 				// Verify it's the right array
 				if arrayRef.Name != "IPTBEG" {
@@ -75,8 +64,8 @@ END SUBROUTINE`,
 				}
 
 				// Verify it has subscripts
-				if len(arrayRef.Subscripts) != 1 {
-					t.Errorf("Expected 1 subscript, got %d", len(arrayRef.Subscripts))
+				if len(arrayRef.Args) != 1 {
+					t.Errorf("Expected 1 subscript, got %d", len(arrayRef.Args))
 				}
 			},
 		},
@@ -89,10 +78,7 @@ END SUBROUTINE`,
   x = UNKNOWN_FUNC(5)
 END SUBROUTINE`,
 			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				sub, ok := unit.(*ast.Subroutine)
-				if !ok {
-					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
-				}
+				sub := helperWantNode[*ast.Subroutine](t, unit, "")
 
 				// Verify arr is registered with VFlagDimension
 				vi := data.Var("arr")
@@ -115,18 +101,14 @@ END SUBROUTINE`,
 				}
 
 				// First assignment: x = arr(5) - arr should be ArrayRef
-				arrRef, ok := assignStmts[0].Value.(*ast.ArrayRef)
-				if !ok {
-					t.Errorf("expected arr(5) to be *ast.ArrayRef, got %T", assignStmts[0].Value)
-				} else if arrRef.Name != "arr" {
+				arrRef := helperWantNode[*ast.CallExpr](t, assignStmts[0].Value, "arr(5)")
+				if arrRef.Name != "arr" {
 					t.Errorf("expected ArrayRef name 'arr', got %s", arrRef.Name)
 				}
 
 				// Second assignment: x = UNKNOWN_FUNC(5) - should be FunctionCall
-				funcCall, ok := assignStmts[1].Value.(*ast.FunctionCall)
-				if !ok {
-					t.Errorf("expected UNKNOWN_FUNC(5) to be *ast.FunctionCall, got %T", assignStmts[1].Value)
-				} else if funcCall.Name != "UNKNOWN_FUNC" {
+				funcCall := helperWantNode[*ast.CallExpr](t, assignStmts[1].Value, "UNKNOWN_FUNC(5)")
+				if funcCall.Name != "UNKNOWN_FUNC" {
 					t.Errorf("expected FunctionCall name 'UNKNOWN_FUNC', got %s", funcCall.Name)
 				}
 			},
@@ -248,10 +230,7 @@ END PROGRAM`,
    X = 1
 END SUBROUTINE`,
 			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				sub, ok := unit.(*ast.Subroutine)
-				if !ok {
-					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
-				}
+				sub := helperWantNode[*ast.Subroutine](t, unit, "")
 				params := sub.Parameters
 				if len(params) != 6 {
 					t.Errorf("Expected 6 parameters, got %d", len(params))
@@ -275,10 +254,7 @@ END SUBROUTINE`,
    X = 1
 END SUBROUTINE`,
 			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				sub, ok := unit.(*ast.Subroutine)
-				if !ok {
-					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
-				}
+				sub := helperWantNode[*ast.Subroutine](t, unit, "")
 				params := sub.Parameters
 				if len(params) != 3 {
 					t.Errorf("Expected 3 parameters, got %d", len(params))
@@ -302,10 +278,7 @@ END SUBROUTINE`,
    X = 1
 END SUBROUTINE`,
 			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				sub, ok := unit.(*ast.Subroutine)
-				if !ok {
-					t.Fatalf("Expected *ast.Subroutine, got %T", unit)
-				}
+				sub := helperWantNode[*ast.Subroutine](t, unit, "")
 				params := sub.Parameters
 				if len(params) != 4 {
 					t.Errorf("Expected 4 parameters, got %d", len(params))
@@ -325,10 +298,7 @@ END SUBROUTINE`,
    VALUE = 1
 END FUNCTION`,
 			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				fn, ok := unit.(*ast.Function)
-				if !ok {
-					t.Fatalf("Expected *ast.Function, got %T", unit)
-				}
+				fn := helperWantNode[*ast.Function](t, unit, "")
 				params := fn.Parameters
 				if len(params) != 2 {
 					t.Errorf("Expected 2 parameters, got %d", len(params))
@@ -353,10 +323,7 @@ END FUNCTION`,
 	add = x + y
 END FUNCTION`,
 			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				fn, ok := unit.(*ast.Function)
-				if !ok {
-					t.Fatalf("Expected *ast.Function, got %T", unit)
-				}
+				fn := helperWantNode[*ast.Function](t, unit, "")
 				if fn.Name != "add" {
 					t.Errorf("Expected function name 'add', got %q", fn.Name)
 				}
@@ -381,10 +348,7 @@ END FUNCTION`,
 	square = n * n
 END FUNCTION`,
 			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				fn, ok := unit.(*ast.Function)
-				if !ok {
-					t.Fatalf("Expected *ast.Function, got %T", unit)
-				}
+				fn := helperWantNode[*ast.Function](t, unit, "")
 				if fn.Name != "square" {
 					t.Errorf("Expected function name 'square', got %q", fn.Name)
 				}
@@ -415,10 +379,7 @@ END FUNCTION`,
 	res = x * 2.0
 END FUNCTION`,
 			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				fn, ok := unit.(*ast.Function)
-				if !ok {
-					t.Fatalf("Expected *ast.Function, got %T", unit)
-				}
+				fn := helperWantNode[*ast.Function](t, unit, "")
 				if fn.Name != "compute" {
 					t.Errorf("Expected function name 'compute', got %q", fn.Name)
 				}
@@ -447,17 +408,11 @@ END FUNCTION`,
   END FUNCTION public_func
 END MODULE test_mod`,
 			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				mod, ok := unit.(*ast.Module)
-				if !ok {
-					t.Fatalf("Expected *ast.Module, got %T", unit)
-				}
+				mod := helperWantNode[*ast.Module](t, unit, "")
 				if len(mod.Contains) != 1 {
 					t.Fatalf("Expected 1 contained unit, got %d", len(mod.Contains))
 				}
-				fn, ok := mod.Contains[0].(*ast.Function)
-				if !ok {
-					t.Fatalf("Expected *ast.Function in Contains, got %T", mod.Contains[0])
-				}
+				fn := helperWantNode[*ast.Function](t, mod.Contains[0], "Contains[0]")
 				fnData, ok := fn.Data.(*ParserUnitData)
 				if !ok {
 					t.Fatalf("Expected *ParserUnitData for function, got %T", fn.Data)
@@ -487,10 +442,7 @@ END MODULE test_mod`,
     res = x * 2.0
 END FUNCTION standalone_func`,
 			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				fn, ok := unit.(*ast.Function)
-				if !ok {
-					t.Fatalf("Expected *ast.Function, got %T", unit)
-				}
+				fn := helperWantNode[*ast.Function](t, unit, "")
 				// Debug: print all variables in function
 				t.Logf("Function %s variables:", fn.Name)
 				vars := data.AppendVarinfo(nil)

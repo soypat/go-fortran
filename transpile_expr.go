@@ -51,9 +51,9 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 
 	case *f90.Identifier:
 		result, resultType, err = tg.transformExprIdentifer(vitgt, e)
-	case *f90.ArrayRef:
-		result, err = tg.transformArrayRef(vitgt, e)
-		resultType = tg.repl.Var(e.Name)
+	case *f90.CallExpr:
+		// CallExpr: disambiguate between array access and function call
+		result, resultType, err = tg.transformFunctionCall(vitgt, e)
 	case *f90.BinaryExpr:
 		if e.Op == f90token.StringConcat {
 			err = tg.makeErrAtStmt("string concat special handling needed")
@@ -71,9 +71,6 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 			return nil, nil, err
 		}
 		result = &ast.ParenExpr{X: inner}
-	case *f90.FunctionCall:
-		// FunctionCall in expression: could be actual function or COMMON block array access
-		result, resultType, err = tg.transformFunctionCall(vitgt, e)
 
 	case *f90.ArrayConstructor:
 		resultType = vitgt
@@ -423,21 +420,13 @@ func (tg *ToGo) pointerNilComparison(ptrExpr ast.Expr, op token.Token) ast.Expr 
 	}
 }
 
-func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.FunctionCall) (result ast.Expr, resultType *Varinfo, err error) {
+func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result ast.Expr, resultType *Varinfo, err error) {
 	vi := tg.repl.Var(e.Name)
 	if vi != nil {
-		// Check if this is a declared variable (COMMON block array access)
-		// Wrap indices in int() for Go's array methods
-		var args []ast.Expr
-		for _, expr := range e.Args {
-			arg, _, err := tg.transformExpression(_tgtInt, expr)
-			if err != nil {
-				return nil, nil, err
-			}
-			args = append(args, arg)
-		}
-		// Treat as array element access: arr.At(int(indices)...)
-		return tg.astMethodCall(e.Name, "At", args...), vi, nil
+		// It's a declared variable - route to array access handler
+		// which properly handles both element access and range expressions
+		result, err = tg.transformArrayRef(vitgt, e)
+		return result, vi, err
 	}
 
 	// Special handling for MALLOC - type parameter comes from target's pointee
@@ -481,7 +470,7 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.FunctionCall) (resu
 // transformMALLOC handles MALLOC intrinsic specially.
 // MALLOC returns PointerTo[T] where T comes from the target's pointee type.
 // Generates: intrinsic.MALLOC[T](size)
-func (tg *ToGo) transformMALLOC(vitgt *Varinfo, e *f90.FunctionCall) (result ast.Expr, resultType *Varinfo, err error) {
+func (tg *ToGo) transformMALLOC(vitgt *Varinfo, e *f90.CallExpr) (result ast.Expr, resultType *Varinfo, err error) {
 	if len(e.Args) != 1 {
 		return nil, nil, tg.makeErr(e, "MALLOC requires 1 argument")
 	}
@@ -516,15 +505,15 @@ func (tg *ToGo) transformMALLOC(vitgt *Varinfo, e *f90.FunctionCall) (result ast
 	return call, vitgt, nil
 }
 
-func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.ArrayRef) (result ast.Expr, err error) {
-	if e.Base != nil {
-		return nil, tg.makeErr(e, "chained ArrayRef expression not yet implemented")
+func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.CallExpr) (result ast.Expr, err error) {
+	if e.SecondaryAccess != nil {
+		return nil, tg.makeErr(e, "chained CallExpr expression not yet implemented")
 	}
 	vi := tg.repl.Var(e.Name)
-	isRanged := e.IsRanged()
-	if isRanged && len(e.Subscripts) == 1 {
+	isRanged := f90.IsRanged(e.Args...)
+	if isRanged && len(e.Args) == 1 {
 		// Substring access: str(2:4) → str.Substring(start, end)
-		args, err := tg.transformRangeExprToArgs(e.Subscripts[0].(*f90.RangeExpr), vi)
+		args, err := tg.transformRangeExprToArgs(e.Args[0].(*f90.RangeExpr), vi)
 		receiver := tg.astVarExpr(vi)
 		return &ast.CallExpr{
 			Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("Substring")},
@@ -533,7 +522,7 @@ func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.ArrayRef) (result ast.E
 	}
 	// Regular element access: arr(i) → arr.At(int(indices)...)
 	var args []ast.Expr
-	for _, expr := range e.Subscripts {
+	for _, expr := range e.Args {
 		arg, _, err := tg.transformExpression(_tgtInt, expr)
 		if err != nil {
 			return nil, err
@@ -572,9 +561,9 @@ func (tg *ToGo) astSetCall(receiver, value ast.Expr, indices ...ast.Expr) *ast.C
 	}
 }
 
-func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs ast.Expr) (_ []ast.Stmt, err error) {
-	if fexpr.Base != nil {
-		return dst, tg.makeErr(fexpr, "chained ArrayRef assignment not yet implemented")
+func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.CallExpr, rhs ast.Expr) (_ []ast.Stmt, err error) {
+	if fexpr.SecondaryAccess != nil {
+		return dst, tg.makeErr(fexpr, "chained CallExpr assignment not yet implemented")
 	}
 	vitgt := tg.repl.Var(fexpr.Name)
 	if vitgt == nil {
@@ -586,11 +575,11 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 	}
 
 	// Check for whole-array assignment: arr(:) = v → arr.SetAll(v)
-	isRanged := fexpr.IsRanged()
+	isRanged := f90.IsRanged(fexpr.Args...)
 	if isRanged {
 		// Check if it's a simple whole-array assignment (single ":" subscript with no bounds)
-		if len(fexpr.Subscripts) == 1 {
-			if rng, ok := fexpr.Subscripts[0].(*f90.RangeExpr); ok && rng.Start == nil && rng.End == nil {
+		if len(fexpr.Args) == 1 {
+			if rng, ok := fexpr.Args[0].(*f90.RangeExpr); ok && rng.Start == nil && rng.End == nil {
 				receiver := tg.astVarExpr(vitgt)
 				gstmt := &ast.ExprStmt{
 					X: &ast.CallExpr{
@@ -606,8 +595,8 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 	}
 
 	// Regular element assignment: arr(i) = v → arr.Set(value, int(indices)...)
-	indices := make([]ast.Expr, 0, len(fexpr.Subscripts))
-	for _, expr := range fexpr.Subscripts {
+	indices := make([]ast.Expr, 0, len(fexpr.Args))
+	for _, expr := range fexpr.Args {
 		arg, _, err := tg.transformExpression(_tgtInt, expr)
 		if err != nil {
 			return dst, err
@@ -619,15 +608,15 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 	return dst, nil
 }
 
-func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs ast.Expr) (_ []ast.Stmt, err error) {
+func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.CallExpr, rhs ast.Expr) (_ []ast.Stmt, err error) {
 	vi := tg.repl.Var(fexpr.Name)
-	isRanged := fexpr.IsRanged()
+	isRanged := f90.IsRanged(fexpr.Args...)
 
 	// If this is an array of characters with integer subscripts (not range), use AtPtr().SetFromString()
-	if len(fexpr.Subscripts) > 0 && !isRanged {
+	if len(fexpr.Args) > 0 && !isRanged {
 		// CHARACTER array element assignment: arr(i,j) = 'ABC' → arr.AtPtr(i,j).SetFromString("ABC")
-		indices := make([]ast.Expr, 0, len(fexpr.Subscripts))
-		for _, expr := range fexpr.Subscripts {
+		indices := make([]ast.Expr, 0, len(fexpr.Args))
+		for _, expr := range fexpr.Args {
 			arg, _, err := tg.transformExpression(_tgtInt, expr)
 			if err != nil {
 				return dst, err
@@ -649,10 +638,10 @@ func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, 
 		return dst, nil
 	}
 
-	if tg.varIsArray(vi) || isRanged && len(fexpr.Subscripts) > 1 || fexpr.Base != nil {
+	if tg.varIsArray(vi) || isRanged && len(fexpr.Args) > 1 || fexpr.SecondaryAccess != nil {
 		return dst, tg.makeErrWithPos(fexpr.Position, "unsupported character type attributes for range set")
 	}
-	args, err := tg.transformRangeExprToArgs(fexpr.Subscripts[0].(*f90.RangeExpr), vi)
+	args, err := tg.transformRangeExprToArgs(fexpr.Args[0].(*f90.RangeExpr), vi)
 	if err != nil {
 		return dst, err
 	}
