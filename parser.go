@@ -1108,6 +1108,7 @@ func (p *Parser90) parseBody2(params []ast.Parameter) []ast.Statement {
 	defer p.vars.resolveParameterTypes(params)
 	var stmts []ast.Statement
 	inExec := false
+	p.vars.implicits = p.vars.implicits[:0] // TODO: shouldn't anytime vars is reset implicits also be reset? This seems like an edge case.
 	for p.loopUntil(token.CONTAINS, token.END) && !p.isEndOfProgramUnit() {
 		if p.skipUnexpectedEndConstructs("at body parsing spec statements") {
 			return stmts
@@ -1115,26 +1116,31 @@ func (p *Parser90) parseBody2(params []ast.Parameter) []ast.Statement {
 		p.skipNewlinesAndComments()
 		stmt := p.parseStatement(inExec)
 		if stmt == nil {
-			p.addError("nil statement, skipping")
+			// p.addError("nil statement, skipping")
 			p.skipToNextStatement() // Should never happen, but likely a bug.
 			continue
 		}
 		stmts = append(stmts, stmt)
+		p.nStatements++
 		if !inExec {
-			p.vars.resolveImplicitTypes()
 			inExec = stmt.IsExecutable()
+			if inExec {
+				// p.vars.resolveImplicitTypes() // Resolve implicit types once on spec statement ends.
+			}
 		}
 	}
-	return nil
+	// Resolve spec statements again after all statements parsed.
+	p.vars.resolveImplicitTypes()
+	return stmts
 }
 
 // parseBody parses specification statements, then executable statements
 // If parameters are provided, it will populate their type information when type declarations are found
 func (p *Parser90) parseBody(params []ast.Parameter) []ast.Statement {
-	// return p.parseBody2(params)
+	return p.parseBody2(params)
 	defer p.vars.resolveParameterTypes(params)
 	var stmts []ast.Statement
-	var sawDecl bool
+	// var sawDecl bool
 	// Create a map for quick parameter lookup
 	p.vars.implicits = p.vars.implicits[:0] // TODO: shouldn't anytime vars is reset implicits also be reset? This seems like an edge case.
 	p.skipNewlinesAndComments()
@@ -1152,7 +1158,7 @@ func (p *Parser90) parseBody(params []ast.Parameter) []ast.Statement {
 			break
 		}
 
-		if stmt := p.parseSpecStatement(&sawDecl); stmt != nil {
+		if stmt := p.parseStatement(false); stmt != nil {
 			stmts = append(stmts, stmt)
 		} else {
 			// Not a parseable spec statement - skip the construct

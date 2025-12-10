@@ -404,7 +404,7 @@ func (tok Token) IsConstructAdmitsParens() bool {
 		PARAMETER, EQUIVALENCE, POINTER,
 		READ, WRITE, FORMAT, OPEN, CLOSE,
 		ALLOCATE, DEALLOCATE, REWIND, BACKSPACE, INQUIRE,
-		REAL:
+		INTEGER, REAL, COMPLEX, LOGICAL, CHARACTER, TYPE:
 		return true
 	}
 	return false
