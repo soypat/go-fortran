@@ -85,7 +85,7 @@ func TestFindPerfectHashIntrinsics(t *testing.T) {
 	for intr := fortran66Start + 1; intr < fortran2008End; intr++ {
 		if !intr.IsValid() {
 			continue
-		} else if intr.Version() > 77 {
+		} else if intr.Version() > 95 {
 			break
 		}
 
@@ -135,7 +135,11 @@ func printCoefs(coefs []Coef) {
 	lc := coefs[len(coefs)-1]
 	fmt.Printf("\nh := uint(len(s))*%d\n", lc.Value)
 	for _, c := range coefs[:len(coefs)-1] {
-		fmt.Printf("h %s= uint(s[%d])*%d\n", c.Op.String(), c.IndexApplied, c.Value)
+		pfx := ""
+		if c.IndexApplied < 0 {
+			pfx = "len(s)"
+		}
+		fmt.Printf("h %s= uint(s[%s%d])*%d\n", c.Op.String(), pfx, c.IndexApplied, c.Value)
 	}
 }
 

@@ -510,7 +510,11 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 			dst.val.tok = fn.returnType.typeToken()
 			return nil
 		}
-		err = fmt.Errorf("unknown intrinsic: %s", name)
+		if f90token.IsIntrinsic(name) {
+			err = fmt.Errorf("intrinsic not yet implemented: %s", name)
+		} else {
+			err = fmt.Errorf("unknown intrinsic: %s", name)
+		}
 	}
 	return err
 }

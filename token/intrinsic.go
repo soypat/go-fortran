@@ -2,252 +2,252 @@ package token
 
 import "strings"
 
-type intrinsic uint
+type Intrinsic uint
 
 const (
-	intrinsicUndefined intrinsic = 0
+	intrinsicUndefined Intrinsic = 0 // undefined
 )
 
-// Fortran 66 function intrinsics (FORTRAN IV compatible)
+// Fortran 66 function Intrinsics (FORTRAN IV compatible)
 const (
-	fortran66Start intrinsic = iota + intrinsicUndefined + 1
+	fortran66Start Intrinsic = iota + intrinsicUndefined + 1
 	// Mathematical functions
-	intrinsicABS   // ABS
-	intrinsicMOD   // MOD
-	intrinsicSIGN  // SIGN
-	intrinsicDIM   // DIM
-	intrinsicDPROD // DPROD
+	IntrinsicABS   // ABS
+	IntrinsicMOD   // MOD
+	IntrinsicSIGN  // SIGN
+	IntrinsicDIM   // DIM
+	IntrinsicDPROD // DPROD
 	// Trigonometric
-	intrinsicSIN   // SIN
-	intrinsicCOS   // COS
-	intrinsicTAN   // TAN
-	intrinsicASIN  // ASIN
-	intrinsicACOS  // ACOS
-	intrinsicATAN  // ATAN
-	intrinsicATAN2 // ATAN2
+	IntrinsicSIN   // SIN
+	IntrinsicCOS   // COS
+	IntrinsicTAN   // TAN
+	IntrinsicASIN  // ASIN
+	IntrinsicACOS  // ACOS
+	IntrinsicATAN  // ATAN
+	IntrinsicATAN2 // ATAN2
 	// Hyperbolic
-	intrinsicSINH // SINH
-	intrinsicCOSH // COSH
-	intrinsicTANH // TANH
+	IntrinsicSINH // SINH
+	IntrinsicCOSH // COSH
+	IntrinsicTANH // TANH
 	// Exponential and logarithmic
-	intrinsicEXP   // EXP
-	intrinsicLOG   // LOG
-	intrinsicLOG10 // LOG10
-	intrinsicSQRT  // SQRT
+	IntrinsicEXP   // EXP
+	IntrinsicLOG   // LOG
+	IntrinsicLOG10 // LOG10
+	IntrinsicSQRT  // SQRT
 	// Type conversion
-	intrinsicINT   // INT
-	intrinsicREAL  // REAL
-	intrinsicDBLE  // DBLE
-	intrinsicCMPLX // CMPLX
-	intrinsicFLOAT // FLOAT
-	intrinsicIFIX  // IFIX
-	intrinsicSNGL  // SNGL
+	IntrinsicINT   // INT
+	IntrinsicREAL  // REAL
+	IntrinsicDBLE  // DBLE
+	IntrinsicCMPLX // CMPLX
+	IntrinsicFLOAT // FLOAT
+	IntrinsicIFIX  // IFIX
+	IntrinsicSNGL  // SNGL
 	// Truncation and rounding
-	intrinsicAINT  // AINT
-	intrinsicANINT // ANINT
-	intrinsicNINT  // NINT
+	IntrinsicAINT  // AINT
+	IntrinsicANINT // ANINT
+	IntrinsicNINT  // NINT
 	// Min/Max
-	intrinsicMAX   // MAX
-	intrinsicMIN   // MIN
-	intrinsicMAX0  // MAX0
-	intrinsicMAX1  // MAX1
-	intrinsicMIN0  // MIN0
-	intrinsicMIN1  // MIN1
-	intrinsicAMAX0 // AMAX0
-	intrinsicAMAX1 // AMAX1
-	intrinsicAMIN0 // AMIN0
-	intrinsicAMIN1 // AMIN1
-	intrinsicDMAX1 // DMAX1
-	intrinsicDMIN1 // DMIN1
+	IntrinsicMAX   // MAX
+	IntrinsicMIN   // MIN
+	IntrinsicMAX0  // MAX0
+	IntrinsicMAX1  // MAX1
+	IntrinsicMIN0  // MIN0
+	IntrinsicMIN1  // MIN1
+	IntrinsicAMAX0 // AMAX0
+	IntrinsicAMAX1 // AMAX1
+	IntrinsicAMIN0 // AMIN0
+	IntrinsicAMIN1 // AMIN1
+	IntrinsicDMAX1 // DMAX1
+	IntrinsicDMIN1 // DMIN1
 	// Complex conjugate and imaginary part
-	intrinsicCONJG // CONJG
-	intrinsicAIMAG // AIMAG
+	IntrinsicCONJG // CONJG
+	IntrinsicAIMAG // AIMAG
 	// Specific names for type variants
-	intrinsicIABS   // IABS
-	intrinsicDABS   // DABS
-	intrinsicCABS   // CABS
-	intrinsicDSIN   // DSIN
-	intrinsicDCOS   // DCOS
-	intrinsicDTAN   // DTAN
-	intrinsicDASIN  // DASIN
-	intrinsicDACOS  // DACOS
-	intrinsicDATAN  // DATAN
-	intrinsicDATAN2 // DATAN2
-	intrinsicDSINH  // DSINH
-	intrinsicDCOSH  // DCOSH
-	intrinsicDTANH  // DTANH
-	intrinsicDEXP   // DEXP
-	intrinsicDLOG   // DLOG
-	intrinsicDLOG10 // DLOG10
-	intrinsicDSQRT  // DSQRT
-	intrinsicCSIN   // CSIN
-	intrinsicCCOS   // CCOS
-	intrinsicCEXP   // CEXP
-	intrinsicCLOG   // CLOG
-	intrinsicCSQRT  // CSQRT
-	intrinsicIDIM   // IDIM
-	intrinsicDDIM   // DDIM
-	intrinsicIDINT  // IDINT
-	intrinsicISIGN  // ISIGN
-	intrinsicDSIGN  // DSIGN
-	intrinsicDNINT  // DNINT
-	intrinsicIDNINT // IDNINT
-	intrinsicDIMAG  // DIMAG
-	intrinsicDCONJG // DCONJG
+	IntrinsicIABS   // IABS
+	IntrinsicDABS   // DABS
+	IntrinsicCABS   // CABS
+	IntrinsicDSIN   // DSIN
+	IntrinsicDCOS   // DCOS
+	IntrinsicDTAN   // DTAN
+	IntrinsicDASIN  // DASIN
+	IntrinsicDACOS  // DACOS
+	IntrinsicDATAN  // DATAN
+	IntrinsicDATAN2 // DATAN2
+	IntrinsicDSINH  // DSINH
+	IntrinsicDCOSH  // DCOSH
+	IntrinsicDTANH  // DTANH
+	IntrinsicDEXP   // DEXP
+	IntrinsicDLOG   // DLOG
+	IntrinsicDLOG10 // DLOG10
+	IntrinsicDSQRT  // DSQRT
+	IntrinsicCSIN   // CSIN
+	IntrinsicCCOS   // CCOS
+	IntrinsicCEXP   // CEXP
+	IntrinsicCLOG   // CLOG
+	IntrinsicCSQRT  // CSQRT
+	IntrinsicIDIM   // IDIM
+	IntrinsicDDIM   // DDIM
+	IntrinsicIDINT  // IDINT
+	IntrinsicISIGN  // ISIGN
+	IntrinsicDSIGN  // DSIGN
+	IntrinsicDNINT  // DNINT
+	IntrinsicIDNINT // IDNINT
+	IntrinsicDIMAG  // DIMAG
+	IntrinsicDCONJG // DCONJG
 	fortran66End
 )
 
-// Fortran 77 function intrinsics (added string handling)
+// Fortran 77 function Intrinsics (added string handling)
 const (
-	fortran77Start intrinsic = iota + fortran66End
+	fortran77Start Intrinsic = iota + fortran66End
 	// Character functions
-	intrinsicCHAR  // CHAR
-	intrinsicICHAR // ICHAR
-	intrinsicLEN   // LEN
-	intrinsicINDEX // INDEX
+	IntrinsicCHAR  // CHAR
+	IntrinsicICHAR // ICHAR
+	IntrinsicLEN   // LEN
+	IntrinsicINDEX // INDEX
 	// Lexical comparison
-	intrinsicLGE // LGE
-	intrinsicLGT // LGT
-	intrinsicLLE // LLE
-	intrinsicLLT // LLT
+	IntrinsicLGE // LGE
+	IntrinsicLGT // LGT
+	IntrinsicLLE // LLE
+	IntrinsicLLT // LLT
 	fortran77End
 )
 
-// Fortran 90 function intrinsics
+// Fortran 90 function Intrinsics
 const (
-	fortran90Start intrinsic = iota + fortran77End
+	fortran90Start Intrinsic = iota + fortran77End
 	// Array reduction functions
-	intrinsicSUM     // SUM
-	intrinsicPRODUCT // PRODUCT
-	intrinsicMAXVAL  // MAXVAL
-	intrinsicMINVAL  // MINVAL
-	intrinsicALL     // ALL
-	intrinsicANY     // ANY
-	intrinsicCOUNT   // COUNT
+	IntrinsicSUM     // SUM
+	IntrinsicPRODUCT // PRODUCT
+	IntrinsicMAXVAL  // MAXVAL
+	IntrinsicMINVAL  // MINVAL
+	IntrinsicALL     // ALL
+	IntrinsicANY     // ANY
+	IntrinsicCOUNT   // COUNT
 	// Array inquiry functions
-	intrinsicSIZE      // SIZE
-	intrinsicSHAPE     // SHAPE
-	intrinsicLBOUND    // LBOUND
-	intrinsicUBOUND    // UBOUND
-	intrinsicALLOCATED // ALLOCATED
+	IntrinsicSIZE      // SIZE
+	IntrinsicSHAPE     // SHAPE
+	IntrinsicLBOUND    // LBOUND
+	IntrinsicUBOUND    // UBOUND
+	IntrinsicALLOCATED // ALLOCATED
 	// Array construction functions
-	intrinsicRESHAPE // RESHAPE
-	intrinsicSPREAD  // SPREAD
-	intrinsicPACK    // PACK
-	intrinsicUNPACK  // UNPACK
-	intrinsicMERGE   // MERGE
+	IntrinsicRESHAPE // RESHAPE
+	IntrinsicSPREAD  // SPREAD
+	IntrinsicPACK    // PACK
+	IntrinsicUNPACK  // UNPACK
+	IntrinsicMERGE   // MERGE
 	// Array manipulation functions
-	intrinsicTRANSPOSE // TRANSPOSE
-	intrinsicCSHIFT    // CSHIFT
-	intrinsicEOSHIFT   // EOSHIFT
+	IntrinsicTRANSPOSE // TRANSPOSE
+	IntrinsicCSHIFT    // CSHIFT
+	IntrinsicEOSHIFT   // EOSHIFT
 	// Array location functions
-	intrinsicMAXLOC // MAXLOC
-	intrinsicMINLOC // MINLOC
+	IntrinsicMAXLOC // MAXLOC
+	IntrinsicMINLOC // MINLOC
 	// Matrix functions
-	intrinsicMATMUL      // MATMUL
-	intrinsicDOT_PRODUCT // DOT_PRODUCT
+	IntrinsicMATMUL      // MATMUL
+	IntrinsicDOT_PRODUCT // DOT_PRODUCT
 	// Bit manipulation functions
-	intrinsicIAND   // IAND
-	intrinsicIOR    // IOR
-	intrinsicIEOR   // IEOR
-	intrinsicNOT    // NOT
-	intrinsicBTEST  // BTEST
-	intrinsicIBSET  // IBSET
-	intrinsicIBCLR  // IBCLR
-	intrinsicIBITS  // IBITS
-	intrinsicISHFT  // ISHFT
-	intrinsicISHFTC // ISHFTC
-	intrinsicMVBITS // MVBITS
+	IntrinsicIAND   // IAND
+	IntrinsicIOR    // IOR
+	IntrinsicIEOR   // IEOR
+	IntrinsicNOT    // NOT
+	IntrinsicBTEST  // BTEST
+	IntrinsicIBSET  // IBSET
+	IntrinsicIBCLR  // IBCLR
+	IntrinsicIBITS  // IBITS
+	IntrinsicISHFT  // ISHFT
+	IntrinsicISHFTC // ISHFTC
+	IntrinsicMVBITS // MVBITS
 	// Floating point inquiry
-	intrinsicHUGE         // HUGE
-	intrinsicTINY         // TINY
-	intrinsicEPSILON      // EPSILON
-	intrinsicPRECISION    // PRECISION
-	intrinsicRANGE        // RANGE
-	intrinsicRADIX        // RADIX
-	intrinsicDIGITS       // DIGITS
-	intrinsicBIT_SIZE     // BIT_SIZE
-	intrinsicEXPONENT     // EXPONENT
-	intrinsicFRACTION     // FRACTION
-	intrinsicNEAREST      // NEAREST
-	intrinsicRRSPACING    // RRSPACING
-	intrinsicSPACING      // SPACING
-	intrinsicSCALE        // SCALE
-	intrinsicSET_EXPONENT // SET_EXPONENT
+	IntrinsicHUGE         // HUGE
+	IntrinsicTINY         // TINY
+	IntrinsicEPSILON      // EPSILON
+	IntrinsicPRECISION    // PRECISION
+	IntrinsicRANGE        // RANGE
+	IntrinsicRADIX        // RADIX
+	IntrinsicDIGITS       // DIGITS
+	IntrinsicBIT_SIZE     // BIT_SIZE
+	IntrinsicEXPONENT     // EXPONENT
+	IntrinsicFRACTION     // FRACTION
+	IntrinsicNEAREST      // NEAREST
+	IntrinsicRRSPACING    // RRSPACING
+	IntrinsicSPACING      // SPACING
+	IntrinsicSCALE        // SCALE
+	IntrinsicSET_EXPONENT // SET_EXPONENT
 	// Kind functions
-	intrinsicKIND               // KIND
-	intrinsicSELECTED_INT_KIND  // SELECTED_INT_KIND
-	intrinsicSELECTED_REAL_KIND // SELECTED_REAL_KIND
+	IntrinsicKIND               // KIND
+	IntrinsicSELECTED_INT_KIND  // SELECTED_INT_KIND
+	IntrinsicSELECTED_REAL_KIND // SELECTED_REAL_KIND
 	// String functions
-	intrinsicLEN_TRIM // LEN_TRIM
-	intrinsicTRIM     // TRIM
-	intrinsicADJUSTL  // ADJUSTL
-	intrinsicADJUSTR  // ADJUSTR
-	intrinsicREPEAT   // REPEAT
-	intrinsicSCAN     // SCAN
-	intrinsicVERIFY   // VERIFY
+	IntrinsicLEN_TRIM // LEN_TRIM
+	IntrinsicTRIM     // TRIM
+	IntrinsicADJUSTL  // ADJUSTL
+	IntrinsicADJUSTR  // ADJUSTR
+	IntrinsicREPEAT   // REPEAT
+	IntrinsicSCAN     // SCAN
+	IntrinsicVERIFY   // VERIFY
 	// Pointer inquiry
-	intrinsicASSOCIATED // ASSOCIATED
+	IntrinsicASSOCIATED // ASSOCIATED
 	// Argument presence
-	intrinsicPRESENT // PRESENT
+	IntrinsicPRESENT // PRESENT
 	// Transfer and conversion
-	intrinsicTRANSFER // TRANSFER
-	intrinsicLOGICAL  // LOGICAL
+	IntrinsicTRANSFER // TRANSFER
+	IntrinsicLOGICAL  // LOGICAL
 	// Miscellaneous
-	intrinsicCEILING // CEILING
-	intrinsicFLOOR   // FLOOR
-	intrinsicMODULO  // MODULO
-	intrinsicNULL    // NULL
+	IntrinsicCEILING // CEILING
+	IntrinsicFLOOR   // FLOOR
+	IntrinsicMODULO  // MODULO
+	IntrinsicNULL    // NULL
 	fortran90End
 )
 
-// Fortran 95 intrinsics
+// Fortran 95 Intrinsics
 const (
-	fortran95Start    intrinsic = iota + fortran90End
-	intrinsicCPU_TIME           // CPU_TIME
+	fortran95Start    Intrinsic = iota + fortran90End
+	IntrinsicCPU_TIME           // CPU_TIME
 	fortran95End
 )
 
-// Fortran 2003 intrinsics
+// Fortran 2003 Intrinsics
 const (
-	fortran2003Start                  intrinsic = iota + fortran95End
-	intrinsicMOVE_ALLOC                         // MOVE_ALLOC
-	intrinsicIS_IOSTAT_END                      // IS_IOSTAT_END
-	intrinsicIS_IOSTAT_EOR                      // IS_IOSTAT_EOR
-	intrinsicNEW_LINE                           // NEW_LINE
-	intrinsicCOMMAND_ARGUMENT_COUNT             // COMMAND_ARGUMENT_COUNT
-	intrinsicGET_COMMAND                        // GET_COMMAND
-	intrinsicGET_COMMAND_ARGUMENT               // GET_COMMAND_ARGUMENT
-	intrinsicGET_ENVIRONMENT_VARIABLE           // GET_ENVIRONMENT_VARIABLE
+	fortran2003Start                  Intrinsic = iota + fortran95End
+	IntrinsicMOVE_ALLOC                         // MOVE_ALLOC
+	IntrinsicIS_IOSTAT_END                      // IS_IOSTAT_END
+	IntrinsicIS_IOSTAT_EOR                      // IS_IOSTAT_EOR
+	IntrinsicNEW_LINE                           // NEW_LINE
+	IntrinsicCOMMAND_ARGUMENT_COUNT             // COMMAND_ARGUMENT_COUNT
+	IntrinsicGET_COMMAND                        // GET_COMMAND
+	IntrinsicGET_COMMAND_ARGUMENT               // GET_COMMAND_ARGUMENT
+	IntrinsicGET_ENVIRONMENT_VARIABLE           // GET_ENVIRONMENT_VARIABLE
 	fortran2003End
 )
 
-// Fortran 2008 intrinsics
+// Fortran 2008 Intrinsics
 const (
-	fortran2008Start      intrinsic = iota + fortran2003End
-	intrinsicACOSH                  // ACOSH
-	intrinsicASINH                  // ASINH
-	intrinsicATANH                  // ATANH
-	intrinsicBESSEL_J0              // BESSEL_J0
-	intrinsicBESSEL_J1              // BESSEL_J1
-	intrinsicBESSEL_JN              // BESSEL_JN
-	intrinsicBESSEL_Y0              // BESSEL_Y0
-	intrinsicBESSEL_Y1              // BESSEL_Y1
-	intrinsicBESSEL_YN              // BESSEL_YN
-	intrinsicERF                    // ERF
-	intrinsicERFC                   // ERFC
-	intrinsicERFC_SCALED            // ERFC_SCALED
-	intrinsicGAMMA                  // GAMMA
-	intrinsicLOG_GAMMA              // LOG_GAMMA
-	intrinsicHYPOT                  // HYPOT
-	intrinsicNORM2                  // NORM2
-	intrinsicPARITY                 // PARITY
-	intrinsicFINDLOC                // FINDLOC
-	intrinsicSTORAGE_SIZE           // STORAGE_SIZE
+	fortran2008Start      Intrinsic = iota + fortran2003End
+	IntrinsicACOSH                  // ACOSH
+	IntrinsicASINH                  // ASINH
+	IntrinsicATANH                  // ATANH
+	IntrinsicBESSEL_J0              // BESSEL_J0
+	IntrinsicBESSEL_J1              // BESSEL_J1
+	IntrinsicBESSEL_JN              // BESSEL_JN
+	IntrinsicBESSEL_Y0              // BESSEL_Y0
+	IntrinsicBESSEL_Y1              // BESSEL_Y1
+	IntrinsicBESSEL_YN              // BESSEL_YN
+	IntrinsicERF                    // ERF
+	IntrinsicERFC                   // ERFC
+	IntrinsicERFC_SCALED            // ERFC_SCALED
+	IntrinsicGAMMA                  // GAMMA
+	IntrinsicLOG_GAMMA              // LOG_GAMMA
+	IntrinsicHYPOT                  // HYPOT
+	IntrinsicNORM2                  // NORM2
+	IntrinsicPARITY                 // PARITY
+	IntrinsicFINDLOC                // FINDLOC
+	IntrinsicSTORAGE_SIZE           // STORAGE_SIZE
 	fortran2008End
 )
 
-func (intr intrinsic) Version() (year int) {
+func (intr Intrinsic) Version() (year int) {
 	switch {
 	case intr > fortran2008Start:
 		year = 2008
@@ -265,16 +265,16 @@ func (intr intrinsic) Version() (year int) {
 	return year
 }
 
-func (intr intrinsic) IsValid() bool {
+func (intr Intrinsic) IsValid() bool {
 	return intr > fortran66Start && intr < fortran2008End && intr != fortran77Start &&
 		intr != fortran90Start && intr != fortran95Start && intr != fortran2003Start && intr != fortran2008Start
 }
 
-func LookupIntrinsic(s string) intrinsic {
+func LookupIntrinsic(s string) Intrinsic {
 	if len(s) < 2 || len(s) > 18 {
 		return 0
 	}
-	intr := intrinsicMap[intrinsicHash(s)]
+	intr := IntrinsicMap[ntrinsicHash(s)]
 	if intr != 0 && strings.EqualFold(s, intr.String()) {
 		return intr
 	}
@@ -285,29 +285,29 @@ func IsIntrinsic(s string) bool {
 	return LookupIntrinsic(s) != 0
 }
 
-var intrinsicMap [1 << 10]intrinsic
+var IntrinsicMap [1 << 10]Intrinsic
 
 func init() {
 	for intr := fortran66Start + 1; intr < fortran2008End; intr++ {
 		if !intr.IsValid() {
 			continue
-		} else if intr.Version() > 77 {
+		} else if intr.Version() > 95 {
 			break
 		}
 		name := intr.String()
-		h := intrinsicHash(name)
-		if intrinsicMap[h] != 0 {
+		h := ntrinsicHash(name)
+		if IntrinsicMap[h] != 0 {
 			panic("imperfect hash")
 		}
-		intrinsicMap[h] = intr
+		IntrinsicMap[h] = intr
 	}
 }
 
-func intrinsicHash(s string) uint {
+func ntrinsicHash(s string) uint {
 	h := uint(len(s)) * 13
 	h *= uint(s[0]) * 21
 	h += uint(s[1]) * 62
 	h += uint(s[len(s)-2]) * 25
 	h += uint(s[len(s)-1]) * 41
-	return h & uint(len(intrinsicMap)-1)
+	return h & uint(len(IntrinsicMap)-1)
 }

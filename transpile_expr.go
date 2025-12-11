@@ -436,9 +436,10 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 
 	fi := tg.ContainedOrUsed(e.Name)
 	if fi == nil {
-		fn := getIntrinsic(e.Name, len(e.Args))
+		lookup := f90token.LookupIntrinsic(e.Name)
+		fn := getIntrinsic(lookup, len(e.Args))
 		if fn == nil {
-			return nil, nil, tg.makeErr(e, "function/intrinsic not found: "+e.Name)
+			return nil, nil, tg.makeErr(e, "unknown intrinsic: "+e.Name)
 		}
 		expr, resultType, err := tg.intrinsicExpr(vitgt, fn, e.Args...)
 		if err != nil {
@@ -748,7 +749,7 @@ func (tg *ToGo) wrapMethodIntrinsic(fn *intrinsicFn, call *ast.CallExpr) *ast.Ca
 }
 
 type intrinsicFn struct {
-	name        string
+	name        f90token.Intrinsic
 	expr        ast.Expr
 	exprGeneric func(tp *Varinfo) ast.Expr
 	method      string
@@ -805,10 +806,13 @@ func (tg *ToGo) intrinsicExpr(vitgt *Varinfo, fn *intrinsicFn, args ...f90.Expre
 	return call, resultType, nil
 }
 
-func getIntrinsic(name string, nargs int) *intrinsicFn {
+func getIntrinsic(name f90token.Intrinsic, nargs int) *intrinsicFn {
+	if name == 0 {
+		return nil
+	}
 	for i := range intrinsics {
 		fn := &intrinsics[i]
-		if !strings.EqualFold(name, fn.name) {
+		if fn.name != name {
 			continue
 		}
 		// Check arg count matches (for non-variadic) or meets minimum (for variadic)
@@ -825,9 +829,9 @@ func getIntrinsic(name string, nargs int) *intrinsicFn {
 }
 
 // intrinsicSel creates a selector expression for intrinsic.NAME
-func intrinsicSel(name string) func(*Varinfo) ast.Expr {
+func intrinsicSel(name f90token.Intrinsic) func(*Varinfo) ast.Expr {
 	return func(tp *Varinfo) ast.Expr {
-		return &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(name)}
+		return &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(name.String())}
 	}
 }
 
@@ -876,7 +880,7 @@ func goTypeBasic(tok f90token.Token, kind int) (goType ast.Expr) {
 
 // makeIntrinsicFn creates an intrinsic that calls intrinsic.NAME (e.g., SQRT, SIN).
 // returnType is nil if return type matches first param.
-func makeIntrinsicFn(name string, returnType *Varinfo, params ...*Varinfo) intrinsicFn {
+func makeIntrinsicFn(name f90token.Intrinsic, returnType *Varinfo, params ...*Varinfo) intrinsicFn {
 	return intrinsicFn{
 		name:        name,
 		exprGeneric: intrinsicSel(name),
@@ -886,7 +890,7 @@ func makeIntrinsicFn(name string, returnType *Varinfo, params ...*Varinfo) intri
 }
 
 // makeIntrinsicVariadic creates a variadic intrinsic like MAX, MIN.
-func makeIntrinsicVariadic(name string, returnType *Varinfo, variadicType *Varinfo) intrinsicFn {
+func makeIntrinsicVariadic(name f90token.Intrinsic, returnType *Varinfo, variadicType *Varinfo) intrinsicFn {
 	return intrinsicFn{
 		name:        name,
 		exprGeneric: intrinsicSel(name),
@@ -897,20 +901,20 @@ func makeIntrinsicVariadic(name string, returnType *Varinfo, variadicType *Varin
 }
 
 // makeIntrinsicFnGeneric creates a generic intrinsic that emits intrinsic.NAME[T].
-func makeIntrinsicFnGeneric(name string, returnType *Varinfo, params ...*Varinfo) intrinsicFn {
+func makeIntrinsicFnGeneric(name f90token.Intrinsic, returnType *Varinfo, params ...*Varinfo) intrinsicFn {
 	return intrinsicFn{
 		name:        name,
-		exprGeneric: intrinsicSelGeneric(name),
+		exprGeneric: intrinsicSelGeneric(name.String()),
 		returnType:  returnType,
 		params:      params,
 	}
 }
 
 // makeIntrinsicVariadicGeneric creates a variadic generic intrinsic like MAX, MIN.
-func makeIntrinsicVariadicGeneric(name string, returnType *Varinfo, variadicType *Varinfo) intrinsicFn {
+func makeIntrinsicVariadicGeneric(name f90token.Intrinsic, returnType *Varinfo, variadicType *Varinfo) intrinsicFn {
 	return intrinsicFn{
 		name:        name,
-		exprGeneric: intrinsicSelGeneric(name),
+		exprGeneric: intrinsicSelGeneric(name.String()),
 		returnType:  returnType,
 		params:      []*Varinfo{variadicType},
 		isVariadic:  true,
@@ -918,7 +922,7 @@ func makeIntrinsicVariadicGeneric(name string, returnType *Varinfo, variadicType
 }
 
 // makeIntrinsicCast creates a type cast intrinsic like REAL, INT, DBLE.
-func makeIntrinsicCast(name, goType string, returnType, paramType *Varinfo) intrinsicFn {
+func makeIntrinsicCast(name f90token.Intrinsic, goType string, returnType, paramType *Varinfo) intrinsicFn {
 	return intrinsicFn{
 		name:       name,
 		expr:       ast.NewIdent(goType),
@@ -928,7 +932,7 @@ func makeIntrinsicCast(name, goType string, returnType, paramType *Varinfo) intr
 }
 
 // makeIntrinsicMethod creates a method-call intrinsic like LEN, TRIM.
-func makeIntrinsicMethod(name, methodName string, returnType, receiverType *Varinfo, params ...*Varinfo) intrinsicFn {
+func makeIntrinsicMethod(name f90token.Intrinsic, methodName string, returnType, receiverType *Varinfo, params ...*Varinfo) intrinsicFn {
 	allParams := make([]*Varinfo, 0, 1+len(params))
 	allParams = append(allParams, receiverType)
 	allParams = append(allParams, params...)
@@ -965,61 +969,61 @@ func (fn *intrinsicFn) inferReturnType(tgt *Varinfo) (inferred *Varinfo) {
 
 var intrinsics = []intrinsicFn{
 	// Type conversions
-	makeIntrinsicCast("REAL", "float32", _tgtFloat32, _tgtGenericFloat),
-	makeIntrinsicCast("DBLE", "float64", _tgtFloat64, _tgtGenericFloat),
-	makeIntrinsicCast("INT", "int32", _tgtInt32, _tgtGenericInt),
-	makeIntrinsicCast("INT32", "int32", _tgtInt32, _tgtGenericInt),
+	makeIntrinsicCast(f90token.IntrinsicREAL, "float32", _tgtFloat32, _tgtGenericFloat),
+	makeIntrinsicCast(f90token.IntrinsicDBLE, "float64", _tgtFloat64, _tgtGenericFloat),
+	makeIntrinsicCast(f90token.IntrinsicINT, "int32", _tgtInt32, _tgtGenericInt),
+	makeIntrinsicCast(f90token.IntrinsicINT32, "int32", _tgtInt32, _tgtGenericInt),
 
 	// Math intrinsics - single float argument (return type matches input)
-	makeIntrinsicFn("SQRT", nil, _tgtGenericFloat),
-	makeIntrinsicFn("SIN", nil, _tgtGenericFloat),
-	makeIntrinsicFn("COS", nil, _tgtGenericFloat),
-	makeIntrinsicFn("TAN", nil, _tgtGenericFloat),
-	makeIntrinsicFn("ASIN", nil, _tgtGenericFloat),
-	makeIntrinsicFn("ACOS", nil, _tgtGenericFloat),
-	makeIntrinsicFn("ATAN", nil, _tgtGenericFloat),
-	makeIntrinsicFn("EXP", nil, _tgtGenericFloat),
-	makeIntrinsicFn("LOG", nil, _tgtGenericFloat),
-	makeIntrinsicFn("LOG10", nil, _tgtGenericFloat),
-	makeIntrinsicFn("SINH", nil, _tgtGenericFloat),
-	makeIntrinsicFn("COSH", nil, _tgtGenericFloat),
-	makeIntrinsicFn("TANH", nil, _tgtGenericFloat),
-	makeIntrinsicFn("FLOOR", nil, _tgtGenericFloat),
-	makeIntrinsicFn("CEILING", nil, _tgtGenericFloat),
-	makeIntrinsicFn("AINT", nil, _tgtGenericFloat),
-	makeIntrinsicFn("ANINT", nil, _tgtGenericFloat),
-	makeIntrinsicFn("NINT", _tgtInt32, _tgtGenericFloat), // NINT returns INTEGER
-	makeIntrinsicFn("POW", nil, _tgtGenericFloat, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicSQRT, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicSIN, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicCOS, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicTAN, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicASIN, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicACOS, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicATAN, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicEXP, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicLOG, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicLOG10, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicSINH, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicCOSH, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicTANH, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicFLOOR, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicCEILING, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicAINT, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicANINT, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicNINT, _tgtInt32, _tgtGenericFloat), // NINT returns INTEGER
+	makeIntrinsicFn(f90token.IntrinsicPOW, nil, _tgtGenericFloat, _tgtGenericFloat),
 
 	// Math intrinsics - two float arguments
-	makeIntrinsicFn("ATAN2", nil, _tgtGenericFloat, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicATAN2, nil, _tgtGenericFloat, _tgtGenericFloat),
 
 	// Math intrinsics - signed/numeric
-	makeIntrinsicFnGeneric("ABS", nil, _tgtGenericFloat),
-	makeIntrinsicFn("SIGN", nil, _tgtGenericFloat, _tgtGenericFloat),
-	makeIntrinsicFn("MOD", nil, _tgtGenericInt, _tgtGenericInt),
-	makeIntrinsicFn("DIM", nil, _tgtGenericFloat, _tgtGenericFloat),
-	makeIntrinsicFn("DPROD", _tgtFloat64, _tgtGenericFloat, _tgtGenericFloat), // DPROD returns DOUBLE
+	makeIntrinsicFnGeneric(f90token.IntrinsicABS, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicSIGN, nil, _tgtGenericFloat, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicMOD, nil, _tgtGenericInt, _tgtGenericInt),
+	makeIntrinsicFn(f90token.IntrinsicDIM, nil, _tgtGenericFloat, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicDPROD, _tgtFloat64, _tgtGenericFloat, _tgtGenericFloat), // DPROD returns DOUBLE
 
 	// Variadic intrinsics
-	makeIntrinsicVariadicGeneric("MAX", nil, _tgtGenericFloat),
-	makeIntrinsicVariadicGeneric("MIN", nil, _tgtGenericFloat),
+	makeIntrinsicVariadicGeneric(f90token.IntrinsicMAX, nil, _tgtGenericFloat),
+	makeIntrinsicVariadicGeneric(f90token.IntrinsicMIN, nil, _tgtGenericFloat),
 
 	// Character methods
-	makeIntrinsicMethod("LEN", "Len", _tgtInt32, _tgtChar),
-	makeIntrinsicMethod("LEN_TRIM", "LenTrim", _tgtInt32, _tgtChar),
-	makeIntrinsicMethod("TRIM", "Trim", _tgtChar, _tgtChar),
-	makeIntrinsicMethod("ADJUSTL", "AdjustL", _tgtChar, _tgtChar),
-	makeIntrinsicMethod("ADJUSTR", "AdjustR", _tgtChar, _tgtChar),
-	makeIntrinsicMethod("INDEX", "Index", _tgtInt32, _tgtChar, _tgtChar),
+	makeIntrinsicMethod(f90token.IntrinsicLEN, "Len", _tgtInt32, _tgtChar),
+	makeIntrinsicMethod(f90token.IntrinsicLEN_TRIM, "LenTrim", _tgtInt32, _tgtChar),
+	makeIntrinsicMethod(f90token.IntrinsicTRIM, "Trim", _tgtChar, _tgtChar),
+	makeIntrinsicMethod(f90token.IntrinsicADJUSTL, "AdjustL", _tgtChar, _tgtChar),
+	makeIntrinsicMethod(f90token.IntrinsicADJUSTR, "AdjustR", _tgtChar, _tgtChar),
+	makeIntrinsicMethod(f90token.IntrinsicINDEX, "Index", _tgtInt32, _tgtChar, _tgtChar),
 
 	// Array methods - 1 arg versions
-	makeIntrinsicMethod("SIZE", "Size", _tgtInt32, _tgtArray),
-	makeIntrinsicMethod("SHAPE", "Shape", nil, _tgtArray), // returns array
+	makeIntrinsicMethod(f90token.IntrinsicSIZE, "Size", _tgtInt32, _tgtArray),
+	makeIntrinsicMethod(f90token.IntrinsicSHAPE, "Shape", nil, _tgtArray), // returns array
 	// Array methods - 2 arg versions (with dimension)
-	makeIntrinsicMethod("SIZE", "SizeDim", _tgtInt32, _tgtArray, _tgtInt32),
-	makeIntrinsicMethod("LBOUND", "LowerDim", _tgtInt32, _tgtArray, _tgtInt32),
-	makeIntrinsicMethod("UBOUND", "UpperDim", _tgtInt32, _tgtArray, _tgtInt32),
+	makeIntrinsicMethod(f90token.IntrinsicSIZE, "SizeDim", _tgtInt32, _tgtArray, _tgtInt32),
+	makeIntrinsicMethod(f90token.IntrinsicLBOUND, "LowerDim", _tgtInt32, _tgtArray, _tgtInt32),
+	makeIntrinsicMethod(f90token.IntrinsicUBOUND, "UpperDim", _tgtInt32, _tgtArray, _tgtInt32),
 
 	// Note: MALLOC is handled specially in transformMALLOC, not here
 }

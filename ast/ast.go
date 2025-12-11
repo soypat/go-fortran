@@ -220,8 +220,8 @@ type ProgramBlock struct {
 var _ ProgramUnit = (*ProgramBlock)(nil) // compile time check of interface implementation.
 
 func (pb *ProgramBlock) GetLabel() *string { return &pb.Label }
-func (pb *ProgramBlock) UnitData() any    { return pb.Data }
-func (pb *ProgramBlock) UnitName() string { return pb.Name }
+func (pb *ProgramBlock) UnitData() any     { return pb.Data }
+func (pb *ProgramBlock) UnitName() string  { return pb.Name }
 
 func (pb *ProgramBlock) statementNode()     {}
 func (pb *ProgramBlock) programUnitNode()   {}
@@ -427,8 +427,8 @@ type BlockData struct {
 var _ ProgramUnit = (*BlockData)(nil) // compile time check of interface implementation.
 
 func (bd *BlockData) GetLabel() *string { return &bd.Label }
-func (pb *BlockData) UnitData() any    { return pb.Data }
-func (pb *BlockData) UnitName() string { return pb.Name }
+func (pb *BlockData) UnitData() any     { return pb.Data }
+func (pb *BlockData) UnitName() string  { return pb.Name }
 
 func (bd *BlockData) statementNode()     {}
 func (bd *BlockData) programUnitNode()   {}
@@ -736,7 +736,7 @@ type ParameterStmt struct {
 
 var _ Statement = (*ParameterStmt)(nil)
 
-func (ps *ParameterStmt) GetLabel() *string { return nil }
+func (ps *ParameterStmt) GetLabel() *string  { return nil }
 func (ps *ParameterStmt) statementNode()     {}
 func (ps *ParameterStmt) IsExecutable() bool { return false }
 func (ps *ParameterStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -936,7 +936,7 @@ type DataStmt struct {
 
 var _ Statement = (*DataStmt)(nil)
 
-func (ds *DataStmt) GetLabel() *string { return &ds.Label }
+func (ds *DataStmt) GetLabel() *string  { return &ds.Label }
 func (ds *DataStmt) statementNode()     {}
 func (ds *DataStmt) IsExecutable() bool { return false }
 func (ds *DataStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -1124,6 +1124,13 @@ type DeclEntity struct {
 	KindOrLen Expression // Non-default kind or character length. Old F77 syntax. CHARACTER a*8 : character string of length 8.
 	Init      Expression
 	Position
+}
+
+func (de *DeclEntity) Element() token.Token {
+	if de.Type != nil {
+		return de.Type.Token
+	}
+	return 0
 }
 
 func (de *DeclEntity) Kind() Expression {
@@ -1737,7 +1744,7 @@ type ArithmeticIfStmt struct {
 
 var _ Statement = (*ArithmeticIfStmt)(nil)
 
-func (ais *ArithmeticIfStmt) GetLabel() *string { return &ais.Label }
+func (ais *ArithmeticIfStmt) GetLabel() *string  { return &ais.Label }
 func (ais *ArithmeticIfStmt) statementNode()     {}
 func (ais *ArithmeticIfStmt) IsExecutable() bool { return true }
 func (ais *ArithmeticIfStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -1846,7 +1853,7 @@ type SelectCaseStmt struct {
 
 var _ Statement = (*SelectCaseStmt)(nil)
 
-func (s *SelectCaseStmt) GetLabel() *string { return &s.Label }
+func (s *SelectCaseStmt) GetLabel() *string  { return &s.Label }
 func (s *SelectCaseStmt) statementNode()     {}
 func (s *SelectCaseStmt) IsExecutable() bool { return true }
 func (s *SelectCaseStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2157,7 +2164,7 @@ type ComputedGotoStmt struct {
 
 var _ Statement = (*ComputedGotoStmt)(nil)
 
-func (cgs *ComputedGotoStmt) GetLabel() *string { return &cgs.Label }
+func (cgs *ComputedGotoStmt) GetLabel() *string  { return &cgs.Label }
 func (cgs *ComputedGotoStmt) statementNode()     {}
 func (cgs *ComputedGotoStmt) IsExecutable() bool { return true }
 func (cgs *ComputedGotoStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2196,7 +2203,7 @@ type AssignedGotoStmt struct {
 
 var _ Statement = (*AssignedGotoStmt)(nil)
 
-func (ags *AssignedGotoStmt) GetLabel() *string { return &ags.Label }
+func (ags *AssignedGotoStmt) GetLabel() *string  { return &ags.Label }
 func (ags *AssignedGotoStmt) statementNode()     {}
 func (ags *AssignedGotoStmt) IsExecutable() bool { return true }
 func (ags *AssignedGotoStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2237,7 +2244,7 @@ type InquireStmt struct {
 
 var _ Statement = (*InquireStmt)(nil)
 
-func (is *InquireStmt) GetLabel() *string { return &is.Label }
+func (is *InquireStmt) GetLabel() *string  { return &is.Label }
 func (is *InquireStmt) statementNode()     {}
 func (is *InquireStmt) IsExecutable() bool { return true }
 func (is *InquireStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2318,7 +2325,7 @@ type CloseStmt struct {
 
 var _ Statement = (*CloseStmt)(nil)
 
-func (cs *CloseStmt) GetLabel() *string { return &cs.Label }
+func (cs *CloseStmt) GetLabel() *string  { return &cs.Label }
 func (cs *CloseStmt) statementNode()     {}
 func (cs *CloseStmt) IsExecutable() bool { return true }
 func (cs *CloseStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2481,7 +2488,7 @@ type BackspaceStmt struct {
 
 var _ Statement = (*BackspaceStmt)(nil)
 
-func (bs *BackspaceStmt) GetLabel() *string { return &bs.Label }
+func (bs *BackspaceStmt) GetLabel() *string  { return &bs.Label }
 func (bs *BackspaceStmt) statementNode()     {}
 func (bs *BackspaceStmt) IsExecutable() bool { return true }
 func (bs *BackspaceStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2520,7 +2527,7 @@ type RewindStmt struct {
 
 var _ Statement = (*RewindStmt)(nil)
 
-func (rs *RewindStmt) GetLabel() *string { return &rs.Label }
+func (rs *RewindStmt) GetLabel() *string  { return &rs.Label }
 func (rs *RewindStmt) statementNode()     {}
 func (rs *RewindStmt) IsExecutable() bool { return true }
 func (rs *RewindStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2559,7 +2566,7 @@ type EndfileStmt struct {
 
 var _ Statement = (*EndfileStmt)(nil)
 
-func (es *EndfileStmt) GetLabel() *string { return &es.Label }
+func (es *EndfileStmt) GetLabel() *string  { return &es.Label }
 func (es *EndfileStmt) statementNode()     {}
 func (es *EndfileStmt) IsExecutable() bool { return true }
 func (es *EndfileStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2598,7 +2605,7 @@ type StopStmt struct {
 
 var _ Statement = (*StopStmt)(nil)
 
-func (ss *StopStmt) GetLabel() *string { return &ss.Label }
+func (ss *StopStmt) GetLabel() *string  { return &ss.Label }
 func (ss *StopStmt) statementNode()     {}
 func (ss *StopStmt) IsExecutable() bool { return true }
 func (ss *StopStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2631,7 +2638,7 @@ type FormatStmt struct {
 
 var _ Statement = (*FormatStmt)(nil)
 
-func (fs *FormatStmt) GetLabel() *string { return &fs.Label }
+func (fs *FormatStmt) GetLabel() *string  { return &fs.Label }
 func (fs *FormatStmt) statementNode()     {}
 func (fs *FormatStmt) IsExecutable() bool { return false } // FORMAT is a non-executable specification
 func (fs *FormatStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2667,7 +2674,7 @@ type AllocateStmt struct {
 
 var _ Statement = (*AllocateStmt)(nil)
 
-func (as *AllocateStmt) GetLabel() *string { return &as.Label }
+func (as *AllocateStmt) GetLabel() *string  { return &as.Label }
 func (as *AllocateStmt) statementNode()     {}
 func (as *AllocateStmt) IsExecutable() bool { return true }
 func (as *AllocateStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2710,7 +2717,7 @@ type DeallocateStmt struct {
 
 var _ Statement = (*DeallocateStmt)(nil)
 
-func (ds *DeallocateStmt) GetLabel() *string { return &ds.Label }
+func (ds *DeallocateStmt) GetLabel() *string  { return &ds.Label }
 func (ds *DeallocateStmt) statementNode()     {}
 func (ds *DeallocateStmt) IsExecutable() bool { return true }
 func (ds *DeallocateStmt) AppendTokenLiteral(dst []byte) []byte {
