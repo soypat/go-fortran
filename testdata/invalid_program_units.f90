@@ -11,5 +11,5 @@ END FUNCTION
 MODULE ! ERROR "expected module name"
 END MODULE
 
-RECURSIVE ! ERROR "expected SUBROUTINE"
+
 

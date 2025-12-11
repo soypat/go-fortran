@@ -5,10 +5,10 @@
 ! Invalid: PROGRAM with no name
 ! Note: The specification statements below won't be parsed, just the structural error
 PROGRAM ! ERROR "expected program name"
-
+END PROGRAM
 ! Invalid: MODULE with no name
 MODULE ! ERROR "expected module name"
-
+END MODULE
 ! The following errors will only be detected in Phase 2
 ! (when specification statement parsing is implemented)
 ! For now, they parse successfully as the statements are collected as tokens
