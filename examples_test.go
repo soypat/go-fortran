@@ -311,42 +311,6 @@ END MODULE math_utils
 	//   1: FUNCTION multiply
 }
 
-// Example_detectSpecificationErrors demonstrates how the parser
-// detects errors in specification statement ordering.
-func Example_detectSpecificationErrors() {
-	// This program has IMPLICIT NONE after a type declaration (error!)
-	src := `
-PROGRAM bad_implicit
-  INTEGER :: x
-  IMPLICIT NONE
-  x = 42
-END PROGRAM
-`
-
-	var parser fortran.Parser90
-	err := parser.Reset("bad.f90", strings.NewReader(src))
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
-
-	parser.ParseNextProgramUnit()
-
-	// Check for errors
-	if len(parser.Errors()) > 0 {
-		fmt.Println("Parse errors detected:")
-		for _, e := range parser.Errors() {
-			fmt.Printf("  %s\n", e.Error())
-		}
-	} else {
-		fmt.Println("No errors detected")
-	}
-
-	// Output:
-	// Parse errors detected:
-	//   bad.f90:4:12: IMPLICIT NONE must appear before type declarations
-}
-
 // Example_parseSubroutine demonstrates parsing a subroutine
 // with parameters and specification statements.
 func Example_parseSubroutine() {

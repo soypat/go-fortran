@@ -70,7 +70,7 @@ func (ch CharacterArray) At(i int) byte {
 	return ch.data[i-1]
 }
 
-func (ch CharacterArray) Set(i int, v byte) {
+func (ch CharacterArray) Set(v byte, i int) {
 	ch.data[i-1] = v
 }
 
@@ -90,6 +90,31 @@ func (ch *CharacterArray) SetFromString(data string) {
 		ch.data[i] = ' '
 	}
 	// Keep data at full capacity (Fortran semantics)
+}
+
+// SetSubstring sets a substring of the character array.
+// Fortran: str(start:end) = 'value'
+// Uses 1-based indexing.
+func (ch *CharacterArray) SetSubstring(start, end int, data string) {
+	ch.data = ch.data[:cap(ch.data)] // Ensure full capacity
+	// Convert to 0-based indexing
+	start--
+	// Clamp to bounds
+	if start < 0 {
+		start = 0
+	}
+	if end > cap(ch.data) {
+		end = cap(ch.data)
+	}
+	if start >= end {
+		return
+	}
+	// Copy data into the substring region
+	n := copy(ch.data[start:end], data)
+	// Pad the rest of the substring with spaces
+	for i := start + n; i < end; i++ {
+		ch.data[i] = ' '
+	}
 }
 
 func (ch *CharacterArray) SetConcat(toJoin ...CharacterArray) {

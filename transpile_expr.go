@@ -13,6 +13,9 @@ import (
 
 // transformExpression transforms a single Fortran expression to a Go expression
 func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result ast.Expr, resultType *Varinfo, err error) {
+	if expr == nil {
+		return nil, nil, tg.makeErrAtStmt("nil expression")
+	}
 	switch e := expr.(type) {
 	case *f90.StringLiteral:
 		resultType = _tgtStringLit
@@ -48,9 +51,9 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 
 	case *f90.Identifier:
 		result, resultType, err = tg.transformExprIdentifer(vitgt, e)
-	case *f90.ArrayRef:
-		result, err = tg.transformArrayRef(vitgt, e)
-		resultType = tg.repl.Var(e.Name)
+	case *f90.CallExpr:
+		// CallExpr: disambiguate between array access and function call
+		result, resultType, err = tg.transformFunctionCall(vitgt, e)
 	case *f90.BinaryExpr:
 		if e.Op == f90token.StringConcat {
 			err = tg.makeErrAtStmt("string concat special handling needed")
@@ -68,9 +71,6 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 			return nil, nil, err
 		}
 		result = &ast.ParenExpr{X: inner}
-	case *f90.FunctionCall:
-		// FunctionCall in expression: could be actual function or COMMON block array access
-		result, resultType, err = tg.transformFunctionCall(vitgt, e)
 
 	case *f90.ArrayConstructor:
 		resultType = vitgt
@@ -79,11 +79,14 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 		// Range expressions in subscripts (e.g., arr(1:5), str(2:3))
 		// TODO: implement proper range transformation
 		err = tg.makeErr(expr, "RangeExpr not yet implemented in transpiler")
+	case *f90.ComponentAccess:
+		// Component access: p%age → p.age
+		result, resultType, err = tg.transformComponentAccess(vitgt, e)
 	default:
 		err = tg.makeErr(expr, "unsupported expression")
 	}
 	if (result == nil || resultType == nil) && err == nil {
-		err = tg.makeErr(expr, "unhandled expression type, result or result type is nil")
+		err = tg.makeErr(expr, "unhandled expression type, result or result type is nil: "+string(expr.AppendString(nil)))
 	}
 	if err != nil {
 		return nil, nil, err
@@ -131,6 +134,35 @@ func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructo
 			&ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(len(e.Values))},
 		},
 	}, nil
+}
+
+// transformComponentAccess transforms Fortran component access (p%age) to Go field access (p.age).
+func (tg *ToGo) transformComponentAccess(vitgt *Varinfo, e *f90.ComponentAccess) (result ast.Expr, resultType *Varinfo, err error) {
+	// Get the base variable info for transformation
+	var baseVinfo *Varinfo
+	if ident, ok := e.Base.(*f90.Identifier); ok {
+		baseVinfo = tg.repl.Var(ident.Value)
+	}
+
+	// Transform the base expression using the base variable info
+	base, _, err := tg.transformExpression(baseVinfo, e.Base)
+	if err != nil {
+		return nil, nil, err
+	}
+	// TODO: add field ot varinfo: fields []struct{name string; type *TypeDeclaration} and search for field matches in case insensitive fashion.
+	// Create Go selector expression: base.Component
+	result = &ast.SelectorExpr{
+		X:   base,
+		Sel: ast.NewIdent(e.Component), // This can fail on a field case mismatch. Varinfo should have a fields slice and then component be searched in there.
+	}
+
+	// For now, return vitgt as resultType since we don't track derived type field types
+	// This works for simple cases where the target type is known
+	if vitgt != nil {
+		return result, vitgt, nil
+	}
+	// If no target type, use base variable info
+	return result, baseVinfo, nil
 }
 
 func (tg *ToGo) transformUnaryExpr(vitgt *Varinfo, e *f90.UnaryExpr) (result ast.Expr, resultType *Varinfo, err error) {
@@ -202,6 +234,8 @@ func normalizeTokenKind(tok f90token.Token, kind int) (f90token.Token, int) {
 		defaultKind = 4
 	case f90token.INTEGER:
 		defaultKind = 4
+	case f90token.LOGICAL:
+		defaultKind = 4
 	}
 	if kind == 0 {
 		kind = defaultKind
@@ -218,9 +252,19 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 	if err != nil {
 		return nil, nil, err
 	}
+	if tg.varIsCharlike(rightType) || tg.varIsCharlike(leftType) {
+		return tg.transformBinaryExprChar(vitgt, e.Op, left, right, leftType, rightType)
+	}
 	lpromote, rpromote, err := tg.checkPromotion(leftType, rightType)
 	if err != nil {
 		return nil, nil, err
+	}
+	// Result type is result of promotion. In switch/case statement boolean returnType is set for logical operations.
+	resultType = leftType
+	if lpromote != nil {
+		resultType = lpromote
+	} else if rpromote != nil {
+		resultType = rpromote
 	}
 	needsPromotion := lpromote != nil || rpromote != nil
 	// Map Fortran operator to Go operator
@@ -252,6 +296,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 			return tg.pointerNilComparison(right, token.EQL), _tgtBool, nil
 		}
 		op = token.EQL
+		resultType = _tgtBool
 	case f90token.NE, f90token.NotEquals:
 		// Special case: pointer comparison to 0 → ptr.DataUnsafe() != nil
 		if isPointerZeroComparison(leftType, rightType, e.Right) {
@@ -261,20 +306,27 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 			return tg.pointerNilComparison(right, token.NEQ), _tgtBool, nil
 		}
 		op = token.NEQ
+		resultType = _tgtBool
 	case f90token.LT, f90token.Less:
 		op = token.LSS
+		resultType = _tgtBool
 	case f90token.LE, f90token.LessEq:
 		op = token.LEQ
+		resultType = _tgtBool
 	case f90token.GT, f90token.Greater:
 		op = token.GTR
+		resultType = _tgtBool
 	case f90token.GE, f90token.GreaterEq:
 		op = token.GEQ
+		resultType = _tgtBool
 	case f90token.AND:
 		op = token.LAND
 		needsPromotion = false
+		resultType = _tgtBool
 	case f90token.OR:
 		op = token.LOR
 		needsPromotion = false
+		resultType = _tgtBool
 	case f90token.StringConcat:
 		return nil, nil, tg.makeErr(e, "string concat handled in transformExpression")
 	default:
@@ -282,13 +334,10 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 	}
 
 	// Promote operands to common type for arithmetic/comparison ops
-	resultType = leftType
 	if needsPromotion {
 		if lpromote != nil {
-			resultType = lpromote
 			left = tg.wrapConversion(lpromote, leftType, left)
 		} else if rpromote != nil {
-			resultType = rpromote
 			right = tg.wrapConversion(rpromote, rightType, right)
 		}
 	}
@@ -297,6 +346,55 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 		Op: op,
 		Y:  right,
 	}, resultType, nil
+}
+
+func (tg *ToGo) transformBinaryExprChar(vitgt *Varinfo, op f90token.Token, left, right ast.Expr, leftType, rightType *Varinfo) (result ast.Expr, resultType *Varinfo, err error) {
+	// Convert operands to Go strings for comparison
+	// - String literals are already Go strings
+	// - CharacterArray variables need .String() method call
+	leftStr := tg.charToGoString(left, leftType)
+	rightStr := tg.charToGoString(right, rightType)
+
+	// Map Fortran comparison operator to Go operator
+	var goOp token.Token
+	switch op {
+	case f90token.EQ, f90token.EqEq:
+		goOp = token.EQL
+	case f90token.NE, f90token.NotEquals:
+		goOp = token.NEQ
+	case f90token.LT, f90token.Less:
+		goOp = token.LSS
+	case f90token.LE, f90token.LessEq:
+		goOp = token.LEQ
+	case f90token.GT, f90token.Greater:
+		goOp = token.GTR
+	case f90token.GE, f90token.GreaterEq:
+		goOp = token.GEQ
+	default:
+		return nil, nil, tg.makeErrAtStmt("unsupported operator for character types: " + op.String())
+	}
+
+	return &ast.BinaryExpr{
+		X:  leftStr,
+		Op: goOp,
+		Y:  rightStr,
+	}, _tgtBool, nil
+}
+
+// charToGoString converts a character expression to a Go string expression.
+// String literals are already Go strings, CharacterArray variables need .String() call.
+func (tg *ToGo) charToGoString(expr ast.Expr, exprType *Varinfo) ast.Expr {
+	if exprType.typeToken() == f90token.StringLit {
+		// Already a Go string literal
+		return expr
+	}
+	// CharacterArray - call .String() method
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   expr,
+			Sel: ast.NewIdent("String"),
+		},
+	}
 }
 
 // isPointerZeroComparison checks if ptrType is a Cray pointer and other is literal 0.
@@ -322,21 +420,13 @@ func (tg *ToGo) pointerNilComparison(ptrExpr ast.Expr, op token.Token) ast.Expr 
 	}
 }
 
-func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.FunctionCall) (result ast.Expr, resultType *Varinfo, err error) {
+func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result ast.Expr, resultType *Varinfo, err error) {
 	vi := tg.repl.Var(e.Name)
 	if vi != nil {
-		// Check if this is a declared variable (COMMON block array access)
-		// Wrap indices in int() for Go's array methods
-		var args []ast.Expr
-		for _, expr := range e.Args {
-			arg, _, err := tg.transformExpression(_tgtInt, expr)
-			if err != nil {
-				return nil, nil, err
-			}
-			args = append(args, arg)
-		}
-		// Treat as array element access: arr.At(int(indices)...)
-		return tg.astMethodCall(e.Name, "At", args...), vi, nil
+		// It's a declared variable - route to array access handler
+		// which properly handles both element access and range expressions
+		result, err = tg.transformArrayRef(vitgt, e)
+		return result, vi, err
 	}
 
 	// Special handling for MALLOC - type parameter comes from target's pointee
@@ -344,7 +434,7 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.FunctionCall) (resu
 		return tg.transformMALLOC(vitgt, e)
 	}
 
-	fi := tg.ContainedOrExtern(e.Name)
+	fi := tg.ContainedOrUsed(e.Name)
 	if fi == nil {
 		fn := getIntrinsic(e.Name, len(e.Args))
 		if fn == nil {
@@ -380,7 +470,7 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.FunctionCall) (resu
 // transformMALLOC handles MALLOC intrinsic specially.
 // MALLOC returns PointerTo[T] where T comes from the target's pointee type.
 // Generates: intrinsic.MALLOC[T](size)
-func (tg *ToGo) transformMALLOC(vitgt *Varinfo, e *f90.FunctionCall) (result ast.Expr, resultType *Varinfo, err error) {
+func (tg *ToGo) transformMALLOC(vitgt *Varinfo, e *f90.CallExpr) (result ast.Expr, resultType *Varinfo, err error) {
 	if len(e.Args) != 1 {
 		return nil, nil, tg.makeErr(e, "MALLOC requires 1 argument")
 	}
@@ -415,15 +505,15 @@ func (tg *ToGo) transformMALLOC(vitgt *Varinfo, e *f90.FunctionCall) (result ast
 	return call, vitgt, nil
 }
 
-func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.ArrayRef) (result ast.Expr, err error) {
-	if e.Base != nil {
-		return nil, tg.makeErr(e, "chained ArrayRef expression not yet implemented")
+func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.CallExpr) (result ast.Expr, err error) {
+	if e.SecondaryAccess != nil {
+		return nil, tg.makeErr(e, "chained CallExpr expression not yet implemented")
 	}
 	vi := tg.repl.Var(e.Name)
-	isRanged := e.IsRanged()
-	if isRanged && len(e.Subscripts) == 1 {
+	isRanged := f90.IsRanged(e.Args...)
+	if isRanged && len(e.Args) == 1 {
 		// Substring access: str(2:4) → str.Substring(start, end)
-		args, err := tg.transformRangeExprToArgs(e.Subscripts[0].(*f90.RangeExpr), vi)
+		args, err := tg.transformRangeExprToArgs(e.Args[0].(*f90.RangeExpr), vi)
 		receiver := tg.astVarExpr(vi)
 		return &ast.CallExpr{
 			Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("Substring")},
@@ -432,7 +522,7 @@ func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.ArrayRef) (result ast.E
 	}
 	// Regular element access: arr(i) → arr.At(int(indices)...)
 	var args []ast.Expr
-	for _, expr := range e.Subscripts {
+	for _, expr := range e.Args {
 		arg, _, err := tg.transformExpression(_tgtInt, expr)
 		if err != nil {
 			return nil, err
@@ -459,9 +549,21 @@ func (tg *ToGo) astVarExpr(vi *Varinfo) ast.Expr {
 	return ast.NewIdent(vi.Identifier())
 }
 
-func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs ast.Expr) (_ []ast.Stmt, err error) {
-	if fexpr.Base != nil {
-		return dst, tg.makeErr(fexpr, "chained ArrayRef assignment not yet implemented")
+// astSetCall generates: receiver.Set(value, indices...)
+// Works for Array[T], PointerTo[T], and CharacterArray.
+func (tg *ToGo) astSetCall(receiver, value ast.Expr, indices ...ast.Expr) *ast.CallExpr {
+	args := make([]ast.Expr, 0, 1+len(indices))
+	args = append(args, value)
+	args = append(args, indices...)
+	return &ast.CallExpr{
+		Fun:  &ast.SelectorExpr{X: receiver, Sel: _astSet},
+		Args: args,
+	}
+}
+
+func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.CallExpr, rhs ast.Expr) (_ []ast.Stmt, err error) {
+	if fexpr.SecondaryAccess != nil {
+		return dst, tg.makeErr(fexpr, "chained CallExpr assignment not yet implemented")
 	}
 	vitgt := tg.repl.Var(fexpr.Name)
 	if vitgt == nil {
@@ -472,34 +574,74 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs as
 		return tg.transformSetCharacterArray(dst, fexpr, rhs)
 	}
 
+	// Check for whole-array assignment: arr(:) = v → arr.SetAll(v)
+	isRanged := f90.IsRanged(fexpr.Args...)
+	if isRanged {
+		// Check if it's a simple whole-array assignment (single ":" subscript with no bounds)
+		if len(fexpr.Args) == 1 {
+			if rng, ok := fexpr.Args[0].(*f90.RangeExpr); ok && rng.Start == nil && rng.End == nil {
+				receiver := tg.astVarExpr(vitgt)
+				gstmt := &ast.ExprStmt{
+					X: &ast.CallExpr{
+						Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("SetAll")},
+						Args: []ast.Expr{rhs},
+					},
+				}
+				dst = append(dst, gstmt)
+				return dst, nil
+			}
+		}
+		return dst, tg.makeErr(fexpr, "partial range array assignment not yet implemented")
+	}
+
 	// Regular element assignment: arr(i) = v → arr.Set(value, int(indices)...)
-	args := []ast.Expr{rhs}
-	for _, expr := range fexpr.Subscripts {
+	indices := make([]ast.Expr, 0, len(fexpr.Args))
+	for _, expr := range fexpr.Args {
 		arg, _, err := tg.transformExpression(_tgtInt, expr)
 		if err != nil {
 			return dst, err
 		}
-		// Wrap in int() conversion for Go's array methods
-		args = append(args, arg)
+		indices = append(indices, arg)
 	}
 	receiver := tg.astVarExpr(vitgt)
-	gstmt := &ast.ExprStmt{
-		X: &ast.CallExpr{
-			Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("Set")},
-			Args: args,
-		},
-	}
-	dst = append(dst, gstmt)
+	dst = append(dst, &ast.ExprStmt{X: tg.astSetCall(receiver, rhs, indices...)})
 	return dst, nil
 }
 
-func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.ArrayRef, rhs ast.Expr) (_ []ast.Stmt, err error) {
+func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.CallExpr, rhs ast.Expr) (_ []ast.Stmt, err error) {
 	vi := tg.repl.Var(fexpr.Name)
-	isRanged := fexpr.IsRanged()
-	if tg.varIsArray(vi) || isRanged && len(fexpr.Subscripts) > 1 || fexpr.Base != nil {
+	isRanged := f90.IsRanged(fexpr.Args...)
+
+	// If this is an array of characters with integer subscripts (not range), use AtPtr().SetFromString()
+	if len(fexpr.Args) > 0 && !isRanged {
+		// CHARACTER array element assignment: arr(i,j) = 'ABC' → arr.AtPtr(i,j).SetFromString("ABC")
+		indices := make([]ast.Expr, 0, len(fexpr.Args))
+		for _, expr := range fexpr.Args {
+			arg, _, err := tg.transformExpression(_tgtInt, expr)
+			if err != nil {
+				return dst, err
+			}
+			indices = append(indices, arg)
+		}
+		receiver := tg.astVarExpr(vi)
+		// Generate: arr.AtPtr(indices...).SetFromString(rhs)
+		atPtrCall := &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("AtPtr")},
+			Args: indices,
+		}
+		dst = append(dst, &ast.ExprStmt{
+			X: &ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: atPtrCall, Sel: ast.NewIdent("SetFromString")},
+				Args: []ast.Expr{rhs},
+			},
+		})
+		return dst, nil
+	}
+
+	if tg.varIsArray(vi) || isRanged && len(fexpr.Args) > 1 || fexpr.SecondaryAccess != nil {
 		return dst, tg.makeErrWithPos(fexpr.Position, "unsupported character type attributes for range set")
 	}
-	args, err := tg.transformRangeExprToArgs(fexpr.Subscripts[0].(*f90.RangeExpr), vi)
+	args, err := tg.transformRangeExprToArgs(fexpr.Args[0].(*f90.RangeExpr), vi)
 	if err != nil {
 		return dst, err
 	}
@@ -892,6 +1034,7 @@ func defaultVarinfo(tok f90token.Token) *Varinfo {
 var (
 	_astFalse        = ast.NewIdent("false")
 	_astTrue         = ast.NewIdent("true")
+	_astSet          = ast.NewIdent("Set")
 	_astOne          = &ast.BasicLit{Kind: token.INT, Value: "1"}
 	_tgtInt32        = defaultVarinfo(f90token.INTEGER)
 	_tgtInt          = defaultVarinfo(f90token.INTEGER)

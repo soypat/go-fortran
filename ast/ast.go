@@ -24,7 +24,8 @@ type Expression interface {
 type Statement interface {
 	Node
 	statementNode()
-	GetLabel() string
+	GetLabel() *string
+	IsExecutable() bool
 }
 
 // ProgramUnit represents a top-level construct (PROGRAM, SUBROUTINE, FUNCTION, MODULE)
@@ -167,7 +168,7 @@ type Program struct {
 	Label string
 }
 
-func (p *Program) GetLabel() string { return p.Label }
+func (p *Program) GetLabel() *string { return &p.Label }
 
 func (p *Program) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "PROGRAM"...)
@@ -218,12 +219,13 @@ type ProgramBlock struct {
 
 var _ ProgramUnit = (*ProgramBlock)(nil) // compile time check of interface implementation.
 
-func (pb *ProgramBlock) GetLabel() string { return pb.Label }
+func (pb *ProgramBlock) GetLabel() *string { return &pb.Label }
 func (pb *ProgramBlock) UnitData() any    { return pb.Data }
 func (pb *ProgramBlock) UnitName() string { return pb.Name }
 
-func (pb *ProgramBlock) statementNode()   {}
-func (pb *ProgramBlock) programUnitNode() {}
+func (pb *ProgramBlock) statementNode()     {}
+func (pb *ProgramBlock) programUnitNode()   {}
+func (pb *ProgramBlock) IsExecutable() bool { return false }
 func (pb *ProgramBlock) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "PROGRAM"...)
 }
@@ -264,12 +266,13 @@ type Subroutine struct {
 
 var _ ProgramUnit = (*Subroutine)(nil) // compile time check of interface implementation.
 
-func (s *Subroutine) GetLabel() string  { return s.Label }
+func (s *Subroutine) GetLabel() *string { return &s.Label }
 func (pb *Subroutine) UnitData() any    { return pb.Data }
 func (pb *Subroutine) UnitName() string { return pb.Name }
 
-func (s *Subroutine) statementNode()   {}
-func (s *Subroutine) programUnitNode() {}
+func (s *Subroutine) statementNode()     {}
+func (s *Subroutine) programUnitNode()   {}
+func (s *Subroutine) IsExecutable() bool { return false }
 func (s *Subroutine) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "SUBROUTINE"...)
 }
@@ -318,12 +321,13 @@ type Function struct {
 
 var _ ProgramUnit = (*Function)(nil) // compile time check of interface implementation.
 
-func (f *Function) GetLabel() string  { return f.Label }
+func (f *Function) GetLabel() *string { return &f.Label }
 func (pb *Function) UnitData() any    { return pb.Data }
 func (pb *Function) UnitName() string { return pb.Name }
 
-func (f *Function) statementNode()   {}
-func (f *Function) programUnitNode() {}
+func (f *Function) statementNode()     {}
+func (f *Function) programUnitNode()   {}
+func (f *Function) IsExecutable() bool { return false }
 func (f *Function) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "FUNCTION"...)
 }
@@ -377,12 +381,13 @@ type Module struct {
 
 var _ ProgramUnit = (*Module)(nil) // compile time check of interface implementation.
 
-func (m *Module) GetLabel() string  { return m.Label }
+func (m *Module) GetLabel() *string { return &m.Label }
 func (pb *Module) UnitData() any    { return pb.Data }
 func (pb *Module) UnitName() string { return pb.Name }
 
-func (m *Module) statementNode()   {}
-func (m *Module) programUnitNode() {}
+func (m *Module) statementNode()     {}
+func (m *Module) programUnitNode()   {}
+func (m *Module) IsExecutable() bool { return false }
 func (m *Module) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "MODULE"...)
 }
@@ -421,12 +426,13 @@ type BlockData struct {
 
 var _ ProgramUnit = (*BlockData)(nil) // compile time check of interface implementation.
 
-func (bd *BlockData) GetLabel() string { return bd.Label }
+func (bd *BlockData) GetLabel() *string { return &bd.Label }
 func (pb *BlockData) UnitData() any    { return pb.Data }
 func (pb *BlockData) UnitName() string { return pb.Name }
 
-func (bd *BlockData) statementNode()   {}
-func (bd *BlockData) programUnitNode() {}
+func (bd *BlockData) statementNode()     {}
+func (bd *BlockData) programUnitNode()   {}
+func (bd *BlockData) IsExecutable() bool { return false }
 func (bd *BlockData) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "BLOCKDATA"...)
 }
@@ -522,9 +528,10 @@ func (is *ImplicitStatement) ImplicitTypeFor(ident string) *TypeSpec {
 
 var _ Statement = (*ImplicitStatement)(nil) // compile time check of interface implementation.
 
-func (is *ImplicitStatement) GetLabel() string { return is.Label }
+func (is *ImplicitStatement) GetLabel() *string { return &is.Label }
 
-func (is *ImplicitStatement) statementNode() {}
+func (is *ImplicitStatement) statementNode()     {}
+func (is *ImplicitStatement) IsExecutable() bool { return false }
 func (is *ImplicitStatement) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "IMPLICIT"...)
 }
@@ -580,9 +587,10 @@ type UseStatement struct {
 
 var _ Statement = (*UseStatement)(nil) // compile time check of interface implementation.
 
-func (us *UseStatement) GetLabel() string { return us.Label }
+func (us *UseStatement) GetLabel() *string { return &us.Label }
 
-func (us *UseStatement) statementNode() {}
+func (us *UseStatement) statementNode()     {}
+func (us *UseStatement) IsExecutable() bool { return false }
 func (us *UseStatement) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "USE"...)
 }
@@ -621,9 +629,10 @@ type CommonStmt struct {
 
 var _ Statement = (*CommonStmt)(nil) // compile time check of interface implementation.
 
-func (cs *CommonStmt) GetLabel() string { return cs.Label }
+func (cs *CommonStmt) GetLabel() *string { return &cs.Label }
 
-func (cs *CommonStmt) statementNode() {}
+func (cs *CommonStmt) statementNode()     {}
+func (cs *CommonStmt) IsExecutable() bool { return false }
 func (cs *CommonStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "COMMON"...)
 }
@@ -661,9 +670,10 @@ type ExternalStmt struct {
 
 var _ Statement = (*ExternalStmt)(nil) // compile time check of interface implementation.
 
-func (es *ExternalStmt) GetLabel() string { return es.Label }
+func (es *ExternalStmt) GetLabel() *string { return &es.Label }
 
-func (es *ExternalStmt) statementNode() {}
+func (es *ExternalStmt) statementNode()     {}
+func (es *ExternalStmt) IsExecutable() bool { return false }
 func (es *ExternalStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "EXTERNAL"...)
 }
@@ -694,9 +704,10 @@ type IntrinsicStmt struct {
 
 var _ Statement = (*IntrinsicStmt)(nil) // compile time check of interface implementation.
 
-func (is *IntrinsicStmt) GetLabel() string { return is.Label }
+func (is *IntrinsicStmt) GetLabel() *string { return &is.Label }
 
-func (is *IntrinsicStmt) statementNode() {}
+func (is *IntrinsicStmt) statementNode()     {}
+func (is *IntrinsicStmt) IsExecutable() bool { return false }
 func (is *IntrinsicStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "INTRINSIC"...)
 }
@@ -711,6 +722,28 @@ func (is *IntrinsicStmt) AppendString(dst []byte) []byte {
 		dst = append(dst, name...)
 	}
 	return dst
+}
+
+// ParameterStmt declares named constants using F77 PARAMETER statement syntax.
+//
+// Example:
+//
+//	PARAMETER (PI=3.14159, MAXN=100)
+type ParameterStmt struct {
+	Decls []DeclEntity
+	Position
+}
+
+var _ Statement = (*ParameterStmt)(nil)
+
+func (ps *ParameterStmt) GetLabel() *string { return nil }
+func (ps *ParameterStmt) statementNode()     {}
+func (ps *ParameterStmt) IsExecutable() bool { return false }
+func (ps *ParameterStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "PARAMETER"...)
+}
+func (ps *ParameterStmt) AppendString(dst []byte) []byte {
+	return append(dst, "PARAMETER (...)"...)
 }
 
 // DimensionStmt declares array dimensions for variables using IMPLICIT typing.
@@ -728,9 +761,10 @@ type DimensionStmt struct {
 
 var _ Statement = (*DimensionStmt)(nil) // compile time check of interface implementation.
 
-func (ds *DimensionStmt) GetLabel() string { return ds.Label }
+func (ds *DimensionStmt) GetLabel() *string { return &ds.Label }
 
-func (ds *DimensionStmt) statementNode() {}
+func (ds *DimensionStmt) statementNode()     {}
+func (ds *DimensionStmt) IsExecutable() bool { return false }
 func (ds *DimensionStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "DIMENSION"...)
 }
@@ -785,7 +819,7 @@ func (ds *DimensionStmt) AppendString(dst []byte) []byte {
 // This makes DEFALT and I_DEFALT(1) occupy the same 8 bytes of memory,
 // allowing the same memory to be viewed as either a float64 or two int32 values.
 type EquivalenceStmt struct {
-	Sets [][]ArrayRef
+	Sets [][]CallExpr
 	// Sets  [][]Expression // Each set is a list of variable names/refs that share memory
 	Label string
 	Position
@@ -793,9 +827,10 @@ type EquivalenceStmt struct {
 
 var _ Statement = (*EquivalenceStmt)(nil) // compile time check of interface implementation.
 
-func (es *EquivalenceStmt) GetLabel() string { return es.Label }
+func (es *EquivalenceStmt) GetLabel() *string { return &es.Label }
 
-func (es *EquivalenceStmt) statementNode() {}
+func (es *EquivalenceStmt) statementNode()     {}
+func (es *EquivalenceStmt) IsExecutable() bool { return false }
 func (es *EquivalenceStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "EQUIVALENCE"...)
 }
@@ -842,9 +877,10 @@ type PointerCrayPair struct {
 
 var _ Statement = (*PointerCrayStmt)(nil) // compile time check
 
-func (ps *PointerCrayStmt) GetLabel() string { return ps.Label }
+func (ps *PointerCrayStmt) GetLabel() *string { return &ps.Label }
 
-func (ps *PointerCrayStmt) statementNode() {}
+func (ps *PointerCrayStmt) statementNode()     {}
+func (ps *PointerCrayStmt) IsExecutable() bool { return false }
 
 func (ps *PointerCrayStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "POINTER"...)
@@ -900,8 +936,9 @@ type DataStmt struct {
 
 var _ Statement = (*DataStmt)(nil)
 
-func (ds *DataStmt) GetLabel() string { return ds.Label }
-func (ds *DataStmt) statementNode()   {}
+func (ds *DataStmt) GetLabel() *string { return &ds.Label }
+func (ds *DataStmt) statementNode()     {}
+func (ds *DataStmt) IsExecutable() bool { return false }
 func (ds *DataStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "DATA"...)
 }
@@ -930,9 +967,10 @@ type TypeDeclaration struct {
 
 var _ Statement = (*TypeDeclaration)(nil) // compile time check of interface implementation.
 
-func (td *TypeDeclaration) GetLabel() string { return td.Label }
+func (td *TypeDeclaration) GetLabel() *string { return &td.Label }
 
-func (td *TypeDeclaration) statementNode() {}
+func (td *TypeDeclaration) statementNode()     {}
+func (td *TypeDeclaration) IsExecutable() bool { return false }
 func (td *TypeDeclaration) AppendTokenLiteral(dst []byte) []byte {
 	return td.Type.AppendString(dst)
 }
@@ -1092,10 +1130,16 @@ func (de *DeclEntity) Kind() Expression {
 	if de.KindOrLen != nil {
 		return de.KindOrLen
 	}
+	if de.Type == nil {
+		return nil
+	}
 	return de.Type.Kind()
 }
 
 func (de *DeclEntity) Charlen() Expression {
+	if de.Type == nil {
+		return nil
+	}
 	if de.Type.Token == token.CHARACTER && de.KindOrLen != nil {
 		return de.KindOrLen
 	}
@@ -1105,6 +1149,9 @@ func (de *DeclEntity) Charlen() Expression {
 func (de *DeclEntity) Dimension() *ArraySpec {
 	if de.ArraySpec != nil {
 		return de.ArraySpec
+	}
+	if de.Type == nil {
+		return nil
 	}
 	return de.Type.Dimension()
 }
@@ -1354,6 +1401,20 @@ func (ara *AlternateReturnArg) AppendString(dst []byte) []byte {
 	return dst
 }
 
+type parensExpr interface {
+	Expression
+	AppendStringParens([]byte) []byte
+}
+
+func appendParenExpr(dst []byte, expr Expression) []byte {
+	if p, ok := expr.(parensExpr); ok {
+		dst = p.AppendStringParens(dst)
+	} else {
+		dst = expr.AppendString(dst)
+	}
+	return dst
+}
+
 // BinaryExpr represents a binary operation with two operands. Fortran supports
 // arithmetic operators (+, -, *, /, **), relational operators (.LT., .GT., etc.),
 // and logical operators (.AND., .OR., .NOT.).
@@ -1373,6 +1434,7 @@ type BinaryExpr struct {
 }
 
 var _ Expression = (*BinaryExpr)(nil) // compile time check of interface implementation.
+var _ parensExpr = (*BinaryExpr)(nil)
 
 func (be *BinaryExpr) expressionNode() {}
 func (be *BinaryExpr) AppendTokenLiteral(dst []byte) []byte {
@@ -1384,6 +1446,21 @@ func (be *BinaryExpr) AppendString(dst []byte) []byte {
 	dst = append(dst, be.Op.String()...)
 	dst = append(dst, ' ')
 	dst = be.Right.AppendString(dst)
+	return dst
+}
+func (be *BinaryExpr) AppendStringParens(dst []byte) []byte {
+	dst = append(dst, '(')
+	dst = appendParenExpr(dst, be.Left)
+	dst = append(dst, be.Op.String()...)
+	dst = appendParenExpr(dst, be.Right)
+	dst = append(dst, ')')
+	return dst
+}
+func (ue *UnaryExpr) AppendStringParens(dst []byte) []byte {
+	dst = append(dst, '(')
+	dst = append(dst, ue.Op.String()...)
+	dst = appendParenExpr(dst, ue.Operand)
+	dst = append(dst, ')')
 	return dst
 }
 
@@ -1404,6 +1481,7 @@ type UnaryExpr struct {
 }
 
 var _ Expression = (*UnaryExpr)(nil) // compile time check of interface implementation.
+var _ parensExpr = (*UnaryExpr)(nil)
 
 func (ue *UnaryExpr) expressionNode() {}
 func (ue *UnaryExpr) AppendTokenLiteral(dst []byte) []byte {
@@ -1416,34 +1494,41 @@ func (ue *UnaryExpr) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// FunctionCall represents an invocation of a function that returns a value.
-// Functions can be intrinsic (built-in) or user-defined. Unlike [CallStmt]
-// for subroutines, function calls appear in expressions.
-//
-// Example:
-//
-//	<function-name>([<argument-list>])
-//	sqrt(x)
-//	max(a, b, c)
-//	my_function(i, j)
-type FunctionCall struct {
+// CallExpr represents an expression called on a set of arguments with parentheses.
+// Fortran allows for a great variety of statements/expressions to be represented as call expressions
+// and their specialization depends on several factors which make identification hard without
+// context, thus CallExpr expresses this ambiguitity of Fortran source code. Examples:
+//   - function/intrinsic call: <funcion>(<argument-list>)
+//   - subroutine call: <subroutine>(<argument list>)
+//   - array access: <array>(<indices>)
+//   - array range access: <array>(<range spec>)
+//   - character access: <character>(<index>)
+//   - character range access: <character>(<range spec>)
+//   - array-character range access: <character array>(<indices>)(<range spec or index>)
+//   - statement function declaration: <function>(<dummy arguments>)
+type CallExpr struct {
 	Name string
+	// Args are the comma-separated expressions contained within parentheses.
 	Args []Expression
+	// Character arrays can have two calls, first one is indices Args
+	// and the secondary access is into the resulting character array at said indices.
+	// SecondaryAccess can be a integer expression or a [RangeExpr].
+	SecondaryAccess Expression
 	Position
 }
 
-var _ Expression = (*FunctionCall)(nil) // compile time check of interface implementation.
+var _ Expression = (*CallExpr)(nil)  // compile time check of interface implementation.
+func (pb *CallExpr) expressionNode() {}
 
-func (fc *FunctionCall) expressionNode() {}
-func (fc *FunctionCall) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "CALL"...)
+func (pb *CallExpr) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "CALLEXPR"...)
 }
-func (fc *FunctionCall) AppendString(dst []byte) []byte {
-	dst = append(dst, fc.Name...)
+func (pb *CallExpr) AppendString(dst []byte) []byte {
+	dst = append(dst, pb.Name...)
 	dst = append(dst, '(')
-	for i, arg := range fc.Args {
-		if i > 0 {
-			dst = append(dst, ", "...)
+	for i, arg := range pb.Args {
+		if i != 0 {
+			dst = append(dst, ',')
 		}
 		dst = arg.AppendString(dst)
 	}
@@ -1451,65 +1536,14 @@ func (fc *FunctionCall) AppendString(dst []byte) []byte {
 	return dst
 }
 
-// ArrayRef represents array element access, array sections, or substrings.
-// Either Name or Base is set, not both:
-//   - Name: direct variable access like arr(i) or str(2:5)
-//   - Base: chained access like arr(i)(2:3) where Base is the preceding expression
-//
-// Subscripts can be integers (element access) or RangeExpr (section/substring).
-//
-// Examples:
-//
-//	arr(i)           → ArrayRef{Name: "arr", Subscripts: [i]}
-//	arr(1:5)         → ArrayRef{Name: "arr", Subscripts: [RangeExpr]}
-//	arr(i)(2:3)      → ArrayRef{Base: ArrayRef{...}, Subscripts: [RangeExpr]}
-type ArrayRef struct {
-	Name       string     // Variable name (empty if Base is set)
-	Base       Expression // Preceding expression for chained access
-	Subscripts []Expression
-	Position
-}
-
-var _ Expression = (*ArrayRef)(nil) // compile time check of interface implementation.
-
-func (ar *ArrayRef) expressionNode() {}
-func (ar *ArrayRef) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "ARRAYREF"...)
-}
-func (ar *ArrayRef) AppendString(dst []byte) []byte {
-	if ar.Base != nil {
-		dst = ar.Base.AppendString(dst)
-	} else {
-		dst = append(dst, ar.Name...)
-	}
-	if len(ar.Subscripts) > 0 {
-		dst = append(dst, '(')
-		for i, sub := range ar.Subscripts {
-			if i > 0 {
-				dst = append(dst, ", "...)
-			}
-			dst = sub.AppendString(dst)
-		}
-		dst = append(dst, ')')
-	}
-	return dst
-}
-
-func (ar *ArrayRef) IsRanged() bool {
-	if IsRanged(ar.Base) {
-		return true
-	}
-	for i := range ar.Subscripts {
-		if IsRanged(ar.Subscripts[i]) {
+func IsRanged(expr ...Expression) bool {
+	for i := range expr {
+		_, ok := expr[i].(*RangeExpr)
+		if ok {
 			return true
 		}
 	}
 	return false
-}
-
-func IsRanged(expr Expression) bool {
-	_, ok := expr.(*RangeExpr)
-	return ok
 }
 
 // ParenExpr represents an expression enclosed in parentheses for grouping or
@@ -1607,9 +1641,10 @@ type AssignmentStmt struct {
 
 var _ Statement = (*AssignmentStmt)(nil) // compile time check of interface implementation.
 
-func (as *AssignmentStmt) GetLabel() string { return as.Label }
+func (as *AssignmentStmt) GetLabel() *string { return &as.Label }
 
-func (as *AssignmentStmt) statementNode() {}
+func (as *AssignmentStmt) statementNode()     {}
+func (as *AssignmentStmt) IsExecutable() bool { return true }
 func (as *AssignmentStmt) AppendTokenLiteral(dst []byte) []byte {
 	if as.IsPointerAssignment {
 		return append(dst, "=>"...)
@@ -1659,7 +1694,7 @@ type IfStmt struct {
 
 var _ Statement = (*IfStmt)(nil) // compile time check of interface implementation.
 
-func (is *IfStmt) GetLabel() string { return is.Label }
+func (is *IfStmt) GetLabel() *string { return &is.Label }
 
 // ElseIfClause represents a single ELSE IF block
 type ElseIfClause struct {
@@ -1668,7 +1703,8 @@ type ElseIfClause struct {
 	Position
 }
 
-func (is *IfStmt) statementNode() {}
+func (is *IfStmt) statementNode()     {}
+func (is *IfStmt) IsExecutable() bool { return true }
 func (is *IfStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "IF"...)
 }
@@ -1701,8 +1737,9 @@ type ArithmeticIfStmt struct {
 
 var _ Statement = (*ArithmeticIfStmt)(nil)
 
-func (ais *ArithmeticIfStmt) GetLabel() string { return ais.Label }
-func (ais *ArithmeticIfStmt) statementNode()   {}
+func (ais *ArithmeticIfStmt) GetLabel() *string { return &ais.Label }
+func (ais *ArithmeticIfStmt) statementNode()     {}
+func (ais *ArithmeticIfStmt) IsExecutable() bool { return true }
 func (ais *ArithmeticIfStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "IF"...)
 }
@@ -1750,9 +1787,10 @@ type DoLoop struct {
 
 var _ Statement = (*DoLoop)(nil) // compile time check of interface implementation.
 
-func (dl *DoLoop) GetLabel() string { return dl.Label }
+func (dl *DoLoop) GetLabel() *string { return &dl.Label }
 
-func (dl *DoLoop) statementNode() {}
+func (dl *DoLoop) statementNode()     {}
+func (dl *DoLoop) IsExecutable() bool { return true }
 func (dl *DoLoop) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "DO"...)
 }
@@ -1808,8 +1846,9 @@ type SelectCaseStmt struct {
 
 var _ Statement = (*SelectCaseStmt)(nil)
 
-func (s *SelectCaseStmt) GetLabel() string { return s.Label }
-func (s *SelectCaseStmt) statementNode()   {}
+func (s *SelectCaseStmt) GetLabel() *string { return &s.Label }
+func (s *SelectCaseStmt) statementNode()     {}
+func (s *SelectCaseStmt) IsExecutable() bool { return true }
 func (s *SelectCaseStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "SELECT CASE"...)
 }
@@ -1848,9 +1887,10 @@ type CallStmt struct {
 
 var _ Statement = (*CallStmt)(nil) // compile time check of interface implementation.
 
-func (cs *CallStmt) GetLabel() string { return cs.Label }
+func (cs *CallStmt) GetLabel() *string { return &cs.Label }
 
-func (cs *CallStmt) statementNode() {}
+func (cs *CallStmt) statementNode()     {}
+func (cs *CallStmt) IsExecutable() bool { return true }
 func (cs *CallStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "CALL"...)
 }
@@ -1885,9 +1925,10 @@ type EntryStmt struct {
 
 var _ Statement = (*EntryStmt)(nil) // compile time check of interface implementation.
 
-func (es *EntryStmt) GetLabel() string { return es.Label }
+func (es *EntryStmt) GetLabel() *string { return &es.Label }
 
-func (es *EntryStmt) statementNode() {}
+func (es *EntryStmt) statementNode()     {}
+func (es *EntryStmt) IsExecutable() bool { return false } // ENTRY is specification, not executable
 func (es *EntryStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "ENTRY"...)
 }
@@ -1923,9 +1964,10 @@ type ReturnStmt struct {
 
 var _ Statement = (*ReturnStmt)(nil) // compile time check of interface implementation.
 
-func (rs *ReturnStmt) GetLabel() string { return rs.Label }
+func (rs *ReturnStmt) GetLabel() *string { return &rs.Label }
 
-func (rs *ReturnStmt) statementNode() {}
+func (rs *ReturnStmt) statementNode()     {}
+func (rs *ReturnStmt) IsExecutable() bool { return true }
 func (rs *ReturnStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "RETURN"...)
 }
@@ -1957,9 +1999,10 @@ type CycleStmt struct {
 
 var _ Statement = (*CycleStmt)(nil) // compile time check of interface implementation.
 
-func (cs *CycleStmt) GetLabel() string { return cs.Label }
+func (cs *CycleStmt) GetLabel() *string { return &cs.Label }
 
-func (cs *CycleStmt) statementNode() {}
+func (cs *CycleStmt) statementNode()     {}
+func (cs *CycleStmt) IsExecutable() bool { return true }
 func (cs *CycleStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "CYCLE"...)
 }
@@ -1987,9 +2030,10 @@ type ExitStmt struct {
 
 var _ Statement = (*ExitStmt)(nil) // compile time check of interface implementation.
 
-func (es *ExitStmt) GetLabel() string { return es.Label }
+func (es *ExitStmt) GetLabel() *string { return &es.Label }
 
-func (es *ExitStmt) statementNode() {}
+func (es *ExitStmt) statementNode()     {}
+func (es *ExitStmt) IsExecutable() bool { return true }
 func (es *ExitStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "EXIT"...)
 }
@@ -2015,9 +2059,10 @@ type ContinueStmt struct {
 
 var _ Statement = (*ContinueStmt)(nil) // compile time check of interface implementation.
 
-func (cs *ContinueStmt) GetLabel() string { return cs.Label }
+func (cs *ContinueStmt) GetLabel() *string { return &cs.Label }
 
-func (cs *ContinueStmt) statementNode() {}
+func (cs *ContinueStmt) statementNode()     {}
+func (cs *ContinueStmt) IsExecutable() bool { return true }
 func (cs *ContinueStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "CONTINUE"...)
 }
@@ -2044,9 +2089,10 @@ type GotoStmt struct {
 
 var _ Statement = (*GotoStmt)(nil) // compile time check of interface implementation.
 
-func (gs *GotoStmt) GetLabel() string { return gs.Label }
+func (gs *GotoStmt) GetLabel() *string { return &gs.Label }
 
-func (gs *GotoStmt) statementNode() {}
+func (gs *GotoStmt) statementNode()     {}
+func (gs *GotoStmt) IsExecutable() bool { return true }
 func (gs *GotoStmt) AppendTokenLiteral(dst []byte) []byte {
 	dst = append(dst, "GO TO "...)
 	return append(dst, gs.Target...)
@@ -2073,9 +2119,10 @@ type AssignStmt struct {
 
 var _ Statement = (*AssignStmt)(nil)
 
-func (as *AssignStmt) GetLabel() string { return as.Label }
+func (as *AssignStmt) GetLabel() *string { return &as.Label }
 
-func (as *AssignStmt) statementNode() {}
+func (as *AssignStmt) statementNode()     {}
+func (as *AssignStmt) IsExecutable() bool { return true }
 func (as *AssignStmt) AppendTokenLiteral(dst []byte) []byte {
 	dst = append(dst, "ASSIGN "...)
 	dst = append(dst, as.LabelValue...)
@@ -2110,8 +2157,9 @@ type ComputedGotoStmt struct {
 
 var _ Statement = (*ComputedGotoStmt)(nil)
 
-func (cgs *ComputedGotoStmt) GetLabel() string { return cgs.Label }
-func (cgs *ComputedGotoStmt) statementNode()   {}
+func (cgs *ComputedGotoStmt) GetLabel() *string { return &cgs.Label }
+func (cgs *ComputedGotoStmt) statementNode()     {}
+func (cgs *ComputedGotoStmt) IsExecutable() bool { return true }
 func (cgs *ComputedGotoStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "GO TO"...)
 }
@@ -2148,8 +2196,9 @@ type AssignedGotoStmt struct {
 
 var _ Statement = (*AssignedGotoStmt)(nil)
 
-func (ags *AssignedGotoStmt) GetLabel() string { return ags.Label }
-func (ags *AssignedGotoStmt) statementNode()   {}
+func (ags *AssignedGotoStmt) GetLabel() *string { return &ags.Label }
+func (ags *AssignedGotoStmt) statementNode()     {}
+func (ags *AssignedGotoStmt) IsExecutable() bool { return true }
 func (ags *AssignedGotoStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "GO TO"...)
 }
@@ -2188,8 +2237,9 @@ type InquireStmt struct {
 
 var _ Statement = (*InquireStmt)(nil)
 
-func (is *InquireStmt) GetLabel() string { return is.Label }
-func (is *InquireStmt) statementNode()   {}
+func (is *InquireStmt) GetLabel() *string { return &is.Label }
+func (is *InquireStmt) statementNode()     {}
+func (is *InquireStmt) IsExecutable() bool { return true }
 func (is *InquireStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "INQUIRE"...)
 }
@@ -2226,9 +2276,10 @@ type OpenStmt struct {
 
 var _ Statement = (*OpenStmt)(nil) // compile time check of interface implementation.
 
-func (os *OpenStmt) GetLabel() string { return os.Label }
+func (os *OpenStmt) GetLabel() *string { return &os.Label }
 
-func (os *OpenStmt) statementNode() {}
+func (os *OpenStmt) statementNode()     {}
+func (os *OpenStmt) IsExecutable() bool { return true }
 
 func (os *OpenStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "OPEN"...)
@@ -2267,8 +2318,9 @@ type CloseStmt struct {
 
 var _ Statement = (*CloseStmt)(nil)
 
-func (cs *CloseStmt) GetLabel() string { return cs.Label }
-func (cs *CloseStmt) statementNode()   {}
+func (cs *CloseStmt) GetLabel() *string { return &cs.Label }
+func (cs *CloseStmt) statementNode()     {}
+func (cs *CloseStmt) IsExecutable() bool { return true }
 func (cs *CloseStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "CLOSE"...)
 }
@@ -2309,9 +2361,10 @@ type WriteStmt struct {
 
 var _ Statement = (*WriteStmt)(nil) // compile time check of interface implementation.
 
-func (ws *WriteStmt) GetLabel() string { return ws.Label }
+func (ws *WriteStmt) GetLabel() *string { return &ws.Label }
 
-func (ws *WriteStmt) statementNode() {}
+func (ws *WriteStmt) statementNode()     {}
+func (ws *WriteStmt) IsExecutable() bool { return true }
 
 // ReadStmt transfers data from an external file or device into internal
 // storage. The format specifier controls how the data is interpreted.
@@ -2333,9 +2386,10 @@ type ReadStmt struct {
 
 var _ Statement = (*ReadStmt)(nil) // compile time check of interface implementation.
 
-func (rs *ReadStmt) GetLabel() string { return rs.Label }
+func (rs *ReadStmt) GetLabel() *string { return &rs.Label }
 
-func (rs *ReadStmt) statementNode() {}
+func (rs *ReadStmt) statementNode()     {}
+func (rs *ReadStmt) IsExecutable() bool { return true }
 
 func (rs *ReadStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "READ"...)
@@ -2384,9 +2438,10 @@ type PrintStmt struct {
 
 var _ Statement = (*PrintStmt)(nil) // compile time check of interface implementation.
 
-func (ps *PrintStmt) GetLabel() string { return ps.Label }
+func (ps *PrintStmt) GetLabel() *string { return &ps.Label }
 
-func (ps *PrintStmt) statementNode() {}
+func (ps *PrintStmt) statementNode()     {}
+func (ps *PrintStmt) IsExecutable() bool { return true }
 
 func (ps *PrintStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "PRINT"...)
@@ -2426,8 +2481,9 @@ type BackspaceStmt struct {
 
 var _ Statement = (*BackspaceStmt)(nil)
 
-func (bs *BackspaceStmt) GetLabel() string { return bs.Label }
-func (bs *BackspaceStmt) statementNode()   {}
+func (bs *BackspaceStmt) GetLabel() *string { return &bs.Label }
+func (bs *BackspaceStmt) statementNode()     {}
+func (bs *BackspaceStmt) IsExecutable() bool { return true }
 func (bs *BackspaceStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "BACKSPACE"...)
 }
@@ -2464,8 +2520,9 @@ type RewindStmt struct {
 
 var _ Statement = (*RewindStmt)(nil)
 
-func (rs *RewindStmt) GetLabel() string { return rs.Label }
-func (rs *RewindStmt) statementNode()   {}
+func (rs *RewindStmt) GetLabel() *string { return &rs.Label }
+func (rs *RewindStmt) statementNode()     {}
+func (rs *RewindStmt) IsExecutable() bool { return true }
 func (rs *RewindStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "REWIND"...)
 }
@@ -2502,8 +2559,9 @@ type EndfileStmt struct {
 
 var _ Statement = (*EndfileStmt)(nil)
 
-func (es *EndfileStmt) GetLabel() string { return es.Label }
-func (es *EndfileStmt) statementNode()   {}
+func (es *EndfileStmt) GetLabel() *string { return &es.Label }
+func (es *EndfileStmt) statementNode()     {}
+func (es *EndfileStmt) IsExecutable() bool { return true }
 func (es *EndfileStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "ENDFILE"...)
 }
@@ -2540,8 +2598,9 @@ type StopStmt struct {
 
 var _ Statement = (*StopStmt)(nil)
 
-func (ss *StopStmt) GetLabel() string { return ss.Label }
-func (ss *StopStmt) statementNode()   {}
+func (ss *StopStmt) GetLabel() *string { return &ss.Label }
+func (ss *StopStmt) statementNode()     {}
+func (ss *StopStmt) IsExecutable() bool { return true }
 func (ss *StopStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "STOP"...)
 }
@@ -2572,8 +2631,9 @@ type FormatStmt struct {
 
 var _ Statement = (*FormatStmt)(nil)
 
-func (fs *FormatStmt) GetLabel() string { return fs.Label }
-func (fs *FormatStmt) statementNode()   {}
+func (fs *FormatStmt) GetLabel() *string { return &fs.Label }
+func (fs *FormatStmt) statementNode()     {}
+func (fs *FormatStmt) IsExecutable() bool { return false } // FORMAT is a non-executable specification
 func (fs *FormatStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "FORMAT"...)
 }
@@ -2607,8 +2667,9 @@ type AllocateStmt struct {
 
 var _ Statement = (*AllocateStmt)(nil)
 
-func (as *AllocateStmt) GetLabel() string { return as.Label }
-func (as *AllocateStmt) statementNode()   {}
+func (as *AllocateStmt) GetLabel() *string { return &as.Label }
+func (as *AllocateStmt) statementNode()     {}
+func (as *AllocateStmt) IsExecutable() bool { return true }
 func (as *AllocateStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "ALLOCATE"...)
 }
@@ -2649,8 +2710,9 @@ type DeallocateStmt struct {
 
 var _ Statement = (*DeallocateStmt)(nil)
 
-func (ds *DeallocateStmt) GetLabel() string { return ds.Label }
-func (ds *DeallocateStmt) statementNode()   {}
+func (ds *DeallocateStmt) GetLabel() *string { return &ds.Label }
+func (ds *DeallocateStmt) statementNode()     {}
+func (ds *DeallocateStmt) IsExecutable() bool { return true }
 func (ds *DeallocateStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "DEALLOCATE"...)
 }
@@ -2699,9 +2761,10 @@ type DerivedTypeStmt struct {
 
 var _ Statement = (*DerivedTypeStmt)(nil) // compile time check of interface implementation.
 
-func (dts *DerivedTypeStmt) GetLabel() string { return dts.Label }
+func (dts *DerivedTypeStmt) GetLabel() *string { return &dts.Label }
 
-func (dts *DerivedTypeStmt) statementNode() {}
+func (dts *DerivedTypeStmt) statementNode()     {}
+func (dts *DerivedTypeStmt) IsExecutable() bool { return false }
 func (dts *DerivedTypeStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "TYPE"...)
 }
@@ -2731,9 +2794,10 @@ type ComponentDecl struct {
 
 var _ Statement = (*ComponentDecl)(nil) // compile time check of interface implementation.
 
-func (cd *ComponentDecl) GetLabel() string { return cd.Label }
+func (cd *ComponentDecl) GetLabel() *string { return &cd.Label }
 
-func (cd *ComponentDecl) statementNode() {}
+func (cd *ComponentDecl) statementNode()     {}
+func (cd *ComponentDecl) IsExecutable() bool { return false }
 func (cd *ComponentDecl) AppendTokenLiteral(dst []byte) []byte {
 	return cd.Type.AppendString(dst)
 }
@@ -2782,9 +2846,10 @@ type InterfaceStmt struct {
 
 var _ Statement = (*InterfaceStmt)(nil) // compile time check of interface implementation.
 
-func (is *InterfaceStmt) GetLabel() string { return is.Label }
+func (is *InterfaceStmt) GetLabel() *string { return &is.Label }
 
-func (is *InterfaceStmt) statementNode() {}
+func (is *InterfaceStmt) statementNode()     {}
+func (is *InterfaceStmt) IsExecutable() bool { return false }
 func (is *InterfaceStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "INTERFACE"...)
 }
@@ -2816,9 +2881,10 @@ type PrivateStmt struct {
 
 var _ Statement = (*PrivateStmt)(nil) // compile time check of interface implementation.
 
-func (ps *PrivateStmt) GetLabel() string { return ps.Label }
+func (ps *PrivateStmt) GetLabel() *string { return &ps.Label }
 
-func (ps *PrivateStmt) statementNode() {}
+func (ps *PrivateStmt) statementNode()     {}
+func (ps *PrivateStmt) IsExecutable() bool { return false }
 func (ps *PrivateStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "PRIVATE"...)
 }
@@ -2853,9 +2919,10 @@ type PublicStmt struct {
 
 var _ Statement = (*PublicStmt)(nil) // compile time check of interface implementation.
 
-func (ps *PublicStmt) GetLabel() string { return ps.Label }
+func (ps *PublicStmt) GetLabel() *string { return &ps.Label }
 
-func (ps *PublicStmt) statementNode() {}
+func (ps *PublicStmt) statementNode()     {}
+func (ps *PublicStmt) IsExecutable() bool { return false }
 func (ps *PublicStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "PUBLIC"...)
 }

@@ -16,7 +16,14 @@ type ToGo struct {
 	repl        REPL
 	source      string
 	sourceFile  io.ReaderAt
-	currentStmt f90.Statement
+	currentNode f90.Node
+}
+
+func (tg *ToGo) Reset() {
+	*tg = ToGo{
+		repl: tg.repl,
+	}
+	tg.repl.Reset()
 }
 
 func (tg *ToGo) SetSource(source string, r io.ReaderAt) {
@@ -24,20 +31,20 @@ func (tg *ToGo) SetSource(source string, r io.ReaderAt) {
 	tg.sourceFile = r
 }
 
-func (tg *ToGo) AddExtern(pu []f90.ProgramUnit) error {
-	return tg.repl.AddExtern(pu)
+func (tg *ToGo) AddUsed(pu ...f90.ProgramUnit) error {
+	return tg.repl.AddUsed(pu...)
 }
 
-func (tg *ToGo) Extern(name string) *ParserUnitData {
-	return tg.repl.Extern(name)
+func (tg *ToGo) GetUsed(name string) *ParserUnitData {
+	return tg.repl.GetUsed(name)
 }
 
 func (tg *ToGo) Contained(name string) *ParserUnitData {
 	return tg.repl.Contained(name)
 }
 
-func (tg *ToGo) ContainedOrExtern(name string) *ParserUnitData {
-	return tg.repl.ContainedOrExtern(name)
+func (tg *ToGo) ContainedOrUsed(name string) *ParserUnitData {
+	return tg.repl.ContainedOrUsed(name)
 }
 
 func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
@@ -78,35 +85,35 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 	if err != nil {
 		return decls, fmt.Errorf("in CONTAINS of %s: %w", prog.Name, err)
 	}
-	decls, err = tg.transformProcedures(decls, tg.repl.externUnits)
+	decls, err = tg.transformProcedures(decls, tg.repl.used)
 	if err != nil {
-		return decls, fmt.Errorf("in externally added routine for %s: %w", prog.Name, err)
+		return decls, fmt.Errorf("in USE added routines for %s: %w", prog.Name, err)
 	}
 	decls = tg.AppendCommonDecls(decls)
 	return decls, nil
 }
 
-func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.ProgramUnit) ([]ast.Decl, error) {
+func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.ProgramUnit) (_ []ast.Decl, err error) {
 	for _, contained := range pus {
+		tg.currentNode = contained
+		var decl ast.Decl
 		switch c := contained.(type) {
 		case *f90.Subroutine:
-			funcDecl, err := tg.TransformSubroutine(c)
-			if err != nil {
-				return nil, err
-			}
-			if funcDecl != nil {
-				dst = append(dst, funcDecl)
-			}
+			decl, err = tg.TransformSubroutine(c)
 		case *f90.Function:
-			funcDecl, err := tg.TransformFunction(c)
-			if err != nil {
-				return nil, err
-			}
-			if funcDecl != nil {
-				dst = append(dst, funcDecl)
-			}
+			decl, err = tg.TransformFunction(c)
+		case *f90.Module:
+			dst, err = tg.transformProcedures(dst, c.Contains)
+		case *f90.BlockData:
+			// TODO: handle block data.
 		default:
-			return dst, fmt.Errorf("expected function/subroutine, got name=%s type=%T", c.UnitName(), c)
+			panic(fmt.Sprintf("unexpected program unit %s", c))
+
+		}
+		if err != nil {
+			return dst, err
+		} else if decl != nil {
+			dst = append(dst, decl)
 		}
 	}
 	return dst, nil
@@ -127,6 +134,7 @@ func (tg *ToGo) TransformFunction(fn *f90.Function) (_ *ast.FuncDecl, err error)
 }
 
 func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.FuncDecl, err error) {
+	tg.currentNode = subroutineOrFunc
 	err = tg.repl.SetScope(subroutineOrFunc)
 	if err != nil {
 		return nil, err
@@ -200,7 +208,7 @@ func (tg *ToGo) getReturnParam() *ast.Field {
 func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("label" + f90Label) }
 
 func (tg *ToGo) makeErrAtStmt(msg string) error {
-	return tg.makeErr(tg.currentStmt, msg)
+	return tg.makeErr(tg.currentNode, msg)
 }
 
 func (tg *ToGo) makeErr(node f90.Node, msg string) error {
@@ -225,12 +233,12 @@ func (tg *ToGo) makeErrWithPos(pos f90.Position, msg string) error {
 func (tg *ToGo) transformStatements(dst []ast.Stmt, stmts []f90.Statement) (_ []ast.Stmt, err error) {
 	for _, stmt := range stmts {
 		label := stmt.GetLabel()
-		if label == "" {
+		if label == nil || *label == "" {
 			dst, err = tg.transformStatement(dst, stmt)
 		} else {
 			var gstmts []ast.Stmt
 			gstmts, err = tg.transformStatement(nil, stmt)
-			lab := tg.astLabel(label)
+			lab := tg.astLabel(*label)
 			useGoto := &ast.BranchStmt{
 				Label: lab,
 				Tok:   token.GOTO, // Use the goto label so compiler does not complain.
@@ -250,13 +258,13 @@ func (tg *ToGo) transformStatements(dst []ast.Stmt, stmts []f90.Statement) (_ []
 
 func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.Stmt, err error) {
 	if stmt != nil {
-		tg.currentStmt = stmt
+		tg.currentNode = stmt
 	}
 	switch s := stmt.(type) {
 	case *f90.TypeDeclaration:
 		dst, err = tg.transformTypeDeclaration(dst, s)
-	// case *f90.DerivedTypeStmt:
-	// 	gostmt = tg.transformDerivedType(s)
+	case *f90.DerivedTypeStmt:
+		dst, err = tg.transformDerivedType(dst, s)
 	case *f90.AssignmentStmt:
 		dst, err = tg.transformAssignment(dst, s)
 	case *f90.CallStmt:
@@ -309,9 +317,14 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		dst, err = tg.transformComputedGotoStmt(dst, s)
 	case *f90.StopStmt:
 		var code ast.Expr
-		code, _, err = tg.transformExpression(_tgtInt, s.Code)
+		if s.Code != nil {
+			code, _, err = tg.transformExpression(_tgtInt, s.Code)
+		} else {
+			code = &ast.BasicLit{Kind: token.INT, Value: "0"}
+		}
 		dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{Fun: _astIntrinsicStop, Args: []ast.Expr{code}}})
-
+	case *f90.ParameterStmt:
+		dst, err = tg.transformParameterStmt(dst, s)
 	case *f90.WriteStmt:
 		// gostmt = tg.transformWriteStmt(s)
 	case *f90.FormatStmt:
@@ -455,9 +468,85 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	return dst, nil
 }
 
+// transformDerivedType transforms a Fortran TYPE definition into a Go struct type.
+// Example:
+//
+//	TYPE :: person
+//	  CHARACTER(LEN=50) :: name
+//	  INTEGER :: age
+//	END TYPE person
+//
+// Becomes:
+//
+//	type person struct {
+//	    name *intrinsic.CharacterArray
+//	    age  int32
+//	}
+func (tg *ToGo) transformDerivedType(dst []ast.Stmt, stmt *f90.DerivedTypeStmt) (_ []ast.Stmt, err error) {
+	fields := &ast.FieldList{
+		List: make([]*ast.Field, 0, len(stmt.Components)),
+	}
+
+	for _, comp := range stmt.Components {
+		for _, ent := range comp.Components {
+			fieldType := tg.componentGoType(&comp.Type, &ent)
+			field := &ast.Field{
+				Names: []*ast.Ident{ast.NewIdent(ent.Name)},
+				Type:  fieldType,
+			}
+			fields.List = append(fields.List, field)
+		}
+	}
+
+	typeSpec := &ast.TypeSpec{
+		Name: ast.NewIdent(stmt.Name),
+		Type: &ast.StructType{
+			Fields: fields,
+		},
+	}
+
+	decl := &ast.GenDecl{
+		Tok:   token.TYPE,
+		Specs: []ast.Spec{typeSpec},
+	}
+
+	dst = append(dst, &ast.DeclStmt{Decl: decl})
+	return dst, nil
+}
+
+// componentGoType returns the Go type for a derived type component.
+func (tg *ToGo) componentGoType(ts *f90.TypeSpec, ent *f90.DeclEntity) ast.Expr {
+	// TODO: integrate with goType method likely candidate for simplification.
+	tok := ts.Token
+	kind := 0
+	if kindExpr := ts.Kind(); kindExpr != nil {
+		if lit, ok := kindExpr.(*f90.IntegerLiteral); ok {
+			kind = int(lit.Value)
+		}
+	}
+
+	// Handle CHARACTER type
+	if tok == f90token.CHARACTER {
+		return &ast.StarExpr{X: _astTypeCharArray}
+	}
+
+	// Handle arrays
+	if ent.ArraySpec != nil && len(ent.ArraySpec.Bounds) > 0 {
+		baseType := tg.baseGotype(tok, kind)
+		return &ast.StarExpr{
+			X: &ast.IndexExpr{
+				X:     _astTypeArray,
+				Index: baseType,
+			},
+		}
+	}
+
+	return tg.baseGotype(tok, kind)
+}
+
 func (tg *ToGo) transformAllocateStmt(dst []ast.Stmt, stmt *f90.AllocateStmt) (_ []ast.Stmt, err error) {
 	for _, obj := range stmt.Objects {
-		arrRef, ok := obj.(*f90.ArrayRef)
+		arrRef, ok := obj.(*f90.CallExpr)
 		if !ok {
 			return dst, tg.makeErr(stmt, "ALLOCATE requires array reference")
 		}
@@ -466,7 +555,7 @@ func (tg *ToGo) transformAllocateStmt(dst []ast.Stmt, stmt *f90.AllocateStmt) (_
 			return dst, tg.makeErr(stmt, "unknown variable: "+arrRef.Name)
 		}
 		var args []ast.Expr
-		for _, sub := range arrRef.Subscripts {
+		for _, sub := range arrRef.Args {
 			arg, _, err := tg.transformExpression(_tgtInt, sub)
 			if err != nil {
 				return dst, err
@@ -489,7 +578,7 @@ func (tg *ToGo) transformDeallocateStmt(dst []ast.Stmt, stmt *f90.DeallocateStmt
 		switch e := obj.(type) {
 		case *f90.Identifier:
 			vi = tg.repl.Var(e.Value)
-		case *f90.ArrayRef:
+		case *f90.CallExpr:
 			vi = tg.repl.Var(e.Name)
 		default:
 			return dst, tg.makeErr(stmt, "DEALLOCATE requires variable")
@@ -504,28 +593,35 @@ func (tg *ToGo) transformDeallocateStmt(dst []ast.Stmt, stmt *f90.DeallocateStmt
 }
 
 func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.Stmt, err error) {
-	fninfo := tg.ContainedOrExtern(stmt.Name)
+	fninfo := tg.ContainedOrUsed(stmt.Name)
 	if fninfo == nil {
 		return dst, tg.makeErr(stmt, "subroutine not found: "+stmt.Name)
 	}
 	params := fninfo.ProcedureParams()
-	if len(params) != len(stmt.Args) {
-		return dst, tg.makeErr(stmt, "mismatched number of args with declaration")
+	// Legacy Fortran allows calling with fewer arguments (undefined behavior but permitted).
+	// We handle this by using type inference for excess arguments.
+	if len(stmt.Args) > len(params) {
+		return dst, tg.makeErr(stmt, fmt.Sprintf("too many args in call (expected %d, got %d)", len(params), len(stmt.Args)))
 	}
 	gstmt := &ast.CallExpr{
 		Fun: tg.astIdent(fninfo.name),
 	}
 	for i := range stmt.Args {
-		info := &params[i]
+		var info *Varinfo
+		if i < len(params) {
+			info = &params[i]
+		}
 		goexpr, _, err := tg.transformExpression(info, stmt.Args[i])
 		if err != nil {
 			return dst, err
 		}
 		// For INTENT(OUT/INOUT) non-array scalar parameters, pass address
-		intent := info.decl.Type.Intent()
-		isArray := tg.varIsArray(info)
-		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
-			goexpr = &ast.UnaryExpr{Op: token.AND, X: goexpr}
+		if info != nil && info.decl != nil {
+			intent := info.decl.Type.Intent()
+			isArray := tg.varIsArray(info)
+			if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
+				goexpr = &ast.UnaryExpr{Op: token.AND, X: goexpr}
+			}
 		}
 		gstmt.Args = append(gstmt.Args, goexpr)
 	}
@@ -538,24 +634,20 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_ []ast.Stmt, err error) {
 	var targetVinfo *Varinfo
 	var lhs ast.Expr
+	var isIdentifier bool
 	switch tgt := stmt.Target.(type) {
-	case *f90.ArrayRef:
+	case *f90.CallExpr:
+		// CallExpr as assignment target: array access or substring
 		targetVinfo = tg.repl.Var(tgt.Name)
 	case *f90.Identifier:
 		targetVinfo = tg.repl.Var(tgt.Value)
-		lhs = tg.astVarExpr(targetVinfo)
-		// Dereference INTENT(OUT/INOUT) non-array scalar parameters
-		intent := targetVinfo.decl.Type.Intent()
-		isArray := tg.varIsArray(targetVinfo)
-		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
-			lhs = &ast.StarExpr{X: lhs}
+		isIdentifier = true
+	case *f90.ComponentAccess:
+		// Component access: p%age = 30 → p.age = 30
+		// Get the base variable for type info
+		if ident, ok := tgt.Base.(*f90.Identifier); ok {
+			targetVinfo = tg.repl.Var(ident.Value)
 		}
-		if binop, ok := stmt.Value.(*f90.BinaryExpr); ok && binop.Op == f90token.StringConcat {
-			return tg.transformStringConcat(dst, targetVinfo._varname, binop)
-		}
-	case *f90.FunctionCall:
-		// FunctionCall as assignment target occurs for CHARACTER substring: str(1:5) = 'x'
-		targetVinfo = tg.repl.Var(tgt.Name)
 	default:
 		err = tg.makeErr(tgt, "unknown target expression in assignment")
 	}
@@ -566,11 +658,24 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	} else if targetVinfo.decl == nil {
 		return nil, tg.makeErr(stmt.Target, "identifier with no corresponding type declaration:"+targetVinfo.Identifier())
 	}
+	if isIdentifier {
+		lhs = tg.astVarExpr(targetVinfo)
+		// Dereference INTENT(OUT/INOUT) non-array scalar parameters
+		intent := targetVinfo.decl.Type.Intent()
+		isArray := tg.varIsArray(targetVinfo)
+		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
+			lhs = &ast.StarExpr{X: lhs}
+		}
+		if binop, ok := stmt.Value.(*f90.BinaryExpr); ok && binop.Op == f90token.StringConcat {
+			return tg.transformStringConcat(dst, targetVinfo._varname, binop)
+		}
+	}
 	rhs, _, err := tg.transformExpression(targetVinfo, stmt.Value)
 	if err != nil {
 		return dst, err
 	}
-	if targetVinfo.decl.Type.Token == f90token.CHARACTER {
+	// SetFromString only for scalar CHARACTER (identifier target), not array elements
+	if targetVinfo.decl.Type.Token == f90token.CHARACTER && isIdentifier {
 		receiver := tg.astVarExpr(targetVinfo)
 		stmt := &ast.ExprStmt{
 			X: &ast.CallExpr{
@@ -582,28 +687,35 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		return dst, nil
 	}
 
+	// Infer RHS type for conversions (needed by ArrayRef/FunctionCall and default path)
+	var rhsType Varinfo
+	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
+		return dst, tg.makeErr(stmt, "inferring type: "+err.Error())
+	}
+
 	switch tgt := stmt.Target.(type) {
-	case *f90.ArrayRef:
+	case *f90.CallExpr:
+		// CallExpr as target: array element access or substring
+		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
 		return tg.transformSetArrayRef(dst, tgt, rhs)
-	case *f90.FunctionCall:
-		// FunctionCall as target: COMMON block arrays or undeclared arrays
-		// Convert to ArrayRef-like handling
-		syntheticRef := &f90.ArrayRef{
-			Name:       tgt.Name,
-			Subscripts: tgt.Args,
-			Position:   tgt.Position,
+	case *f90.ComponentAccess:
+		// Component access: p%age = 30 → p.age = 30
+		// Handle component access directly and return - no type conversion needed
+		lhs, _, err = tg.transformComponentAccess(nil, tgt)
+		if err != nil {
+			return dst, err
 		}
-		return tg.transformSetArrayRef(dst, syntheticRef, rhs)
+		gstmt := &ast.AssignStmt{
+			Tok: token.ASSIGN,
+			Lhs: []ast.Expr{lhs},
+			Rhs: []ast.Expr{rhs},
+		}
+		dst = append(dst, gstmt)
+		return dst, nil
 	default:
 		if lhs == nil {
 			return dst, tg.makeErr(stmt.Target, "unsupported assignment target")
 		}
-	}
-
-	// Convert RHS to target type if needed
-	var rhsType Varinfo
-	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
-		return dst, err
 	}
 
 	// Special case: cross-type pointer assignment (npii = npaa where types differ)
@@ -628,28 +740,23 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 				Args: []ast.Expr{rhs},
 			}
 		}
-	} else {
-		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
 	}
-
-	// Handle equivalenced scalar assignment: f = value → f.Set(1, value)
+	rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
+	// Handle equivalenced scalar assignment: f = value → f.Set(value, 1)
 	// CHARACTER types are excluded as they use SetFromString
 	isArray := tg.varIsArray(targetVinfo)
 	isCharacter := targetVinfo.typeToken() == f90token.CHARACTER
 	if !isArray && !isCharacter && targetVinfo.flags.HasAny(VFlagEquivalenced) {
 		dst = append(dst, &ast.ExprStmt{
-			X: &ast.CallExpr{
-				Fun:  &ast.SelectorExpr{X: lhs, Sel: ast.NewIdent("Set")},
-				Args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "1"}, rhs},
-			},
+			X: tg.astSetCall(lhs, rhs, &ast.BasicLit{Kind: token.INT, Value: "1"}),
 		})
 		return dst, nil
 	}
 
 	gstmt := &ast.AssignStmt{
 		Tok: token.ASSIGN,
-		Rhs: []ast.Expr{rhs},
 		Lhs: []ast.Expr{lhs},
+		Rhs: []ast.Expr{rhs},
 	}
 	dst = append(dst, gstmt)
 
@@ -893,41 +1000,33 @@ func (tg *ToGo) transformSelectCaseStmt(dst []ast.Stmt, stmt *f90.SelectCaseStmt
 }
 
 func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.Stmt, err error) {
-	// DATA statements initialize variables: DATA a, b, c / 10, 20, 30 /
-	// Generate assignment statements for each variable-value pair
-	if len(stmt.Variables) != len(stmt.Values) {
-		return dst, tg.makeErr(stmt, "DATA statement variable/value count mismatch")
-	}
+	// DATA statements initialize variables in several ways:
+	// 1. DATA a, b, c / 10, 20, 30 /       - multiple scalars
+	//    → a = 10; b = 20; c = 30
+	// 2. DATA arr / 1, 2, 3, 4, 5 /        - whole array initialization
+	//    → arr.Set(1, 1); arr.Set(2, 2); ... arr.Set(5, 5)
+	// 3. DATA arr(1), arr(2) / 1, 2 /      - specific array elements
+	//    → arr.Set(1, 1); arr.Set(2, 2)
+	// When var count < value count, distribute values across array variables
 
-	for i := range stmt.Variables {
-		varExpr := stmt.Variables[i]
-		valExpr := stmt.Values[i]
+	valueIdx := 0 // Track current position in values list
 
-		// Get target variable info and LHS expression
+	for _, varExpr := range stmt.Variables {
+		// Get target variable info
 		var targetVinfo *Varinfo
-		var lhs ast.Expr
+		var varName string
 		var isArrayElement bool
 
 		switch v := varExpr.(type) {
 		case *f90.Identifier:
 			targetVinfo = tg.repl.Var(v.Value)
-			lhs = tg.astVarExpr(targetVinfo)
-		case *f90.ArrayRef:
+			varName = v.Value
+		case *f90.CallExpr:
 			targetVinfo = tg.repl.Var(v.Name)
-			if len(v.Subscripts) > 0 {
-				// Array element with indices: use Set method
-				isArrayElement = true
-			} else {
-				// No subscripts - treat as scalar variable
-				lhs = tg.astVarExpr(targetVinfo)
-			}
-		case *f90.FunctionCall:
-			// May be parsed as function call for array access
-			targetVinfo = tg.repl.Var(v.Name)
+			varName = v.Name
 			if len(v.Args) > 0 {
+				// Array element with explicit indices: arr(1,2)
 				isArrayElement = true
-			} else {
-				lhs = tg.astVarExpr(targetVinfo)
 			}
 		default:
 			return dst, tg.makeErr(stmt, "unsupported DATA statement variable type")
@@ -937,38 +1036,148 @@ func (tg *ToGo) transformDataStmt(dst []ast.Stmt, stmt *f90.DataStmt) (_ []ast.S
 			return dst, tg.makeErr(stmt, "unknown variable in DATA statement")
 		}
 
-		// Transform the value expression
-		rhs, _, err := tg.transformExpression(targetVinfo, valExpr)
-		if err != nil {
-			return dst, err
-		}
-
 		if isArrayElement {
-			// Array element: generate arr.Set(value, indices)
-			switch v := varExpr.(type) {
-			case *f90.ArrayRef:
-				dst, err = tg.transformSetArrayRef(dst, v, rhs)
-			case *f90.FunctionCall:
-				syntheticRef := &f90.ArrayRef{
-					Name:       v.Name,
-					Subscripts: v.Args,
-					Position:   v.Position,
-				}
-				dst, err = tg.transformSetArrayRef(dst, syntheticRef, rhs)
+			// Specific array element: arr(i,j) - use one value
+			if valueIdx >= len(stmt.Values) {
+				return dst, tg.makeErr(stmt, "not enough values in DATA statement")
 			}
+			valExpr := stmt.Values[valueIdx]
+			valueIdx++
+
+			// Transform the value expression
+			rhs, _, err := tg.transformExpression(targetVinfo, valExpr)
 			if err != nil {
 				return dst, err
 			}
+
+			// Generate arr.Set(value, indices)
+			if callExpr, ok := varExpr.(*f90.CallExpr); ok {
+				dst, err = tg.transformSetArrayRef(dst, callExpr, rhs)
+				if err != nil {
+					return dst, err
+				}
+			}
 		} else {
-			// Scalar: generate simple assignment
-			dst = append(dst, &ast.AssignStmt{
-				Lhs: []ast.Expr{lhs},
-				Tok: token.ASSIGN,
-				Rhs: []ast.Expr{rhs},
-			})
+			// Whole variable or array without subscripts
+			isArray := tg.varIsArray(targetVinfo)
+
+			// Heuristic: if we have more values than variables, treat as array initialization
+			// This handles cases where DIMENSION statement info isn't propagated properly
+			hasMultipleValues := (len(stmt.Values) - valueIdx) > (len(stmt.Variables) - len(stmt.Variables[:0]))
+
+			if !isArray && !hasMultipleValues {
+				// Scalar variable - use one value
+				if valueIdx >= len(stmt.Values) {
+					return dst, tg.makeErr(stmt, "not enough values in DATA statement")
+				}
+				valExpr := stmt.Values[valueIdx]
+				valueIdx++
+
+				lhs := tg.astVarExpr(targetVinfo)
+				rhs, _, err := tg.transformExpression(targetVinfo, valExpr)
+				if err != nil {
+					return dst, err
+				}
+
+				dst = append(dst, &ast.AssignStmt{
+					Lhs: []ast.Expr{lhs},
+					Tok: token.ASSIGN,
+					Rhs: []ast.Expr{rhs},
+				})
+			} else {
+				// Array variable - consume multiple values to fill array elements
+				// For now, we'll initialize elements sequentially
+				// TODO: Handle multidimensional arrays properly
+				// This assumes 1D array or column-major order for N-D arrays
+
+				// We need to know how many values to consume
+				// For simple case, consume remaining values or until we fill the array
+				// Since we don't easily compute total array size here,
+				// we'll consume values one-by-one until we run out
+				// TODO: We should calculate the array size to know exactly how many values
+				// to consume. For now, consume all remaining values for the last variable
+				// or distribute evenly if multiple variables remain.
+
+				// Calculate values per variable
+				varsRemaining := len(stmt.Variables) - len(stmt.Variables[:0]) // Count vars from current position
+				valuesRemaining := len(stmt.Values) - valueIdx
+
+				// For simplicity: if this is the only variable, consume all values
+				// Otherwise, calculate how many values this array should get
+				var valuesToConsume int
+				if len(stmt.Variables) == 1 {
+					valuesToConsume = valuesRemaining
+				} else {
+					// Need to compute array size - for now, just take values until we match expected count
+					// This is where we need proper array size calculation
+					// As a heuristic: consume remaining values divided by remaining variables
+					varsRemaining = len(stmt.Variables)
+					for i := range stmt.Variables {
+						if stmt.Variables[i] == varExpr {
+							varsRemaining = len(stmt.Variables) - i
+							break
+						}
+					}
+					valuesToConsume = valuesRemaining / varsRemaining
+				}
+
+				for i := 0; i < valuesToConsume && valueIdx < len(stmt.Values); i++ {
+					valExpr := stmt.Values[valueIdx]
+
+					// Transform the value
+					rhs, _, err := tg.transformExpression(targetVinfo, valExpr)
+					if err != nil {
+						return dst, err
+					}
+
+					// Create array reference with 1-based index (Fortran convention)
+					// For multidimensional arrays, this is simplified
+					syntheticRef := &f90.CallExpr{
+						Name:     varName,
+						Args:     []f90.Expression{&f90.IntegerLiteral{Value: int64(i + 1)}},
+						Position: varExpr.SourcePos(),
+					}
+
+					dst, err = tg.transformSetArrayRef(dst, syntheticRef, rhs)
+					if err != nil {
+						return dst, err
+					}
+
+					valueIdx++
+				}
+			}
 		}
 	}
 
+	// Verify we consumed all values
+	if valueIdx != len(stmt.Values) {
+		return dst, tg.makeErr(stmt, fmt.Sprintf("DATA statement has %d unused values", len(stmt.Values)-valueIdx))
+	}
+
+	return dst, nil
+}
+
+func (tg *ToGo) transformParameterStmt(dst []ast.Stmt, stmt *f90.ParameterStmt) ([]ast.Stmt, error) {
+	decl := &ast.GenDecl{
+		Tok: token.CONST,
+	}
+	for _, v := range stmt.Decls {
+		vi := tg.repl.Var(v.Name)
+		if vi == nil {
+			return dst, tg.makeErr(stmt, "undeclared parameter?")
+		}
+		tp := tg.goType(vi)
+		initVal, _, err := tg.transformExpression(vi, vi.decl.Init)
+		if err != nil {
+			return dst, err
+		}
+		decl.Specs = append(decl.Specs, &ast.ValueSpec{
+			Names:  []*ast.Ident{ast.NewIdent(vi.Identifier())},
+			Type:   tp,
+			Values: []ast.Expr{initVal},
+		})
+	}
+	dst = append(dst, &ast.DeclStmt{Decl: decl})
 	return dst, nil
 }
 
@@ -1127,7 +1336,7 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 				isCharacter := vinfo.typeToken() == f90token.CHARACTER
 				isPointerTo := tg.varIsPointerTo(vinfo)
 
-				if len(ref.Subscripts) == 0 {
+				if len(ref.Args) == 0 {
 					if isArray {
 						args[i] = varExpr // *Array implements PointerSetter
 					} else if isCharacter {
@@ -1141,7 +1350,7 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 				} else {
 					// Subscripted: PointerOff(var, var.AtOffset(...))
 					var offsetArgs []ast.Expr
-					for _, sub := range ref.Subscripts {
+					for _, sub := range ref.Args {
 						arg, _, err := tg.transformExpression(_tgtInt, sub)
 						if err != nil {
 							return dst, err
@@ -1362,6 +1571,10 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 // explicit array bounds in their type declaration.
 func (tg *ToGo) varIsArray(v *Varinfo) bool {
 	return v.flags.HasAny(VFlagDimension)
+}
+
+func (tg *ToGo) varIsCharlike(v *Varinfo) bool {
+	return !tg.varIsArray(v) && (v.typeToken() == f90token.CHARACTER || v.typeToken() == f90token.StringLit)
 }
 
 // varIsPointerTo returns true if the variable's Go type is intrinsic.PointerTo[T]

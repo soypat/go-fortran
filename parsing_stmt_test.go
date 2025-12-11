@@ -1,6 +1,7 @@
 package fortran
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -22,10 +23,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "arithmetic IF with simple expression",
 			src:  "IF(X-5) 100,200,300",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				aif, ok := stmt.(*ast.ArithmeticIfStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ArithmeticIfStmt, got %T", stmt)
-				}
+				aif := helperWantNode[*ast.ArithmeticIfStmt](t, stmt, "")
 
 				if aif.NegativeLabel != "100" {
 					t.Errorf("Expected negative label '100', got %q", aif.NegativeLabel)
@@ -38,10 +36,7 @@ func TestStatementParsing(t *testing.T) {
 				}
 
 				// Verify condition is a binary expression
-				_, ok = aif.Condition.(*ast.BinaryExpr)
-				if !ok {
-					t.Errorf("Expected condition to be *ast.BinaryExpr, got %T", aif.Condition)
-				}
+				_ = helperWantNode[*ast.BinaryExpr](t, aif.Condition, "condition")
 			},
 		},
 		{
@@ -79,10 +74,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "inline IF with assignment",
 			src:  "IF(X.GT.0) Y = 1",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt, ok := stmt.(*ast.IfStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
-				}
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 
 				// Should have exactly one statement in ThenPart
 				if len(ifStmt.ThenPart) != 1 {
@@ -90,10 +82,7 @@ func TestStatementParsing(t *testing.T) {
 				}
 
 				// ThenPart should contain an assignment
-				_, ok = ifStmt.ThenPart[0].(*ast.AssignmentStmt)
-				if !ok {
-					t.Errorf("Expected ThenPart[0] to be *ast.AssignmentStmt, got %T", ifStmt.ThenPart[0])
-				}
+				_ = helperWantNode[*ast.AssignmentStmt](t, ifStmt.ThenPart[0], "ThenPart[0]")
 
 				// Should have no ELSE parts
 				if len(ifStmt.ElseIfParts) != 0 {
@@ -108,33 +97,45 @@ func TestStatementParsing(t *testing.T) {
 			name: "inline IF with CALL statement",
 			src:  "IF(LNORMP) CALL TITLE(IOUT15)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt := stmt.(*ast.IfStmt)
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 
 				if len(ifStmt.ThenPart) != 1 {
 					t.Fatalf("Expected 1 statement in ThenPart, got %d", len(ifStmt.ThenPart))
 				}
 
 				// ThenPart should contain a CALL statement
-				callStmt, ok := ifStmt.ThenPart[0].(*ast.CallStmt)
-				if !ok {
-					t.Fatalf("Expected ThenPart[0] to be *ast.CallStmt, got %T", ifStmt.ThenPart[0])
-				}
+				callStmt := helperWantNode[*ast.CallStmt](t, ifStmt.ThenPart[0], "ThenPart[0]")
 
 				if callStmt.Name != "TITLE" {
 					t.Errorf("Expected CALL to 'TITLE', got %q", callStmt.Name)
 				}
 			},
 		},
-
+		{
+			name: "inline IF with assignment",
+			src:  "IF (INDEX(TITLE(1,I),NAMES(I)).EQ.0) STOP = .TRUE.",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
+				if len(ifStmt.ThenPart) != 1 {
+					t.Fatalf("Expected 1 statement in ThenPart, got %d", len(ifStmt.ThenPart))
+				}
+				// ThenPart should contain a CALL statement
+				assignment := helperWantNode[*ast.AssignmentStmt](t, ifStmt.ThenPart[0], "ThenPart[0]")
+				id := helperWantNode[*ast.Identifier](t, assignment.Target, "assignment target")
+				if id.Value != "STOP" {
+					t.Errorf("Expected STOP var, got %q", id.Value)
+				}
+				if !helperWantNode[*ast.LogicalLiteral](t, assignment.Value, ".TRUE.").Value {
+					t.Errorf("Expected true var, got false")
+				}
+			},
+		},
 		// ===== GOTO Statements =====
 		{
 			name: "GOTO statement (single token)",
 			src:  "GOTO 100",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				gotoStmt, ok := stmt.(*ast.GotoStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.GotoStmt, got %T", stmt)
-				}
+				gotoStmt := helperWantNode[*ast.GotoStmt](t, stmt, "")
 
 				if gotoStmt.Target != "100" {
 					t.Errorf("Expected target '100', got %q", gotoStmt.Target)
@@ -145,7 +146,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "GO TO statement (two tokens)",
 			src:  "GO TO 2000",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				gotoStmt := stmt.(*ast.GotoStmt)
+				gotoStmt := helperWantNode[*ast.GotoStmt](t, stmt, "")
 
 				if gotoStmt.Target != "2000" {
 					t.Errorf("Expected target '2000', got %q", gotoStmt.Target)
@@ -156,10 +157,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "computed GOTO with few labels",
 			src:  "GOTO (10,20,30) I",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				computedGoto, ok := stmt.(*ast.ComputedGotoStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ComputedGotoStmt, got %T", stmt)
-				}
+				computedGoto := helperWantNode[*ast.ComputedGotoStmt](t, stmt, "")
 
 				expectedLabels := []string{"10", "20", "30"}
 				if len(computedGoto.Labels) != len(expectedLabels) {
@@ -173,10 +171,8 @@ func TestStatementParsing(t *testing.T) {
 				}
 
 				// Check expression is an identifier
-				ident, ok := computedGoto.Expression.(*ast.Identifier)
-				if !ok {
-					t.Errorf("Expected expression to be *ast.Identifier, got %T", computedGoto.Expression)
-				} else if ident.Value != "I" {
+				ident := helperWantNode[*ast.Identifier](t, computedGoto.Expression, "expression")
+				if ident.Value != "I" {
 					t.Errorf("Expected expression 'I', got %q", ident.Value)
 				}
 			},
@@ -185,10 +181,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "computed GOTO with many labels",
 			src:  "GOTO(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15) ibeta",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				computedGoto, ok := stmt.(*ast.ComputedGotoStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ComputedGotoStmt, got %T", stmt)
-				}
+				computedGoto := helperWantNode[*ast.ComputedGotoStmt](t, stmt, "")
 
 				if len(computedGoto.Labels) != 15 {
 					t.Fatalf("Expected 15 labels, got %d", len(computedGoto.Labels))
@@ -203,22 +196,17 @@ func TestStatementParsing(t *testing.T) {
 				}
 
 				// Check expression
-				ident, ok := computedGoto.Expression.(*ast.Identifier)
-				if !ok {
-					t.Errorf("Expected expression to be *ast.Identifier, got %T", computedGoto.Expression)
-				} else if ident.Value != "ibeta" {
+				ident := helperWantNode[*ast.Identifier](t, computedGoto.Expression, "expression")
+				if ident.Value != "ibeta" {
 					t.Errorf("Expected expression 'ibeta', got %q", ident.Value)
 				}
 			},
 		},
 		{
-			name: "computed GOTO with comma before variable",
+			name: "computed GO TO with comma before variable",
 			src:  "GO TO (1000,1300,1700,1900,2100,2300),MCALL",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				computedGoto, ok := stmt.(*ast.ComputedGotoStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ComputedGotoStmt, got %T", stmt)
-				}
+				computedGoto := helperWantNode[*ast.ComputedGotoStmt](t, stmt, "")
 
 				expectedLabels := []string{"1000", "1300", "1700", "1900", "2100", "2300"}
 				if len(computedGoto.Labels) != len(expectedLabels) {
@@ -232,10 +220,8 @@ func TestStatementParsing(t *testing.T) {
 				}
 
 				// Check expression is MCALL
-				ident, ok := computedGoto.Expression.(*ast.Identifier)
-				if !ok {
-					t.Errorf("Expected expression to be *ast.Identifier, got %T", computedGoto.Expression)
-				} else if ident.Value != "MCALL" {
+				ident := helperWantNode[*ast.Identifier](t, computedGoto.Expression, "expression")
+				if ident.Value != "MCALL" {
 					t.Errorf("Expected expression 'MCALL', got %q", ident.Value)
 				}
 			},
@@ -244,16 +230,13 @@ func TestStatementParsing(t *testing.T) {
 			name: "GOTO in inline IF",
 			src:  "IF(NPARC.LE.0.AND..NOT.LSTARC) GO TO 2000",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt := stmt.(*ast.IfStmt)
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 
 				if len(ifStmt.ThenPart) != 1 {
 					t.Fatalf("Expected 1 statement in ThenPart, got %d", len(ifStmt.ThenPart))
 				}
 
-				gotoStmt, ok := ifStmt.ThenPart[0].(*ast.GotoStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.GotoStmt in ThenPart, got %T", ifStmt.ThenPart[0])
-				}
+				gotoStmt := helperWantNode[*ast.GotoStmt](t, ifStmt.ThenPart[0], "ThenPart[0]")
 
 				if gotoStmt.Target != "2000" {
 					t.Errorf("Expected target '2000', got %q", gotoStmt.Target)
@@ -266,10 +249,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "WRITE statement with simple output",
 			src:  "WRITE(6) X",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				writeStmt, ok := stmt.(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
-				}
+				writeStmt := helperWantNode[*ast.WriteStmt](t, stmt, "")
 
 				if writeStmt.Unit == nil {
 					t.Error("Expected non-nil Unit")
@@ -284,7 +264,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "WRITE statement with multiple outputs",
 			src:  "WRITE(91) BIASP,BIAS,DYNEQ",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				writeStmt := stmt.(*ast.WriteStmt)
+				writeStmt := helperWantNode[*ast.WriteStmt](t, stmt, "")
 
 				if len(writeStmt.OutputList) != 3 {
 					t.Fatalf("Expected 3 output items, got %d", len(writeStmt.OutputList))
@@ -302,16 +282,13 @@ func TestStatementParsing(t *testing.T) {
 			name: "WRITE in inline IF",
 			src:  "IF(LSTINR) WRITE(91) BIASP,BIAS,DYNEQ",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt := stmt.(*ast.IfStmt)
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 
 				if len(ifStmt.ThenPart) != 1 {
 					t.Fatalf("Expected 1 statement in ThenPart, got %d", len(ifStmt.ThenPart))
 				}
 
-				writeStmt, ok := ifStmt.ThenPart[0].(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.WriteStmt in ThenPart, got %T", ifStmt.ThenPart[0])
-				}
+				writeStmt := helperWantNode[*ast.WriteStmt](t, ifStmt.ThenPart[0], "ThenPart[0]")
 
 				if len(writeStmt.OutputList) != 3 {
 					t.Errorf("Expected 3 output items, got %d", len(writeStmt.OutputList))
@@ -322,25 +299,15 @@ func TestStatementParsing(t *testing.T) {
 			name: "inline IF with keyword array assignment",
 			src:  "IF(1) RESULT(N)=1",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt, ok := stmt.(*ast.IfStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
-				}
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 
 				if len(ifStmt.ThenPart) != 1 {
 					t.Fatalf("Expected 1 statement in ThenPart, got %d", len(ifStmt.ThenPart))
 				}
 
-				assignStmt, ok := ifStmt.ThenPart[0].(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt in ThenPart, got %T", ifStmt.ThenPart[0])
-				}
-
+				assignStmt := helperWantNode[*ast.AssignmentStmt](t, ifStmt.ThenPart[0], "ThenPart[0]")
 				// Verify target is a function call (array reference)
-				_, ok = assignStmt.Target.(*ast.FunctionCall)
-				if !ok {
-					t.Errorf("Expected Target to be *ast.FunctionCall (array ref), got %T", assignStmt.Target)
-				}
+				helperWantNode[*ast.CallExpr](t, assignStmt.Target, "RESULT(N)")
 			},
 		},
 
@@ -349,15 +316,9 @@ func TestStatementParsing(t *testing.T) {
 			name: "keyword as simple variable assignment",
 			src:  "RESULT=1",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignStmt, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
+				assignStmt := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
-				ident, ok := assignStmt.Target.(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected Target to be *ast.Identifier, got %T", assignStmt.Target)
-				}
+				ident := helperWantNode[*ast.Identifier](t, assignStmt.Target, "Target")
 
 				if ident.Value != "RESULT" {
 					t.Errorf("Expected identifier 'RESULT', got %q", ident.Value)
@@ -368,15 +329,8 @@ func TestStatementParsing(t *testing.T) {
 			name: "keyword as array variable assignment",
 			src:  "RESULT(N)=1",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignStmt, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
-
-				funcCall, ok := assignStmt.Target.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected Target to be *ast.FunctionCall (array ref), got %T", assignStmt.Target)
-				}
+				assignStmt := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
+				funcCall := helperWantNode[*ast.CallExpr](t, assignStmt.Target, "Target")
 
 				if funcCall.Name != "RESULT" {
 					t.Errorf("Expected function name 'RESULT', got %q", funcCall.Name)
@@ -391,15 +345,9 @@ func TestStatementParsing(t *testing.T) {
 			name: "STOP keyword as array variable",
 			src:  "STOP(I)=5",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignStmt, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
+				assignStmt := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
-				funcCall, ok := assignStmt.Target.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected Target to be *ast.FunctionCall (array ref), got %T", assignStmt.Target)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, assignStmt.Target, "Target")
 
 				if funcCall.Name != "STOP" {
 					t.Errorf("Expected function name 'STOP', got %q", funcCall.Name)
@@ -410,15 +358,9 @@ func TestStatementParsing(t *testing.T) {
 			name: "STOP keyword as simple variable",
 			src:  "STOP=.TRUE.",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignStmt, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
+				assignStmt := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
-				ident, ok := assignStmt.Target.(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected Target to be *ast.Identifier, got %T", assignStmt.Target)
-				}
+				ident := helperWantNode[*ast.Identifier](t, assignStmt.Target, "Target")
 
 				if ident.Value != "STOP" {
 					t.Errorf("Expected identifier 'STOP', got %q", ident.Value)
@@ -431,19 +373,13 @@ func TestStatementParsing(t *testing.T) {
 			name: "WRITE with implied DO loop - single expression",
 			src:  "WRITE(6,10109) (COVSCR(M,1), M=1, 6)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				writeStmt, ok := stmt.(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
-				}
+				writeStmt := helperWantNode[*ast.WriteStmt](t, stmt, "")
 
 				if len(writeStmt.OutputList) != 1 {
 					t.Fatalf("Expected 1 output item, got %d", len(writeStmt.OutputList))
 				}
 
-				impliedDo, ok := writeStmt.OutputList[0].(*ast.ImpliedDoLoop)
-				if !ok {
-					t.Fatalf("Expected *ast.ImpliedDoLoop, got %T", writeStmt.OutputList[0])
-				}
+				impliedDo := helperWantNode[*ast.ImpliedDoLoop](t, writeStmt.OutputList[0], "OutputList[0]")
 
 				if len(impliedDo.Expressions) != 1 {
 					t.Errorf("Expected 1 expression in implied DO, got %d", len(impliedDo.Expressions))
@@ -454,18 +390,14 @@ func TestStatementParsing(t *testing.T) {
 				}
 
 				// Check start value
-				startIdent, ok := impliedDo.Start.(*ast.IntegerLiteral)
-				if !ok {
-					t.Errorf("Expected start to be *ast.IntegerLiteral, got %T", impliedDo.Start)
-				} else if startIdent.Raw != "1" {
+				startIdent := helperWantNode[*ast.IntegerLiteral](t, impliedDo.Start, "start")
+				if startIdent.Raw != "1" {
 					t.Errorf("Expected start value '1', got %q", startIdent.Raw)
 				}
 
 				// Check end value
-				endIdent, ok := impliedDo.End.(*ast.IntegerLiteral)
-				if !ok {
-					t.Errorf("Expected end to be *ast.IntegerLiteral, got %T", impliedDo.End)
-				} else if endIdent.Raw != "6" {
+				endIdent := helperWantNode[*ast.IntegerLiteral](t, impliedDo.End, "end")
+				if endIdent.Raw != "6" {
 					t.Errorf("Expected end value '6', got %q", endIdent.Raw)
 				}
 
@@ -479,10 +411,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "WRITE with implied DO loop - multiple expressions",
 			src:  "WRITE(IOUT6,10109) TOTAL, DEL, (COVSCR(M,1), M=1, 6)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				writeStmt, ok := stmt.(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
-				}
+				writeStmt := helperWantNode[*ast.WriteStmt](t, stmt, "")
 
 				if len(writeStmt.OutputList) != 3 {
 					t.Fatalf("Expected 3 output items, got %d", len(writeStmt.OutputList))
@@ -496,10 +425,7 @@ func TestStatementParsing(t *testing.T) {
 				}
 
 				// Third should be implied DO loop
-				impliedDo, ok := writeStmt.OutputList[2].(*ast.ImpliedDoLoop)
-				if !ok {
-					t.Fatalf("Expected *ast.ImpliedDoLoop, got %T", writeStmt.OutputList[2])
-				}
+				impliedDo := helperWantNode[*ast.ImpliedDoLoop](t, writeStmt.OutputList[2], "OutputList[2]")
 
 				if impliedDo.LoopVar != "M" {
 					t.Errorf("Expected loop variable 'M', got %q", impliedDo.LoopVar)
@@ -510,15 +436,9 @@ func TestStatementParsing(t *testing.T) {
 			name: "implied DO loop with stride",
 			src:  "WRITE(6) (A(I), I=1, 10, 2)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				writeStmt, ok := stmt.(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
-				}
+				writeStmt := helperWantNode[*ast.WriteStmt](t, stmt, "")
 
-				impliedDo, ok := writeStmt.OutputList[0].(*ast.ImpliedDoLoop)
-				if !ok {
-					t.Fatalf("Expected *ast.ImpliedDoLoop, got %T", writeStmt.OutputList[0])
-				}
+				impliedDo := helperWantNode[*ast.ImpliedDoLoop](t, writeStmt.OutputList[0], "OutputList[0]")
 
 				if impliedDo.LoopVar != "I" {
 					t.Errorf("Expected loop variable 'I', got %q", impliedDo.LoopVar)
@@ -528,10 +448,8 @@ func TestStatementParsing(t *testing.T) {
 				if impliedDo.Stride == nil {
 					t.Error("Expected non-nil stride")
 				} else {
-					strideVal, ok := impliedDo.Stride.(*ast.IntegerLiteral)
-					if !ok {
-						t.Errorf("Expected stride to be *ast.IntegerLiteral, got %T", impliedDo.Stride)
-					} else if strideVal.Raw != "2" {
+					strideVal := helperWantNode[*ast.IntegerLiteral](t, impliedDo.Stride, "stride")
+					if strideVal.Raw != "2" {
 						t.Errorf("Expected stride value '2', got %q", strideVal.Raw)
 					}
 				}
@@ -541,15 +459,9 @@ func TestStatementParsing(t *testing.T) {
 			name: "implied DO loop with multiple output expressions",
 			src:  "WRITE(6) (A(I), B(I), I=1, N)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				writeStmt, ok := stmt.(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
-				}
+				writeStmt := helperWantNode[*ast.WriteStmt](t, stmt, "")
 
-				impliedDo, ok := writeStmt.OutputList[0].(*ast.ImpliedDoLoop)
-				if !ok {
-					t.Fatalf("Expected *ast.ImpliedDoLoop, got %T", writeStmt.OutputList[0])
-				}
+				impliedDo := helperWantNode[*ast.ImpliedDoLoop](t, writeStmt.OutputList[0], "OutputList[0]")
 
 				// Should have 2 expressions before the loop control
 				if len(impliedDo.Expressions) != 2 {
@@ -567,10 +479,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "READ with END= keyword",
 			src:  "READ(14,5000,END=500) X",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				readStmt, ok := stmt.(*ast.ReadStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ReadStmt, got %T", stmt)
-				}
+				readStmt := helperWantNode[*ast.ReadStmt](t, stmt, "")
 
 				// Should have 3 specs: unit, format, END=500
 				// (Unit is parsed from first spec)
@@ -588,10 +497,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "READ with IOSTAT= keyword",
 			src:  "READ(14,5000,IOSTAT=IOS) X, Y",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				readStmt, ok := stmt.(*ast.ReadStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ReadStmt, got %T", stmt)
-				}
+				readStmt := helperWantNode[*ast.ReadStmt](t, stmt, "")
 
 				if readStmt.Unit == nil {
 					t.Error("Expected non-nil Unit")
@@ -607,10 +513,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "READ with multiple keyword=value specs",
 			src:  "READ(14,81200,IOSTAT=IOS,END=60000) X",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				readStmt, ok := stmt.(*ast.ReadStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ReadStmt, got %T", stmt)
-				}
+				readStmt := helperWantNode[*ast.ReadStmt](t, stmt, "")
 
 				// This was the failing case - should parse successfully
 				if readStmt.Unit == nil {
@@ -626,10 +529,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "WRITE with FMT= keyword",
 			src:  "WRITE(6,FMT=100) X, Y",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				writeStmt, ok := stmt.(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
-				}
+				writeStmt := helperWantNode[*ast.WriteStmt](t, stmt, "")
 
 				if writeStmt.Unit == nil {
 					t.Error("Expected non-nil Unit")
@@ -644,10 +544,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "READ with ERR= keyword",
 			src:  "READ(14,5000,ERR=999) A, B, C",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				readStmt, ok := stmt.(*ast.ReadStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ReadStmt, got %T", stmt)
-				}
+				readStmt := helperWantNode[*ast.ReadStmt](t, stmt, "")
 
 				if readStmt.Unit == nil {
 					t.Error("Expected non-nil Unit")
@@ -662,10 +559,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "WRITE with UNIT= and FMT= keywords",
 			src:  "WRITE(UNIT=6,FMT=100) MESSAGE",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				writeStmt, ok := stmt.(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.WriteStmt, got %T", stmt)
-				}
+				writeStmt := helperWantNode[*ast.WriteStmt](t, stmt, "")
 
 				// With keyword form, both should be parsed
 				if writeStmt.Unit == nil {
@@ -683,10 +577,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "PRINT with list-directed format",
 			src:  "PRINT *, 'Hello World'",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				printStmt, ok := stmt.(*ast.PrintStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.PrintStmt, got %T", stmt)
-				}
+				printStmt := helperWantNode[*ast.PrintStmt](t, stmt, "")
 
 				if printStmt.Format == nil {
 					t.Fatal("Expected non-nil Format")
@@ -701,10 +592,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "PRINT with format label and variables",
 			src:  "PRINT 100, X, Y, Z",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				printStmt, ok := stmt.(*ast.PrintStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.PrintStmt, got %T", stmt)
-				}
+				printStmt := helperWantNode[*ast.PrintStmt](t, stmt, "")
 
 				if printStmt.Format == nil {
 					t.Fatal("Expected non-nil Format")
@@ -719,10 +607,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "PRINT with inline format",
 			src:  "PRINT '(I5,F10.2)', N, X",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				printStmt, ok := stmt.(*ast.PrintStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.PrintStmt, got %T", stmt)
-				}
+				printStmt := helperWantNode[*ast.PrintStmt](t, stmt, "")
 
 				if printStmt.Format == nil {
 					t.Fatal("Expected non-nil Format")
@@ -737,10 +622,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "PRINT with format only (no output list)",
 			src:  "PRINT 10000",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				printStmt, ok := stmt.(*ast.PrintStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.PrintStmt, got %T", stmt)
-				}
+				printStmt := helperWantNode[*ast.PrintStmt](t, stmt, "")
 
 				if printStmt.Format == nil {
 					t.Fatal("Expected non-nil Format")
@@ -757,10 +639,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "OPEN with positional unit and FILE",
 			src:  "OPEN(10, FILE='data.txt')",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				openStmt, ok := stmt.(*ast.OpenStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.OpenStmt, got %T", stmt)
-				}
+				openStmt := helperWantNode[*ast.OpenStmt](t, stmt, "")
 
 				if len(openStmt.Specifiers) == 0 {
 					t.Error("Expected non-empty Specifiers map")
@@ -779,10 +658,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "OPEN with keyword specifiers",
 			src:  "OPEN(UNIT=20, FILE='output.dat', STATUS='NEW', FORM='FORMATTED')",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				openStmt, ok := stmt.(*ast.OpenStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.OpenStmt, got %T", stmt)
-				}
+				openStmt := helperWantNode[*ast.OpenStmt](t, stmt, "")
 
 				requiredSpecs := []string{"UNIT", "FILE", "STATUS", "FORM"}
 				for _, spec := range requiredSpecs {
@@ -796,10 +672,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "OPEN with IOSTAT and ERR",
 			src:  "OPEN(UNIT=30, FILE=FNAME, IOSTAT=IOS, ERR=999)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				openStmt, ok := stmt.(*ast.OpenStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.OpenStmt, got %T", stmt)
-				}
+				openStmt := helperWantNode[*ast.OpenStmt](t, stmt, "")
 
 				if openStmt.Specifiers["UNIT"] == nil {
 					t.Error("Expected UNIT specifier")
@@ -822,10 +695,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "OPEN with ACCESS and RECL for direct access",
 			src:  "OPEN(UNIT=40, FILE='direct.dat', ACCESS='DIRECT', RECL=512)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				openStmt, ok := stmt.(*ast.OpenStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.OpenStmt, got %T", stmt)
-				}
+				openStmt := helperWantNode[*ast.OpenStmt](t, stmt, "")
 
 				if openStmt.Specifiers["ACCESS"] == nil {
 					t.Error("Expected ACCESS specifier")
@@ -842,10 +712,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "CLOSE with positional unit",
 			src:  "CLOSE(10)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				closeStmt, ok := stmt.(*ast.CloseStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.CloseStmt, got %T", stmt)
-				}
+				closeStmt := helperWantNode[*ast.CloseStmt](t, stmt, "")
 				if closeStmt.Specifiers["UNIT"] == nil {
 					t.Error("Expected UNIT specifier")
 				}
@@ -855,10 +722,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "CLOSE with UNIT and STATUS keywords",
 			src:  "CLOSE(UNIT=20, STATUS='KEEP')",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				closeStmt, ok := stmt.(*ast.CloseStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.CloseStmt, got %T", stmt)
-				}
+				closeStmt := helperWantNode[*ast.CloseStmt](t, stmt, "")
 				if closeStmt.Specifiers["UNIT"] == nil {
 					t.Error("Expected UNIT specifier")
 				}
@@ -873,10 +737,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "BACKSPACE with positional unit",
 			src:  "BACKSPACE(15)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				backspaceStmt, ok := stmt.(*ast.BackspaceStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.BackspaceStmt, got %T", stmt)
-				}
+				backspaceStmt := helperWantNode[*ast.BackspaceStmt](t, stmt, "")
 				if backspaceStmt.Specifiers["UNIT"] == nil {
 					t.Error("Expected UNIT specifier")
 				}
@@ -886,10 +747,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "BACKSPACE with IOSTAT and ERR",
 			src:  "BACKSPACE(UNIT=10, IOSTAT=ios, ERR=99)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				backspaceStmt, ok := stmt.(*ast.BackspaceStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.BackspaceStmt, got %T", stmt)
-				}
+				backspaceStmt := helperWantNode[*ast.BackspaceStmt](t, stmt, "")
 				if backspaceStmt.Specifiers["UNIT"] == nil {
 					t.Error("Expected UNIT specifier")
 				}
@@ -907,10 +765,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "REWIND with positional unit",
 			src:  "REWIND(25)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				rewindStmt, ok := stmt.(*ast.RewindStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.RewindStmt, got %T", stmt)
-				}
+				rewindStmt := helperWantNode[*ast.RewindStmt](t, stmt, "")
 				if rewindStmt.Specifiers["UNIT"] == nil {
 					t.Error("Expected UNIT specifier")
 				}
@@ -920,10 +775,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "REWIND with IOSTAT",
 			src:  "REWIND(UNIT=30, IOSTAT=ierr)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				rewindStmt, ok := stmt.(*ast.RewindStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.RewindStmt, got %T", stmt)
-				}
+				rewindStmt := helperWantNode[*ast.RewindStmt](t, stmt, "")
 				if rewindStmt.Specifiers["UNIT"] == nil {
 					t.Error("Expected UNIT specifier")
 				}
@@ -938,10 +790,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "STOP with no argument",
 			src:  "STOP",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				stopStmt, ok := stmt.(*ast.StopStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.StopStmt, got %T", stmt)
-				}
+				stopStmt := helperWantNode[*ast.StopStmt](t, stmt, "")
 				if stopStmt.Code != nil {
 					t.Error("Expected nil Code for simple STOP")
 				}
@@ -951,10 +800,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "STOP with integer code",
 			src:  "STOP 123",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				stopStmt, ok := stmt.(*ast.StopStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.StopStmt, got %T", stmt)
-				}
+				stopStmt := helperWantNode[*ast.StopStmt](t, stmt, "")
 				if stopStmt.Code == nil {
 					t.Fatal("Expected non-nil Code")
 				}
@@ -964,17 +810,12 @@ func TestStatementParsing(t *testing.T) {
 			name: "STOP with string message",
 			src:  "STOP 'Abnormal termination'",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				stopStmt, ok := stmt.(*ast.StopStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.StopStmt, got %T", stmt)
-				}
+				stopStmt := helperWantNode[*ast.StopStmt](t, stmt, "")
 				if stopStmt.Code == nil {
 					t.Fatal("Expected non-nil Code")
 				}
-				strLit, ok := stopStmt.Code.(*ast.StringLiteral)
-				if !ok {
-					t.Errorf("Expected StringLiteral, got %T", stopStmt.Code)
-				} else if strLit.Value != "Abnormal termination" {
+				strLit := helperWantNode[*ast.StringLiteral](t, stopStmt.Code, "Code")
+				if strLit.Value != "Abnormal termination" {
 					t.Errorf("Expected message 'Abnormal termination', got %q", strLit.Value)
 				}
 			},
@@ -985,10 +826,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "FORMAT with simple spec",
 			src:  "100 FORMAT(I5)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				formatStmt, ok := stmt.(*ast.FormatStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.FormatStmt, got %T", stmt)
-				}
+				formatStmt := helperWantNode[*ast.FormatStmt](t, stmt, "")
 				if formatStmt.Label != "100" {
 					t.Errorf("Expected label '100', got %q", formatStmt.Label)
 				}
@@ -1001,10 +839,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "FORMAT with multiple specs",
 			src:  "200 FORMAT(I5, F10.2, A)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				formatStmt, ok := stmt.(*ast.FormatStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.FormatStmt, got %T", stmt)
-				}
+				formatStmt := helperWantNode[*ast.FormatStmt](t, stmt, "")
 				if formatStmt.Label != "200" {
 					t.Errorf("Expected label '200', got %q", formatStmt.Label)
 				}
@@ -1017,10 +852,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "FORMAT with string literal",
 			src:  "300 FORMAT('Result = ', F8.3)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				formatStmt, ok := stmt.(*ast.FormatStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.FormatStmt, got %T", stmt)
-				}
+				formatStmt := helperWantNode[*ast.FormatStmt](t, stmt, "")
 				if formatStmt.Label != "300" {
 					t.Errorf("Expected label '300', got %q", formatStmt.Label)
 				}
@@ -1032,10 +864,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "ALLOCATE with single array",
 			src:  "ALLOCATE(A(10))",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				allocStmt, ok := stmt.(*ast.AllocateStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AllocateStmt, got %T", stmt)
-				}
+				allocStmt := helperWantNode[*ast.AllocateStmt](t, stmt, "")
 				if len(allocStmt.Objects) != 1 {
 					t.Errorf("Expected 1 object, got %d", len(allocStmt.Objects))
 				}
@@ -1045,10 +874,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "ALLOCATE with multiple arrays and STAT",
 			src:  "ALLOCATE(A(10,20), B(100), STAT=ierr)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				allocStmt, ok := stmt.(*ast.AllocateStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AllocateStmt, got %T", stmt)
-				}
+				allocStmt := helperWantNode[*ast.AllocateStmt](t, stmt, "")
 				if allocStmt.Options["STAT"] == nil {
 					t.Error("Expected STAT option")
 				}
@@ -1060,10 +886,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "DEALLOCATE with single object",
 			src:  "DEALLOCATE(A)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				deallocStmt, ok := stmt.(*ast.DeallocateStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.DeallocateStmt, got %T", stmt)
-				}
+				deallocStmt := helperWantNode[*ast.DeallocateStmt](t, stmt, "")
 				if len(deallocStmt.Objects) != 1 {
 					t.Errorf("Expected 1 object, got %d", len(deallocStmt.Objects))
 				}
@@ -1073,10 +896,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "DEALLOCATE with multiple objects and STAT",
 			src:  "DEALLOCATE(A, B, C, STAT=ierr)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				deallocStmt, ok := stmt.(*ast.DeallocateStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.DeallocateStmt, got %T", stmt)
-				}
+				deallocStmt := helperWantNode[*ast.DeallocateStmt](t, stmt, "")
 				if deallocStmt.Options["STAT"] == nil {
 					t.Error("Expected STAT option")
 				}
@@ -1088,10 +908,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "INQUIRE with FILE and EXIST",
 			src:  "INQUIRE(FILE='data.txt', EXIST=lexist)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				inquireStmt, ok := stmt.(*ast.InquireStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.InquireStmt, got %T", stmt)
-				}
+				inquireStmt := helperWantNode[*ast.InquireStmt](t, stmt, "")
 				if inquireStmt.Specifiers["FILE"] == nil {
 					t.Error("Expected FILE specifier")
 				}
@@ -1104,10 +921,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "INQUIRE with UNIT",
 			src:  "INQUIRE(UNIT=10, OPENED=lopen, NAME=fname)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				inquireStmt, ok := stmt.(*ast.InquireStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.InquireStmt, got %T", stmt)
-				}
+				inquireStmt := helperWantNode[*ast.InquireStmt](t, stmt, "")
 				if inquireStmt.Specifiers["UNIT"] == nil {
 					t.Error("Expected UNIT specifier")
 				}
@@ -1117,10 +931,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "INQUIRE with positional UNIT",
 			src:  "INQUIRE(10, OPENED=lopen)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				inquireStmt, ok := stmt.(*ast.InquireStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.InquireStmt, got %T", stmt)
-				}
+				inquireStmt := helperWantNode[*ast.InquireStmt](t, stmt, "")
 				if inquireStmt.Specifiers["UNIT"] == nil {
 					t.Error("Expected UNIT specifier from positional argument")
 				}
@@ -1133,10 +944,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "INQUIRE with IOLENGTH and output list (from valid_gdyn.f90)",
 			src:  "inquire( iolength = len ) date_plus_hour, vmf_array",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				inquireStmt, ok := stmt.(*ast.InquireStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.InquireStmt, got %T", stmt)
-				}
+				inquireStmt := helperWantNode[*ast.InquireStmt](t, stmt, "")
 				if inquireStmt.Specifiers["IOLENGTH"] == nil {
 					t.Error("Expected IOLENGTH specifier")
 				}
@@ -1158,10 +966,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "INQUIRE with IOLENGTH and single output item",
 			src:  "INQUIRE(IOLENGTH=reclen) buffer",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				inquireStmt, ok := stmt.(*ast.InquireStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.InquireStmt, got %T", stmt)
-				}
+				inquireStmt := helperWantNode[*ast.InquireStmt](t, stmt, "")
 				if inquireStmt.Specifiers["IOLENGTH"] == nil {
 					t.Error("Expected IOLENGTH specifier")
 				}
@@ -1174,10 +979,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "INQUIRE with multiple specifiers",
 			src:  "INQUIRE(FILE='data.txt', EXIST=lexist, OPENED=lopen, NUMBER=inum)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				inquireStmt, ok := stmt.(*ast.InquireStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.InquireStmt, got %T", stmt)
-				}
+				inquireStmt := helperWantNode[*ast.InquireStmt](t, stmt, "")
 				expectedSpecs := []string{"FILE", "EXIST", "OPENED", "NUMBER"}
 				for _, spec := range expectedSpecs {
 					if inquireStmt.Specifiers[spec] == nil {
@@ -1192,25 +994,16 @@ func TestStatementParsing(t *testing.T) {
 			name: "substring notation with single character",
 			src:  "IF(ASAVE(isave)(1:1) .NE. ' ') X = 1",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt, ok := stmt.(*ast.IfStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
-				}
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 
 				// The condition should be a binary expression (.NE.)
-				binExpr, ok := ifStmt.Condition.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected condition to be *ast.BinaryExpr, got %T", ifStmt.Condition)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, ifStmt.Condition, "condition")
 
 				// Left side should be chained ArrayRef: ASAVE(isave)(1:1)
-				chainedRef, ok := binExpr.Left.(*ast.ArrayRef)
-				if !ok {
-					t.Fatalf("Expected left side to be *ast.ArrayRef, got %T", binExpr.Left)
-				}
+				chainedRef := helperWantNode[*ast.CallExpr](t, binExpr.Left, "left")
 
 				// For chained access, Base should be set
-				if chainedRef.Base == nil {
+				if chainedRef.SecondaryAccess == nil {
 					t.Error("Expected Base to be set for chained access")
 				}
 			},
@@ -1219,19 +1012,13 @@ func TestStatementParsing(t *testing.T) {
 			name: "array access with substring",
 			src:  "Y = STR(5)(2:4)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignStmt, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
+				assignStmt := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
 				// Value should be a chained ArrayRef
-				chainedRef, ok := assignStmt.Value.(*ast.ArrayRef)
-				if !ok {
-					t.Fatalf("Expected value to be *ast.ArrayRef, got %T", assignStmt.Value)
-				}
+				chainedRef := helperWantNode[*ast.CallExpr](t, assignStmt.Value, "value")
 
 				// Should have Base set (the chained structure)
-				if chainedRef.Base == nil {
+				if chainedRef.SecondaryAccess == nil {
 					t.Error("Expected Base to be set for chained access")
 				}
 			},
@@ -1244,19 +1031,13 @@ func TestStatementParsing(t *testing.T) {
          Y = 1
       ENDIF`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt, ok := stmt.(*ast.IfStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
-				}
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 
 				if len(ifStmt.ThenPart) != 1 {
 					t.Fatalf("Expected 1 statement in ThenPart, got %d", len(ifStmt.ThenPart))
 				}
 
-				_, ok = ifStmt.ThenPart[0].(*ast.AssignmentStmt)
-				if !ok {
-					t.Errorf("Expected ThenPart[0] to be *ast.AssignmentStmt, got %T", ifStmt.ThenPart[0])
-				}
+				helperWantNode[*ast.AssignmentStmt](t, ifStmt.ThenPart[0], "ThenPart[0]")
 			},
 		},
 		{
@@ -1266,10 +1047,7 @@ func TestStatementParsing(t *testing.T) {
       k=1
    ENDIF`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt, ok := stmt.(*ast.IfStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
-				}
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 
 				// Initial THEN part should be empty
 				if len(ifStmt.ThenPart) != 0 {
@@ -1287,10 +1065,7 @@ func TestStatementParsing(t *testing.T) {
 				}
 
 				// Statement should be an assignment
-				_, ok = ifStmt.ElseIfParts[0].ThenPart[0].(*ast.AssignmentStmt)
-				if !ok {
-					t.Errorf("Expected ELSEIF statement to be *ast.AssignmentStmt, got %T", ifStmt.ElseIfParts[0].ThenPart[0])
-				}
+				helperWantNode[*ast.AssignmentStmt](t, ifStmt.ElseIfParts[0].ThenPart[0], "ELSEIF ThenPart[0]")
 
 				// Should have no ELSE part
 				if len(ifStmt.ElsePart) != 0 {
@@ -1302,25 +1077,16 @@ func TestStatementParsing(t *testing.T) {
 			name: "IF used as variable name in assignment",
 			src:  "IF=0",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignStmt, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
+				assignStmt := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
 				// Check LHS is identifier "IF"
-				ident, ok := assignStmt.Target.(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected target to be *ast.Identifier, got %T", assignStmt.Target)
-				}
+				ident := helperWantNode[*ast.Identifier](t, assignStmt.Target, "target")
 				if ident.Value != "IF" {
 					t.Errorf("Expected target 'IF', got %q", ident.Value)
 				}
 
 				// Check RHS is integer literal 0
-				intLit, ok := assignStmt.Value.(*ast.IntegerLiteral)
-				if !ok {
-					t.Fatalf("Expected value to be *ast.IntegerLiteral, got %T", assignStmt.Value)
-				}
+				intLit := helperWantNode[*ast.IntegerLiteral](t, assignStmt.Value, "value")
 				if intLit.Raw != "0" {
 					t.Errorf("Expected value '0', got %q", intLit.Raw)
 				}
@@ -1332,16 +1098,10 @@ func TestStatementParsing(t *testing.T) {
 			name: "array slice with colon only",
 			src:  "LEDIT_EXTRA(:) = .FALSE.",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignment, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
+				assignment := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
 				// Target should be a function call with one argument (the range)
-				funcCall, ok := assignment.Target.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected Target to be *ast.FunctionCall, got %T", assignment.Target)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, assignment.Target, "target")
 
 				if funcCall.Name != "LEDIT_EXTRA" {
 					t.Errorf("Expected array name 'LEDIT_EXTRA', got %q", funcCall.Name)
@@ -1351,10 +1111,7 @@ func TestStatementParsing(t *testing.T) {
 					t.Fatalf("Expected 1 argument (slice), got %d", len(funcCall.Args))
 				}
 
-				rangeExpr, ok := funcCall.Args[0].(*ast.RangeExpr)
-				if !ok {
-					t.Fatalf("Expected argument to be *ast.RangeExpr, got %T", funcCall.Args[0])
-				}
+				rangeExpr := helperWantNode[*ast.RangeExpr](t, funcCall.Args[0], "arg[0]")
 
 				if rangeExpr.Start != nil {
 					t.Error("Expected Start to be nil for ':'")
@@ -1371,21 +1128,15 @@ func TestStatementParsing(t *testing.T) {
 			name: "array slice with start:end",
 			src:  "X = ARR(1:10)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignment := stmt.(*ast.AssignmentStmt)
+				assignment := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
-				funcCall, ok := assignment.Value.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected Value to be *ast.FunctionCall, got %T", assignment.Value)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, assignment.Value, "value")
 
 				if len(funcCall.Args) != 1 {
 					t.Fatalf("Expected 1 argument, got %d", len(funcCall.Args))
 				}
 
-				rangeExpr, ok := funcCall.Args[0].(*ast.RangeExpr)
-				if !ok {
-					t.Fatalf("Expected argument to be *ast.RangeExpr, got %T", funcCall.Args[0])
-				}
+				rangeExpr := helperWantNode[*ast.RangeExpr](t, funcCall.Args[0], "arg[0]")
 
 				if rangeExpr.Start == nil {
 					t.Error("Expected Start to be non-nil")
@@ -1402,10 +1153,10 @@ func TestStatementParsing(t *testing.T) {
 			name: "array slice with start:end:stride",
 			src:  "X = ARR(1:10:2)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignment := stmt.(*ast.AssignmentStmt)
+				assignment := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
-				funcCall := assignment.Value.(*ast.FunctionCall)
-				rangeExpr := funcCall.Args[0].(*ast.RangeExpr)
+				funcCall := helperWantNode[*ast.CallExpr](t, assignment.Value, "value")
+				rangeExpr := helperWantNode[*ast.RangeExpr](t, funcCall.Args[0], "arg[0]")
 
 				if rangeExpr.Start == nil {
 					t.Error("Expected Start to be non-nil")
@@ -1422,10 +1173,10 @@ func TestStatementParsing(t *testing.T) {
 			name: "array slice with :end",
 			src:  "X = ARR(:5)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignment := stmt.(*ast.AssignmentStmt)
+				assignment := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
-				funcCall := assignment.Value.(*ast.FunctionCall)
-				rangeExpr := funcCall.Args[0].(*ast.RangeExpr)
+				funcCall := helperWantNode[*ast.CallExpr](t, assignment.Value, "value")
+				rangeExpr := helperWantNode[*ast.RangeExpr](t, funcCall.Args[0], "arg[0]")
 
 				if rangeExpr.Start != nil {
 					t.Error("Expected Start to be nil for ':end'")
@@ -1439,10 +1190,10 @@ func TestStatementParsing(t *testing.T) {
 			name: "array slice with start:",
 			src:  "X = ARR(5:)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignment := stmt.(*ast.AssignmentStmt)
+				assignment := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
-				funcCall := assignment.Value.(*ast.FunctionCall)
-				rangeExpr := funcCall.Args[0].(*ast.RangeExpr)
+				funcCall := helperWantNode[*ast.CallExpr](t, assignment.Value, "value")
+				rangeExpr := helperWantNode[*ast.RangeExpr](t, funcCall.Args[0], "arg[0]")
 
 				if rangeExpr.Start == nil {
 					t.Error("Expected Start to be non-nil")
@@ -1460,10 +1211,7 @@ func TestStatementParsing(t *testing.T) {
 ! comment line
      &           C3)`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				callStmt, ok := stmt.(*ast.CallStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.CallStmt, got %T", stmt)
-				}
+				callStmt := helperWantNode[*ast.CallStmt](t, stmt, "")
 
 				if callStmt.Name != "DIRALT" {
 					t.Errorf("Expected subroutine name 'DIRALT', got %q", callStmt.Name)
@@ -1492,10 +1240,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "IMPLICIT NONE uppercase",
 			src:  "IMPLICIT NONE",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				implStmt, ok := stmt.(*ast.ImplicitStatement)
-				if !ok {
-					t.Fatalf("Expected *ast.ImplicitStatement, got %T", stmt)
-				}
+				implStmt := helperWantNode[*ast.ImplicitStatement](t, stmt, "")
 				if !implStmt.IsNone {
 					t.Error("Expected IsNone to be true")
 				}
@@ -1505,10 +1250,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "IMPLICIT NONE lowercase",
 			src:  "implicit none",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				implStmt, ok := stmt.(*ast.ImplicitStatement)
-				if !ok {
-					t.Fatalf("Expected *ast.ImplicitStatement, got %T", stmt)
-				}
+				implStmt := helperWantNode[*ast.ImplicitStatement](t, stmt, "")
 				if !implStmt.IsNone {
 					t.Error("Expected IsNone to be true")
 				}
@@ -1518,10 +1260,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "IMPLICIT NONE mixed case",
 			src:  "ImPlIcIt NoNe",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				implStmt, ok := stmt.(*ast.ImplicitStatement)
-				if !ok {
-					t.Fatalf("Expected *ast.ImplicitStatement, got %T", stmt)
-				}
+				implStmt := helperWantNode[*ast.ImplicitStatement](t, stmt, "")
 				if !implStmt.IsNone {
 					t.Error("Expected IsNone to be true")
 				}
@@ -1531,10 +1270,7 @@ func TestStatementParsing(t *testing.T) {
 			name: "IMPLICIT DOUBLE PRECISION and LOGICAL with multiple ranges",
 			src:  "IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				implStmt, ok := stmt.(*ast.ImplicitStatement)
-				if !ok {
-					t.Fatalf("Expected *ast.ImplicitStatement, got %T", stmt)
-				}
+				implStmt := helperWantNode[*ast.ImplicitStatement](t, stmt, "")
 				if implStmt.IsNone {
 					t.Error("Expected IsNone to be false")
 				}
@@ -1596,18 +1332,12 @@ func TestStatementParsing(t *testing.T) {
 	ENDIF
 ENDIF`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt, ok := stmt.(*ast.IfStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
-				}
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 				// Verify outer IF has inner IF in THEN part
 				if len(ifStmt.ThenPart) != 1 {
 					t.Fatalf("Expected 1 statement in outer IF THEN part, got %d", len(ifStmt.ThenPart))
 				}
-				innerIf, ok := ifStmt.ThenPart[0].(*ast.IfStmt)
-				if !ok {
-					t.Errorf("Expected inner statement to be *ast.IfStmt, got %T", ifStmt.ThenPart[0])
-				}
+				innerIf := helperWantNode[*ast.IfStmt](t, ifStmt.ThenPart[0], "inner IF")
 				// Verify inner IF has WRITE statement
 				if len(innerIf.ThenPart) != 1 {
 					t.Errorf("Expected 1 statement in inner IF THEN part, got %d", len(innerIf.ThenPart))
@@ -1622,10 +1352,7 @@ ELSE
 	WRITE(6,*) 'message'
 ENDIF`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt, ok := stmt.(*ast.IfStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
-				}
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 				// Verify ELSE part has WRITE statement
 				if len(ifStmt.ElsePart) != 1 {
 					t.Fatalf("Expected 1 statement in ELSE part, got %d", len(ifStmt.ElsePart))
@@ -1645,19 +1372,14 @@ ENDIF`,
 	ENDIF
 ENDIF`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt, ok := stmt.(*ast.IfStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.IfStmt, got %T", stmt)
-				}
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 				// Verify outer IF has 2 inner IFs
 				if len(ifStmt.ThenPart) != 2 {
 					t.Fatalf("Expected 2 statements in outer IF THEN part, got %d", len(ifStmt.ThenPart))
 				}
 				// Both should be IF statements
 				for i, s := range ifStmt.ThenPart {
-					if _, ok := s.(*ast.IfStmt); !ok {
-						t.Errorf("Expected statement %d to be *ast.IfStmt, got %T", i, s)
-					}
+					helperWantNode[*ast.IfStmt](t, s, fmt.Sprintf("statement %d", i))
 				}
 			},
 		},
@@ -1668,10 +1390,7 @@ ENDIF`,
 			src: `DO 3002 IQP=1,10
  3002 END DO`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				doLoop, ok := stmt.(*ast.DoLoop)
-				if !ok {
-					t.Fatalf("Expected *ast.DoLoop, got %T", stmt)
-				}
+				doLoop := helperWantNode[*ast.DoLoop](t, stmt, "")
 				// Verify loop variable
 				if doLoop.Var != "IQP" {
 					t.Errorf("Expected loop variable 'IQP', got %q", doLoop.Var)
@@ -1691,10 +1410,7 @@ ENDIF`,
 			src: `DO 370 I1=1,6
 370 CONTINUE`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				doLoop, ok := stmt.(*ast.DoLoop)
-				if !ok {
-					t.Fatalf("Expected *ast.DoLoop, got %T", stmt)
-				}
+				doLoop := helperWantNode[*ast.DoLoop](t, stmt, "")
 				// Verify loop variable
 				if doLoop.Var != "I1" {
 					t.Errorf("Expected loop variable 'I1', got %q", doLoop.Var)
@@ -1704,18 +1420,12 @@ ENDIF`,
 					t.Errorf("Expected DO target label '370', got %q", doLoop.TargetLabel)
 				}
 				// Verify start expression
-				startLit, ok := doLoop.Start.(*ast.IntegerLiteral)
-				if !ok {
-					t.Fatalf("Expected start to be *ast.IntegerLiteral, got %T", doLoop.Start)
-				}
+				startLit := helperWantNode[*ast.IntegerLiteral](t, doLoop.Start, "start")
 				if startLit.Raw != "1" {
 					t.Errorf("Expected start '1', got %q", startLit.Raw)
 				}
 				// Verify end expression
-				endLit, ok := doLoop.End.(*ast.IntegerLiteral)
-				if !ok {
-					t.Fatalf("Expected end to be *ast.IntegerLiteral, got %T", doLoop.End)
-				}
+				endLit := helperWantNode[*ast.IntegerLiteral](t, doLoop.End, "end")
 				if endLit.Raw != "6" {
 					t.Errorf("Expected end '6', got %q", endLit.Raw)
 				}
@@ -1725,23 +1435,14 @@ ENDIF`,
 			name: "string with escaped quote (doubled quote)",
 			src:  "name = 'M1'' '",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assign, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
+				assign := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 				// Check target
-				target, ok := assign.Target.(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected target to be *ast.Identifier, got %T", assign.Target)
-				}
+				target := helperWantNode[*ast.Identifier](t, assign.Target, "target")
 				if target.Value != "name" {
 					t.Errorf("Expected target 'name', got %q", target.Value)
 				}
 				// Check value is a string literal
-				strLit, ok := assign.Value.(*ast.StringLiteral)
-				if !ok {
-					t.Fatalf("Expected value to be *ast.StringLiteral, got %T", assign.Value)
-				}
+				strLit := helperWantNode[*ast.StringLiteral](t, assign.Value, "value")
 				// The string 'M1'' ' should parse as: M1' (M1 followed by single quote and space)
 				expected := "M1' "
 				if strLit.Value != expected {
@@ -1756,16 +1457,10 @@ ENDIF`,
 			src: `SELECT CASE (N)
 END SELECT`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				selectStmt, ok := stmt.(*ast.SelectCaseStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.SelectCaseStmt, got %T", stmt)
-				}
+				selectStmt := helperWantNode[*ast.SelectCaseStmt](t, stmt, "")
 
 				// Verify expression
-				ident, ok := selectStmt.Expression.(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected expression to be *ast.Identifier, got %T", selectStmt.Expression)
-				}
+				ident := helperWantNode[*ast.Identifier](t, selectStmt.Expression, "expression")
 				if ident.Value != "N" {
 					t.Errorf("Expected expression 'N', got %q", ident.Value)
 				}
@@ -1783,10 +1478,7 @@ CASE (1)
   X = 10
 END SELECT`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				selectStmt, ok := stmt.(*ast.SelectCaseStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.SelectCaseStmt, got %T", stmt)
-				}
+				selectStmt := helperWantNode[*ast.SelectCaseStmt](t, stmt, "")
 
 				// Verify one case
 				if len(selectStmt.Cases) != 1 {
@@ -1812,10 +1504,7 @@ CASE (1, 2, 3)
   X = 100
 END SELECT`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				selectStmt, ok := stmt.(*ast.SelectCaseStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.SelectCaseStmt, got %T", stmt)
-				}
+				selectStmt := helperWantNode[*ast.SelectCaseStmt](t, stmt, "")
 
 				if len(selectStmt.Cases) != 1 {
 					t.Fatalf("Expected 1 case, got %d", len(selectStmt.Cases))
@@ -1834,10 +1523,7 @@ CASE DEFAULT
   X = 0
 END SELECT`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				selectStmt, ok := stmt.(*ast.SelectCaseStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.SelectCaseStmt, got %T", stmt)
-				}
+				selectStmt := helperWantNode[*ast.SelectCaseStmt](t, stmt, "")
 
 				if len(selectStmt.Cases) != 1 {
 					t.Fatalf("Expected 1 case, got %d", len(selectStmt.Cases))
@@ -1864,10 +1550,7 @@ CASE DEFAULT
   Z = 0
 END SELECT`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				selectStmt, ok := stmt.(*ast.SelectCaseStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.SelectCaseStmt, got %T", stmt)
-				}
+				selectStmt := helperWantNode[*ast.SelectCaseStmt](t, stmt, "")
 
 				if len(selectStmt.Cases) != 3 {
 					t.Fatalf("Expected 3 cases, got %d", len(selectStmt.Cases))
@@ -1895,16 +1578,10 @@ END SELECT`,
 			name: "function call with keyword argument",
 			src:  "result = REAL(value, KIND=KIND(result))",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assign, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
+				assign := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
 				// Check the value is a function call
-				funcCall, ok := assign.Value.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected value to be *ast.FunctionCall, got %T", assign.Value)
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, assign.Value, "value")
 
 				if funcCall.Name != "REAL" {
 					t.Errorf("Expected function name 'REAL', got %q", funcCall.Name)
@@ -1916,29 +1593,20 @@ END SELECT`,
 				}
 
 				// Second argument should be a BinaryExpr representing KIND=KIND(result)
-				binExpr, ok := funcCall.Args[1].(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected second argument to be *ast.BinaryExpr, got %T", funcCall.Args[1])
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, funcCall.Args[1], "second arg")
 
 				if binExpr.Op != token.Equals {
 					t.Errorf("Expected operator to be Equals, got %v", binExpr.Op)
 				}
 
 				// Left side should be identifier "KIND"
-				leftIdent, ok := binExpr.Left.(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected left side to be *ast.Identifier, got %T", binExpr.Left)
-				}
+				leftIdent := helperWantNode[*ast.Identifier](t, binExpr.Left, "left side")
 				if leftIdent.Value != "KIND" {
 					t.Errorf("Expected keyword name 'KIND', got %q", leftIdent.Value)
 				}
 
 				// Right side should be a function call KIND(result)
-				rightFunc, ok := binExpr.Right.(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected right side to be *ast.FunctionCall, got %T", binExpr.Right)
-				}
+				rightFunc := helperWantNode[*ast.CallExpr](t, binExpr.Right, "right side")
 				if rightFunc.Name != "KIND" {
 					t.Errorf("Expected function name 'KIND', got %q", rightFunc.Name)
 				}
@@ -1950,10 +1618,7 @@ END SELECT`,
 			name: "ENTRY statement with parameters",
 			src:  "ENTRY alternate_entry(param1, param2, param3)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				entry, ok := stmt.(*ast.EntryStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.EntryStmt, got %T", stmt)
-				}
+				entry := helperWantNode[*ast.EntryStmt](t, stmt, "")
 
 				if entry.Name != "alternate_entry" {
 					t.Errorf("Expected entry name 'alternate_entry', got %q", entry.Name)
@@ -1975,10 +1640,7 @@ END SELECT`,
 			name: "ENTRY statement without parameters",
 			src:  "ENTRY simple_entry",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				entry, ok := stmt.(*ast.EntryStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.EntryStmt, got %T", stmt)
-				}
+				entry := helperWantNode[*ast.EntryStmt](t, stmt, "")
 
 				if entry.Name != "simple_entry" {
 					t.Errorf("Expected entry name 'simple_entry', got %q", entry.Name)
@@ -1995,10 +1657,7 @@ END SELECT`,
 			name: "ENDFILE simple form",
 			src:  "ENDFILE 10",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				endfile, ok := stmt.(*ast.EndfileStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.EndfileStmt, got %T", stmt)
-				}
+				endfile := helperWantNode[*ast.EndfileStmt](t, stmt, "")
 
 				// Should have UNIT specifier
 				if len(endfile.Specifiers) != 1 {
@@ -2018,10 +1677,7 @@ END SELECT`,
 			name: "ENDFILE with specifiers",
 			src:  "ENDFILE(UNIT=15, IOSTAT=ierr)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				endfile, ok := stmt.(*ast.EndfileStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.EndfileStmt, got %T", stmt)
-				}
+				endfile := helperWantNode[*ast.EndfileStmt](t, stmt, "")
 
 				// Should have UNIT and IOSTAT specifiers
 				if len(endfile.Specifiers) != 2 {
@@ -2043,10 +1699,7 @@ END SELECT`,
 			name: "DATA statement simple",
 			src:  "DATA x, y / 1.0, 2.0 /",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				data, ok := stmt.(*ast.DataStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.DataStmt, got %T", stmt)
-				}
+				data := helperWantNode[*ast.DataStmt](t, stmt, "")
 				// Just verify it parses without error
 				_ = data
 			},
@@ -2055,10 +1708,7 @@ END SELECT`,
 			name: "DATA statement with implied DO loop",
 			src:  "DATA (arr(i), i=1,10) / 10*0.0 /",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				data, ok := stmt.(*ast.DataStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.DataStmt, got %T", stmt)
-				}
+				data := helperWantNode[*ast.DataStmt](t, stmt, "")
 				// Just verify it parses without error
 				_ = data
 			},
@@ -2069,25 +1719,16 @@ END SELECT`,
 			name: "assignment with .EQ. operator",
 			src:  "LPARTS = MOD(IDRAD,4)/2 .EQ. 1",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assign, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
+				assign := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
 				// Target should be identifier LPARTS
-				target, ok := assign.Target.(*ast.Identifier)
-				if !ok {
-					t.Fatalf("Expected target to be *ast.Identifier, got %T", assign.Target)
-				}
+				target := helperWantNode[*ast.Identifier](t, assign.Target, "target")
 				if target.Value != "LPARTS" {
 					t.Errorf("Expected target 'LPARTS', got %q", target.Value)
 				}
 
 				// Value should be a binary expression with .EQ. operator
-				binExpr, ok := assign.Value.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected value to be *ast.BinaryExpr, got %T", assign.Value)
-				}
+				binExpr := helperWantNode[*ast.BinaryExpr](t, assign.Value, "value")
 
 				if binExpr.Op != token.EQ {
 					t.Errorf("Expected .EQ. operator (token %v), got %v", token.EQ, binExpr.Op)
@@ -2098,35 +1739,23 @@ END SELECT`,
 			name: "comparison operators .LT. .GT. .LE. .GE. .NE.",
 			src:  "flag = a .LT. b .AND. c .GT. d",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assign, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignmentStmt, got %T", stmt)
-				}
+				assign := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 
 				// Value should be a binary expression with .AND. operator
-				andExpr, ok := assign.Value.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected value to be *ast.BinaryExpr, got %T", assign.Value)
-				}
+				andExpr := helperWantNode[*ast.BinaryExpr](t, assign.Value, "value")
 
 				if andExpr.Op != token.AND {
 					t.Errorf("Expected .AND. operator, got %v", andExpr.Op)
 				}
 
 				// Left side should be .LT. comparison
-				ltExpr, ok := andExpr.Left.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected left to be *ast.BinaryExpr, got %T", andExpr.Left)
-				}
+				ltExpr := helperWantNode[*ast.BinaryExpr](t, andExpr.Left, "left")
 				if ltExpr.Op != token.LT {
 					t.Errorf("Expected .LT. operator, got %v", ltExpr.Op)
 				}
 
 				// Right side should be .GT. comparison
-				gtExpr, ok := andExpr.Right.(*ast.BinaryExpr)
-				if !ok {
-					t.Fatalf("Expected right to be *ast.BinaryExpr, got %T", andExpr.Right)
-				}
+				gtExpr := helperWantNode[*ast.BinaryExpr](t, andExpr.Right, "right")
 				if gtExpr.Op != token.GT {
 					t.Errorf("Expected .GT. operator, got %v", gtExpr.Op)
 				}
@@ -2138,17 +1767,11 @@ END SELECT`,
 			name: "RETURN with alternate return integer",
 			src:  "RETURN 1",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ret, ok := stmt.(*ast.ReturnStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ReturnStmt, got %T", stmt)
-				}
+				ret := helperWantNode[*ast.ReturnStmt](t, stmt, "")
 				if ret.AlternateReturn == nil {
 					t.Fatal("Expected AlternateReturn to be set")
 				}
-				lit, ok := ret.AlternateReturn.(*ast.IntegerLiteral)
-				if !ok {
-					t.Fatalf("Expected *ast.IntegerLiteral, got %T", ret.AlternateReturn)
-				}
+				lit := helperWantNode[*ast.IntegerLiteral](t, ret.AlternateReturn, "AlternateReturn")
 				if lit.Raw != "1" {
 					t.Errorf("Expected return value '1', got %q", lit.Raw)
 				}
@@ -2158,10 +1781,7 @@ END SELECT`,
 			name: "RETURN without alternate return",
 			src:  "RETURN",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ret, ok := stmt.(*ast.ReturnStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ReturnStmt, got %T", stmt)
-				}
+				ret := helperWantNode[*ast.ReturnStmt](t, stmt, "")
 				if ret.AlternateReturn != nil {
 					t.Errorf("Expected AlternateReturn to be nil, got %v", ret.AlternateReturn)
 				}
@@ -2171,10 +1791,7 @@ END SELECT`,
 			name: "CALL with single alternate return argument",
 			src:  "CALL IONLIM(x, y, *200)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				call, ok := stmt.(*ast.CallStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.CallStmt, got %T", stmt)
-				}
+				call := helperWantNode[*ast.CallStmt](t, stmt, "")
 				if call.Name != "IONLIM" {
 					t.Errorf("Expected subroutine name 'IONLIM', got %q", call.Name)
 				}
@@ -2183,20 +1800,11 @@ END SELECT`,
 				}
 
 				// First two arguments should be identifiers
-				_, ok = call.Args[0].(*ast.Identifier)
-				if !ok {
-					t.Errorf("Expected first arg to be *ast.Identifier, got %T", call.Args[0])
-				}
-				_, ok = call.Args[1].(*ast.Identifier)
-				if !ok {
-					t.Errorf("Expected second arg to be *ast.Identifier, got %T", call.Args[1])
-				}
+				helperWantNode[*ast.Identifier](t, call.Args[0], "first arg")
+				helperWantNode[*ast.Identifier](t, call.Args[1], "second arg")
 
 				// Third argument should be alternate return
-				altRet, ok := call.Args[2].(*ast.AlternateReturnArg)
-				if !ok {
-					t.Fatalf("Expected third arg to be *ast.AlternateReturnArg, got %T", call.Args[2])
-				}
+				altRet := helperWantNode[*ast.AlternateReturnArg](t, call.Args[2], "third arg")
 				if altRet.Label != "200" {
 					t.Errorf("Expected label '200', got %q", altRet.Label)
 				}
@@ -2206,47 +1814,29 @@ END SELECT`,
 			name: "CALL with multiple alternate returns",
 			src:  "CALL SUB(*100, *200, x, y, *300)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				call, ok := stmt.(*ast.CallStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.CallStmt, got %T", stmt)
-				}
+				call := helperWantNode[*ast.CallStmt](t, stmt, "")
 				if len(call.Args) != 5 {
 					t.Fatalf("Expected 5 arguments, got %d", len(call.Args))
 				}
 
 				// First argument: *100
-				altRet1, ok := call.Args[0].(*ast.AlternateReturnArg)
-				if !ok {
-					t.Fatalf("Expected first arg to be *ast.AlternateReturnArg, got %T", call.Args[0])
-				}
+				altRet1 := helperWantNode[*ast.AlternateReturnArg](t, call.Args[0], "first arg")
 				if altRet1.Label != "100" {
 					t.Errorf("Expected label '100', got %q", altRet1.Label)
 				}
 
 				// Second argument: *200
-				altRet2, ok := call.Args[1].(*ast.AlternateReturnArg)
-				if !ok {
-					t.Fatalf("Expected second arg to be *ast.AlternateReturnArg, got %T", call.Args[1])
-				}
+				altRet2 := helperWantNode[*ast.AlternateReturnArg](t, call.Args[1], "second arg")
 				if altRet2.Label != "200" {
 					t.Errorf("Expected label '200', got %q", altRet2.Label)
 				}
 
 				// Third and fourth arguments: regular identifiers
-				_, ok = call.Args[2].(*ast.Identifier)
-				if !ok {
-					t.Errorf("Expected third arg to be *ast.Identifier, got %T", call.Args[2])
-				}
-				_, ok = call.Args[3].(*ast.Identifier)
-				if !ok {
-					t.Errorf("Expected fourth arg to be *ast.Identifier, got %T", call.Args[3])
-				}
+				helperWantNode[*ast.Identifier](t, call.Args[2], "third arg")
+				helperWantNode[*ast.Identifier](t, call.Args[3], "fourth arg")
 
 				// Fifth argument: *300
-				altRet3, ok := call.Args[4].(*ast.AlternateReturnArg)
-				if !ok {
-					t.Fatalf("Expected fifth arg to be *ast.AlternateReturnArg, got %T", call.Args[4])
-				}
+				altRet3 := helperWantNode[*ast.AlternateReturnArg](t, call.Args[4], "fifth arg")
 				if altRet3.Label != "300" {
 					t.Errorf("Expected label '300', got %q", altRet3.Label)
 				}
@@ -2256,10 +1846,7 @@ END SELECT`,
 			name: "CALL from valid_gdyn.f90 line 97",
 			src:  "call ionlim (rd,pt,htrng(6),rlim1,rlim2,*200)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				call, ok := stmt.(*ast.CallStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.CallStmt, got %T", stmt)
-				}
+				call := helperWantNode[*ast.CallStmt](t, stmt, "")
 				if call.Name != "ionlim" {
 					t.Errorf("Expected subroutine name 'ionlim', got %q", call.Name)
 				}
@@ -2268,19 +1855,13 @@ END SELECT`,
 				}
 
 				// Last argument should be alternate return *200
-				altRet, ok := call.Args[5].(*ast.AlternateReturnArg)
-				if !ok {
-					t.Fatalf("Expected last arg to be *ast.AlternateReturnArg, got %T", call.Args[5])
-				}
+				altRet := helperWantNode[*ast.AlternateReturnArg](t, call.Args[5], "last arg")
 				if altRet.Label != "200" {
 					t.Errorf("Expected label '200', got %q", altRet.Label)
 				}
 
 				// Third argument should be function call htrng(6)
-				funcCall, ok := call.Args[2].(*ast.FunctionCall)
-				if !ok {
-					t.Fatalf("Expected third arg to be *ast.FunctionCall, got %T", call.Args[2])
-				}
+				funcCall := helperWantNode[*ast.CallExpr](t, call.Args[2], "third arg")
 				if funcCall.Name != "htrng" {
 					t.Errorf("Expected function name 'htrng', got %q", funcCall.Name)
 				}
@@ -2292,10 +1873,7 @@ END SELECT`,
 			name: "ASSIGN from valid_gdyn.f90 line 99",
 			src:  "ASSIGN 2000 TO IGOTO",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assign, ok := stmt.(*ast.AssignStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignStmt, got %T", stmt)
-				}
+				assign := helperWantNode[*ast.AssignStmt](t, stmt, "")
 				if assign.LabelValue != "2000" {
 					t.Errorf("Expected label '2000', got %q", assign.LabelValue)
 				}
@@ -2308,10 +1886,7 @@ END SELECT`,
 			name: "ASSIGN with different label",
 			src:  "ASSIGN 100 TO jump_target",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assign, ok := stmt.(*ast.AssignStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignStmt, got %T", stmt)
-				}
+				assign := helperWantNode[*ast.AssignStmt](t, stmt, "")
 				if assign.LabelValue != "100" {
 					t.Errorf("Expected label '100', got %q", assign.LabelValue)
 				}
@@ -2323,13 +1898,10 @@ END SELECT`,
 
 		// ===== Assigned GOTO Statements =====
 		{
-			name: "Assigned GOTO from valid_gdyn.f90 line 110",
+			name: "Assigned GO TO from valid_gdyn.f90 line 110",
 			src:  "GO TO IGOTO,(500,2000)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignedGoto, ok := stmt.(*ast.AssignedGotoStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignedGotoStmt, got %T", stmt)
-				}
+				assignedGoto := helperWantNode[*ast.AssignedGotoStmt](t, stmt, "")
 				if assignedGoto.Variable != "IGOTO" {
 					t.Errorf("Expected variable 'IGOTO', got %q", assignedGoto.Variable)
 				}
@@ -2347,13 +1919,10 @@ END SELECT`,
 			},
 		},
 		{
-			name: "Assigned GOTO without label list",
+			name: "Assigned GO TO without label list",
 			src:  "GO TO jump_var",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assignedGoto, ok := stmt.(*ast.AssignedGotoStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.AssignedGotoStmt, got %T", stmt)
-				}
+				assignedGoto := helperWantNode[*ast.AssignedGotoStmt](t, stmt, "")
 				if assignedGoto.Variable != "jump_var" {
 					t.Errorf("Expected variable 'jump_var', got %q", assignedGoto.Variable)
 				}
@@ -2368,10 +1937,7 @@ END SELECT`,
 			name: "CYCLE with construct name from valid_gdyn.f90",
 			src:  "CYCLE satloop",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				cycle, ok := stmt.(*ast.CycleStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.CycleStmt, got %T", stmt)
-				}
+				cycle := helperWantNode[*ast.CycleStmt](t, stmt, "")
 				if cycle.ConstructName != "satloop" {
 					t.Errorf("Expected construct name 'satloop', got %q", cycle.ConstructName)
 				}
@@ -2381,10 +1947,7 @@ END SELECT`,
 			name: "CYCLE without construct name (backward compatibility)",
 			src:  "CYCLE",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				cycle, ok := stmt.(*ast.CycleStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.CycleStmt, got %T", stmt)
-				}
+				cycle := helperWantNode[*ast.CycleStmt](t, stmt, "")
 				if cycle.ConstructName != "" {
 					t.Errorf("Expected empty construct name, got %q", cycle.ConstructName)
 				}
@@ -2396,10 +1959,7 @@ END SELECT`,
 			name: "EXIT with construct name",
 			src:  "EXIT myloop",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				exit, ok := stmt.(*ast.ExitStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ExitStmt, got %T", stmt)
-				}
+				exit := helperWantNode[*ast.ExitStmt](t, stmt, "")
 				if exit.ConstructName != "myloop" {
 					t.Errorf("Expected construct name 'myloop', got %q", exit.ConstructName)
 				}
@@ -2409,10 +1969,7 @@ END SELECT`,
 			name: "EXIT without construct name (backward compatibility)",
 			src:  "EXIT",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				exit, ok := stmt.(*ast.ExitStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ExitStmt, got %T", stmt)
-				}
+				exit := helperWantNode[*ast.ExitStmt](t, stmt, "")
 				if exit.ConstructName != "" {
 					t.Errorf("Expected empty construct name, got %q", exit.ConstructName)
 				}
@@ -2424,10 +1981,7 @@ END SELECT`,
 			name: "Labeled READ with END= specifier from valid_gdyn.f90",
 			src:  "10 READ(50,5000,END=900) CARD",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				readStmt, ok := stmt.(*ast.ReadStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ReadStmt, got %T", stmt)
-				}
+				readStmt := helperWantNode[*ast.ReadStmt](t, stmt, "")
 				if readStmt.Label != "10" {
 					t.Errorf("Expected statement label '10', got %q", readStmt.Label)
 				}
@@ -2443,10 +1997,7 @@ END SELECT`,
 			name: "Labeled READ with multiple I/O specs including END=",
 			src:  "20 READ(14,81200,IOSTAT=IOS,END=60000) X, Y",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				readStmt, ok := stmt.(*ast.ReadStmt)
-				if !ok {
-					t.Fatalf("Expected *ast.ReadStmt, got %T", stmt)
-				}
+				readStmt := helperWantNode[*ast.ReadStmt](t, stmt, "")
 				if readStmt.Label != "20" {
 					t.Errorf("Expected statement label '20', got %q", readStmt.Label)
 				}
@@ -2459,10 +2010,7 @@ END SELECT`,
 			name: "WRITE with END as variable in output list",
 			src:  "WRITE(1,100) s,END,t",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				writeStmt, ok := stmt.(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected WriteStmt, got %T", stmt)
-				}
+				writeStmt := helperWantNode[*ast.WriteStmt](t, stmt, "")
 				// Should have 3 output items: s, END, t
 				if len(writeStmt.OutputList) != 3 {
 					t.Errorf("Expected 3 output items, got %d", len(writeStmt.OutputList))
@@ -2482,14 +2030,9 @@ END SELECT`,
 			name: "END as variable in assignment",
 			src:  "END = DPSR(JPOLE)+DELTA",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assign, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected AssignmentStmt, got %T", stmt)
-				}
-				endVar, ok := assign.Target.(*ast.Identifier)
-				if !ok {
-					t.Errorf("Expected target to be Identifier, got %T", assign.Target)
-				} else if endVar.Value != "END" {
+				assign := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
+				endVar := helperWantNode[*ast.Identifier](t, assign.Target, "target")
+				if endVar.Value != "END" {
 					t.Errorf("Expected target 'END', got '%s'", endVar.Value)
 				}
 			},
@@ -2498,22 +2041,15 @@ END SELECT`,
 			name: "DATA keyword as array name in assignment",
 			src:  "accX1 = data(i,j)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assign, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected AssignmentStmt, got %T", stmt)
-				}
+				assign := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 				// Check target is accX1
-				target, ok := assign.Target.(*ast.Identifier)
-				if !ok {
-					t.Errorf("Expected target to be Identifier, got %T", assign.Target)
-				} else if target.Value != "accX1" {
+				target := helperWantNode[*ast.Identifier](t, assign.Target, "target")
+				if target.Value != "accX1" {
 					t.Errorf("Expected target 'accX1', got '%s'", target.Value)
 				}
 				// Check value is data(i,j) - a function call
-				funcCall, ok := assign.Value.(*ast.FunctionCall)
-				if !ok {
-					t.Errorf("Expected value to be FunctionCall, got %T", assign.Value)
-				} else if funcCall.Name != "data" {
+				funcCall := helperWantNode[*ast.CallExpr](t, assign.Value, "value")
+				if funcCall.Name != "data" {
 					t.Errorf("Expected function 'data', got '%s'", funcCall.Name)
 				}
 			},
@@ -2523,17 +2059,9 @@ END SELECT`,
 			src: `II1(JNREXC+IEXCG-1) = &                       ! jjm
      &                      42`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assign, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected AssignmentStmt, got %T", stmt)
-				}
-				// Check that target is array reference or function call (same syntax in Fortran)
-				switch assign.Target.(type) {
-				case *ast.ArrayRef, *ast.FunctionCall:
-					// OK - both are valid representations
-				default:
-					t.Errorf("Expected target to be ArrayRef or FunctionCall, got %T", assign.Target)
-				}
+				assign := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
+				// Check that target is CallExpr (array reference or function call share same syntax in Fortran)
+				helperWantNode[*ast.CallExpr](t, assign.Target, "target")
 				// Check that value is parsed (continuation worked)
 				if assign.Value == nil {
 					t.Errorf("Expected value to be non-nil (continuation should have been processed)")
@@ -2545,10 +2073,7 @@ END SELECT`,
 			src: `x = 1 + &
        & 2`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assign, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected AssignmentStmt, got %T", stmt)
-				}
+				assign := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 				if assign.Value == nil {
 					t.Errorf("Expected value to be parsed after continuation")
 				}
@@ -2560,10 +2085,7 @@ END SELECT`,
        & 2 + & ! second
        & 3`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				assign, ok := stmt.(*ast.AssignmentStmt)
-				if !ok {
-					t.Fatalf("Expected AssignmentStmt, got %T", stmt)
-				}
+				assign := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
 				if assign.Value == nil {
 					t.Errorf("Expected value to be parsed after multiple continuations")
 				}
@@ -2574,10 +2096,7 @@ END SELECT`,
 			src: `WRITE(*,*) 'A very long string that needs to be ' // &
               & 'continued on the next line'`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				write, ok := stmt.(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected WriteStmt, got %T", stmt)
-				}
+				write := helperWantNode[*ast.WriteStmt](t, stmt, "")
 				if len(write.OutputList) == 0 {
 					t.Errorf("Expected output list to be parsed")
 				}
@@ -2588,10 +2107,7 @@ END SELECT`,
 			src: `CALL SUBROUTINE_NAME(ARG1, ARG2, &
                         & ARG3, ARG4)`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				call, ok := stmt.(*ast.CallStmt)
-				if !ok {
-					t.Fatalf("Expected CallStmt, got %T", stmt)
-				}
+				call := helperWantNode[*ast.CallStmt](t, stmt, "")
 				if len(call.Args) != 4 {
 					t.Errorf("Expected 4 arguments, got %d", len(call.Args))
 				}
@@ -2604,23 +2120,16 @@ END SELECT`,
       END = 200.0
    ENDIF`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt, ok := stmt.(*ast.IfStmt)
-				if !ok {
-					t.Fatalf("Expected IfStmt, got %T", stmt)
-				}
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 				if len(ifStmt.ThenPart) != 2 {
 					t.Errorf("Expected 2 statements in THEN part, got %d", len(ifStmt.ThenPart))
 				}
 				// Check that second statement is END assignment
 				if len(ifStmt.ThenPart) >= 2 {
-					assign, ok := ifStmt.ThenPart[1].(*ast.AssignmentStmt)
-					if !ok {
-						t.Errorf("Expected second statement to be AssignmentStmt, got %T", ifStmt.ThenPart[1])
-					} else {
-						target, ok := assign.Target.(*ast.Identifier)
-						if ok && target.Value != "END" {
-							t.Errorf("Expected target to be 'END', got '%s'", target.Value)
-						}
+					assign := helperWantNode[*ast.AssignmentStmt](t, ifStmt.ThenPart[1], "second statement")
+					target := helperWantNode[*ast.Identifier](t, assign.Target, "target")
+					if target.Value != "END" {
+						t.Errorf("Expected target to be 'END', got '%s'", target.Value)
 					}
 				}
 			},
@@ -2633,20 +2142,14 @@ END SELECT`,
       ENDIF
    ENDIF`,
 			validate: func(t *testing.T, stmt ast.Statement) {
-				ifStmt, ok := stmt.(*ast.IfStmt)
-				if !ok {
-					t.Fatalf("Expected IfStmt, got %T", stmt)
-				}
+				ifStmt := helperWantNode[*ast.IfStmt](t, stmt, "")
 				// Check outer IF has nested IF
 				if len(ifStmt.ThenPart) != 1 {
 					t.Errorf("Expected 1 statement in outer THEN part, got %d", len(ifStmt.ThenPart))
 				}
 				// Verify inner IF exists
 				if len(ifStmt.ThenPart) > 0 {
-					_, ok := ifStmt.ThenPart[0].(*ast.IfStmt)
-					if !ok {
-						t.Errorf("Expected nested IfStmt, got %T", ifStmt.ThenPart[0])
-					}
+					helperWantNode[*ast.IfStmt](t, ifStmt.ThenPart[0], "nested IF")
 				}
 			},
 		},
@@ -2654,10 +2157,7 @@ END SELECT`,
 			name: "Implied DO with IN as loop variable",
 			src:  "WRITE(6,100) (A(IN),IN=1,10)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				write, ok := stmt.(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected WriteStmt, got %T", stmt)
-				}
+				write := helperWantNode[*ast.WriteStmt](t, stmt, "")
 				if len(write.OutputList) == 0 {
 					t.Errorf("Expected non-empty output list")
 				}
@@ -2678,10 +2178,7 @@ END SELECT`,
 			name: "Implied DO with OUT as loop variable",
 			src:  "WRITE(6,100) (B(OUT),OUT=1,5)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				write, ok := stmt.(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected WriteStmt, got %T", stmt)
-				}
+				write := helperWantNode[*ast.WriteStmt](t, stmt, "")
 				if len(write.OutputList) == 0 {
 					t.Errorf("Expected non-empty output list")
 				}
@@ -2691,10 +2188,7 @@ END SELECT`,
 			name: "Nested implied DO with keyword loop variable",
 			src:  "WRITE(6,100) I,(ARRAY(I3),I3=1,3)",
 			validate: func(t *testing.T, stmt ast.Statement) {
-				write, ok := stmt.(*ast.WriteStmt)
-				if !ok {
-					t.Fatalf("Expected WriteStmt, got %T", stmt)
-				}
+				write := helperWantNode[*ast.WriteStmt](t, stmt, "")
 				if len(write.OutputList) < 2 {
 					t.Errorf("Expected at least 2 items in output list, got %d", len(write.OutputList))
 				}
@@ -2721,10 +2215,7 @@ END SELECT`,
 			helperFatalErrors(t, &parser, "statement:\n"+wrappedSrc)
 
 			// Extract the statement from the parsed program
-			progBlock, ok := unit.(*ast.ProgramBlock)
-			if !ok {
-				t.Fatalf("Expected *ast.ProgramBlock, got %T", unit)
-			}
+			progBlock := helperWantNode[*ast.ProgramBlock](t, unit, "")
 
 			// The statement should be in Body
 			if len(progBlock.Body) == 0 {
@@ -2734,109 +2225,6 @@ END SELECT`,
 
 			// Run the validation function
 			tt.validate(t, stmt)
-		})
-	}
-}
-
-// TestParameterNameEdgeCases tests that keywords like END and DATA can be used as parameter names
-func TestParameterNameEdgeCases(t *testing.T) {
-	tests := []struct {
-		name          string
-		src           string
-		validateParam func(*testing.T, []ast.Parameter)
-	}{
-		{
-			name: "END as parameter name in subroutine",
-			src: `SUBROUTINE TOBNRY(IN,HDATAS,END,INTYPE,IDAT,MWORDS)
-   X = 1
-END SUBROUTINE`,
-			validateParam: func(t *testing.T, params []ast.Parameter) {
-				if len(params) != 6 {
-					t.Errorf("Expected 6 parameters, got %d", len(params))
-				}
-				// Check that END is the third parameter
-				if len(params) >= 3 && params[2].Name != "END" {
-					t.Errorf("Expected third parameter to be 'END', got '%s'", params[2].Name)
-				}
-			},
-		},
-		{
-			name: "DATA as parameter name in subroutine",
-			src: `SUBROUTINE EXAMPLE(IN,DATA,OUT)
-   X = 1
-END SUBROUTINE`,
-			validateParam: func(t *testing.T, params []ast.Parameter) {
-				if len(params) != 3 {
-					t.Errorf("Expected 3 parameters, got %d", len(params))
-				}
-				// Check that DATA is the second parameter
-				if len(params) >= 2 && params[1].Name != "DATA" {
-					t.Errorf("Expected second parameter to be 'DATA', got '%s'", params[1].Name)
-				}
-			},
-		},
-		{
-			name: "Both END and DATA as parameter names",
-			src: `SUBROUTINE TESTFUNC(START,END,DATA,RESULT)
-   X = 1
-END SUBROUTINE`,
-			validateParam: func(t *testing.T, params []ast.Parameter) {
-				if len(params) != 4 {
-					t.Errorf("Expected 4 parameters, got %d", len(params))
-				}
-				// Check parameter names
-				expectedNames := []string{"START", "END", "DATA", "RESULT"}
-				for i, expected := range expectedNames {
-					if i < len(params) && params[i].Name != expected {
-						t.Errorf("Expected parameter %d to be '%s', got '%s'", i, expected, params[i].Name)
-					}
-				}
-			},
-		},
-		{
-			name: "END as parameter in function",
-			src: `FUNCTION CALCULATE(BEGIN,END) RESULT(VALUE)
-   VALUE = 1
-END FUNCTION`,
-			validateParam: func(t *testing.T, params []ast.Parameter) {
-				if len(params) != 2 {
-					t.Errorf("Expected 2 parameters, got %d", len(params))
-				}
-				// Check that END is the second parameter
-				if len(params) >= 2 && params[1].Name != "END" {
-					t.Errorf("Expected second parameter to be 'END', got '%s'", params[1].Name)
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var parser Parser90
-			err := parser.Reset(tt.name+".f90", strings.NewReader(tt.src))
-			if err != nil {
-				t.Fatalf("Reset failed: %v", err)
-			}
-
-			unit := parser.ParseNextProgramUnit()
-			if unit == nil {
-				t.Fatal("ParseNextProgramUnit returned nil")
-			}
-
-			helperFatalErrors(t, &parser, "source:\n"+tt.src)
-
-			// Extract parameters based on unit type
-			var params []ast.Parameter
-			switch u := unit.(type) {
-			case *ast.Subroutine:
-				params = u.Parameters
-			case *ast.Function:
-				params = u.Parameters
-			default:
-				t.Fatalf("Expected Subroutine or Function, got %T", unit)
-			}
-
-			tt.validateParam(t, params)
 		})
 	}
 }

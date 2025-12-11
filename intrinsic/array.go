@@ -143,8 +143,7 @@ func (a *Array[T]) Allocated() bool {
 //	arr.At(0, 5) accesses element at indices (0, 5)
 //	offset = (0 - (-5))*1 + (5 - 0)*11 = 5 + 55 = 60
 func (a *Array[T]) At(indices ...int) T {
-	offset := a.offset(indices)
-	return a.data[offset]
+	return *a.AtPtr(indices...)
 }
 
 func (a *Array[T]) AtPtr(indices ...int) *T {
@@ -159,6 +158,14 @@ func (a *Array[T]) AtPtr(indices ...int) *T {
 func (a *Array[T]) Set(value T, indices ...int) {
 	offset := a.offset(indices)
 	a.data[offset] = value
+}
+
+// SetAll sets all elements of the array to the given value.
+// Corresponds to Fortran array(:) = value or array = value syntax.
+func (a *Array[T]) SetAll(value T) {
+	for i := range a.data {
+		a.data[i] = value
+	}
 }
 
 // Len returns the size of the first dimension

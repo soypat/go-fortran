@@ -2,6 +2,10 @@ SUBROUTINE hello
 	PRINT *, "Hello"
 	END SUBROUTINE
 
+SUBROUTINE print_hello
+	PRINT *, "Hello from print_hello"
+	END SUBROUTINE
+
 SUBROUTINE sub1(a, b, c)
 	REAL :: a, b, c
 	END SUBROUTINE sub1

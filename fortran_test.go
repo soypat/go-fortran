@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/soypat/go-fortran/ast"
+	f90 "github.com/soypat/go-fortran/ast"
 )
 
 //go:embed testdata
@@ -19,18 +20,30 @@ func TestData_valid(t *testing.T) {
 	if err != nil || len(entries) == 0 {
 		t.Fatal(err)
 	}
+	var parser Parser90
+	var tg ToGo
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasPrefix(name, "valid_") {
 			continue
 		}
 		t.Run(entry.Name(), func(t *testing.T) {
+			finishedNormally := false
+			defer func() {
+				if !finishedNormally {
+					t.Log(tg.makeErrAtStmt("panic/t.Fatal at statement"))
+				}
+			}()
 			path := "testdata/" + name
 			src, err := fs.ReadFile(testdatadir, path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			checkErrors(t, path, string(src), false)
+			ssrc := string(src)
+			units := testParse(t, &parser, path, ssrc, false)
+			tg.Reset()
+			testTranspile(t, &tg, units, path, ssrc)
+			finishedNormally = true
 		})
 	}
 }
@@ -40,6 +53,7 @@ func TestData_invalid(t *testing.T) {
 	if err != nil || len(entries) == 0 {
 		t.Fatal(err)
 	}
+	var parser Parser90
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasPrefix(name, "invalid_") {
@@ -51,7 +65,9 @@ func TestData_invalid(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			checkErrors(t, srcpath, string(src), true)
+			ssrc := string(src)
+			testParse(t, &parser, srcpath, ssrc, true)
+
 		})
 	}
 }
@@ -73,41 +89,66 @@ func expectedErrors(src string) map[int]string {
 	return errors
 }
 
-// checkErrors is a test helper that parses source code and verifies errors match annotations.
-// If expectErrors is false, it verifies that no errors occurred.
-func checkErrors(t *testing.T, srcpath, src string, expectErrors bool) {
-	t.Helper()
+func testTranspile(t testing.TB, tg *ToGo, pus []f90.ProgramUnit, srcPath string, src string) {
+	tg.SetSource(srcPath, strings.NewReader(src))
+	var mainProg *f90.ProgramBlock
+	for _, unit := range pus {
+		if block, ok := unit.(*f90.ProgramBlock); ok {
+			mainProg = block
+			continue
+		}
+		err := tg.AddUsed(unit)
+		if err != nil {
+			t.Fatal(srcPath, err)
+		}
+	}
+	if mainProg != nil {
+		_, err := tg.TransformProgram(mainProg)
+		if err != nil {
+			t.Fatal(srcPath, err)
+		}
+		// TODO: add other routines here.
+	} else {
+		_, err := tg.transformProcedures(nil, pus)
+		if err != nil {
+			t.Fatal(srcPath, err)
+		}
+	}
 
+}
+
+func testParse(t testing.TB, p *Parser90, srcPath string, src string, expectErrors bool) []f90.ProgramUnit {
 	expected := map[int]string{}
 	if expectErrors {
 		expected = expectedErrors(src)
 	}
-
-	parser := Parser90{}
-	err := parser.Reset(srcpath, strings.NewReader(src))
+	err := p.Reset(srcPath, strings.NewReader(src))
 	if err != nil {
 		t.Fatalf("Failed to reset parser: %v", err)
 	}
-
 	// Parse all units
+	var units []f90.ProgramUnit
 	for {
-		unit := parser.ParseNextProgramUnit()
+		unit := p.ParseNextProgramUnit()
 		if unit == nil {
 			break
 		}
+		units = append(units, unit)
 	}
-
-	actual := parser.Errors()
-
+	actualErrs := p.Errors()
+	if !expectErrors {
+		helperFatalErrors(t, p, srcPath)
+	}
 	// Compare errors
-	if err := compareErrors(t, srcpath, expected, actual); err != nil {
+	if err := compareErrors(t, srcPath, expected, actualErrs); err != nil {
 		t.Error(err)
 	}
+	return units
 }
 
 // compareErrors compares expected errors (from annotations) with actual parser errors.
 // It returns an error describing any mismatches.
-func compareErrors(t *testing.T, srcpath string, expected map[int]string, actual []ParserError) error {
+func compareErrors(t testing.TB, srcpath string, expected map[int]string, actual []ParserError) error {
 	t.Helper()
 	actualAreExpected := make([]bool, len(actual))
 	for line, pattern := range expected {
@@ -150,59 +191,18 @@ func compareErrors(t *testing.T, srcpath string, expected map[int]string, actual
 	return nil
 }
 
-func newParser(t *testing.T, code string) *Parser90 {
-	p := &Parser90{}
-	err := p.Reset("test.f90", strings.NewReader(code))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
-// TestArrayRefVsFunctionCall verifies that declared arrays produce ArrayRef nodes
-// while undeclared identifiers produce FunctionCall nodes.
-func TestArrayRefVsFunctionCall(t *testing.T) {
-	src := `SUBROUTINE test()
-  INTEGER, DIMENSION(10) :: arr
-  INTEGER :: x
-  x = arr(5)
-  x = UNKNOWN_FUNC(5)
-END SUBROUTINE`
-
-	p := newParser(t, src)
-	unit := p.ParseNextProgramUnit()
-	if unit == nil {
-		t.Fatal("expected program unit")
-	}
-	sub, ok := unit.(*ast.Subroutine)
+// helperWantNode asserts that v is of type T and returns it.
+// Fails the test with a descriptive message if the type assertion fails.
+func helperWantNode[T ast.Node](t testing.TB, v ast.Node, context string) T {
+	t.Helper()
+	var z T
+	vt, ok := v.(T)
 	if !ok {
-		t.Fatalf("expected Subroutine, got %T", unit)
-	}
-
-	// Find the assignment statements
-	var assignStmts []*ast.AssignmentStmt
-	for _, stmt := range sub.Body {
-		if assign, ok := stmt.(*ast.AssignmentStmt); ok {
-			assignStmts = append(assignStmts, assign)
+		if context != "" {
+			t.Fatalf("%s: want %T, got %T", context, z, v)
+		} else {
+			t.Fatalf("want %T, got %T", z, v)
 		}
 	}
-	if len(assignStmts) != 2 {
-		t.Fatalf("expected 2 assignment statements, got %d", len(assignStmts))
-	}
-
-	// First assignment: x = arr(5) - arr should be ArrayRef
-	arrRef, ok := assignStmts[0].Value.(*ast.ArrayRef)
-	if !ok {
-		t.Errorf("expected arr(5) to be *ast.ArrayRef, got %T", assignStmts[0].Value)
-	} else if arrRef.Name != "arr" {
-		t.Errorf("expected ArrayRef name 'arr', got %s", arrRef.Name)
-	}
-
-	// Second assignment: x = UNKNOWN_FUNC(5) - should be FunctionCall
-	funcCall, ok := assignStmts[1].Value.(*ast.FunctionCall)
-	if !ok {
-		t.Errorf("expected UNKNOWN_FUNC(5) to be *ast.FunctionCall, got %T", assignStmts[1].Value)
-	} else if funcCall.Name != "UNKNOWN_FUNC" {
-		t.Errorf("expected FunctionCall name 'UNKNOWN_FUNC', got %s", funcCall.Name)
-	}
+	return vt
 }

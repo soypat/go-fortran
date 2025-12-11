@@ -7,3 +7,11 @@
 
 Fortran source code parsing utilities for the Go programming language.
 
+## Transpiler
+Transpiler currently working for most common modern Fortran features. Work ongoing on supporting FORTRAN77 legacy features like statement functions (inline functions) and other ambiguous and tricky to detect ambiguous statements. File manipulation WIP. 
+
+Feature set demonstration of around ~1000 lines of code shown in [`golden.f90`](testdata/golden.f90) which transpiles to [`golden.go`](testdata/golden.go). Tests pass if output matches byte-to-byte running Go and Fortran programs with gfortran.
+
+See [`TestTranspileGolden`](transpile_Test.go) for example on how to transpile. WIP.
+
+Note that not even [fortls](https://github.com/fortran-lang/fortls), the open source fortran language server parses some of these statements correctly and will show the transpiled Fortran file as having errors even though it compiles correctly.
