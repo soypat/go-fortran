@@ -509,10 +509,6 @@ func (p *Parser90) IsDone() bool {
 	return p.died || p.current.tok == token.EOF || errExceed
 }
 
-func (p *Parser90) registerStatement(tokenType token.Token, fn statementParseFn) {
-	p.stmtFns[tokenType] = fn
-}
-
 type toktuple struct {
 	tok   token.Token
 	start int
@@ -2772,11 +2768,6 @@ func (p *Parser90) parseIndexCallOrAssignment(context string) (parenExpr ast.Exp
 	}
 }
 
-// isExecutableStatement returns true if current token starts an executable statement
-func (p *Parser90) isExecutableStatement() bool {
-	return token.IsExecutableStatement(p.current.tok, p.peek.tok, p.uberpeek.tok)
-}
-
 // skipToNextStatement skips tokens until the next newline or construct-ending keyword
 func (p *Parser90) skipToNextStatement() {
 	for p.loopUntilEndElseOr(token.NewLine, token.LineComment) {
@@ -2917,67 +2908,6 @@ func (p *Parser90) isEndOfProgramUnit() bool {
 		return false
 	}
 	return true
-}
-
-// parseSpecStatement parses a specification statement
-// paramMap is used to populate type information for parameters
-func (p *Parser90) parseSpecStatement(sawDecl *bool) ast.Statement {
-	// Check for labeled FORMAT statement (can appear in spec section)
-	var label string
-	if p.currentTokenIs(token.IntLit) && p.peekTokenIs(token.FORMAT) {
-		label = string(p.current.lit)
-		p.nextToken() // consume label
-		stmt := p.parseFormatStmt()
-		if formatStmt, ok := stmt.(*ast.FormatStmt); ok {
-			formatStmt.Label = label
-		}
-		return stmt
-	}
-
-	switch p.current.tok {
-	case token.IMPLICIT:
-		return p.parseImplicit()
-	case token.USE:
-		return p.parseUse()
-	case token.FORMAT:
-		return p.parseFormatStmt()
-	case token.INTEGER, token.REAL, token.DOUBLE, token.DOUBLEPRECISION, token.COMPLEX, token.LOGICAL, token.CHARACTER:
-		*sawDecl = true
-		return p.parseTypeDecl()
-	case token.TYPE:
-		// Distinguish between TYPE definition and TYPE(typename) declaration
-		if p.peekTokenIs(token.LParen) {
-			// TYPE(typename) :: var - treat as type declaration
-			*sawDecl = true
-			return p.parseTypeDecl()
-		} else {
-			// TYPE :: name ... END TYPE - parse derived type definition
-			return p.parseDerivedTypeStmt()
-		}
-	case token.INTERFACE:
-		// INTERFACE block - skip entire block
-		p.skipConstruct(token.INTERFACE, token.ENDINTERFACE)
-		return &ast.InterfaceStmt{} // Return non-nil to indicate success
-	case token.DATA:
-		// DATA statement - skip to end of statement (complex to parse fully)
-		return p.parseDataStmt()
-	case token.COMMON:
-		return p.parseCommonStmt()
-	case token.DIMENSION:
-		return p.parseDimensionStmt()
-	case token.EQUIVALENCE:
-		return p.parseEquivalenceStmt()
-	case token.POINTER:
-		return p.parsePointerCrayStmt()
-	case token.EXTERNAL:
-		return p.parseExternalStmt()
-	case token.INTRINSIC:
-		return p.parseIntrinsicStmt()
-	case token.PARAMETER:
-		return p.parseParameterStmt()
-	default:
-		return nil // Unknown statement, caller will skip
-	}
 }
 
 // parseDataStmt parses a DATA statement

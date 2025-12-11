@@ -20,7 +20,7 @@ import (
 //go:embed testdata/golden.f90
 var goldensrc string
 
-func TestTranspileGolden2(t *testing.T) {
+func TestTranspileGolden(t *testing.T) {
 	const filename = "testdata/golden.f90"
 	var parser Parser90
 	err := parser.Reset(filename, strings.NewReader(goldensrc))
