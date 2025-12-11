@@ -11,7 +11,7 @@ type Token int
 // Install stringer tool:
 //  go install golang.org/x/tools/cmd/stringer@latest
 
-//go:generate stringer -type=Token -linecomment -output stringers.go .
+//go:generate stringer -type=Token,intrinsic -linecomment -output stringers.go .
 
 // List of all tokens of the Fortran programming language.
 // When adding a new token add it in between blocks since we use comparison functions to check properties of tokens.
