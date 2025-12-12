@@ -35,7 +35,7 @@
       CALL LEVEL30()
       CALL LEVEL31()
       CALL LEVEL32()
-    !   CALL LEVEL33()
+      CALL LEVEL33()
       STOP 0
       CONTAINS
 
@@ -784,13 +784,24 @@
         PRINT *, 'LEVEL 32:', A(1,1),A(1,2),A(2,1),A(2,2)
     END SUBROUTINE LEVEL32
     SUBROUTINE LEVEL33() ! ARRAY RANGES.
-        INTEGER, PARAMETER :: NM=2
-        DOUBLE PRECISION :: XSN(3,3), COF_COM_TOR(3,3)
+        INTEGER, PARAMETER :: NM=3
+        INTEGER :: i,j,range
+        DOUBLE PRECISION :: XSN(NM,NM), COF_COM_TOR(NM,NM)
+        do i = 1,NM
+            do j = 1,NM
+                XSN(i,j) = 0.0
+                COF_COM_TOR(i,j) = 1.0
+            end do
+        end do
         XSN(1,1) = 1.0
         COF_COM_TOR(1,1) = 10.0
         COF_COM_TOR(2,2) = 20.0
-        XSN(1:NM,1:3) = XSN(1:NM,1:3) + COF_COM_TOR(1:NM,1:3)
-        PRINT *, 'LEVEL 33:', XSN(1,1), XSN(2,2)
+        COF_COM_TOR(3,3) = 20.0
+        range = 2
+        XSN(1:range,range:3) = XSN(1:range,range:3) + COF_COM_TOR(1:range,range:3)
+        do i = 1,NM
+            PRINT *, 'LEVEL 33:', XSN(i,1), XSN(i,2), XSN(i,3)
+        end do
     END SUBROUTINE LEVEL33
 
 ! ==============================================================================

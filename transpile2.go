@@ -369,7 +369,27 @@ func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Ex
 		}
 		args = append(args, size)
 	}
-	// Get element type - handle CHARACTER specially
+
+	// CHARACTER arrays need special initialization with charlen
+	if typ.typeToken() == f90token.CHARACTER {
+		// Get charlen (default to 1)
+		var charlenExpr ast.Expr = _astOne
+		if charLen := typ.Charlen(); charLen != nil {
+			var err error
+			charlenExpr, _, err = tg.transformExpression(_tgtInt, charLen)
+			if err != nil {
+				return nil, tg.makeErrWithPos(typ.decl.Position, "unable to get character length: "+err.Error())
+			}
+		}
+		// Generate: intrinsic.NewCharacterArrayArray(charlen, dims...)
+		charArgs := append([]ast.Expr{charlenExpr}, args[1:]...) // Skip nil initializer
+		return &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("NewCharacterArrayArray")},
+			Args: charArgs,
+		}, nil
+	}
+
+	// Get element type for non-CHARACTER arrays
 	elemType := tg.baseGotype(typ.typeToken(), tg.resolveKind(typ))
 	expr := &ast.CallExpr{
 		Fun: &ast.IndexExpr{

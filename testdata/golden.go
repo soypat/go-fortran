@@ -34,6 +34,7 @@ func main() {
 	LEVEL30()
 	LEVEL31()
 	LEVEL32()
+	LEVEL33()
 	intrinsic.Stop(0)
 }
 func LEVEL01() {
@@ -883,7 +884,7 @@ func LEVEL30() {
 		c *intrinsic.Array[intrinsic.CharacterArray]
 		_ = c
 	)
-	c = intrinsic.NewArray[intrinsic.CharacterArray](nil, 4)
+	c = intrinsic.NewCharacterArrayArray(1, 4)
 	var (
 		mat *intrinsic.Array[int32]
 		_   = mat
@@ -945,7 +946,7 @@ func LEVEL32() {
 		a *intrinsic.Array[intrinsic.CharacterArray]
 		_ = a
 	)
-	a = intrinsic.NewArray[intrinsic.CharacterArray](nil, 2, 2)
+	a = intrinsic.NewCharacterArrayArray(10, 2, 2)
 	a.AtPtr(1, 1).SetFromString("ABC")
 	a.AtPtr(1, 2).SetFromString("DEF")
 	a.AtPtr(2, 1).SetFromString("GHI")
@@ -954,21 +955,37 @@ func LEVEL32() {
 }
 func LEVEL33() {
 	var (
-		nm int32 = 2
+		nm int32 = 3
 		_        = nm
+	)
+	var (
+		i       int32
+		j       int32
+		Range   int32
+		_, _, _ = i, j, Range
 	)
 	var (
 		xsn         *intrinsic.Array[float64]
 		cof_com_tor *intrinsic.Array[float64]
 		_, _        = xsn, cof_com_tor
 	)
-	xsn = intrinsic.NewArray[float64](nil, 3, 3)
-	cof_com_tor = intrinsic.NewArray[float64](nil, 3, 3)
+	xsn = intrinsic.NewArray[float64](nil, int(nm), int(nm))
+	cof_com_tor = intrinsic.NewArray[float64](nil, int(nm), int(nm))
+	for i = 1; i <= nm; i++ {
+		for j = 1; j <= nm; j++ {
+			xsn.Set(float64(0.0), int(i), int(j))
+			cof_com_tor.Set(float64(1.0), int(i), int(j))
+		}
+	}
 	xsn.Set(float64(1.0), 1, 1)
 	cof_com_tor.Set(float64(10.0), 1, 1)
 	cof_com_tor.Set(float64(20.0), 2, 2)
-	intrinsic.ArraySetAdd(xsn.View(intrinsic.R(1, int(nm)), intrinsic.R(1, 3)), xsn.View(intrinsic.R(1, int(nm)), intrinsic.R(1, 3)), cof_com_tor.View(intrinsic.R(1, int(nm)), intrinsic.R(1, 3)))
-	intrinsic.Print("LEVEL 33:", xsn.At(1, 1), xsn.At(2, 2))
+	cof_com_tor.Set(float64(20.0), 3, 3)
+	Range = 2
+	intrinsic.ArraySetAdd(xsn.View(intrinsic.R(1, int(Range)), intrinsic.R(int(Range), 3)), xsn.View(intrinsic.R(1, int(Range)), intrinsic.R(int(Range), 3)), cof_com_tor.View(intrinsic.R(1, int(Range)), intrinsic.R(int(Range), 3)))
+	for i = 1; i <= nm; i++ {
+		intrinsic.Print("LEVEL 33:", xsn.At(int(i), 1), xsn.At(int(i), 2), xsn.At(int(i), 3))
+	}
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")

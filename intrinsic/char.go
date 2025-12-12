@@ -31,6 +31,16 @@ func NewCharacterArray(length int) (ch CharacterArray) {
 	return ch
 }
 
+// NewCharacterArrayArray creates a multi-dimensional array of CHARACTER(LEN=charlen) strings.
+// Each CharacterArray element is pre-allocated with the specified character length.
+func NewCharacterArrayArray(charlen int, dims ...int) *Array[CharacterArray] {
+	arr := NewArray[CharacterArray](nil, dims...)
+	for i := range arr.data {
+		arr.data[i].Allocate(charlen)
+	}
+	return arr
+}
+
 var _ Pointer = CharacterArray{} // compile time check of interface implementation.
 var _ PointerSetter = (*CharacterArray)(nil)
 
