@@ -31,6 +31,7 @@ testdata/golden.out
 *bin
 /fortranvar
 /fortrangrep
+/fortranpp
 # IDE
 .vscode/
 

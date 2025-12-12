@@ -137,10 +137,9 @@ type Parser90 struct {
 	current  toktuple
 	peek     toktuple
 	uberpeek toktuple
-	stmtFns  map[token.Token]statementParseFn // Statement parsers
-	errors   []ParserError                    // Collected parsing errors
+	errors   []ParserError // Collected parsing errors
 	vars     ParserUnitData
-	// vars          []varinfo // variables defined in current scope.
+
 	maxStatements int
 	maxErrs       int
 	nStatements   int
@@ -417,9 +416,6 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	if p.stmtFns == nil {
-		p.stmtFns = make(map[token.Token]statementParseFn)
-	}
 	if p.maxErrs == 0 {
 		p.maxErrs = 10000 // Increased from 20 to handle large legacy codebases with many warnings
 		p.maxStatements = 1_000_000
@@ -429,12 +425,10 @@ func (p *Parser90) Reset(source string, r io.Reader) error {
 		// Reuse memory but clear later.
 		maxErrs:       p.maxErrs,
 		maxStatements: p.maxStatements,
-		stmtFns:       p.stmtFns,
 		errors:        p.errors[:0], // Reuse slice, clear contents
 		vars:          p.vars,
 	}
 	p.vars.reset()
-	clear(p.stmtFns)
 
 	// Initialize token stream
 	p.nextToken()

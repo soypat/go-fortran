@@ -9,7 +9,10 @@ import (
 )
 
 type Node interface {
+	// AppendTokenLiteral appends a simple tokenized form of a node to the buffer.
 	AppendTokenLiteral(dst []byte) []byte
+	// AppendString appends the valid Fortran representation of the AST node
+	// on to the buffer. AppendString appends a single line at most for statements/program units.
 	AppendString(dst []byte) []byte
 	// SourcePos returns the position of first character belonging to the node as start
 	// and the position of the first character immediately after the node as end in the file.
