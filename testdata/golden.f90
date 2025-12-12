@@ -34,6 +34,8 @@
       CALL LEVEL29()
       CALL LEVEL30()
       CALL LEVEL31()
+      CALL LEVEL32()
+    !   CALL LEVEL33()
       STOP 0
       CONTAINS
 
@@ -781,6 +783,15 @@
         A(2,2) = 'JKL'
         PRINT *, 'LEVEL 32:', A(1,1),A(1,2),A(2,1),A(2,2)
     END SUBROUTINE LEVEL32
+    SUBROUTINE LEVEL33() ! ARRAY RANGES.
+        INTEGER, PARAMETER :: NM=2
+        DOUBLE PRECISION :: XSN(3,3), COF_COM_TOR(3,3)
+        XSN(1,1) = 1.0
+        COF_COM_TOR(1,1) = 10.0
+        COF_COM_TOR(2,2) = 20.0
+        XSN(1:NM,1:3) = XSN(1:NM,1:3) + COF_COM_TOR(1:NM,1:3)
+        PRINT *, 'LEVEL 33:', XSN(1,1), XSN(2,2)
+    END SUBROUTINE LEVEL33
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

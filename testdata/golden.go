@@ -33,6 +33,7 @@ func main() {
 	LEVEL29()
 	LEVEL30()
 	LEVEL31()
+	LEVEL32()
 	intrinsic.Stop(0)
 }
 func LEVEL01() {
@@ -950,6 +951,24 @@ func LEVEL32() {
 	a.AtPtr(2, 1).SetFromString("GHI")
 	a.AtPtr(2, 2).SetFromString("JKL")
 	intrinsic.Print("LEVEL 32:", a.At(1, 1), a.At(1, 2), a.At(2, 1), a.At(2, 2))
+}
+func LEVEL33() {
+	var (
+		nm int32 = 2
+		_        = nm
+	)
+	var (
+		xsn         *intrinsic.Array[float64]
+		cof_com_tor *intrinsic.Array[float64]
+		_, _        = xsn, cof_com_tor
+	)
+	xsn = intrinsic.NewArray[float64](nil, 3, 3)
+	cof_com_tor = intrinsic.NewArray[float64](nil, 3, 3)
+	xsn.Set(float64(1.0), 1, 1)
+	cof_com_tor.Set(float64(10.0), 1, 1)
+	cof_com_tor.Set(float64(20.0), 2, 2)
+	intrinsic.ArraySetAdd(xsn.View(intrinsic.R(1, int(nm)), intrinsic.R(1, 3)), xsn.View(intrinsic.R(1, int(nm)), intrinsic.R(1, 3)), cof_com_tor.View(intrinsic.R(1, int(nm)), intrinsic.R(1, 3)))
+	intrinsic.Print("LEVEL 33:", xsn.At(1, 1), xsn.At(2, 2))
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")

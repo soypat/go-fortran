@@ -702,6 +702,15 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 
 	switch tgt := stmt.Target.(type) {
 	case *f90.CallExpr:
+		// Check for ranged array binary operation: arr(1:N) = arr(1:N) + other(1:N)
+		if f90.IsRanged(tgt.Args...) {
+			if binop, ok := stmt.Value.(*f90.BinaryExpr); ok {
+				if result, err := tg.transformRangedArrayBinaryOp(dst, tgt, binop, targetVinfo); err == nil {
+					return result, nil
+				}
+				// Fall through to normal handling if pattern doesn't match
+			}
+		}
 		// CallExpr as target: array element access or substring
 		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
 		return tg.transformSetArrayRef(dst, tgt, rhs)

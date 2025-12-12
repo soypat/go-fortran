@@ -524,14 +524,18 @@ func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.CallExpr) (result ast.E
 	}
 	vi := tg.repl.Var(e.Name)
 	isRanged := f90.IsRanged(e.Args...)
-	if isRanged && len(e.Args) == 1 {
-		// Substring access: str(2:4) → str.Substring(start, end)
-		args, err := tg.transformRangeExprToArgs(e.Args[0].(*f90.RangeExpr), vi)
-		receiver := tg.astVarExpr(vi)
-		return &ast.CallExpr{
-			Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("Substring")},
-			Args: args,
-		}, err
+	if isRanged {
+		// Check if it's a 1D character substring: str(2:4) → str.Substring(start, end)
+		if len(e.Args) == 1 && vi.decl.Type.Token == f90token.CHARACTER && !tg.varIsArray(vi) {
+			args, err := tg.transformRangeExprToArgs(e.Args[0].(*f90.RangeExpr), vi)
+			receiver := tg.astVarExpr(vi)
+			return &ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("Substring")},
+				Args: args,
+			}, err
+		}
+		// Multi-dimensional range access: arr(1:N, 2:M) → arr.View(R(...), R(...))
+		return tg.transformArrayView(e, vi)
 	}
 	// Regular element access: arr(i) → arr.At(int(indices)...)
 	var args []ast.Expr
@@ -587,7 +591,7 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.CallExpr, rhs as
 		return tg.transformSetCharacterArray(dst, fexpr, rhs)
 	}
 
-	// Check for whole-array assignment: arr(:) = v → arr.SetAll(v)
+	// Check for ranged array assignment: arr(1:N, 2:M) = v → arr.View(...).SetFrom(v)
 	isRanged := f90.IsRanged(fexpr.Args...)
 	if isRanged {
 		// Check if it's a simple whole-array assignment (single ":" subscript with no bounds)
@@ -604,7 +608,19 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.CallExpr, rhs as
 				return dst, nil
 			}
 		}
-		return dst, tg.makeErr(fexpr, "partial range array assignment not yet implemented")
+		// Partial range assignment: arr(1:N, 2:M) = v → arr.View(...).SetFrom(v)
+		viewExpr, err := tg.transformArrayView(fexpr, vitgt)
+		if err != nil {
+			return dst, err
+		}
+		gstmt := &ast.ExprStmt{
+			X: &ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: viewExpr, Sel: ast.NewIdent("SetFrom")},
+				Args: []ast.Expr{rhs},
+			},
+		}
+		dst = append(dst, gstmt)
+		return dst, nil
 	}
 
 	// Regular element assignment: arr(i) = v → arr.Set(value, int(indices)...)
@@ -695,6 +711,157 @@ func (tg *ToGo) transformRangeExprToArgs(rng *f90.RangeExpr, vi *Varinfo) (_ []a
 		return nil, err
 	}
 	return []ast.Expr{start, end}, nil
+}
+
+// transformRangeToViewArg transforms a RangeExpr to intrinsic.R() or RS() call.
+// Returns ast.Expr for: intrinsic.R(start, end) or intrinsic.RS(start, end, stride)
+func (tg *ToGo) transformRangeToViewArg(rng *f90.RangeExpr, vi *Varinfo, dim int) (ast.Expr, error) {
+	var start, end ast.Expr
+	var err error
+
+	// Start: nil → 1, else transform
+	if rng.Start == nil {
+		start = _astOne
+	} else {
+		start, _, err = tg.transformExpression(_tgtInt, rng.Start)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// End: nil → use variable's upper bound for this dimension, else transform
+	if rng.End == nil {
+		// Get upper bound from variable's dimension
+		dims := vi.decl.Dimension()
+		if dims != nil && dim < len(dims.Bounds) && dims.Bounds[dim].Upper != nil {
+			end, _, err = tg.transformExpression(_tgtInt, dims.Bounds[dim].Upper)
+		} else {
+			return nil, tg.makeErrWithPos(rng.Position, "cannot determine upper bound for dimension")
+		}
+	} else {
+		end, _, err = tg.transformExpression(_tgtInt, rng.End)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Stride: nil → use R(), else use RS()
+	if rng.Stride == nil {
+		// intrinsic.R(start, end)
+		return &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: ast.NewIdent("intrinsic"), Sel: ast.NewIdent("R")},
+			Args: []ast.Expr{start, end},
+		}, nil
+	}
+
+	// intrinsic.RS(start, end, stride)
+	stride, _, err := tg.transformExpression(_tgtInt, rng.Stride)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CallExpr{
+		Fun:  &ast.SelectorExpr{X: ast.NewIdent("intrinsic"), Sel: ast.NewIdent("RS")},
+		Args: []ast.Expr{start, end, stride},
+	}, nil
+}
+
+// transformArrayView generates arr.View(R(...), R(...), ...) for ranged subscripts.
+// Each subscript that is a RangeExpr becomes a Range argument.
+// Each subscript that is a scalar index becomes R(idx, idx) to select that single row/col.
+func (tg *ToGo) transformArrayView(call *f90.CallExpr, vi *Varinfo) (ast.Expr, error) {
+	rangeArgs := make([]ast.Expr, 0, len(call.Args))
+
+	for dim, arg := range call.Args {
+		if rng, ok := arg.(*f90.RangeExpr); ok {
+			// Range expression: transform to R() or RS()
+			rangeArg, err := tg.transformRangeToViewArg(rng, vi, dim)
+			if err != nil {
+				return nil, err
+			}
+			rangeArgs = append(rangeArgs, rangeArg)
+		} else {
+			// Scalar index: convert to R(idx, idx) for single element selection
+			idx, _, err := tg.transformExpression(_tgtInt, arg)
+			if err != nil {
+				return nil, err
+			}
+			rangeArgs = append(rangeArgs, &ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: ast.NewIdent("intrinsic"), Sel: ast.NewIdent("R")},
+				Args: []ast.Expr{idx, idx},
+			})
+		}
+	}
+
+	receiver := tg.astVarExpr(vi)
+	return &ast.CallExpr{
+		Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("View")},
+		Args: rangeArgs,
+	}, nil
+}
+
+// transformRangedArrayBinaryOp handles array range binary operations:
+// arr(1:N) = arr(1:N) + other(1:N) → intrinsic.ArraySetAdd(arr.View(...), arr.View(...), other.View(...))
+// Returns error if pattern doesn't match (caller should fall back to normal handling).
+func (tg *ToGo) transformRangedArrayBinaryOp(dst []ast.Stmt, target *f90.CallExpr, binop *f90.BinaryExpr, targetVinfo *Varinfo) ([]ast.Stmt, error) {
+	// Determine the function name based on operator
+	var funcName string
+	switch binop.Op {
+	case f90token.Plus:
+		funcName = "ArraySetAdd"
+	case f90token.Minus:
+		funcName = "ArraySetSub"
+	case f90token.Asterisk:
+		funcName = "ArraySetMul"
+	case f90token.Slash:
+		funcName = "ArraySetDiv"
+	default:
+		return nil, tg.makeErr(binop, "unsupported binary operator for array range operation")
+	}
+
+	// Transform target to View expression (destination)
+	dstView, err := tg.transformArrayView(target, targetVinfo)
+	if err != nil {
+		return nil, err
+	}
+
+	// Transform LHS operand
+	lhsView, err := tg.transformRangedOperand(binop.Left)
+	if err != nil {
+		return nil, err
+	}
+
+	// Transform RHS operand
+	rhsView, err := tg.transformRangedOperand(binop.Right)
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate: intrinsic.ArraySetAdd(dst, lhs, rhs)
+	gstmt := &ast.ExprStmt{
+		X: &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: ast.NewIdent("intrinsic"), Sel: ast.NewIdent(funcName)},
+			Args: []ast.Expr{dstView, lhsView, rhsView},
+		},
+	}
+	dst = append(dst, gstmt)
+	return dst, nil
+}
+
+// transformRangedOperand transforms an operand that should be a ranged array access.
+func (tg *ToGo) transformRangedOperand(expr f90.Expression) (ast.Expr, error) {
+	call, ok := expr.(*f90.CallExpr)
+	if !ok {
+		return nil, tg.makeErr(expr, "expected array access in ranged binary operation")
+	}
+	vi := tg.repl.Var(call.Name)
+	if vi == nil {
+		return nil, tg.makeErr(expr, "unknown variable: "+call.Name)
+	}
+	if f90.IsRanged(call.Args...) {
+		return tg.transformArrayView(call, vi)
+	}
+	// Not ranged - fall back to normal expression transformation
+	return nil, tg.makeErr(expr, "expected ranged array access")
 }
 
 func (tg *ToGo) transformExprSlice(vitgt *Varinfo, dst []ast.Expr, src []f90.Expression) (_ []ast.Expr, err error) {

@@ -304,8 +304,8 @@ func (a *Array[T]) SetDataUnsafe(v unsafe.Pointer) {
 	a.data = unsafe.Slice((*T)(v), len(a.data))
 }
 
-// SetLenBuffer sets the number of elements in the backing data slice.
-func (a *Array[T]) SetLenBuffer(length int) {
+// SetLenBufferUnsafe sets the number of elements in the backing data slice.
+func (a *Array[T]) SetLenBufferUnsafe(length int) {
 	a.data = unsafe.Slice(unsafe.SliceData(a.data), length)
 }
 
