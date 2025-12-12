@@ -245,11 +245,11 @@ func normalizeTokenKind(tok f90token.Token, kind int) (f90token.Token, int) {
 }
 
 func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result ast.Expr, resultType *Varinfo, err error) {
-	left, leftType, err := tg.transformExpression(vitgt, e.Left)
+	left, leftType, err := tg.transformExpression(nil, e.Left)
 	if err != nil {
 		return nil, nil, err
 	}
-	right, rightType, err := tg.transformExpression(vitgt, e.Right)
+	right, rightType, err := tg.transformExpression(nil, e.Right)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -422,6 +422,7 @@ func (tg *ToGo) pointerNilComparison(ptrExpr ast.Expr, op token.Token) ast.Expr 
 }
 
 func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result ast.Expr, resultType *Varinfo, err error) {
+
 	vi := tg.repl.Var(e.Name)
 	if vi != nil {
 		// It's a declared variable - route to array access handler
@@ -720,7 +721,7 @@ func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Ex
 	}
 	srcType := sourceType.typeToken()
 	targetType := target.typeToken()
-	if srcType == targetType {
+	if srcType == targetType || targetType == f90token.FloatLit {
 		return expr
 	}
 	conv := tg.baseGotype(targetType, tg.resolveKind(target))
@@ -964,7 +965,7 @@ func getIntrinsic(name f90token.Intrinsic, nargs int) *intrinsicFn {
 		diff := int(e.name) - int(a)
 		if diff == 0 {
 			if e.isVariadic {
-				return 0
+				return 0 // Prioritize isVariadic.
 			}
 			diff = len(e.params) - nargs
 		}
@@ -992,6 +993,7 @@ var intrinsics = []intrinsicFn{
 	makeIntrinsicFn(f90token.IntrinsicASIN, nil, _tgtGenericFloat),
 	makeIntrinsicFn(f90token.IntrinsicACOS, nil, _tgtGenericFloat),
 	makeIntrinsicFn(f90token.IntrinsicATAN, nil, _tgtGenericFloat),
+	makeIntrinsicFn(f90token.IntrinsicATAN2, nil, _tgtGenericFloat),
 	makeIntrinsicFn(f90token.IntrinsicEXP, nil, _tgtGenericFloat),
 	makeIntrinsicFn(f90token.IntrinsicLOG, nil, _tgtGenericFloat),
 	makeIntrinsicFn(f90token.IntrinsicLOG10, nil, _tgtGenericFloat),

@@ -257,6 +257,12 @@ func (tg *ToGo) transformStatements(dst []ast.Stmt, stmts []f90.Statement) (_ []
 }
 
 func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.Stmt, err error) {
+	reachedEnd := false
+	defer func() {
+		if !reachedEnd {
+			fmt.Println(tg.makeErrAtStmt("detected panic"))
+		}
+	}()
 	if stmt != nil {
 		tg.currentNode = stmt
 	}
@@ -343,6 +349,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		// For now, unsupported statements are skipped
 		err = tg.makeErr(s, "unsupported transpile statement")
 	}
+	reachedEnd = true
 	return dst, err
 }
 

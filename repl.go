@@ -439,81 +439,87 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 		return err
 	}
 
+	// Lookup intrinsic by name using perfect hash.
+	intr := f90token.LookupIntrinsic(name)
+
+	// Check single-argument float function table.
+	if int(intr) < len(_intrinsicEvalf1) {
+		if fn1 := _intrinsicEvalf1[intr]; fn1 != nil {
+			return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(fn1, arg0.val.Float()))
+		}
+	}
+
+	// Check two-argument float function table.
+	if int(intr) < len(_intrinsicEvalf2) {
+		if fn2 := _intrinsicEvalf2[intr]; fn2 != nil {
+			if len(e.Args) < 2 {
+				return fmt.Errorf("%s requires 2 arguments", name)
+			}
+			var arg1 Varinfo
+			if err := repl.Eval(&arg1, e.Args[1]); err != nil {
+				return err
+			}
+			return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn2(fn2, arg0.val.Float(), arg1.val.Float()))
+		}
+	}
+
+	// Handle special cases not covered by lookup tables.
 	f0 := arg0.val.Float()
-	var fn0 func(float64) float64
-	switch name {
-	case "SQRT":
-		fn0 = math.Sqrt
-	case "SIN":
-		fn0 = math.Sin
-	case "COS":
-		fn0 = math.Cos
-	case "TAN":
-		fn0 = math.Tan
-	case "ASIN":
-		fn0 = math.Asin
-	case "ACOS":
-		fn0 = math.Acos
-	case "ATAN":
-		fn0 = math.Atan
-	case "EXP":
-		fn0 = math.Exp
-	case "LOG":
-		fn0 = math.Log
-	case "LOG10":
-		fn0 = math.Log10
-	case "ABS":
-		fn0 = math.Abs
-	}
-	if fn0 != nil {
-		return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(fn0, f0))
-	}
-	switch name {
-	case "REAL":
+	switch intr {
+	case f90token.IntrinsicREAL, f90token.IntrinsicFLOAT, f90token.IntrinsicSNGL:
 		err = repl.assignFloat32(dst, f0)
-	case "DBLE":
+	case f90token.IntrinsicDBLE:
 		err = repl.assignFloat64(dst, f0)
-	case "INT":
+	case f90token.IntrinsicINT, f90token.IntrinsicIFIX, f90token.IntrinsicIDINT:
 		err = repl.assignInt(dst, int64(f0))
-	case "NINT":
+	case f90token.IntrinsicNINT, f90token.IntrinsicIDNINT:
 		err = repl.assignInt(dst, int64(repl.evalFloatFn0(math.Round, f0)))
-	case "FACTORIAL":
-		err = repl.assignInt(dst, repl.evalFactorial(arg0.val.Int()))
-	case "FLOOR":
-		err = repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(math.Floor, f0))
-	case "CEILING":
-		err = repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(math.Ceil, f0))
-	case "MAX":
+	case f90token.IntrinsicMAX, f90token.IntrinsicMAX0, f90token.IntrinsicMAX1, f90token.IntrinsicAMAX0, f90token.IntrinsicAMAX1, f90token.IntrinsicDMAX1:
 		err = repl.evalMax(dst, e.Args)
-	case "MIN":
+	case f90token.IntrinsicMIN, f90token.IntrinsicMIN0, f90token.IntrinsicMIN1, f90token.IntrinsicAMIN0, f90token.IntrinsicAMIN1, f90token.IntrinsicDMIN1:
 		err = repl.evalMin(dst, e.Args)
-	case "LEN", "LEN_TRIM", "INDEX", "ICHAR", "IACHAR", "SIZE", "LBOUND", "UBOUND", "MALLOC":
+	case f90token.IntrinsicLEN, f90token.IntrinsicLEN_TRIM, f90token.IntrinsicINDEX, f90token.IntrinsicICHAR, f90token.IntrinsicSIZE, f90token.IntrinsicLBOUND, f90token.IntrinsicUBOUND:
 		err = repl.assignInt(dst, int64(len(arg0.val.StringValue())))
-	case "TRIM", "ADJUSTL", "ADJUSTR", "CHAR", "ACHAR":
+	case f90token.IntrinsicTRIM, f90token.IntrinsicADJUSTL, f90token.IntrinsicADJUSTR, f90token.IntrinsicCHAR:
 		err = repl.assignString(dst, arg0.val.StringValue())
-	case "MOD":
+	case f90token.IntrinsicIABS:
+		err = repl.assignInt(dst, int64(math.Abs(float64(arg0.val.Int()))))
+	case f90token.IntrinsicISIGN, f90token.IntrinsicDSIGN, f90token.IntrinsicSIGN:
 		if len(e.Args) < 2 {
-			return fmt.Errorf("MOD requires 2 arguments")
+			return fmt.Errorf("%s requires 2 arguments", name)
 		}
 		var arg1 Varinfo
 		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
 			return err
 		}
-		if repl.noValueResolution || arg1.val.Int() == 0 {
-			err = repl.assignInt(dst, 0)
-		} else {
-			err = repl.assignInt(dst, arg0.val.Int()%arg1.val.Int())
+		err = repl.assignFloatLike(dst, &arg0, math.Copysign(f0, arg1.val.Float()))
+	case f90token.IntrinsicDPROD:
+		if len(e.Args) < 2 {
+			return fmt.Errorf("%s requires 2 arguments", name)
 		}
+		var arg1 Varinfo
+		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
+			return err
+		}
+		err = repl.assignFloat64(dst, f0*arg1.val.Float())
 	default:
-		// Check for user-defined functions
+		// Check for user-defined functions.
 		if fn := repl.ContainedOrUsed(e.Name); fn != nil && fn.returnType != nil {
 			dst.val.tok = fn.returnType.typeToken()
 			return nil
 		}
-		if f90token.IsIntrinsic(name) {
-			err = fmt.Errorf("intrinsic not yet implemented: %s", name)
-		} else {
-			err = fmt.Errorf("unknown intrinsic: %s", name)
+		// Handle non-standard extensions by string matching.
+		switch name {
+		case "MALLOC", "IACHAR":
+			err = repl.assignInt(dst, int64(len(arg0.val.StringValue())))
+		case "ACHAR":
+			err = repl.assignString(dst, arg0.val.StringValue())
+		default:
+			if f90token.IsIntrinsic(name) {
+				err = fmt.Errorf("intrinsic not yet implemented: %s", name)
+			} else {
+				err = fmt.Errorf("unknown intrinsic: %s", name)
+			}
 		}
 	}
 	return err
@@ -524,6 +530,13 @@ func (repl *REPL) evalFloatFn0(fn func(float64) float64, val float64) float64 {
 		return 0
 	}
 	return fn(val)
+}
+
+func (repl *REPL) evalFloatFn2(fn func(float64, float64) float64, a, b float64) float64 {
+	if repl.noValueResolution {
+		return 0
+	}
+	return fn(a, b)
 }
 
 func (repl *REPL) evalMax(dst *Varinfo, args []f90.Expression) error {
@@ -752,13 +765,71 @@ func intPow(base, exp int64) int64 {
 	return result
 }
 
-func (repl *REPL) evalFactorial(n int64) int64 {
-	if repl.noValueResolution || n <= 1 {
-		return 1
-	}
-	result := int64(1)
-	for i := int64(2); i <= n; i++ {
-		result *= i
-	}
-	return result
+// Single-argument float intrinsics: f(float64) float64
+var _intrinsicEvalf1 = [...]func(float64) float64{
+	// Fortran 66 - Mathematical
+	f90token.IntrinsicABS:  math.Abs,
+	f90token.IntrinsicSQRT: math.Sqrt,
+	// Fortran 66 - Trigonometric
+	f90token.IntrinsicSIN:  math.Sin,
+	f90token.IntrinsicCOS:  math.Cos,
+	f90token.IntrinsicTAN:  math.Tan,
+	f90token.IntrinsicASIN: math.Asin,
+	f90token.IntrinsicACOS: math.Acos,
+	f90token.IntrinsicATAN: math.Atan,
+	// Fortran 66 - Hyperbolic
+	f90token.IntrinsicSINH: math.Sinh,
+	f90token.IntrinsicCOSH: math.Cosh,
+	f90token.IntrinsicTANH: math.Tanh,
+	// Fortran 66 - Exponential/Logarithmic
+	f90token.IntrinsicEXP:   math.Exp,
+	f90token.IntrinsicLOG:   math.Log,
+	f90token.IntrinsicLOG10: math.Log10,
+	// Fortran 66 - Truncation/Rounding
+	f90token.IntrinsicAINT:  math.Trunc,
+	f90token.IntrinsicANINT: math.Round,
+	// Fortran 66 - Double precision specific names
+	f90token.IntrinsicDABS:   math.Abs,
+	f90token.IntrinsicDSQRT:  math.Sqrt,
+	f90token.IntrinsicDSIN:   math.Sin,
+	f90token.IntrinsicDCOS:   math.Cos,
+	f90token.IntrinsicDTAN:   math.Tan,
+	f90token.IntrinsicDASIN:  math.Asin,
+	f90token.IntrinsicDACOS:  math.Acos,
+	f90token.IntrinsicDATAN:  math.Atan,
+	f90token.IntrinsicDSINH:  math.Sinh,
+	f90token.IntrinsicDCOSH:  math.Cosh,
+	f90token.IntrinsicDTANH:  math.Tanh,
+	f90token.IntrinsicDEXP:   math.Exp,
+	f90token.IntrinsicDLOG:   math.Log,
+	f90token.IntrinsicDLOG10: math.Log10,
+	f90token.IntrinsicDNINT:  math.Round,
+	// Fortran 90
+	f90token.IntrinsicCEILING: math.Ceil,
+	f90token.IntrinsicFLOOR:   math.Floor,
+	// Fortran 2008
+	f90token.IntrinsicACOSH:     math.Acosh,
+	f90token.IntrinsicASINH:     math.Asinh,
+	f90token.IntrinsicATANH:     math.Atanh,
+	f90token.IntrinsicBESSEL_J0: math.J0,
+	f90token.IntrinsicBESSEL_J1: math.J1,
+	f90token.IntrinsicBESSEL_Y0: math.Y0,
+	f90token.IntrinsicBESSEL_Y1: math.Y1,
+	f90token.IntrinsicERF:       math.Erf,
+	f90token.IntrinsicERFC:      math.Erfc,
+	f90token.IntrinsicGAMMA:     math.Gamma,
+}
+
+// Two-argument float intrinsics: f(float64, float64) float64
+var _intrinsicEvalf2 = [...]func(float64, float64) float64{
+	// Fortran 66
+	f90token.IntrinsicATAN2:  math.Atan2,
+	f90token.IntrinsicDATAN2: math.Atan2,
+	f90token.IntrinsicDIM:    math.Dim,
+	f90token.IntrinsicDDIM:   math.Dim,
+	f90token.IntrinsicMOD:    math.Mod,
+	// Fortran 90
+	f90token.IntrinsicMODULO: math.Mod,
+	// Fortran 2008
+	f90token.IntrinsicHYPOT: math.Hypot,
 }

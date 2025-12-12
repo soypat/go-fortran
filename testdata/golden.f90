@@ -285,7 +285,7 @@
       SUBROUTINE LEVEL12()
           REAL :: angle, sin_val, cos_val, abs_val
           INTEGER :: i, j, k, max_val, min_val
-
+          
           i = 11
           j = 52
           k = 84
