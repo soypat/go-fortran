@@ -214,7 +214,7 @@ func (tg *ToGo) makeErrAtStmt(msg string) error {
 func (tg *ToGo) makeErr(node f90.Node, msg string) error {
 	tok := node.AppendTokenLiteral(nil)
 	pos := node.SourcePos()
-	return tg.makeErrWithPos(pos, fmt.Sprintf("%s in %T %s", msg, node, tok))
+	return tg.makeErrWithPos(pos, fmt.Sprintf("%T %s: %s", node, tok, msg))
 }
 
 func (tg *ToGo) makeErrWithPos(pos f90.Position, msg string) error {

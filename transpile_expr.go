@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -282,7 +283,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 		// Power operator: x ** y → intrinsic.POW[float T](x, y)
 		left = tg.wrapConversion(vitgt, leftType, left)
 		right = tg.wrapConversion(vitgt, rightType, right)
-		sel := intrinsicSel("POW")
+		sel := intrinsicSelGeneric("POW")
 		return &ast.CallExpr{
 			Fun:  sel(vitgt),
 			Args: []ast.Expr{left, right},
@@ -806,28 +807,6 @@ func (tg *ToGo) intrinsicExpr(vitgt *Varinfo, fn *intrinsicFn, args ...f90.Expre
 	return call, resultType, nil
 }
 
-func getIntrinsic(name f90token.Intrinsic, nargs int) *intrinsicFn {
-	if name == 0 {
-		return nil
-	}
-	for i := range intrinsics {
-		fn := &intrinsics[i]
-		if fn.name != name {
-			continue
-		}
-		// Check arg count matches (for non-variadic) or meets minimum (for variadic)
-		if fn.isVariadic {
-			if nargs < len(fn.params) {
-				continue // try next entry
-			}
-		} else if nargs != len(fn.params) {
-			continue // try next entry with same name
-		}
-		return fn
-	}
-	return nil
-}
-
 // intrinsicSel creates a selector expression for intrinsic.NAME
 func intrinsicSel(name f90token.Intrinsic) func(*Varinfo) ast.Expr {
 	return func(tp *Varinfo) ast.Expr {
@@ -967,12 +946,43 @@ func (fn *intrinsicFn) inferReturnType(tgt *Varinfo) (inferred *Varinfo) {
 	return inferred
 }
 
+func init() {
+	slices.SortStableFunc(intrinsics, func(a, b intrinsicFn) int {
+		diff := int(a.name) - int(b.name)
+		if diff == 0 {
+			diff = len(a.params) - len(b.params)
+		}
+		return diff
+	})
+}
+
+func getIntrinsic(name f90token.Intrinsic, nargs int) *intrinsicFn {
+	if name == 0 {
+		return nil
+	}
+	idx, found := slices.BinarySearchFunc(intrinsics, name, func(e intrinsicFn, a f90token.Intrinsic) int {
+		diff := int(e.name) - int(a)
+		if diff == 0 {
+			if e.isVariadic {
+				return 0
+			}
+			diff = len(e.params) - nargs
+		}
+		return diff
+	})
+	if !found {
+		return nil
+	} else if nargs == len(intrinsics[idx].params) || intrinsics[idx].isVariadic {
+		return &intrinsics[idx]
+	}
+	return nil
+}
+
 var intrinsics = []intrinsicFn{
 	// Type conversions
 	makeIntrinsicCast(f90token.IntrinsicREAL, "float32", _tgtFloat32, _tgtGenericFloat),
 	makeIntrinsicCast(f90token.IntrinsicDBLE, "float64", _tgtFloat64, _tgtGenericFloat),
 	makeIntrinsicCast(f90token.IntrinsicINT, "int32", _tgtInt32, _tgtGenericInt),
-	makeIntrinsicCast(f90token.IntrinsicINT32, "int32", _tgtInt32, _tgtGenericInt),
 
 	// Math intrinsics - single float argument (return type matches input)
 	makeIntrinsicFn(f90token.IntrinsicSQRT, nil, _tgtGenericFloat),
@@ -993,7 +1003,6 @@ var intrinsics = []intrinsicFn{
 	makeIntrinsicFn(f90token.IntrinsicAINT, nil, _tgtGenericFloat),
 	makeIntrinsicFn(f90token.IntrinsicANINT, nil, _tgtGenericFloat),
 	makeIntrinsicFn(f90token.IntrinsicNINT, _tgtInt32, _tgtGenericFloat), // NINT returns INTEGER
-	makeIntrinsicFn(f90token.IntrinsicPOW, nil, _tgtGenericFloat, _tgtGenericFloat),
 
 	// Math intrinsics - two float arguments
 	makeIntrinsicFn(f90token.IntrinsicATAN2, nil, _tgtGenericFloat, _tgtGenericFloat),
