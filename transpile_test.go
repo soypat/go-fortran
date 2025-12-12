@@ -371,3 +371,37 @@ func TestModuleVariableImport(t *testing.T) {
 		t.Errorf("TransformProgram failed: %v", err)
 	}
 }
+
+// TestStatementFunction verifies that statement functions are correctly
+// detected and expanded during transpilation.
+func TestStatementFunction(t *testing.T) {
+	src := `      PROGRAM TEST
+      INTEGER :: MAPARM
+      MAPARM = 10
+      INDXNO(M) = MAPARM*(M-1)-(M*(M-1))/2
+      X = INDXNO(5)
+      PRINT *, X
+      END PROGRAM`
+
+	var parser Parser90
+	err := parser.Reset("test.f90", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unit := parser.ParseNextProgramUnit()
+	if unit == nil {
+		t.Fatal("Expected program unit")
+	}
+	program, ok := unit.(*f90.ProgramBlock)
+	if !ok {
+		t.Fatalf("Expected ProgramBlock, got %T", unit)
+	}
+
+	var tg ToGo
+	tg.SetSource("test.f90", strings.NewReader(src))
+	_, err = tg.TransformProgram(program)
+	if err != nil {
+		t.Errorf("TransformProgram failed: %v", err)
+	}
+}

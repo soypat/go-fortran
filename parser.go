@@ -45,6 +45,7 @@ const (
 	VFlagRecursive
 	VFlagEquivalenced      // Participates in EQUIVALENCE statement (scalars become PointerTo[T])
 	VFlagConstantParameter // Declared with PARAMETER attribute or part of PARAMETER statement
+	VFlagStmtFunc          // Statement function (one-line inline function)
 )
 
 func (f VarFlags) HasAny(hasBits VarFlags) bool { return f&hasBits != 0 }
@@ -379,6 +380,9 @@ type Varinfo struct {
 	declPos  sourcePos
 	val      Value // Runtime value for REPL evaluation
 	kindFlag int   // 0 when uninitialized. -1 when unspecified, -2..-99 error. else is kind value.
+	// Statement function fields (only set if VFlagStmtFunc)
+	stmtFuncExpr   ast.Expression // RHS expression
+	stmtFuncParams []string       // parameter names
 }
 
 func (p *Varinfo) Flags() VarFlags            { return p.flags }
@@ -389,6 +393,9 @@ func (p *Varinfo) Dimensions() *ast.ArraySpec { return p.decl.Dimension() }
 func (p *Varinfo) Identifier() string         { return p._varname }
 func (p *Varinfo) IsParameter() bool          { return p.flags.HasAny(VFlagParameter) }
 func (p *Varinfo) IsAllocatable() bool        { return p.flags.HasAny(VFlagAllocatable) }
+func (p *Varinfo) IsStmtFunc() bool           { return p.flags.HasAny(VFlagStmtFunc) }
+func (p *Varinfo) StmtFuncExpr() ast.Expression { return p.stmtFuncExpr }
+func (p *Varinfo) StmtFuncParams() []string   { return p.stmtFuncParams }
 func (p *Varinfo) CommonBlock() string        { return p.common }
 func (p *Varinfo) DeclPos() (source string, line, col int) {
 	return p.declPos.Source, p.declPos.Line, p.declPos.Col

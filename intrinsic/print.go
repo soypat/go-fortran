@@ -74,6 +74,10 @@ func (f Formatter) formatValue(dst []byte, value any) []byte {
 		dst = strconv.AppendInt(dst, int64(v), 10)
 		leftPad = 11 - (len(dst) - prevLen)
 		rightPad = 0
+	case int:
+		dst = strconv.AppendInt(dst, int64(v), 10)
+		leftPad = 11 - (len(dst) - prevLen)
+		rightPad = 0
 
 	case int64: // INTEGER (kind=8): 1 leading space (+ 1 from Print = 2 total)
 		dst = strconv.AppendInt(dst, v, 10)

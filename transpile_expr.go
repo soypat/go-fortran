@@ -433,9 +433,12 @@ func (tg *ToGo) pointerNilComparison(ptrExpr ast.Expr, op token.Token) ast.Expr 
 }
 
 func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result ast.Expr, resultType *Varinfo, err error) {
-
 	vi := tg.repl.Var(e.Name)
 	if vi != nil {
+		// Check if it's a statement function
+		if vi.IsStmtFunc() {
+			return tg.expandStatementFunction(vitgt, vi, e.Args)
+		}
 		// It's a declared variable - route to array access handler
 		// which properly handles both element access and range expressions
 		result, err = tg.transformArrayRef(vitgt, e)
@@ -479,6 +482,64 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 		Fun:  ast.NewIdent(fi.name),
 		Args: args,
 	}, fi.returnType, nil
+}
+
+// expandStatementFunction expands a statement function call by substituting
+// parameters with arguments and transforming the expression.
+func (tg *ToGo) expandStatementFunction(vitgt *Varinfo, vi *Varinfo, args []f90.Expression) (ast.Expr, *Varinfo, error) {
+	params := vi.StmtFuncParams()
+	expr := vi.StmtFuncExpr()
+	if len(args) != len(params) {
+		return nil, nil, fmt.Errorf("statement function %s: expected %d args, got %d", vi.Identifier(), len(params), len(args))
+	}
+	// Substitute parameters in expression
+	substituted := substituteParams(expr, params, args)
+	// Transform the substituted expression
+	return tg.transformExpression(vitgt, substituted)
+}
+
+// substituteParams replaces identifier references to parameters with argument expressions.
+func substituteParams(expr f90.Expression, params []string, args []f90.Expression) f90.Expression {
+	switch e := expr.(type) {
+	case *f90.Identifier:
+		for i := range params {
+			if strings.EqualFold(params[i], e.Value) {
+				return args[i]
+			}
+		}
+		return e
+	case *f90.BinaryExpr:
+		return &f90.BinaryExpr{
+			Left:     substituteParams(e.Left, params, args),
+			Op:       e.Op,
+			Right:    substituteParams(e.Right, params, args),
+			Position: e.Position,
+		}
+	case *f90.UnaryExpr:
+		return &f90.UnaryExpr{
+			Op:       e.Op,
+			Operand:  substituteParams(e.Operand, params, args),
+			Position: e.Position,
+		}
+	case *f90.CallExpr:
+		newArgs := make([]f90.Expression, len(e.Args))
+		for i, arg := range e.Args {
+			newArgs[i] = substituteParams(arg, params, args)
+		}
+		return &f90.CallExpr{
+			Name:     e.Name,
+			Args:     newArgs,
+			Position: e.Position,
+		}
+	case *f90.ParenExpr:
+		return &f90.ParenExpr{
+			Expr:     substituteParams(e.Expr, params, args),
+			Position: e.Position,
+		}
+	default:
+		// Literals and other expressions don't need substitution
+		return e
+	}
 }
 
 // transformMALLOC handles MALLOC intrinsic specially.

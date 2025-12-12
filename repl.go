@@ -140,6 +140,23 @@ func (repl *REPL) Var(name string) *Varinfo {
 	return nil
 }
 
+// DefineStmtFunc registers a statement function in the current scope.
+// Statement functions are one-line inline functions like: FUNCNAME(X) = expr
+func (repl *REPL) DefineStmtFunc(name string, params []string, expr f90.Expression, decl *f90.DeclEntity) {
+	vi := repl.scope.Var(name)
+	if vi == nil {
+		// Add new varinfo for the statement function
+		repl.scope.vars = append(repl.scope.vars, Varinfo{
+			_varname: name,
+			decl:     decl,
+		})
+		vi = &repl.scope.vars[len(repl.scope.vars)-1]
+	}
+	vi.flags |= VFlagStmtFunc
+	vi.stmtFuncExpr = expr
+	vi.stmtFuncParams = params
+}
+
 // RegisteredUnit returns a program unit that was previously registered with RegisterUnit.
 func (repl *REPL) RegisteredUnit(name string) f90.ProgramUnit {
 	for i := range repl.registered {
@@ -274,7 +291,7 @@ func (repl *REPL) SetScope(pu f90.ProgramUnit) (err error) {
 		v.pointee = sanitizeIdent(v.pointee)
 	}
 	repl.collectCommonBlocks(repl.scope.vars)
-
+	repl._use = repl._use[:0]
 	var toAdd []f90.ProgramUnit
 	switch unit := pu.(type) {
 	case *f90.ProgramBlock:

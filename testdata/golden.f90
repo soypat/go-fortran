@@ -36,6 +36,7 @@
       CALL LEVEL31()
       CALL LEVEL32()
       CALL LEVEL33()
+      CALL LEVEL34()
       STOP 0
       CONTAINS
 
@@ -810,7 +811,13 @@
             PRINT *, 'LEVEL 33:', XSN(i,1), XSN(i,2), XSN(i,3)
         end do
     END SUBROUTINE LEVEL33
-
+    SUBROUTINE LEVEL34() ! Statement Function declarations
+        INTEGER :: IDX, M
+        IDX(M) = (M*(M/2))*2
+        REAL VOLUME, RADIUS
+        VOLUME(RADIUS) = 4.189*RADIUS**3
+        PRINT *, 'LEVEL 34:', IDX(2), IDX(3), VOLUME(23.0)
+    END SUBROUTINE LEVEL34
 ! ==============================================================================
 ! Helper Subroutines and Functions
 ! ==============================================================================

@@ -35,6 +35,7 @@ func main() {
 	LEVEL31()
 	LEVEL32()
 	LEVEL33()
+	LEVEL34()
 	intrinsic.Stop(0)
 }
 func LEVEL01() {
@@ -1003,6 +1004,9 @@ func LEVEL33() {
 	for i = 1; i <= nm; i++ {
 		intrinsic.Print("LEVEL 33:", xsn.At(int(i), 1), xsn.At(int(i), 2), xsn.At(int(i), 3))
 	}
+}
+func LEVEL34() {
+	intrinsic.Print("LEVEL 34:", (2*(2/2))*2, (3*(3/2))*2, 4.189*intrinsic.POW[float32](float32(23.0), float32(3)))
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")

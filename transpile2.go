@@ -660,14 +660,46 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 	return dst, nil
 }
 
+// allIdentifierArgs returns true if all args are simple Identifier nodes.
+func allIdentifierArgs(args []f90.Expression) bool {
+	for _, arg := range args {
+		if _, ok := arg.(*f90.Identifier); !ok {
+			return false
+		}
+	}
+	return len(args) > 0 // Must have at least one parameter
+}
+
+// defineStatementFunction registers a statement function definition.
+// Statement functions are one-line inline functions: FUNCNAME(X, Y) = expr
+func (tg *ToGo) defineStatementFunction(call *f90.CallExpr, expr f90.Expression) ([]ast.Stmt, error) {
+	params := make([]string, len(call.Args))
+	for i, arg := range call.Args {
+		params[i] = arg.(*f90.Identifier).Value
+	}
+	// Get the variable's declaration for type info (may be implicitly typed)
+	vi := tg.repl.Var(call.Name)
+	var decl *f90.DeclEntity
+	if vi != nil {
+		decl = vi.decl
+	}
+	tg.repl.DefineStmtFunc(call.Name, params, expr, decl)
+	return nil, nil // No Go code generated at definition site
+}
+
 func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_ []ast.Stmt, err error) {
 	var targetVinfo *Varinfo
 	var lhs ast.Expr
 	var isIdentifier bool
 	switch tgt := stmt.Target.(type) {
 	case *f90.CallExpr:
-		// CallExpr as assignment target: array access or substring
+		// CallExpr as assignment target: array access, substring, or statement function definition
 		targetVinfo = tg.repl.Var(tgt.Name)
+		// Check for statement function definition: NAME(args) = expr
+		// where NAME is not an array and all args are simple identifiers
+		if (targetVinfo == nil || !tg.varIsArray(targetVinfo)) && allIdentifierArgs(tgt.Args) {
+			return tg.defineStatementFunction(tgt, stmt.Value)
+		}
 	case *f90.Identifier:
 		targetVinfo = tg.repl.Var(tgt.Value)
 		isIdentifier = true
