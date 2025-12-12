@@ -43,6 +43,12 @@ func (ch *CharacterArray) SetDataUnsafe(v unsafe.Pointer) {
 	ch.data = ch.data[:l]
 }
 
+// SetLenBufferUnsafe sets the capacity of the character array.
+func (ch *CharacterArray) SetLenBufferUnsafe(length int) {
+	l := min(length, cap(ch.data)) // The length of the characters is an intrinsic part of the character type, we preserve it.
+	ch.data = unsafe.Slice(unsafe.SliceData(ch.data), l)[:l]
+}
+
 func (ch *CharacterArray) Allocate(length int) {
 	if length < len(ch.inmem) {
 		ch.data = ch.inmem[:0:length]

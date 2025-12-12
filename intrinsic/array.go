@@ -29,7 +29,8 @@ import "unsafe"
 // Column-major layout means the FIRST index varies fastest in memory.
 // For a 2D array A(3,4), memory order is: A(1,1), A(2,1), A(3,1), A(1,2), A(2,2), ...
 type Array[T any] struct {
-	data   []T   // Single contiguous allocation (slab allocation)
+	data   []T   // Single contiguous allocation (slab allocation), shared by views
+	base   int   // Offset into data for first element of this array/view
 	shape  []int // Size of each dimension: shape[i] = upper[i] - lower[i] + 1
 	lower  []int // Lower bounds for each dimension (typically 1, but can be negative)
 	upper  []int // Upper bounds for each dimension
@@ -236,7 +237,7 @@ func (a *Array[T]) UpperDim(dim int) int {
 }
 
 func (a *Array[T]) AtOffset(indices ...int) int {
-	return a.offset(indices) + 1
+	return a.offset(indices) - a.base + 1 // Return 1-based offset within view
 }
 
 // offset calculates the flat index for multi-dimensional access using column-major layout
@@ -257,7 +258,7 @@ func (a *Array[T]) offset(indices []int) int {
 		panic("array: wrong number of indices")
 	}
 
-	offset := 0
+	offset := a.base // Start from base offset for views
 	for i, idx := range indices {
 		// Bounds check (F77 Section 5.4.2, line 2341-2365)
 		if idx < a.lower[i] || idx > a.upper[i] {
@@ -267,6 +268,15 @@ func (a *Array[T]) offset(indices []int) int {
 		offset += (idx - a.lower[i]) * a.stride[i]
 	}
 	return offset
+}
+
+// linearIndex returns the flat index without bounds checking (for internal use)
+func (a *Array[T]) linearIndex(indices []int) int {
+	idx := a.base
+	for d, i := range indices {
+		idx += (i - a.lower[d]) * a.stride[d]
+	}
+	return idx
 }
 
 // Pointer returns the pointer to the underlying flat buffer.
@@ -294,7 +304,197 @@ func (a *Array[T]) SetDataUnsafe(v unsafe.Pointer) {
 	a.data = unsafe.Slice((*T)(v), len(a.data))
 }
 
+// SetLenBuffer sets the number of elements in the backing data slice.
+func (a *Array[T]) SetLenBuffer(length int) {
+	a.data = unsafe.Slice(unsafe.SliceData(a.data), length)
+}
+
 // SizeBuffer implements [Pointer] interface.
 func (a *Array[T]) LenBuffer() int {
 	return len(a.data)
+}
+
+// Range represents a Fortran array range expression: start:end:stride
+// Used with View to create array slices.
+type Range struct {
+	Start, End, Stride int
+}
+
+// R creates a Range with stride=1 (most common case).
+// Corresponds to Fortran syntax start:end
+func R(start, end int) Range {
+	return Range{Start: start, End: end, Stride: 1}
+}
+
+// RS creates a Range with explicit stride.
+// Corresponds to Fortran syntax start:end:stride
+func RS(start, end, stride int) Range {
+	return Range{Start: start, End: end, Stride: stride}
+}
+
+// View creates a view of the array with the given ranges applied to each dimension.
+// The view shares the underlying data with the original array (no copy).
+// Views can be nested: arr.View(...).View(...) works correctly.
+//
+// Example:
+//
+//	arr := NewArray[int32](nil, 10, 5)
+//	view := arr.View(R(2, 4), R(1, 3))  // rows 2-4, cols 1-3
+//	view.At(1, 1)  // equivalent to arr.At(2, 1)
+func (a *Array[T]) View(ranges ...Range) *Array[T] {
+	if len(ranges) != len(a.shape) {
+		panic("array: View requires one range per dimension")
+	}
+
+	view := &Array[T]{
+		data:   a.data, // Share backing storage
+		base:   a.base,
+		shape:  make([]int, len(ranges)),
+		lower:  make([]int, len(ranges)),
+		upper:  make([]int, len(ranges)),
+		stride: make([]int, len(ranges)),
+	}
+
+	for d, r := range ranges {
+		// Validate range bounds against array bounds
+		if r.Start < a.lower[d] || r.End > a.upper[d] {
+			panic("array: View range out of bounds")
+		}
+		if r.Stride == 0 {
+			panic("array: View stride cannot be zero")
+		}
+
+		// Adjust base offset to start of range
+		view.base += (r.Start - a.lower[d]) * a.stride[d]
+
+		// Calculate view shape (number of elements in this dimension)
+		if r.Stride > 0 {
+			view.shape[d] = (r.End - r.Start + r.Stride) / r.Stride
+		} else {
+			view.shape[d] = (r.Start - r.End - r.Stride) / (-r.Stride)
+		}
+
+		// View uses 1-based indexing
+		view.lower[d] = 1
+		view.upper[d] = view.shape[d]
+
+		// Stride scales by range stride
+		view.stride[d] = a.stride[d] * r.Stride
+	}
+
+	return view
+}
+
+// SetFrom copies all elements from src to dst element-wise.
+// Both arrays must have the same shape.
+// Corresponds to Fortran: dst = src (array assignment)
+func (dst *Array[T]) SetFrom(src *Array[T]) {
+	dst.iteratePair(src, func(di, si int) {
+		dst.data[di] = src.data[si]
+	})
+}
+
+// iteratePair iterates over corresponding elements of two arrays with same shape
+func (dst *Array[T]) iteratePair(src *Array[T], fn func(di, si int)) {
+	if !shapeEqual(dst.shape, src.shape) {
+		panic("array: shape mismatch in element-wise operation")
+	}
+
+	indices := make([]int, len(dst.shape))
+	for i := range indices {
+		indices[i] = 1
+	}
+
+	total := dst.Size()
+	for n := 0; n < total; n++ {
+		di := dst.linearIndex(indices)
+		si := src.linearIndex(indices)
+		fn(di, si)
+
+		// Increment indices column-major
+		for d := 0; d < len(indices); d++ {
+			indices[d]++
+			if indices[d] <= dst.shape[d] {
+				break
+			}
+			indices[d] = 1
+		}
+	}
+}
+
+// iterateTriple iterates over corresponding elements of three arrays with same shape
+func (dst *Array[T]) iterateTriple(a, b *Array[T], fn func(di, ai, bi int)) {
+	if !shapeEqual(dst.shape, a.shape) || !shapeEqual(dst.shape, b.shape) {
+		panic("array: shape mismatch in element-wise operation")
+	}
+
+	indices := make([]int, len(dst.shape))
+	for i := range indices {
+		indices[i] = 1
+	}
+
+	total := dst.Size()
+	for n := 0; n < total; n++ {
+		di := dst.linearIndex(indices)
+		ai := a.linearIndex(indices)
+		bi := b.linearIndex(indices)
+		fn(di, ai, bi)
+
+		// Increment indices column-major
+		for d := 0; d < len(indices); d++ {
+			indices[d]++
+			if indices[d] <= dst.shape[d] {
+				break
+			}
+			indices[d] = 1
+		}
+	}
+}
+
+func shapeEqual(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// ArraySetAdd performs element-wise addition: dst = a + b
+// All arrays must have the same shape.
+// Corresponds to Fortran: dst = a + b (array expressions)
+func ArraySetAdd[T numeric](dst, a, b *Array[T]) {
+	dst.iterateTriple(a, b, func(di, ai, bi int) {
+		dst.data[di] = a.data[ai] + b.data[bi]
+	})
+}
+
+// ArraySetSub performs element-wise subtraction: dst = a - b
+// All arrays must have the same shape.
+// Corresponds to Fortran: dst = a - b (array expressions)
+func ArraySetSub[T numeric](dst, a, b *Array[T]) {
+	dst.iterateTriple(a, b, func(di, ai, bi int) {
+		dst.data[di] = a.data[ai] - b.data[bi]
+	})
+}
+
+// ArraySetMul performs element-wise multiplication: dst = a * b
+// All arrays must have the same shape.
+// Corresponds to Fortran: dst = a * b (array expressions)
+func ArraySetMul[T numeric](dst, a, b *Array[T]) {
+	dst.iterateTriple(a, b, func(di, ai, bi int) {
+		dst.data[di] = a.data[ai] * b.data[bi]
+	})
+}
+
+// ArraySetDiv performs element-wise division: dst = a / b
+// All arrays must have the same shape.
+// Corresponds to Fortran: dst = a / b (array expressions)
+func ArraySetDiv[T numeric](dst, a, b *Array[T]) {
+	dst.iterateTriple(a, b, func(di, ai, bi int) {
+		dst.data[di] = a.data[ai] / b.data[bi]
+	})
 }

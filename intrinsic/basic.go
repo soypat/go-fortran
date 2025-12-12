@@ -32,6 +32,9 @@ type PointerSetter interface {
 	//
 	// Deprecated: Do not use this.
 	SetDataUnsafe(ptr unsafe.Pointer)
+	// SetLenBufferUnsafe sets the number of elements the pointer can access.
+	// Used by Equivalence to properly size destination pointers.
+	SetLenBufferUnsafe(length int)
 }
 
 // Equivalence implements Fortran's EQUIVALENCE statement by making multiple
@@ -88,6 +91,9 @@ func Equivalence(toEquiv ...PointerSetter) {
 	baseAddr := largest.DataUnsafe()
 	for _, equiv := range toEquiv {
 		equiv.SetDataUnsafe(baseAddr)
+		// Set the allocation length based on total bytes / element size
+		newLen := maxAlloc / equiv.SizeElement()
+		equiv.SetLenBufferUnsafe(newLen)
 	}
 }
 
@@ -134,6 +140,9 @@ func (q *ptrOff) SizeElement() int {
 }
 func (q *ptrOff) LenBuffer() int {
 	return q.ptr.LenBuffer() - q.elemOffset
+}
+func (q *ptrOff) SetLenBufferUnsafe(length int) {
+	q.ptr.SetLenBufferUnsafe(length + q.elemOffset)
 }
 func (q *ptrOff) Offset() int {
 	return q.ptr.SizeElement() * q.elemOffset
@@ -293,6 +302,11 @@ func (p PointerTo[T]) DataUnsafe() unsafe.Pointer {
 // Deprecated: Extremely unsafe. Do not use.
 func (p *PointerTo[T]) SetDataUnsafe(v unsafe.Pointer) {
 	p.v = v
+}
+
+// SetLenBufferUnsafe sets the number of elements this pointer can access.
+func (p *PointerTo[T]) SetLenBufferUnsafe(length int) {
+	p.alloclen = length
 }
 
 // View creates a sub-pointer viewing a range of the original allocation.

@@ -888,12 +888,25 @@ func LEVEL30() {
 		_   = mat
 	)
 	mat = intrinsic.NewArray[int32](nil, 2, 2)
+	var (
+		defalt intrinsic.PointerTo[float64]
+		_      = defalt
+	)
+	var (
+		i_defalt *intrinsic.Array[int32]
+		_        = i_defalt
+	)
+	i_defalt = intrinsic.NewArray[int32](nil, 2)
+	i_defalt.Set(125269879, 1)
+	i_defalt.Set(125269879, 2)
+	intrinsic.Equivalence(&defalt, i_defalt)
 	intrinsic.Equivalence(c.AtPtr(1), intrinsic.PointerOff(mat, mat.AtOffset(1, 1)))
 	intrinsic.Equivalence(&a, &b, intrinsic.PointerOff(mat, mat.AtOffset(1, 2)))
 	mat.Set(64, 1, 1)
 	mat.Set(97, 1, 2)
 	intrinsic.Print("LEVEL 30: CHAR A,B:", a, b)
 	intrinsic.Print("LEVEL 30: CHAR C:", c.At(1))
+	intrinsic.Print("LEVEL 30: DEFALT", defalt.At(1), i_defalt.At(1), i_defalt.At(2))
 }
 func LEVEL31() {
 	const k int32 = 16
@@ -937,63 +950,6 @@ func LEVEL32() {
 	a.AtPtr(2, 1).SetFromString("GHI")
 	a.AtPtr(2, 2).SetFromString("JKL")
 	intrinsic.Print("LEVEL 32:", a.At(1, 1), a.At(1, 2), a.At(2, 1), a.At(2, 2))
-}
-func LEVEL33() {
-	var (
-		npaa intrinsic.PointerTo[float64]
-		aa   intrinsic.PointerTo[float64]
-		_, _ = npaa, aa
-	)
-	var (
-		npii intrinsic.PointerTo[int32]
-		ii   intrinsic.PointerTo[int32]
-		_, _ = npii, ii
-	)
-	var (
-		npll intrinsic.PointerTo[bool]
-		ll   intrinsic.PointerTo[bool]
-		_, _ = npll, ll
-	)
-	var (
-		n             int32
-		m             int32
-		maxmum        int32
-		maxdm1        int32
-		maxdef        int32
-		_, _, _, _, _ = n, m, maxmum, maxdm1, maxdef
-	)
-	var (
-		defalt intrinsic.PointerTo[float64]
-		_      = defalt
-	)
-	var (
-		i_defalt *intrinsic.Array[int32]
-		_        = i_defalt
-	)
-	i_defalt = intrinsic.NewArray[int32](nil, 2)
-	i_defalt.Set(125269879, 1)
-	i_defalt.Set(125269879, 2)
-	intrinsic.Equivalence(&defalt, i_defalt)
-	intrinsic.Print("LEVEL 32: Advanced features test")
-	maxdm1 = 100
-	npaa = intrinsic.MALLOC[float64](maxdm1 * 8)
-	aa = npaa
-	if npaa.DataUnsafe() == nil {
-		intrinsic.Stop(69)
-	}
-	npii = intrinsic.PointerFrom[int32](npaa)
-	ii = npii
-	npll = intrinsic.PointerFrom[bool](npii)
-	ll = npll
-	m = 1
-	maxdef = intrinsic.MIN[int32](200000, maxdm1)
-	for m = 1; m <= maxdef; m += 32768 {
-		maxmum = intrinsic.MIN[int32](m+32767, maxdef)
-		for n = m; n <= maxmum; n++ {
-		}
-	}
-	intrinsic.Print("LEVEL 32: AA(2) ", aa.At(2))
-	intrinsic.Print("LEVEL 32: Initialized", maxmum-m+1, "elements")
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")

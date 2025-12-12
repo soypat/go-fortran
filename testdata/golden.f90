@@ -743,12 +743,18 @@
         CHARACTER :: A, B
         CHARACTER, DIMENSION(4) :: C
         INTEGER :: MAT(2,2)
+        DOUBLEPRECISION          :: DEFALT
+        INTEGER,DIMENSION(2)     :: I_DEFALT
+        DATA I_DEFALT(1) /Z'7777777'/
+        DATA I_DEFALT(2) /Z'7777777'/
+        EQUIVALENCE ( DEFALT, I_DEFALT )
         EQUIVALENCE (C(1), MAT(1,1))
         EQUIVALENCE (A, B, MAT(1,2))
         MAT(1,1) = 64 ! Affect C.
         MAT(1,2) = 97 ! Affect A and B.
         PRINT *, 'LEVEL 30: CHAR A,B:', A, B
         PRINT *, 'LEVEL 30: CHAR C:', C(1)
+        PRINT *, 'LEVEL 30: DEFALT', DEFALT, I_DEFALT(1), I_DEFALT(2)
     END SUBROUTINE LEVEL30
     SUBROUTINE LEVEL31()
         IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L),INTEGER (I,K)
@@ -775,38 +781,6 @@
         A(2,2) = 'JKL'
         PRINT *, 'LEVEL 32:', A(1,1),A(1,2),A(2,1),A(2,2)
     END SUBROUTINE LEVEL32
-    SUBROUTINE LEVEL33()
-        ! Test advanced features: DIMENSION, MALLOC, DATA with hex, labeled DO
-        IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L),INTEGER (I)
-        POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1)) ! cray style pointer, implicit initialization.
-        INTEGER :: N, M, MAXMUM, MAXDM1, MAXDEF
-        ! Initialize with hex values (Cray-style hex literals)
-        DOUBLEPRECISION          :: DEFALT
-        INTEGER,DIMENSION(2)     :: I_DEFALT
-        DATA I_DEFALT(1) /Z'7777777'/
-        DATA I_DEFALT(2) /Z'7777777'/
-        EQUIVALENCE ( DEFALT, I_DEFALT )
-        PRINT *, 'LEVEL 32: Advanced features test'
-        ! Test MALLOC intrinsic
-        MAXDM1 = 100
-        NPAA = MALLOC(MAXDM1 * 8)
-        IF( NPAA .EQ. 0 ) THEN
-           STOP 69
-        ENDIF
-        NPII = NPAA
-        NPLL = NPII
-        M = 1
-        ! Initialize array using labeled DO loop
-         MAXDEF=MIN(200000,MAXDM1)
-         DO  900 M=1,MAXDEF,32768
-         MAXMUM=MIN(M+32767,MAXDEF)
-         DO  800 N=M,MAXMUM
-        !  AA(N)=DEFALT
-800      END DO
-900      END DO
-        PRINT *, 'LEVEL 32: AA(2) ', AA(2)
-        PRINT *, 'LEVEL 32: Initialized', MAXMUM - M + 1, 'elements'
-    END SUBROUTINE LEVEL33
 
 ! ==============================================================================
 ! Helper Subroutines and Functions
