@@ -339,7 +339,10 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		// ASSIGN label TO variable (Fortran 77 feature) - not supported, skip silently
 	case *f90.AssignedGotoStmt:
 		// GOTO variable (assigned GOTO using label from ASSIGN statement) - not supported
-	case *f90.ImplicitStatement, *f90.UseStatement, *f90.ExternalStmt, *f90.IntrinsicStmt:
+	case *f90.UseStatement:
+		// USE statement - load module into scope
+		err = tg.repl.Use(s.ModuleName)
+	case *f90.ImplicitStatement, *f90.ExternalStmt, *f90.IntrinsicStmt:
 		// Specification statement - no code generation
 	default:
 		// For now, unsupported statements are skipped
