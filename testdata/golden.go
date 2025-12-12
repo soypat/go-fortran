@@ -321,7 +321,7 @@ func LEVEL12() {
 	angle = 0.5
 	sin_val = intrinsic.SIN(angle)
 	cos_val = intrinsic.COS(angle)
-	abs_val = float32(intrinsic.ABS[float32](-5.5))
+	abs_val = float32(intrinsic.ABS(-5.5))
 	max_val = intrinsic.MAX[int32](i, j, k)
 	min_val = intrinsic.MIN[int32](10, 20, 5)
 	intrinsic.Print("LEVEL 12: SIN(0.5) =", sin_val)

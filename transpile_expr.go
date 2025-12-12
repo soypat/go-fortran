@@ -245,11 +245,21 @@ func normalizeTokenKind(tok f90token.Token, kind int) (f90token.Token, int) {
 }
 
 func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result ast.Expr, resultType *Varinfo, err error) {
-	left, leftType, err := tg.transformExpression(nil, e.Left)
+	exprTarget := vitgt
+	// if vitgt == _tgtBool && e.Op.IsNumericalOperator() {
+	// 	// We are targeting boolean but likely have numerical values, infer type.
+	// 	var leftType Varinfo
+	// 	err = tg.repl.InferType(&leftType, e.Left)
+	// 	if err != nil {
+	// 		return nil, nil, tg.makeErr(e.Left, err.Error())
+	// 	}
+	// 	exprTarget = &leftType
+	// }
+	left, leftType, err := tg.transformExpression(exprTarget, e.Left)
 	if err != nil {
 		return nil, nil, err
 	}
-	right, rightType, err := tg.transformExpression(nil, e.Right)
+	right, rightType, err := tg.transformExpression(exprTarget, e.Right)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -769,15 +779,19 @@ func (tg *ToGo) intrinsicExpr(vitgt *Varinfo, fn *intrinsicFn, args ...f90.Expre
 		return nil, nil, fmt.Errorf("intrinsic %s requires %d arguments, got %d", fn.name, len(fn.params), len(args))
 	}
 	var gargs []ast.Expr
+	var firstArgType *Varinfo // Capture first argument's type for generic intrinsics
 	for i := range args {
 		// For variadic, use the first param type for extra args
 		paramIdx := i
 		if paramIdx >= len(fn.params) {
 			paramIdx = 0
 		}
-		expr, _, err := tg.transformExpression(fn.params[paramIdx], args[i])
+		expr, argType, err := tg.transformExpression(fn.params[paramIdx], args[i])
 		if err != nil {
 			return nil, nil, err
+		}
+		if i == 0 {
+			firstArgType = argType
 		}
 		gargs = append(gargs, expr)
 	}
@@ -797,8 +811,15 @@ func (tg *ToGo) intrinsicExpr(vitgt *Varinfo, fn *intrinsicFn, args ...f90.Expre
 		resultType = fn.returnType
 		funcExpr := fn.expr
 		if funcExpr == nil && fn.exprGeneric != nil {
-			funcExpr = fn.exprGeneric(vitgt)
-			resultType = vitgt
+			// For generic intrinsics, determine the type parameter:
+			// - Variadic intrinsics (MIN/MAX): use target type if valid, else first arg type
+			// - Other generics (ABS, etc.): use first argument's actual type
+			genericType := firstArgType
+			if fn.isVariadic && vitgt != nil && !isGenericVarinfo(vitgt) {
+				genericType = vitgt
+			}
+			funcExpr = fn.exprGeneric(genericType)
+			resultType = genericType
 		}
 		call = &ast.CallExpr{
 			Fun:  funcExpr,

@@ -397,6 +397,19 @@ func (tok Token) IsLiteral() bool {
 	return tok > litStart && tok < litEnd
 }
 
+func (tok Token) IsNumericalOperator() bool {
+	if !tok.IsOperator() {
+		return false
+	}
+	switch tok {
+	case Plus, Asterisk, Slash, Minus, DoubleStar,
+		EQ, NE, LT, LE, GT, GE,
+		EqEq, NotEquals, Less, LessEq, Greater, GreaterEq:
+		return true
+	}
+	return false
+}
+
 // IsConstructWithParens returns true if the construct has parentheses
 // that follow after declaration.
 func (tok Token) IsConstructAdmitsParens() bool {

@@ -9,5 +9,6 @@ RECURSIVE FUNCTION fibonacci(n) RESULT(res)
 
 FUNCTION gdyn2e()
 	REAL :: alat, cldrad, al
-	If (ABS(alat) .ge. 90. - cldrad)al = 1.15*al
+	IF (ABS(alat) .ge. 90. - cldrad)al = 1.15*al
+	IF (alat+cldrad .ge. 90. - cldrad)al = 1.15*al
 END FUNCTION gdyn2e
