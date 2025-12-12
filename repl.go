@@ -165,37 +165,49 @@ func (repl *REPL) RegisterUnits(pu ...f90.ProgramUnit) error {
 }
 
 // Use loads a registered unit to the REPL scope until scope is reset.
-func (repl *REPL) Use(name string) (err error) {
+func (repl *REPL) Use(name string, only ...string) (err error) {
 	unit := repl.RegisteredUnit(name)
 	if unit == nil {
 		return errors.New("unit " + name + " not registered")
 	}
-	repl._use, err = repl.appendUnitData(repl._use, unit)
+	repl._use, err = repl.appendUnitData(repl._use, only, unit)
 	if err != nil {
 		return fmt.Errorf("using unit %s: %w", name, err)
 	}
 	return nil
 }
 
-func (repl *REPL) appendUnitData(dst []*ParserUnitData, pus ...f90.ProgramUnit) (_ []*ParserUnitData, err error) {
-	for _, pu := range pus {
-		data, ok := pu.UnitData().(*ParserUnitData)
-		if !ok {
-			return dst, fmt.Errorf("program unit %s has incompatible UnitData %T", pu.UnitName(), pu.UnitData())
+func (repl *REPL) appendUnitData(dst []*ParserUnitData, only []string, pu f90.ProgramUnit) (_ []*ParserUnitData, err error) {
+	data, ok := pu.UnitData().(*ParserUnitData)
+	if !ok {
+		return dst, fmt.Errorf("program unit %s has incompatible UnitData %T", pu.UnitName(), pu.UnitData())
+	}
+	for i := range dst {
+		if strings.EqualFold(dst[i].name, data.name) {
+			return dst, fmt.Errorf("%s(%T) already added as %s(%s)", pu.UnitName(), pu, dst[i].name, dst[i].tok.String())
 		}
-		for i := range dst {
-			if strings.EqualFold(dst[i].name, data.name) {
-				return dst, fmt.Errorf("%s(%T) already added as %s(%s)", pu.UnitName(), pu, dst[i].name, dst[i].tok.String())
+	}
+	if only != nil {
+		var filtered ParserUnitData
+		filtered.copyFrom(data)
+		filtered.vars = filtered.vars[:0]
+		for i := range data.vars {
+			if identifierIn(only, data.vars[i].Identifier()) {
+				filtered.vars = append(filtered.vars, data.vars[i])
 			}
 		}
-		dst = append(dst, data)
-		// Also register module-contained procedures so they can be found by ContainedOrExtern.
-		if mod, ok := pu.(*f90.Module); ok {
-			for _, contained := range mod.Contains {
-				dst, err = repl.appendUnitData(dst, mod.Contains...)
-				if err != nil {
-					return dst, fmt.Errorf("%s contained within %s: %w", contained.UnitName(), mod.Name, err)
-				}
+		data = &filtered
+	}
+	dst = append(dst, data)
+	// Also register module-contained procedures so they can be found by ContainedOrExtern.
+	if mod, ok := pu.(*f90.Module); ok {
+		for _, contained := range mod.Contains {
+			if only != nil && !identifierIn(only, contained.UnitName()) {
+				continue
+			}
+			dst, err = repl.appendUnitData(dst, only, contained)
+			if err != nil {
+				return dst, fmt.Errorf("%s contained within %s: %w", contained.UnitName(), mod.Name, err)
 			}
 		}
 	}
@@ -266,26 +278,28 @@ func (repl *REPL) SetScope(pu f90.ProgramUnit) (err error) {
 	var toAdd []f90.ProgramUnit
 	switch unit := pu.(type) {
 	case *f90.ProgramBlock:
+		repl._contains = repl._contains[:0]
 		toAdd = unit.Contains
 	case *f90.Module:
+		repl._contains = repl._contains[:0]
 		toAdd = unit.Contains
 	case *f90.Function:
 		if slices.Contains(unit.Attributes, f90token.RECURSIVE) {
-			repl._contains, _ = repl.appendUnitData(repl._contains, unit)
+			toAdd = []f90.ProgramUnit{unit}
 		}
-		return nil
 	case *f90.Subroutine:
 		if slices.Contains(unit.Attributes, f90token.RECURSIVE) {
-			repl._contains, _ = repl.appendUnitData(repl._contains, unit)
+			toAdd = []f90.ProgramUnit{unit}
 		}
-		return nil
 	default:
 		return nil
 	}
 	// reset contains on Module or Program block.
-	repl._contains, err = repl.appendUnitData(repl._contains, toAdd...)
-	if err != nil {
-		return fmt.Errorf("adding contains %s: %w", pu.UnitName(), err)
+	for _, pu := range toAdd {
+		repl._contains, err = repl.appendUnitData(repl._contains, nil, pu)
+		if err != nil {
+			return fmt.Errorf("adding contains %s: %w", pu.UnitName(), err)
+		}
 	}
 	return nil
 }
@@ -880,4 +894,13 @@ var _intrinsicEvalf2 = [...]func(float64, float64) float64{
 	f90token.IntrinsicMODULO: math.Mod,
 	// Fortran 2008
 	f90token.IntrinsicHYPOT: math.Hypot,
+}
+
+func identifierIn(s []string, id string) bool {
+	for i := range s {
+		if strings.EqualFold(s[i], id) {
+			return true
+		}
+	}
+	return false
 }

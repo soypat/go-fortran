@@ -341,7 +341,10 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		// GOTO variable (assigned GOTO using label from ASSIGN statement) - not supported
 	case *f90.UseStatement:
 		// USE statement - load module into scope
-		err = tg.repl.Use(s.ModuleName)
+		err = tg.repl.Use(s.ModuleName, s.Only...)
+		if err != nil {
+			err = tg.makeErr(stmt, err.Error())
+		}
 	case *f90.ImplicitStatement, *f90.ExternalStmt, *f90.IntrinsicStmt:
 		// Specification statement - no code generation
 	default:
