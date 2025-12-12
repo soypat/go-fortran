@@ -97,7 +97,7 @@ func testTranspile(t testing.TB, tg *ToGo, pus []f90.ProgramUnit, srcPath string
 			mainProg = block
 			continue
 		}
-		err := tg.AddUsed(unit)
+		err := tg.RegisterUnits(unit)
 		if err != nil {
 			t.Fatal(srcPath, err)
 		}

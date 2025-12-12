@@ -303,11 +303,12 @@ func LEVEL11() {
 }
 func LEVEL12() {
 	var (
-		angle      float32
-		sin_val    float32
-		cos_val    float32
-		abs_val    float32
-		_, _, _, _ = angle, sin_val, cos_val, abs_val
+		angle         float32
+		sin_val       float32
+		cos_val       float32
+		abs_val       float32
+		log_val       float32
+		_, _, _, _, _ = angle, sin_val, cos_val, abs_val, log_val
 	)
 	var (
 		i             int32
@@ -326,6 +327,7 @@ func LEVEL12() {
 	abs_val = float32(intrinsic.ABS(-5.5))
 	max_val = intrinsic.MAX[int32](i, j, k)
 	min_val = intrinsic.MIN[int32](10, 20, 5)
+	log_val = 2.0 * intrinsic.LOG(angle)
 	intrinsic.Print("LEVEL 12: SIN(0.5) =", sin_val)
 	intrinsic.Print("LEVEL 12: COS(0.5) =", cos_val)
 	intrinsic.Print("LEVEL 12: ABS(-5.5) =", abs_val)
@@ -582,14 +584,12 @@ func LEVEL20() {
 		_, _, _, _ = a, b, c, i
 	)
 	var (
-		x          float32
-		y          float32
-		vec1       *intrinsic.Array[float32]
-		vec2       *intrinsic.Array[float32]
-		_, _, _, _ = x, y, vec1, vec2
+		x       float32
+		y       float32
+		vec1    *intrinsic.Array[float32]
+		_, _, _ = x, y, vec1
 	)
 	vec1 = intrinsic.NewArray[float32](nil, 3)
-	vec2 = intrinsic.NewArray[float32](nil, 3)
 	var (
 		repeat *intrinsic.Array[intrinsic.CharacterArray]
 		_      = repeat

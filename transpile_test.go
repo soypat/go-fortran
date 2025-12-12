@@ -134,7 +134,7 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 				break
 			}
 			helperFatalErrors(t, &ps, "parsing unit "+unit.UnitName())
-			err = tg.AddUsed(unit)
+			err = tg.RegisterUnits(unit)
 			if err != nil {
 				t.Fatal("failed to use unit", unit.UnitName(), module, err)
 			}
@@ -162,7 +162,7 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 			mainBlock = pb
 			continue
 		}
-		err = tg.AddUsed(unit)
+		err = tg.RegisterUnits(unit)
 		if err != nil {
 			err2 := tg.makeErr(unit, "failed to add")
 			t.Fatal("adding main program unit failed:", err, err2)
@@ -362,7 +362,7 @@ func TestModuleVariableImport(t *testing.T) {
 	// Transpile with module as extern
 	var tg ToGo
 	tg.SetSource("test.f90", strings.NewReader(src))
-	err = tg.AddUsed(mod)
+	err = tg.RegisterUnits(mod)
 	if err != nil {
 		t.Fatal(err)
 	}

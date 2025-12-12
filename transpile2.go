@@ -31,12 +31,8 @@ func (tg *ToGo) SetSource(source string, r io.ReaderAt) {
 	tg.sourceFile = r
 }
 
-func (tg *ToGo) AddUsed(pu ...f90.ProgramUnit) error {
-	return tg.repl.AddUsed(pu...)
-}
-
-func (tg *ToGo) GetUsed(name string) *ParserUnitData {
-	return tg.repl.GetUsed(name)
+func (tg *ToGo) RegisterUnits(pus ...f90.ProgramUnit) error {
+	return tg.repl.RegisterUnits(pus...)
 }
 
 func (tg *ToGo) Contained(name string) *ParserUnitData {
@@ -85,7 +81,7 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 	if err != nil {
 		return decls, fmt.Errorf("in CONTAINS of %s: %w", prog.Name, err)
 	}
-	decls, err = tg.transformProcedures(decls, tg.repl.used)
+	decls, err = tg.transformProcedures(decls, tg.repl.registered)
 	if err != nil {
 		return decls, fmt.Errorf("in USE added routines for %s: %w", prog.Name, err)
 	}

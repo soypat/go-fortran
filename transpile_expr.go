@@ -1,6 +1,7 @@
 package fortran
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -221,7 +222,7 @@ func (tg *ToGo) checkPromotion(left, right *Varinfo) (lPromote, rPromote *Varinf
 	} else if ltok == f90token.INTEGER && rtok == f90token.REAL {
 		return right, nil, nil
 	}
-	return nil, nil, tg.makeErrAtStmt("unpromotable combo " + ltok.String() + " " + rtok.String())
+	return nil, nil, errors.New("unpromotable combo " + ltok.String() + " " + rtok.String())
 }
 
 // normalizeTokenKind sets kind to non-zero size and DOUBLEPRECISION becomes REAL.
@@ -246,15 +247,15 @@ func normalizeTokenKind(tok f90token.Token, kind int) (f90token.Token, int) {
 
 func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result ast.Expr, resultType *Varinfo, err error) {
 	exprTarget := vitgt
-	// if vitgt == _tgtBool && e.Op.IsNumericalOperator() {
-	// 	// We are targeting boolean but likely have numerical values, infer type.
-	// 	var leftType Varinfo
-	// 	err = tg.repl.InferType(&leftType, e.Left)
-	// 	if err != nil {
-	// 		return nil, nil, tg.makeErr(e.Left, err.Error())
-	// 	}
-	// 	exprTarget = &leftType
-	// }
+	if vitgt == _tgtBool && e.Op.IsNumericalOperator() {
+		// We are targeting boolean but likely have numerical values, infer type.
+		var leftType Varinfo
+		err = tg.repl.InferType(&leftType, e.Left)
+		if err != nil {
+			return nil, nil, tg.makeErr(e.Left, err.Error())
+		}
+		exprTarget = &leftType
+	}
 	left, leftType, err := tg.transformExpression(exprTarget, e.Left)
 	if err != nil {
 		return nil, nil, err
@@ -268,7 +269,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 	}
 	lpromote, rpromote, err := tg.checkPromotion(leftType, rightType)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, tg.makeErr(e.Left, err.Error())
 	}
 	// Result type is result of promotion. In switch/case statement boolean returnType is set for logical operations.
 	resultType = leftType

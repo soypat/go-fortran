@@ -68,14 +68,17 @@ func (cb *commonBlockInfo) addField(v *Varinfo) {
 
 type REPL struct {
 	scope ParserUnitData // currentScope variable data.
+	// registered stores all modules that have been registered
+	// using RegisterModule since Reset call. These modules can then be
+	// loaded to the USE scope via "Use".
+	registered []f90.ProgramUnit
+
 	// use stores modules/subroutines/functions/data blocks that have been loaded via Use.
 	// The used modules are flattened here, so _use contains functions/subroutines contained within modules as well.
 	_use              []*ParserUnitData
 	_contains         []*ParserUnitData
 	commonblocks      []commonBlockInfo // COMMON block name -> info (file-level, not reset per procedure)
 	noValueResolution bool              // When true, Eval skips value computation (type inference only)
-	// used contains flat used program units. Contains modules are not added here.
-	used []f90.ProgramUnit
 }
 
 func (repl *REPL) Reset() {
@@ -84,7 +87,7 @@ func (repl *REPL) Reset() {
 		_contains:    repl._contains[:0],
 		scope:        repl.scope,
 		commonblocks: repl.commonblocks[:0],
-		used:         repl.used[:0],
+		registered:   repl.registered[:0],
 	}
 	repl.scope.reset()
 }
@@ -137,28 +140,67 @@ func (repl *REPL) Var(name string) *Varinfo {
 	return nil
 }
 
-func (repl *REPL) AddUsed(pu ...f90.ProgramUnit) error {
+// RegisteredUnit returns a program unit that was previously registered with RegisterUnit.
+func (repl *REPL) RegisteredUnit(name string) f90.ProgramUnit {
+	for i := range repl.registered {
+		if strings.EqualFold(repl.registered[i].UnitName(), name) {
+			return repl.registered[i]
+		}
+	}
+	return nil
+}
+
+// RegisterUnits registers a set of program units to the REPL. This has no effect
+// on inner workings of REPL until Use is called with the name of a previously registered unit.
+func (repl *REPL) RegisterUnits(pu ...f90.ProgramUnit) error {
 	for i := range pu {
-		data, ok := pu[i].UnitData().(*ParserUnitData)
-		if !ok {
-			return fmt.Errorf("extern program unit %s has incompatible UnitData %T", pu[i].UnitName(), pu[i].UnitData())
-		}
-		exists := repl.GetUsed(data.name)
+		name := pu[i].UnitName()
+		exists := repl.RegisteredUnit(name)
 		if exists != nil {
-			return fmt.Errorf("%s(%T) already added as %s(%s)", pu[i].UnitName(), pu[i], exists.name, exists.tok.String())
+			return fmt.Errorf("%s(%T) already added as %s(%s)", pu[i].UnitName(), pu[i], name, exists.AppendTokenLiteral(nil))
 		}
-		repl._use = append(repl._use, data)
-		// Also register module-contained procedures so they can be found by ContainedOrExtern.
-		if mod, ok := pu[i].(*f90.Module); ok {
-			for _, contained := range mod.Contains {
-				err := repl.AddUsed(contained)
-				if err != nil {
-					return fmt.Errorf("%s contained within %s: %w", contained.UnitName(), mod.Name, err)
-				}
+	}
+	repl.registered = append(repl.registered, pu...)
+	return nil
+}
+
+// Use loads a registered unit to the REPL scope until scope is reset.
+func (repl *REPL) Use(name string) error {
+	for i := range repl._use {
+		if strings.EqualFold(repl._use[i].name, name) {
+			return errors.New("unit " + name + " already in use")
+		}
+	}
+	unit := repl.RegisteredUnit(name)
+	if unit == nil {
+		return errors.New("unit " + name + " not registered")
+	}
+	err := repl.use(unit)
+	if err != nil {
+		return fmt.Errorf("using unit %s: %w", name, err)
+	}
+	return nil
+}
+
+func (repl *REPL) use(pu f90.ProgramUnit) error {
+	data, ok := pu.UnitData().(*ParserUnitData)
+	if !ok {
+		return fmt.Errorf("program unit %s has incompatible UnitData %T", pu.UnitName(), pu.UnitData())
+	}
+	exists := repl.GetUsed(data.name)
+	if exists != nil {
+		return fmt.Errorf("%s(%T) already added as %s(%s)", pu.UnitName(), pu, exists.name, exists.tok.String())
+	}
+	repl._use = append(repl._use, data)
+	// Also register module-contained procedures so they can be found by ContainedOrExtern.
+	if mod, ok := pu.(*f90.Module); ok {
+		for _, contained := range mod.Contains {
+			err := repl.use(contained)
+			if err != nil {
+				return fmt.Errorf("%s contained within %s: %w", contained.UnitName(), mod.Name, err)
 			}
 		}
 	}
-	repl.used = append(repl.used, pu...)
 	return nil
 }
 
@@ -226,6 +268,7 @@ func (repl *REPL) SetScope(pu f90.ProgramUnit) error {
 		return nil
 	}
 	// reset contains on Module or Program block.
+	repl._use = repl._use[:0]
 	repl._contains = repl._contains[:0]
 	for i := range toAdd {
 		pu, ok := toAdd[i].UnitData().(*ParserUnitData)
