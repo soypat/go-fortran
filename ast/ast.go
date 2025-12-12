@@ -931,9 +931,8 @@ func (ps *PointerCrayStmt) AppendString(dst []byte) []byte {
 //	DATA (arr(i), i=1,10) / 10*0.0 /
 //	DATA a, b, c / 1, 2, 3 /
 type DataStmt struct {
-	Variables []Expression // Variable names (identifiers or array refs)
-	Values    []Expression // Initialization values
-	Label     string
+	Varlists []Varlist
+	Label    string
 	Position
 }
 
@@ -946,7 +945,59 @@ func (ds *DataStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "DATA"...)
 }
 func (ds *DataStmt) AppendString(dst []byte) []byte {
-	return append(dst, "DATA"...)
+	dst = append(dst, "DATA "...)
+	for i := range ds.Varlists {
+		if i != 0 {
+			dst = append(dst, ' ')
+		}
+		dst = ds.Varlists[i].AppendString(dst)
+	}
+	return dst
+}
+
+type Varlist struct {
+	Variables []Expression
+	Values    []Expression
+}
+
+func (ds *Varlist) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "VARLIST"...)
+}
+func (ds *Varlist) AppendString(dst []byte) []byte {
+	for i := range ds.Variables {
+		if i != 0 {
+			dst = append(dst, ',', ' ')
+		}
+		dst = ds.Variables[i].AppendString(dst)
+	}
+	for i := range ds.Values {
+		dst = append(dst, '/')
+		dst = ds.Values[i].AppendString(dst)
+	}
+	dst = append(dst, '/')
+	return dst
+}
+
+// DataRepeatExpr represents a repeat specifier in DATA statement values.
+// The syntax is: repeat-count * constant
+// Example: 10*0.0 means "repeat 0.0 ten times"
+type DataRepeatExpr struct {
+	Count Expression // Repeat count (must be integer constant per spec)
+	Value Expression // Value to repeat (must be constant per spec)
+	Position
+}
+
+var _ Expression = (*DataRepeatExpr)(nil)
+
+func (dr *DataRepeatExpr) expressionNode() {}
+func (dr *DataRepeatExpr) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "DataRepeat"...)
+}
+func (dr *DataRepeatExpr) AppendString(dst []byte) []byte {
+	dst = dr.Count.AppendString(dst)
+	dst = append(dst, '*')
+	dst = dr.Value.AppendString(dst)
+	return dst
 }
 
 // TypeDeclaration declares variables with a specific type and optional attributes.
@@ -3158,4 +3209,14 @@ func (pos Position) ToLineCol(r io.ReaderAt, aux []byte) (line, col, lineLength 
 	}
 
 	return line, col, lineLength, nil
+}
+
+func appendSep[T Node](dst []byte, sep string, nodes ...T) []byte {
+	for i := range nodes {
+		if i != 0 {
+			dst = append(dst, sep...)
+		}
+		dst = nodes[i].AppendString(dst)
+	}
+	return dst
 }

@@ -575,26 +575,43 @@ func PRINT_COMMON_VALUES() {
 }
 func LEVEL20() {
 	var (
-		a       int32
-		b       int32
-		c       int32
-		_, _, _ = a, b, c
+		a          int32
+		b          int32
+		c          int32
+		i          int32
+		_, _, _, _ = a, b, c, i
 	)
 	var (
-		x    float32
-		y    float32
-		_, _ = x, y
+		x          float32
+		y          float32
+		vec1       *intrinsic.Array[float32]
+		vec2       *intrinsic.Array[float32]
+		_, _, _, _ = x, y, vec1, vec2
 	)
+	vec1 = intrinsic.NewArray[float32](nil, 3)
+	vec2 = intrinsic.NewArray[float32](nil, 3)
+	var (
+		repeat *intrinsic.Array[intrinsic.CharacterArray]
+		_      = repeat
+	)
+	repeat = intrinsic.NewCharacterArrayArray(3, 2)
 	a = 10
 	b = 20
 	c = 30
 	x = 3.14
 	y = 2.71
+	repeat.AtPtr(1).SetFromString("REP")
+	repeat.AtPtr(2).SetFromString("REP")
+	vec1.Set(1.2, 1)
+	vec1.Set(1.2, 2)
+	vec1.Set(2.0, 3)
 	intrinsic.Print("LEVEL 20: a =", a)
 	intrinsic.Print("LEVEL 20: b =", b)
 	intrinsic.Print("LEVEL 20: c =", c)
 	intrinsic.Print("LEVEL 20: x =", x)
 	intrinsic.Print("LEVEL 20: y =", y)
+	intrinsic.Print("LEVEL 20", repeat.At(1), repeat.At(2))
+	intrinsic.Print("LEVEL 20:", vec1.At(1), vec1.At(2), vec1.At(3))
 }
 func LEVEL21() {
 	var (

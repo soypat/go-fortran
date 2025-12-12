@@ -1709,8 +1709,41 @@ END SELECT`,
 			src:  "DATA (arr(i), i=1,10) / 10*0.0 /",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				data := helperWantNode[*ast.DataStmt](t, stmt, "")
-				// Just verify it parses without error
-				_ = data
+				if len(data.Varlists) != 1 {
+					t.Fatalf("expected 1 value, got %d", len(data.Varlists))
+				}
+				values := data.Varlists[0].Values
+				repeat := helperWantNode[*ast.DataRepeatExpr](t, values[0], "")
+				count := helperWantNode[*ast.IntegerLiteral](t, repeat.Count, "")
+				if count.Value != 10 {
+					t.Errorf("expected count 10, got %d", count.Value)
+				}
+				value := helperWantNode[*ast.RealLiteral](t, repeat.Value, "")
+				if value.Value != 0.0 {
+					t.Errorf("expected value 0.0, got %f", value.Value)
+				}
+			},
+		},
+		{
+			name: "DATA statement with repeat specifier",
+			src:  `DATA RADOME/42*"RA_NO  ","RA_YES "/`,
+			validate: func(t *testing.T, stmt ast.Statement) {
+				data := helperWantNode[*ast.DataStmt](t, stmt, "")
+				if len(data.Varlists) != 1 {
+					t.Fatalf("expected 1 varlist, got %d", len(data.Varlists))
+				}
+				values := data.Varlists[0].Values
+				// First value is repeat specifier
+				repeat := helperWantNode[*ast.DataRepeatExpr](t, values[0], "")
+				count := helperWantNode[*ast.IntegerLiteral](t, repeat.Count, "")
+				if count.Value != 42 {
+					t.Errorf("expected count 42, got %d", count.Value)
+				}
+				// Second value is a regular string
+				str := helperWantNode[*ast.StringLiteral](t, values[1], "")
+				if str.Value != "RA_YES " {
+					t.Errorf("expected 'RA_YES ', got %q", str.Value)
+				}
 			},
 		},
 

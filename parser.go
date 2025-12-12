@@ -2920,71 +2920,8 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 	// DATA var1 /val1/, var2 /val2/, var3 /val3/
 	// Loop to handle all pairs
 	for p.loopUntil(token.NewLine) {
-		// Parse variable list: x, y, z OR (arr(i), i=1,n)
-		for p.loopUntil(token.Slash, token.NewLine) {
-			var varName string
-			varStart := p.sourcePos()
-			if p.currentTokenIs(token.LParen) {
-				startPos := p.sourcePos()
-				p.nextToken()
-				doExpr := p.parseExpression(0)
-				impliedDoLoop := p.tryParseImpliedDoLoop(startPos.Pos, doExpr)
-				if impliedDoLoop == nil {
-					return nil
-				}
-				stmt.Variables = append(stmt.Variables, impliedDoLoop)
-			} else if p.expectIdentifier(&varName, "DATA statement") {
-				// Register implicit variable if not already declared.
-				if p.vars.Var(varName) == nil && !p.vars.isImplicitNone() {
-					implicitDecl := p.vars.implicitDeclFor(varName)
-					p.varInit(varName, implicitDecl, VFlagImplicit, "")
-				}
-				// Array subscript: arr(1,2,3)
-				var subscripts []ast.Expression
-				if p.consumeIf(token.LParen) {
-					parseExpr := func() (ast.Expression, error) {
-						expr := p.parseExpression(0)
-						if expr == nil {
-							return nil, errors.New("failed to parse DATA array reference")
-						}
-						return expr, nil
-					}
-					exprs, err := parseCommaSeparatedList(p, token.RParen, parseExpr)
-					if err != nil {
-						return nil
-					}
-					subscripts = exprs
-					p.expect(token.RParen, "closing parentheses for DATA array reference")
-				}
-				stmt.Variables = append(stmt.Variables, &ast.CallExpr{
-					Name:     varName,
-					Args:     subscripts,
-					Position: ast.Pos(varStart.Pos, p.currentAstPos().End()),
-				})
-			}
-			p.consumeIf(token.Comma)
-		}
-
-		// Expect opening slash
-		if !p.expect(token.Slash, "expected / before DATA values") {
-			return stmt
-		}
-		// Parse value list - use parseExpression with terminators
-		for p.loopUntil(token.Slash, token.NewLine) {
-			value := p.parseExpression(0, token.Slash, token.Comma)
-			if value != nil {
-				stmt.Values = append(stmt.Values, value)
-			} else {
-				break
-			}
-
-			if !p.consumeIf(token.Comma) {
-				break
-			}
-		}
-
-		// Expect closing slash
-		p.expect(token.Slash, "expected / after DATA values")
+		vl := p.parseVarlist()
+		stmt.Varlists = append(stmt.Varlists, vl)
 		// Check for comma or another variable (continuation case)
 		p.consumeIf(token.Comma)
 		// If next token is not an identifier, we're done
@@ -2995,6 +2932,98 @@ func (p *Parser90) parseDataStmt() ast.Statement {
 
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
+}
+
+func (p *Parser90) parseVarlist() (vl ast.Varlist) {
+	// Parse Variables.
+	for p.loopUntil(token.Slash, token.NewLine) {
+		var varName string
+		varStart := p.sourcePos()
+		if p.currentTokenIs(token.LParen) {
+			startPos := p.sourcePos()
+			p.nextToken()
+			doExpr := p.parseExpression(0)
+			impliedDoLoop := p.tryParseImpliedDoLoop(startPos.Pos, doExpr)
+			if impliedDoLoop == nil {
+				return vl
+			}
+			vl.Variables = append(vl.Variables, impliedDoLoop)
+		} else if p.expectIdentifier(&varName, "DATA statement") {
+			// p.varInit(varName,nil,)
+			// Register implicit variable if not already declared.
+			if p.vars.Var(varName) == nil && !p.vars.isImplicitNone() {
+				implicitDecl := p.vars.implicitDeclFor(varName)
+				p.varInit(varName, implicitDecl, VFlagImplicit, "")
+			}
+			// Array subscript: arr(1,2,3)
+			var subscripts []ast.Expression
+			if p.consumeIf(token.LParen) {
+				parseExpr := func() (ast.Expression, error) {
+					expr := p.parseExpression(0)
+					if expr == nil {
+						return nil, errors.New("failed to parse DATA array reference")
+					}
+					return expr, nil
+				}
+				exprs, err := parseCommaSeparatedList(p, token.RParen, parseExpr)
+				if err != nil {
+					return vl
+				}
+				subscripts = exprs
+				p.expect(token.RParen, "closing parentheses for DATA array reference")
+			}
+			vl.Variables = append(vl.Variables, &ast.CallExpr{
+				Name:     varName,
+				Args:     subscripts,
+				Position: ast.Pos(varStart.Pos, p.currentAstPos().End()),
+			})
+		}
+		p.consumeIf(token.Comma)
+	}
+	// Expect opening slash
+	if !p.expect(token.Slash, "before DATA values") {
+		return vl
+	}
+	// Parse value list - handle repeat specifier N*value
+	for p.loopUntil(token.Slash, token.NewLine) {
+		value := p.parseDataValue()
+		if value != nil {
+			vl.Values = append(vl.Values, value)
+		} else {
+			break
+		}
+		if !p.consumeIf(token.Comma) {
+			break
+		}
+	}
+	// Expect closing slash
+	p.expect(token.Slash, "after DATA values")
+	return vl
+}
+
+// parseDataValue parses a DATA value, handling repeat specifier N*constant.
+// Per Fortran spec, DATA values must be constants (literal or named).
+// The repeat specifier syntax is: repeat-count * constant
+func (p *Parser90) parseDataValue() ast.Expression {
+	start := p.current.start
+
+	// Parse first part (could be count or the value itself)
+	first := p.parseExpression(0, token.Slash, token.Comma, token.Asterisk)
+	if first == nil {
+		return nil
+	}
+
+	// Check for repeat specifier: N*value
+	if p.consumeIf(token.Asterisk) {
+		value := p.parseExpression(0, token.Slash, token.Comma)
+		return &ast.DataRepeatExpr{
+			Count:    first,
+			Value:    value,
+			Position: ast.Pos(start, p.currentAstPos().End()),
+		}
+	}
+
+	return first
 }
 
 // parseImplicit parses IMPLICIT statements:
