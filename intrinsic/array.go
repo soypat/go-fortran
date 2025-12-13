@@ -498,3 +498,20 @@ func ArraySetDiv[T numeric](dst, a, b *Array[T]) {
 		dst.data[di] = a.data[ai] / b.data[bi]
 	})
 }
+
+// DOT_PRODUCT computes the dot product of two 1D arrays.
+// Corresponds to Fortran DOT_PRODUCT(VECTOR_A, VECTOR_B) intrinsic.
+// For numeric arrays: result = sum(a(i) * b(i))
+func DOT_PRODUCT[T numeric](a, b *Array[T]) T {
+	if len(a.shape) != 1 || len(b.shape) != 1 {
+		panic("DOT_PRODUCT: arguments must be 1D arrays")
+	}
+	if a.shape[0] != b.shape[0] {
+		panic("DOT_PRODUCT: arrays must have same size")
+	}
+	var sum T
+	for i := a.lower[0]; i <= a.upper[0]; i++ {
+		sum += a.At(i) * b.At(i)
+	}
+	return sum
+}

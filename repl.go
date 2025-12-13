@@ -508,6 +508,19 @@ func (repl *REPL) evalFloatBinary(dst, typ *Varinfo, l float64, op f90token.Toke
 }
 
 func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
+	intr := f90token.LookupIntrinsic(e.Name)
+	if repl.noValueResolution {
+		// No value resolution short circuit.
+		intr := getIntrinsic(intr, len(e.Args))
+		if intr != nil {
+			if intr.returnType != nil {
+				*dst = *intr.returnType
+				return nil
+			} else if len(e.Args) > 0 {
+				return repl.Eval(dst, e.Args[0])
+			}
+		}
+	}
 	name := strings.ToUpper(e.Name)
 	if len(e.Args) == 0 {
 		return fmt.Errorf("%s intrinsic requires arguments", name)
@@ -517,9 +530,6 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 	if err != nil {
 		return err
 	}
-
-	// Lookup intrinsic by name using perfect hash.
-	intr := f90token.LookupIntrinsic(name)
 
 	// Check single-argument float function table.
 	if int(intr) < len(_intrinsicEvalf1) {
