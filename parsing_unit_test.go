@@ -460,6 +460,55 @@ END FUNCTION standalone_func`,
 				t.Logf("x decl: %+v", xVar.decl)
 			},
 		},
+		{
+			name: "array parameter with inline array spec has VFlagDimension",
+			src: `SUBROUTINE MATMUL_TEST(nk, a)
+    INTEGER,INTENT(IN):: nk
+    COMPLEX,INTENT(IN OUT):: a(nk,nk)
+    INTEGER:: i, j
+    DO i = 1, nk
+        DO j = 1, nk
+            a(i,j) = a(i,j) * 2.0
+        END DO
+    END DO
+END SUBROUTINE`,
+			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+				sub := helperWantNode[*ast.Subroutine](t, unit, "")
+				if sub.Name != "MATMUL_TEST" {
+					t.Errorf("Expected subroutine name 'MATMUL_TEST', got %q", sub.Name)
+				}
+				// Debug: print all variables
+				t.Logf("Subroutine %s variables:", sub.Name)
+				vars := data.AppendVarinfo(nil)
+				for i, v := range vars {
+					t.Logf("  [%d] %s: decl=%v flags=%v dims=%v",
+						i, v.Identifier(), v.decl != nil, v.Flags(),
+						v.Dimensions() != nil && len(v.Dimensions().Bounds) > 0)
+				}
+				// CRITICAL: Check that array parameter 'a' has VFlagDimension
+				aVar := data.Var("a")
+				if aVar == nil {
+					t.Fatal("BUG: parameter 'a' not found in variable table")
+				}
+				if aVar.decl == nil {
+					t.Fatal("BUG: parameter 'a' has nil decl")
+				}
+				// Check ArraySpec is set
+				if aVar.decl.ArraySpec == nil {
+					t.Error("BUG: parameter 'a' declaration missing ArraySpec for a(nk,nk)")
+				} else {
+					t.Logf("a ArraySpec bounds: %d", len(aVar.decl.ArraySpec.Bounds))
+				}
+				// Check VFlagDimension is set
+				if !aVar.Flags().HasAny(VFlagDimension) {
+					t.Error("BUG: array parameter 'a' missing VFlagDimension flag")
+				}
+				// Verify parameter flag is also set
+				if !aVar.Flags().HasAny(VFlagParameter) {
+					t.Error("BUG: parameter 'a' missing VFlagParameter flag")
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

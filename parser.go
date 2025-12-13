@@ -385,18 +385,18 @@ type Varinfo struct {
 	stmtFuncParams []string       // parameter names
 }
 
-func (p *Varinfo) Flags() VarFlags            { return p.flags }
-func (p *Varinfo) Value() Value               { return p.val }
-func (p *Varinfo) Charlen() ast.Expression    { return p.decl.Charlen() }
-func (p *Varinfo) Kind() ast.Expression       { return p.decl.Kind() }
-func (p *Varinfo) Dimensions() *ast.ArraySpec { return p.decl.Dimension() }
-func (p *Varinfo) Identifier() string         { return p._varname }
-func (p *Varinfo) IsParameter() bool          { return p.flags.HasAny(VFlagParameter) }
-func (p *Varinfo) IsAllocatable() bool        { return p.flags.HasAny(VFlagAllocatable) }
-func (p *Varinfo) IsStmtFunc() bool           { return p.flags.HasAny(VFlagStmtFunc) }
+func (p *Varinfo) Flags() VarFlags              { return p.flags }
+func (p *Varinfo) Value() Value                 { return p.val }
+func (p *Varinfo) Charlen() ast.Expression      { return p.decl.Charlen() }
+func (p *Varinfo) Kind() ast.Expression         { return p.decl.Kind() }
+func (p *Varinfo) Dimensions() *ast.ArraySpec   { return p.decl.Dimension() }
+func (p *Varinfo) Identifier() string           { return p._varname }
+func (p *Varinfo) IsParameter() bool            { return p.flags.HasAny(VFlagParameter) }
+func (p *Varinfo) IsAllocatable() bool          { return p.flags.HasAny(VFlagAllocatable) }
+func (p *Varinfo) IsStmtFunc() bool             { return p.flags.HasAny(VFlagStmtFunc) }
 func (p *Varinfo) StmtFuncExpr() ast.Expression { return p.stmtFuncExpr }
-func (p *Varinfo) StmtFuncParams() []string   { return p.stmtFuncParams }
-func (p *Varinfo) CommonBlock() string        { return p.common }
+func (p *Varinfo) StmtFuncParams() []string     { return p.stmtFuncParams }
+func (p *Varinfo) CommonBlock() string          { return p.common }
 func (p *Varinfo) DeclPos() (source string, line, col int) {
 	return p.declPos.Source, p.declPos.Line, p.declPos.Col
 }
@@ -3413,8 +3413,14 @@ func (p *Parser90) parseTypeAttributess() (attrs []ast.TypeAttribute) {
 		switch {
 		case p.consumeIf(token.INTENT):
 			p.expect(token.LParen, "INTENT attribute")
-			attr.Expr = p.currentTokenExpr()
-			p.nextToken() // consume intent.
+			tok := p.current.tok
+			pos := p.currentAstPos()
+			p.nextToken()
+			if tok == token.IN && p.current.tok == token.OUT {
+				tok = token.INOUT // Join IN OUT -> INOUT
+				p.nextToken()
+			}
+			attr.Expr = &ast.TokenExpr{Token: tok, Position: pos}
 			p.expect(token.RParen, "INTENT attribute")
 		case p.consumeIf(token.DIMENSION):
 			attr.Dimension = p.parseArraySpec()

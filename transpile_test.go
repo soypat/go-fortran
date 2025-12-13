@@ -86,7 +86,7 @@ func helperRunFortran(t *testing.T, filepath string) (output []byte) {
 	cmd = exec.Command(binFile)
 	output, err = cmd.CombinedOutput()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("running fortran:", string(output), err)
 	}
 	return output
 }

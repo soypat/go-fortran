@@ -1735,6 +1735,13 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 		default: // 4 or unspecified
 			goType = ast.NewIdent("float32")
 		}
+	case f90token.COMPLEX:
+		switch kindValue {
+		case 8, 16:
+			goType = ast.NewIdent("complex128")
+		default: // 4 or unspecified
+			goType = ast.NewIdent("complex64")
+		}
 	case f90token.CHARACTER:
 		goType = _astTypeCharArray
 	}

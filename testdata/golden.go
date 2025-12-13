@@ -959,8 +959,7 @@ func LEVEL31() {
 		inits int32
 		_, _  = m, inits
 	)
-	npaa = intrinsic.MALLOC[float64](k * 8)
-	aa = npaa
+	aa.Allocate(int(k))
 	if npaa.DataUnsafe() == nil {
 		intrinsic.Stop(69)
 	}
