@@ -508,13 +508,17 @@ func (repl *REPL) evalFloatBinary(dst, typ *Varinfo, l float64, op f90token.Toke
 }
 
 func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
-	intr := f90token.LookupIntrinsic(e.Name)
+	intrTok := f90token.LookupIntrinsic(e.Name)
 	if repl.noValueResolution {
 		// No value resolution short circuit.
-		intr := getIntrinsic(intr, len(e.Args))
+		intr := getIntrinsic(intrTok, len(e.Args))
 		if intr != nil {
 			if intr.returnType != nil {
 				*dst = *intr.returnType
+				// Ensure val.tok is set from decl for type inference
+				if dst.val.tok == 0 && dst.decl != nil {
+					dst.val.tok = dst.decl.Type.Token
+				}
 				return nil
 			} else if len(e.Args) > 0 {
 				return repl.Eval(dst, e.Args[0])
@@ -532,15 +536,15 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 	}
 
 	// Check single-argument float function table.
-	if int(intr) < len(_intrinsicEvalf1) {
-		if fn1 := _intrinsicEvalf1[intr]; fn1 != nil {
+	if int(intrTok) < len(_intrinsicEvalf1) {
+		if fn1 := _intrinsicEvalf1[intrTok]; fn1 != nil {
 			return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(fn1, arg0.val.Float()))
 		}
 	}
 
 	// Check two-argument float function table.
-	if int(intr) < len(_intrinsicEvalf2) {
-		if fn2 := _intrinsicEvalf2[intr]; fn2 != nil {
+	if int(intrTok) < len(_intrinsicEvalf2) {
+		if fn2 := _intrinsicEvalf2[intrTok]; fn2 != nil {
 			if len(e.Args) < 2 {
 				return fmt.Errorf("%s requires 2 arguments", name)
 			}
@@ -554,7 +558,7 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 
 	// Handle special cases not covered by lookup tables.
 	f0 := arg0.val.Float()
-	switch intr {
+	switch intrTok {
 	case f90token.IntrinsicREAL, f90token.IntrinsicFLOAT, f90token.IntrinsicSNGL:
 		err = repl.assignFloat32(dst, f0)
 	case f90token.IntrinsicDBLE:

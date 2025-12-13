@@ -275,8 +275,7 @@ func LookupIntrinsic(s string) Intrinsic {
 		return 0
 	}
 	// Hash uses uppercase, so convert input to uppercase for lookup
-	upper := strings.ToUpper(s)
-	intr := IntrinsicMap[ntrinsicHash(upper)]
+	intr := IntrinsicMap[ntrinsicHash(s)]
 	if intr != 0 && strings.EqualFold(s, intr.String()) {
 		return intr
 	}
@@ -307,9 +306,9 @@ func init() {
 
 func ntrinsicHash(s string) uint {
 	h := uint(len(s)) * 13
-	h *= uint(s[0]) * 21
-	h += uint(s[1]) * 62
-	h += uint(s[len(s)-2]) * 25
-	h += uint(s[len(s)-1]) * 41
+	h *= uint(toUpper(s[0])) * 21
+	h += uint(toUpper(s[1])) * 62
+	h += uint(toUpper(s[len(s)-2])) * 25
+	h += uint(toUpper(s[len(s)-1])) * 41
 	return h & uint(len(IntrinsicMap)-1)
 }
