@@ -19,6 +19,9 @@ PROGRAM GDYN2E
       COMMON/TRQANG/DTQDAN(3,3,2)
       COMMON/APHASE/NANT_sat
       DOUBLEPRECISION          :: DEFALT
+      INTEGER :: IYS, IHS, IYE, IHE, JNREXC, IEXCG
+      DIMENSION II1(1)
+      CHARACTER*80 CARD
       IF(LNORMP) CALL TITLE(IOUT15)
       IF(NPARC.LE.0.AND..NOT.LSTARC) GO TO 2000
       IF(LSTINR) WRITE(91) BIASP,BIAS,DYNEQ
@@ -109,6 +112,28 @@ PROGRAM GDYN2E
    cycle satloop
    accX1 = data(i,j)
    END  =DPSR(JPOLE)+DELTA
+   WRITE(1,1) s,END,t
+      IF(CARD(1:4).EQ.'DATA'.OR.CARD(1:6).EQ.'ENDARC') THEN
+      DO 40 I=1,80
+      CARD(I:I)=' '
+40    CONTINUE
+      CARD(1:6)='ORBTVU'
+      START=1000000.D0*DBLE(IYS)+DBLE(IHS)
+      END=1000000.D0*DBLE(IYE)+DBLE(IHE)
+      TINC=10.D0
+      WRITE(CARD(28:68),70004) START,END,TINC
+      NREC50=NREC50+1
+      WRITE(IUNT50,70000) CARD
+      DO 30 I=1,80
+      CARD(I:I)=' '
+30    CONTINUE
+      CARD(1:6)='ENDARC'
+      NREC50=NREC50+1
+      WRITE(IUNT50,70000) CARD
+      GO TO 60000
+   ENDIF
+   II1(JNREXC+IEXCG-1) = &                       ! jjm
+   &                      42
 END PROGRAM GDYN2E
 
 SUBROUTINE PASYAW(NCARDS)
@@ -132,32 +157,3 @@ FUNCTION NMF_H()
 !      IF( IGOTO == 2000 ) go to 2000
    
 END !
-
-
-PROGRAM GDYN2S
-         INTEGER :: I, IYS, IHS, IYE, IHE, JNREXC, IEXCG
-         DIMENSION II1(1)
-         CHARACTER*80 CARD
-         WRITE(1,1) s,END,t
-         IF(CARD(1:4).EQ.'DATA'.OR.CARD(1:6).EQ.'ENDARC') THEN
-         DO 40 I=1,80
-         CARD(I:I)=' '
-   40    CONTINUE
-         CARD(1:6)='ORBTVU'
-         START=1000000.D0*DBLE(IYS)+DBLE(IHS)
-         END=1000000.D0*DBLE(IYE)+DBLE(IHE)
-         TINC=10.D0
-         WRITE(CARD(28:68),70004) START,END,TINC
-         NREC50=NREC50+1
-         WRITE(IUNT50,70000) CARD
-         DO 30 I=1,80
-         CARD(I:I)=' '
-   30    CONTINUE
-         CARD(1:6)='ENDARC'
-         NREC50=NREC50+1
-         WRITE(IUNT50,70000) CARD
-         GO TO 60000
-      ENDIF
-      II1(JNREXC+IEXCG-1) = &                       ! jjm
-     &                      42
-END PROGRAM

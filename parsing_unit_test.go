@@ -537,8 +537,8 @@ END SUBROUTINE`,
 func helperWantUnit(t testing.TB, unit *ast.Unit, tok token.Token, context string) *ast.Unit {
 	t.Helper()
 	msg := ""
-	if unit.IsValid() {
-		msg += "[invalid unit]" // unreachable
+	if !unit.IsValid() {
+		msg += "[invalid unit]"
 	}
 	if unit.Token != tok {
 		msg += fmt.Sprintf("want %s unit, got %s", tok.String(), unit.Token.String())

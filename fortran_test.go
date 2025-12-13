@@ -43,7 +43,8 @@ func TestData_valid(t *testing.T) {
 			ssrc := string(src)
 			units := testParse(t, &parser, path, ssrc, false)
 			tg.Reset()
-			testTranspile(t, &tg, units, path, ssrc)
+			allowMultiProg := name == "valid_programs.f90"
+			testTranspile(t, &tg, units, path, ssrc, allowMultiProg)
 			finishedNormally = true
 		})
 	}
@@ -90,14 +91,14 @@ func expectedErrors(src string) map[int]string {
 	return errors
 }
 
-func testTranspile(t testing.TB, tg *ToGo, pus []f90.Unit, srcPath string, src string) {
+func testTranspile(t testing.TB, tg *ToGo, pus []f90.Unit, srcPath string, src string, allowMultiProg bool) {
 	tg.SetSource(srcPath, strings.NewReader(src))
 	var mainProg *f90.Unit
 	for i := range pus {
 		unit := &pus[i]
 		if unit.Token == token.PROGRAM {
-			if mainProg != nil {
-				t.Errorf("two main programs detected %s and %s", mainProg.Name, unit.Name)
+			if mainProg != nil && !allowMultiProg {
+				t.Errorf("two main programs detected in %s: %s and %s", srcPath, mainProg.Name, unit.Name)
 			}
 			mainProg = unit
 			continue

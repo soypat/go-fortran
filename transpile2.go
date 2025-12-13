@@ -63,7 +63,7 @@ func (tg *ToGo) TransformRegistered(dst []ast.Decl) (_ []ast.Decl, err error) {
 }
 
 func (tg *ToGo) TransformProgram(prog f90.Unit) ([]ast.Decl, error) {
-	if prog.IsValid() {
+	if !prog.IsValid() {
 		return nil, errors.New("invalid program unit")
 	} else if prog.Token != f90token.PROGRAM {
 		return nil, errors.New("expected PROGRAM unit")
@@ -116,10 +116,8 @@ func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.Unit) (_ []ast.Dec
 		tg.currentNode = contained
 		var decl ast.Decl
 		switch contained.Token {
-		case f90token.SUBROUTINE:
-			decl, err = tg.TransformSubroutine(contained)
-		case f90token.FUNCTION:
-			decl, err = tg.TransformFunction(contained)
+		case f90token.SUBROUTINE, f90token.FUNCTION:
+			decl, err = tg.transformProcedure(*contained)
 		case f90token.MODULE:
 			dst, err = tg.transformProcedures(dst, contained.Contains)
 		case f90token.BLOCK:
@@ -141,21 +139,21 @@ func (tg *ToGo) astIdent(name string) *ast.Ident {
 }
 
 // TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration
-func (tg *ToGo) TransformSubroutine(sub *f90.Unit) (_ *ast.FuncDecl, err error) {
+func (tg *ToGo) TransformSubroutine(sub f90.Unit) (_ *ast.FuncDecl, err error) {
 	return tg.transformProcedure(sub)
 }
 
 // TransformFunction transforms a Fortran FUNCTION to a Go function declaration
-func (tg *ToGo) TransformFunction(fn *f90.Unit) (_ *ast.FuncDecl, err error) {
+func (tg *ToGo) TransformFunction(fn f90.Unit) (_ *ast.FuncDecl, err error) {
 	return tg.transformProcedure(fn)
 }
 
-func (tg *ToGo) transformProcedure(subroutineOrFunc *f90.Unit) (_ *ast.FuncDecl, err error) {
+func (tg *ToGo) transformProcedure(subroutineOrFunc f90.Unit) (_ *ast.FuncDecl, err error) {
 	if subroutineOrFunc.Token != f90token.FUNCTION && subroutineOrFunc.Token != f90token.SUBROUTINE {
 		return nil, errors.New("not procedure")
 	}
-	tg.currentNode = subroutineOrFunc
-	err = tg.repl.SetScope(*subroutineOrFunc)
+	tg.currentNode = &subroutineOrFunc
+	err = tg.repl.SetScope(subroutineOrFunc)
 	if err != nil {
 		return nil, err
 	}
