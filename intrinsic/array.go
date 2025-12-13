@@ -515,3 +515,14 @@ func DOT_PRODUCT[T numeric](a, b *Array[T]) T {
 	}
 	return sum
 }
+
+// ALL returns true if all elements of a logical array are true.
+// Corresponds to Fortran ALL(MASK) intrinsic.
+func ALL(a *Array[bool]) bool {
+	for i := 0; i < len(a.data); i++ {
+		if !a.data[i] {
+			return false
+		}
+	}
+	return true
+}

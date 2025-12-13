@@ -287,6 +287,7 @@
 ! ==============================================================================
       SUBROUTINE LEVEL12()
           REAL :: angle, sin_val, cos_val, abs_val, log_val, v1(3),v2(3)
+          REAL :: dot_val
           INTEGER :: i, j, k, max_val, min_val
           do i = 1, 3
             v1(i) = i
@@ -303,14 +304,14 @@
           max_val = MAX(i, j, k)
           min_val = MIN(10, 20, 5)
           log_val = 2.*LOG(angle)
-          v1 = DOT_PRODUCT(v1,v2)
+          dot_val = DOT_PRODUCT(v1,v2)
 
         !   PRINT *, 'LEVEL 12: LOG(0.5) = ', log_val
           PRINT *, 'LEVEL 12: SIN(0.5) =', sin_val
           PRINT *, 'LEVEL 12: COS(0.5) =', cos_val
           PRINT *, 'LEVEL 12: ABS(-5.5) =', abs_val
           PRINT *, 'LEVEL 12: MAX =', max_val, ', MIN =', min_val
-          PRINT *, 'LEVEL 12: dot product:',v1(1),v1(2),v1(3)
+          PRINT *, 'LEVEL 12: dot product:', dot_val
       END SUBROUTINE LEVEL12
 
 ! ==============================================================================

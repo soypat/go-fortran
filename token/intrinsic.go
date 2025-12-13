@@ -274,7 +274,9 @@ func LookupIntrinsic(s string) Intrinsic {
 	if len(s) < 2 || len(s) > 18 {
 		return 0
 	}
-	intr := IntrinsicMap[ntrinsicHash(s)]
+	// Hash uses uppercase, so convert input to uppercase for lookup
+	upper := strings.ToUpper(s)
+	intr := IntrinsicMap[ntrinsicHash(upper)]
 	if intr != 0 && strings.EqualFold(s, intr.String()) {
 		return intr
 	}

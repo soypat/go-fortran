@@ -1288,6 +1288,7 @@ var intrinsics = []intrinsicFn{
 
 	// Array reduction intrinsics
 	makeIntrinsicFnGeneric(f90token.IntrinsicDOT_PRODUCT, nil, _tgtArray, _tgtArray),
+	makeIntrinsicFn(f90token.IntrinsicALL, _tgtBool, _tgtArray),
 
 	// Note: MALLOC is handled specially in transformMALLOC, not here
 }
