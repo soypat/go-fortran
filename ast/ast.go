@@ -243,11 +243,10 @@ type Unit struct {
 	Name  string
 	Body  []Statement // Specification and executable statements.
 
-	Contains       []ProgramUnit // Only for PROGRAM and MODULE.
-	Parameters     []Parameter   // FUNCTION/SUBROUTINE parameters with type information
-	Attributes     []token.Token // RECURSIVE, PURE, etc.
-	Label          string
-	ResultVariable string // For FUNCTION RESULT(var) clause
+	Contains   []ProgramUnit // PROGRAM/MODULE contained procedures.
+	Parameters []Parameter   // FUNCTION/SUBROUTINE parameters with type information
+	Label      string
+	ResultType TypeSpec // FUNCTION Result type with optional KIND/LEN
 	Position
 	// Example Parser result of variable resolved types and useage.
 	Data any
@@ -270,11 +269,11 @@ func (pb *Unit) AppendTokenLiteral(dst []byte) []byte {
 	return dst
 }
 func (pb *Unit) AppendString(dst []byte) []byte {
-	for i := range pb.Attributes {
+	for i := range pb.ResultType.Attributes {
 		if i != 0 {
 			dst = append(dst, ',')
 		}
-		dst = append(dst, pb.Attributes[i].String()...)
+		dst = append(dst, pb.ResultType.Attributes[i].Token.String()...)
 	}
 	dst = pb.AppendTokenLiteral(dst)
 	if pb.Name != "" {
@@ -292,7 +291,7 @@ func (pb *Unit) AppendString(dst []byte) []byte {
 		dst = append(dst, param.Name...)
 	}
 	dst = append(dst, ')')
-	if pb.ResultVariable != "" {
+	if pb.Name != "" {
 		dst = append(dst, " RESULT("...)
 		dst = append(dst, pb.Name...)
 		dst = append(dst, ')')
