@@ -359,6 +359,10 @@ func (repl *REPL) Eval(dst *Varinfo, expr f90.Expression) (err error) {
 			dst.val.tok = vi.typeToken()
 		} else {
 			// It's a function call (intrinsic or external)
+			if fn := repl.ContainedOrUsed(e.Name); fn != nil && fn.returnType != nil {
+				*dst = *fn.returnType
+				return nil
+			}
 			err = repl.evalIntrinsic(dst, e)
 		}
 	case *f90.ArrayConstructor:
@@ -509,6 +513,9 @@ func (repl *REPL) evalFloatBinary(dst, typ *Varinfo, l float64, op f90token.Toke
 
 func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 	intrTok := f90token.LookupIntrinsic(e.Name)
+	if intrTok == 0 {
+		return fmt.Errorf("intrinsic %s not found", e.Name)
+	}
 	if repl.noValueResolution {
 		// No value resolution short circuit.
 		intr := getIntrinsic(intrTok, len(e.Args))
@@ -525,9 +532,9 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 			}
 		}
 	}
-	name := strings.ToUpper(e.Name)
+
 	if len(e.Args) == 0 {
-		return fmt.Errorf("%s intrinsic requires arguments", name)
+		return fmt.Errorf("%s intrinsic requires arguments", intrTok.String())
 	}
 	var arg0 Varinfo
 	err := repl.Eval(&arg0, e.Args[0])
@@ -546,7 +553,7 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 	if int(intrTok) < len(_intrinsicEvalf2) {
 		if fn2 := _intrinsicEvalf2[intrTok]; fn2 != nil {
 			if len(e.Args) < 2 {
-				return fmt.Errorf("%s requires 2 arguments", name)
+				return fmt.Errorf("%s requires 2 arguments", intrTok.String())
 			}
 			var arg1 Varinfo
 			if err := repl.Eval(&arg1, e.Args[1]); err != nil {
@@ -579,7 +586,7 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 		err = repl.assignInt(dst, int64(math.Abs(float64(arg0.val.Int()))))
 	case f90token.IntrinsicISIGN, f90token.IntrinsicDSIGN, f90token.IntrinsicSIGN:
 		if len(e.Args) < 2 {
-			return fmt.Errorf("%s requires 2 arguments", name)
+			return fmt.Errorf("%s requires 2 arguments", intrTok.String())
 		}
 		var arg1 Varinfo
 		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
@@ -588,7 +595,7 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 		err = repl.assignFloatLike(dst, &arg0, math.Copysign(f0, arg1.val.Float()))
 	case f90token.IntrinsicDPROD:
 		if len(e.Args) < 2 {
-			return fmt.Errorf("%s requires 2 arguments", name)
+			return fmt.Errorf("%s requires 2 arguments", intrTok.String())
 		}
 		var arg1 Varinfo
 		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
@@ -596,24 +603,7 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 		}
 		err = repl.assignFloat64(dst, f0*arg1.val.Float())
 	default:
-		// Check for user-defined functions.
-		if fn := repl.ContainedOrUsed(e.Name); fn != nil && fn.returnType != nil {
-			dst.val.tok = fn.returnType.typeToken()
-			return nil
-		}
-		// Handle non-standard extensions by string matching.
-		switch name {
-		case "MALLOC", "IACHAR":
-			err = repl.assignInt(dst, int64(len(arg0.val.StringValue())))
-		case "ACHAR":
-			err = repl.assignString(dst, arg0.val.StringValue())
-		default:
-			if f90token.IsIntrinsic(name) {
-				err = fmt.Errorf("intrinsic not yet implemented: %s", name)
-			} else {
-				err = fmt.Errorf("unknown intrinsic: %s", name)
-			}
-		}
+		err = fmt.Errorf("intrinsic not yet implemented: %s", intrTok.String())
 	}
 	return err
 }

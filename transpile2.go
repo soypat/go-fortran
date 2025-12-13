@@ -1,6 +1,7 @@
 package fortran
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -43,7 +44,28 @@ func (tg *ToGo) ContainedOrUsed(name string) *ParserUnitData {
 	return tg.repl.ContainedOrUsed(name)
 }
 
+func (tg *ToGo) ImportDecl() ast.Decl {
+	return &ast.GenDecl{
+		Tok: token.IMPORT,
+		Specs: []ast.Spec{&ast.ImportSpec{
+			Path: &ast.BasicLit{Value: fmt.Sprintf("%q", "github.com/soypat/go-fortran/intrinsic")},
+		}},
+	}
+}
+
+func (tg *ToGo) TransformRegistered(dst []ast.Decl) (_ []ast.Decl, err error) {
+	dst, err = tg.transformProcedures(dst, tg.repl.registered)
+	if err != nil {
+		return dst, err
+	}
+	dst = tg.AppendCommonDecls(dst)
+	return dst, nil
+}
+
 func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
+	if prog == nil {
+		return nil, errors.New("nil program block")
+	}
 	err := tg.repl.SetScope(prog)
 	if err != nil {
 		return nil, err
@@ -63,12 +85,7 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 
 	// Start with import and main function
 	decls := []ast.Decl{
-		&ast.GenDecl{
-			Tok: token.IMPORT,
-			Specs: []ast.Spec{&ast.ImportSpec{
-				Path: &ast.BasicLit{Value: fmt.Sprintf("%q", "github.com/soypat/go-fortran/intrinsic")},
-			}},
-		},
+		tg.ImportDecl(),
 		mainFunc,
 	}
 	if err != nil {
@@ -81,11 +98,10 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 	if err != nil {
 		return decls, fmt.Errorf("in CONTAINS of %s: %w", prog.Name, err)
 	}
-	decls, err = tg.transformProcedures(decls, tg.repl.registered)
+	decls, err = tg.TransformRegistered(decls)
 	if err != nil {
-		return decls, fmt.Errorf("in USE added routines for %s: %w", prog.Name, err)
+		return decls, fmt.Errorf("adding registered units for %s: %w", prog.Name, err)
 	}
-	decls = tg.AppendCommonDecls(decls)
 	return decls, nil
 }
 

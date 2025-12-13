@@ -168,8 +168,13 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 			t.Fatal("adding main program unit failed:", err, err2)
 		}
 	}
-	// helperFatalErrors(t, &ps, "parsing") // Temporarily disabled to see transpile errors
-	decls, err := tg.TransformProgram(mainBlock)
+	var decls []ast.Decl
+	if mainBlock == nil {
+		decls, err = tg.TransformRegistered([]ast.Decl{tg.ImportDecl()})
+	} else {
+		decls, err = tg.TransformProgram(mainBlock)
+	}
+
 	if err != nil {
 		t.Fatal(err)
 	}
