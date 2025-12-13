@@ -238,6 +238,68 @@ func (pb *ProgramBlock) AppendString(dst []byte) []byte {
 	return dst
 }
 
+type Unit struct {
+	Token token.Token // FUNCTION/SUBROUTINE/PROGRAM/MODULE/BLOCK
+	Name  string
+	Body  []Statement // Specification and executable statements.
+
+	Contains       []ProgramUnit // Only for PROGRAM and MODULE.
+	Parameters     []Parameter   // FUNCTION/SUBROUTINE parameters with type information
+	Attributes     []token.Token // RECURSIVE, PURE, etc.
+	Label          string
+	ResultVariable string // For FUNCTION RESULT(var) clause
+	Position
+	// Example Parser result of variable resolved types and useage.
+	Data any
+}
+
+var _ ProgramUnit = (*Unit)(nil)
+
+func (pb *Unit) GetLabel() *string { return &pb.Label }
+func (pb *Unit) UnitData() any     { return pb.Data }
+func (pb *Unit) UnitName() string  { return pb.Name }
+
+func (pb *Unit) statementNode()     {}
+func (pb *Unit) programUnitNode()   {}
+func (pb *Unit) IsExecutable() bool { return false }
+func (pb *Unit) AppendTokenLiteral(dst []byte) []byte {
+	dst = append(dst, pb.Token.String()...)
+	if pb.Token == token.BLOCK {
+		dst = append(dst, " DATA"...)
+	}
+	return dst
+}
+func (pb *Unit) AppendString(dst []byte) []byte {
+	for i := range pb.Attributes {
+		if i != 0 {
+			dst = append(dst, ',')
+		}
+		dst = append(dst, pb.Attributes[i].String()...)
+	}
+	dst = pb.AppendTokenLiteral(dst)
+	if pb.Name != "" {
+		dst = append(dst, ' ')
+		dst = append(dst, pb.Name...)
+	}
+	if pb.Token != token.SUBROUTINE && pb.Token != token.FUNCTION {
+		return dst
+	}
+	dst = append(dst, '(')
+	for i, param := range pb.Parameters {
+		if i != 0 {
+			dst = append(dst, ',')
+		}
+		dst = append(dst, param.Name...)
+	}
+	dst = append(dst, ')')
+	if pb.ResultVariable != "" {
+		dst = append(dst, " RESULT("...)
+		dst = append(dst, pb.Name...)
+		dst = append(dst, ')')
+	}
+	return dst
+}
+
 // Subroutine represents a callable procedure that performs operations but does
 // not return a value. Subroutines are invoked using [CallStmt] and can modify
 // arguments, perform I/O, or change program state.
