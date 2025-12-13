@@ -19,7 +19,8 @@ func (v *countVisitor) Visit(node Node) Visitor {
 }
 
 func TestWalkProgramBlock(t *testing.T) {
-	prog := &ProgramBlock{
+	prog := &Unit{
+		Token:    token.PROGRAM,
 		Name:     "test",
 		Position: Pos(0, 100),
 	}
@@ -34,12 +35,13 @@ func TestWalkProgramBlock(t *testing.T) {
 
 func TestWalkModule(t *testing.T) {
 	// Create a module with contained procedures
-	mod := &Module{
-		Name: "mymodule",
-		Contains: []ProgramUnit{
-			&Subroutine{Name: "sub1"},
-			&Function{Name: "func1"},
-			&Subroutine{Name: "sub2"},
+	mod := &Unit{
+		Token: token.MODULE,
+		Name:  "mymodule",
+		Contains: []Unit{
+			{Token: token.SUBROUTINE, Name: "sub1"},
+			{Token: token.FUNCTION, Name: "func1"},
+			{Token: token.SUBROUTINE, Name: "sub2"},
 		},
 	}
 
@@ -54,16 +56,18 @@ func TestWalkModule(t *testing.T) {
 
 func TestWalkNestedModule(t *testing.T) {
 	// Create nested structure (not typical in Fortran, but testing the walker)
-	innerMod := &Module{
-		Name: "inner",
-		Contains: []ProgramUnit{
-			&Subroutine{Name: "inner_sub"},
+	innerMod := Unit{
+		Token: token.MODULE,
+		Name:  "inner",
+		Contains: []Unit{
+			{Token: token.SUBROUTINE, Name: "inner_sub"},
 		},
 	}
 
-	outerMod := &Module{
+	outerMod := &Unit{
+		Token:    token.MODULE,
 		Name:     "outer",
-		Contains: []ProgramUnit{innerMod},
+		Contains: []Unit{innerMod},
 	}
 
 	v := &countVisitor{}
@@ -88,11 +92,12 @@ func (v *collectVisitor) Visit(node Node) Visitor {
 }
 
 func TestWalkCollect(t *testing.T) {
-	mod := &Module{
-		Name: "test",
-		Contains: []ProgramUnit{
-			&Subroutine{Name: "sub1"},
-			&Function{Name: "func1"},
+	mod := &Unit{
+		Token: token.MODULE,
+		Name:  "test",
+		Contains: []Unit{
+			{Token: token.SUBROUTINE, Name: "sub1"},
+			{Token: token.FUNCTION, Name: "func1"},
 		},
 	}
 
@@ -103,32 +108,36 @@ func TestWalkCollect(t *testing.T) {
 		t.Errorf("Expected 3 nodes, got %d", len(v.nodes))
 	}
 
-	// Check types
-	if _, ok := v.nodes[0].(*Module); !ok {
-		t.Errorf("First node should be Module, got %T", v.nodes[0])
+	// Check types - all are *Unit now, so check Token field
+	u0, ok := v.nodes[0].(*Unit)
+	if !ok || u0.Token != token.MODULE {
+		t.Errorf("First node should be Module Unit, got %T", v.nodes[0])
 	}
-	if _, ok := v.nodes[1].(*Subroutine); !ok {
-		t.Errorf("Second node should be Subroutine, got %T", v.nodes[1])
+	u1, ok := v.nodes[1].(*Unit)
+	if !ok || u1.Token != token.SUBROUTINE {
+		t.Errorf("Second node should be Subroutine Unit, got %T", v.nodes[1])
 	}
-	if _, ok := v.nodes[2].(*Function); !ok {
-		t.Errorf("Third node should be Function, got %T", v.nodes[2])
+	u2, ok := v.nodes[2].(*Unit)
+	if !ok || u2.Token != token.FUNCTION {
+		t.Errorf("Third node should be Function Unit, got %T", v.nodes[2])
 	}
 }
 
 func TestInspect(t *testing.T) {
-	mod := &Module{
-		Name: "test",
-		Contains: []ProgramUnit{
-			&Subroutine{Name: "sub1"},
-			&Function{Name: "func1"},
-			&Subroutine{Name: "sub2"},
+	mod := &Unit{
+		Token: token.MODULE,
+		Name:  "test",
+		Contains: []Unit{
+			{Token: token.SUBROUTINE, Name: "sub1"},
+			{Token: token.FUNCTION, Name: "func1"},
+			{Token: token.SUBROUTINE, Name: "sub2"},
 		},
 	}
 
 	// Count subroutines
 	subCount := 0
 	Inspect(mod, func(n Node) bool {
-		if _, ok := n.(*Subroutine); ok {
+		if u, ok := n.(*Unit); ok && u.Token == token.SUBROUTINE {
 			subCount++
 		}
 		return true
@@ -140,12 +149,13 @@ func TestInspect(t *testing.T) {
 }
 
 func TestInspectEarlyReturn(t *testing.T) {
-	mod := &Module{
-		Name: "test",
-		Contains: []ProgramUnit{
-			&Subroutine{Name: "sub1"},
-			&Function{Name: "func1"},
-			&Subroutine{Name: "sub2"},
+	mod := &Unit{
+		Token: token.MODULE,
+		Name:  "test",
+		Contains: []Unit{
+			{Token: token.SUBROUTINE, Name: "sub1"},
+			{Token: token.FUNCTION, Name: "func1"},
+			{Token: token.SUBROUTINE, Name: "sub2"},
 		},
 	}
 
@@ -154,7 +164,7 @@ func TestInspectEarlyReturn(t *testing.T) {
 	Inspect(mod, func(n Node) bool {
 		visitCount++
 		// Stop traversal after first subroutine
-		if _, ok := n.(*Subroutine); ok {
+		if u, ok := n.(*Unit); ok && u.Token == token.SUBROUTINE {
 			return false
 		}
 		return true
@@ -167,23 +177,12 @@ func TestInspectEarlyReturn(t *testing.T) {
 	}
 }
 
-// Helper to count nodes of a specific type
-func countNodeType(node Node, target any) int {
+// Helper to count nodes of a specific token type
+func countNodeToken(node Node, tok token.Token) int {
 	count := 0
 	Inspect(node, func(n Node) bool {
-		switch target.(type) {
-		case *Subroutine:
-			if _, ok := n.(*Subroutine); ok {
-				count++
-			}
-		case *Function:
-			if _, ok := n.(*Function); ok {
-				count++
-			}
-		case *Module:
-			if _, ok := n.(*Module); ok {
-				count++
-			}
+		if u, ok := n.(*Unit); ok && u.Token == tok {
+			count++
 		}
 		return true
 	})
@@ -191,25 +190,26 @@ func countNodeType(node Node, target any) int {
 }
 
 func TestCountNodeType(t *testing.T) {
-	mod := &Module{
-		Name: "test",
-		Contains: []ProgramUnit{
-			&Subroutine{Name: "sub1", Attributes: []token.Token{token.RECURSIVE}},
-			&Function{Name: "func1"},
-			&Subroutine{Name: "sub2"},
-			&Function{Name: "func2"},
+	mod := &Unit{
+		Token: token.MODULE,
+		Name:  "test",
+		Contains: []Unit{
+			{Token: token.SUBROUTINE, Name: "sub1", ResultType: TypeSpec{Attributes: []TypeAttribute{{Token: token.RECURSIVE}}}},
+			{Token: token.FUNCTION, Name: "func1"},
+			{Token: token.SUBROUTINE, Name: "sub2"},
+			{Token: token.FUNCTION, Name: "func2"},
 		},
 	}
 
-	if count := countNodeType(mod, (*Subroutine)(nil)); count != 2 {
+	if count := countNodeToken(mod, token.SUBROUTINE); count != 2 {
 		t.Errorf("Expected 2 subroutines, got %d", count)
 	}
 
-	if count := countNodeType(mod, (*Function)(nil)); count != 2 {
+	if count := countNodeToken(mod, token.FUNCTION); count != 2 {
 		t.Errorf("Expected 2 functions, got %d", count)
 	}
 
-	if count := countNodeType(mod, (*Module)(nil)); count != 1 {
+	if count := countNodeToken(mod, token.MODULE); count != 1 {
 		t.Errorf("Expected 1 module, got %d", count)
 	}
 }

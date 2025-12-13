@@ -23,6 +23,7 @@ import (
 
 	fortran "github.com/soypat/go-fortran"
 	"github.com/soypat/go-fortran/ast"
+	"github.com/soypat/go-fortran/token"
 )
 
 var (
@@ -119,12 +120,7 @@ func printUnitVarsRecursive(unit ast.ProgramUnit) {
 	}
 
 	// Process contained procedures
-	switch u := unit.(type) {
-	case *ast.ProgramBlock:
-		for _, contained := range u.Contains {
-			printUnitVarsRecursive(contained)
-		}
-	case *ast.Module:
+	if u, ok := unit.(*ast.Unit); ok && (u.Token == token.PROGRAM || u.Token == token.MODULE) {
 		for _, contained := range u.Contains {
 			printUnitVarsRecursive(contained)
 		}
@@ -132,16 +128,20 @@ func printUnitVarsRecursive(unit ast.ProgramUnit) {
 }
 
 func unitKindString(unit ast.ProgramUnit) string {
-	switch unit.(type) {
-	case *ast.ProgramBlock:
+	u, ok := unit.(*ast.Unit)
+	if !ok {
+		return "UNIT"
+	}
+	switch u.Token {
+	case token.PROGRAM:
 		return "PROG"
-	case *ast.Subroutine:
+	case token.SUBROUTINE:
 		return "SUB"
-	case *ast.Function:
+	case token.FUNCTION:
 		return "FUNC"
-	case *ast.Module:
+	case token.MODULE:
 		return "MOD"
-	case *ast.BlockData:
+	case token.BLOCK:
 		return "BDATA"
 	default:
 		return "UNIT"

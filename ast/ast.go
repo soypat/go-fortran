@@ -31,14 +31,6 @@ type Statement interface {
 	IsExecutable() bool
 }
 
-// ProgramUnit represents a top-level construct (PROGRAM, SUBROUTINE, FUNCTION, MODULE)
-type ProgramUnit interface {
-	Statement
-	programUnitNode()
-	UnitName() string
-	UnitData() any
-}
-
 func Pos(start, end int) Position {
 	if end < start {
 		panic("end < start")
@@ -167,7 +159,7 @@ func appendTypenameOrTok(dst []byte, typename string, tok token.Token) []byte {
 //	  ...
 //	END MODULE utilities
 type Program struct {
-	Units []ProgramUnit
+	Units []Unit
 	Label string
 }
 
@@ -196,68 +188,42 @@ func (p *Program) SourcePos() Position {
 	return Position{start: p0.start, end: pend.end}
 }
 
-// ProgramBlock represents the main executable program unit that serves as the
-// entry point for program execution. A Fortran program may contain at most one
-// PROGRAM block, though it may be omitted for simple programs.
+// Unit represents any Fortran program unit: PROGRAM, MODULE, FUNCTION, SUBROUTINE, or BLOCK DATA.
+// The Token field discriminates between unit kinds.
 //
-// Example:
-//
-//	PROGRAM <name>
-//	  <specification-statements>
-//	  <executable-statements>
-//	END PROGRAM [<name>]
+// Examples:
 //
 //	PROGRAM hello
-//	  PRINT *, 'Hello, World!'
-//	END PROGRAM hello
-type ProgramBlock struct {
-	Name     string
-	Body     []Statement   // Specification and executable statements
-	Contains []ProgramUnit // Internal procedures (CONTAINS section)
-	Label    string
-	Position
-	// Example: Parser result of variable resolved types and usage.
-	Data any
-}
-
-var _ ProgramUnit = (*ProgramBlock)(nil) // compile time check of interface implementation.
-
-func (pb *ProgramBlock) GetLabel() *string { return &pb.Label }
-func (pb *ProgramBlock) UnitData() any     { return pb.Data }
-func (pb *ProgramBlock) UnitName() string  { return pb.Name }
-
-func (pb *ProgramBlock) statementNode()     {}
-func (pb *ProgramBlock) programUnitNode()   {}
-func (pb *ProgramBlock) IsExecutable() bool { return false }
-func (pb *ProgramBlock) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "PROGRAM"...)
-}
-func (pb *ProgramBlock) AppendString(dst []byte) []byte {
-	dst = append(dst, "PROGRAM "...)
-	dst = append(dst, pb.Name...)
-	return dst
-}
-
+//	  PRINT *, 'Hello!'
+//	END PROGRAM
+//
+//	SUBROUTINE swap(a, b)
+//	  REAL :: a, b, temp
+//	  temp = a; a = b; b = temp
+//	END SUBROUTINE
+//
+//	REAL FUNCTION square(x)
+//	  REAL :: x
+//	  square = x * x
+//	END FUNCTION
 type Unit struct {
 	Token token.Token // FUNCTION/SUBROUTINE/PROGRAM/MODULE/BLOCK
 	Name  string
 	Body  []Statement // Specification and executable statements.
 
-	Contains   []ProgramUnit // PROGRAM/MODULE contained procedures.
-	Parameters []Parameter   // FUNCTION/SUBROUTINE parameters with type information
+	Contains   []Unit      // PROGRAM/MODULE contained procedures.
+	Parameters []Parameter // FUNCTION/SUBROUTINE parameters with type information
 	Label      string
-	ResultType TypeSpec // FUNCTION Result type with optional KIND/LEN
+	ResultType TypeSpec // FUNCTION Result type with optional KIND/LEN. Is zero valued for non-function types.
 	Position
 	// Example Parser result of variable resolved types and useage.
 	Data any
 }
 
-var _ ProgramUnit = (*Unit)(nil)
-
-func (pb *Unit) GetLabel() *string { return &pb.Label }
-func (pb *Unit) UnitData() any     { return pb.Data }
-func (pb *Unit) UnitName() string  { return pb.Name }
-
+func (pb *Unit) GetLabel() *string  { return &pb.Label }
+func (pb *Unit) UnitData() any      { return pb.Data }
+func (pb *Unit) UnitName() string   { return pb.Name }
+func (pb *Unit) IsValid() bool      { return pb.Token != 0 }
 func (pb *Unit) statementNode()     {}
 func (pb *Unit) programUnitNode()   {}
 func (pb *Unit) IsExecutable() bool { return false }
@@ -295,216 +261,6 @@ func (pb *Unit) AppendString(dst []byte) []byte {
 		dst = append(dst, " RESULT("...)
 		dst = append(dst, pb.Name...)
 		dst = append(dst, ')')
-	}
-	return dst
-}
-
-// Subroutine represents a callable procedure that performs operations but does
-// not return a value. Subroutines are invoked using [CallStmt] and can modify
-// arguments, perform I/O, or change program state.
-//
-// Example:
-//
-//	SUBROUTINE <name>([<parameter-list>])
-//	  <specification-statements>
-//	  <executable-statements>
-//	END SUBROUTINE [<name>]
-//
-//	SUBROUTINE swap(a, b)
-//	  REAL, INTENT(INOUT) :: a, b
-//	  REAL :: temp
-//	  temp = a
-//	  a = b
-//	  b = temp
-//	END SUBROUTINE swap
-type Subroutine struct {
-	Name       string
-	Parameters []Parameter   // Function/subroutine parameters with type information
-	Attributes []token.Token // RECURSIVE, PURE, etc.
-	Body       []Statement   // Specification and executable statements
-	Label      string
-	Position
-	// Example: Parser result of variable resolved types and usage.
-	Data any
-}
-
-var _ ProgramUnit = (*Subroutine)(nil) // compile time check of interface implementation.
-
-func (s *Subroutine) GetLabel() *string { return &s.Label }
-func (pb *Subroutine) UnitData() any    { return pb.Data }
-func (pb *Subroutine) UnitName() string { return pb.Name }
-
-func (s *Subroutine) statementNode()     {}
-func (s *Subroutine) programUnitNode()   {}
-func (s *Subroutine) IsExecutable() bool { return false }
-func (s *Subroutine) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "SUBROUTINE"...)
-}
-func (s *Subroutine) AppendString(dst []byte) []byte {
-	dst = append(dst, "SUBROUTINE "...)
-	dst = append(dst, s.Name...)
-	dst = append(dst, '(')
-	for i, p := range s.Parameters {
-		if i > 0 {
-			dst = append(dst, ", "...)
-		}
-		dst = append(dst, p.Name...)
-	}
-	dst = append(dst, ')')
-	return dst
-}
-
-// Function represents a callable procedure that returns a value. Functions can
-// be used in expressions and must assign a value to the function name or result
-// variable before returning.
-//
-// Example:
-//
-//	[<type>] FUNCTION <name>([<parameter-list>]) [RESULT(<var>)]
-//	  <specification-statements>
-//	  <executable-statements>
-//	END FUNCTION [<name>]
-//
-//	REAL FUNCTION average(arr, n)
-//	  REAL :: arr(n)
-//	  INTEGER :: n
-//	  average = SUM(arr) / n
-//	END FUNCTION average
-type Function struct {
-	Name           string
-	Type           TypeSpec      // Result type with optional KIND/LEN
-	Parameters     []Parameter   // Function parameters with type information
-	ResultVariable string        // For RESULT(var) clause
-	Attributes     []token.Token // RECURSIVE, PURE, ELEMENTAL
-	Body           []Statement   // Specification and executable statements
-	Label          string
-	Position
-	// Example: Parser result of variable resolved types and usage.
-	Data any
-}
-
-var _ ProgramUnit = (*Function)(nil) // compile time check of interface implementation.
-
-func (f *Function) GetLabel() *string { return &f.Label }
-func (pb *Function) UnitData() any    { return pb.Data }
-func (pb *Function) UnitName() string { return pb.Name }
-
-func (f *Function) statementNode()     {}
-func (f *Function) programUnitNode()   {}
-func (f *Function) IsExecutable() bool { return false }
-func (f *Function) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "FUNCTION"...)
-}
-func (f *Function) AppendString(dst []byte) []byte {
-	if f.Type.Token != 0 {
-		dst = f.Type.AppendString(dst)
-	}
-	dst = append(dst, "FUNCTION "...)
-	dst = append(dst, f.Name...)
-	dst = append(dst, '(')
-	for i, p := range f.Parameters {
-		if i > 0 {
-			dst = append(dst, ", "...)
-		}
-		dst = append(dst, p.Name...)
-	}
-	dst = append(dst, ')')
-	if f.ResultVariable != "" {
-		dst = append(dst, " RESULT("...)
-		dst = append(dst, f.ResultVariable...)
-		dst = append(dst, ')')
-	}
-	return dst
-}
-
-// Module represents a namespace for data, type definitions, and procedures that
-// can be shared across program units via [UseStatement]. Modules support
-// encapsulation and information hiding through [PublicStmt] and [PrivateStmt].
-//
-// Example:
-//
-//	MODULE <name>
-//	  <specification-statements>
-//	  [CONTAINS
-//	    <module-procedures>]
-//	END MODULE [<name>]
-//
-//	MODULE constants
-//	  IMPLICIT NONE
-//	  REAL, PARAMETER :: PI = 3.14159
-//	END MODULE constants
-type Module struct {
-	Name     string
-	Body     []Statement   // Module-level declarations
-	Contains []ProgramUnit // Procedures in CONTAINS section
-	Label    string
-	Position
-	// Example: Parser result of variable resolved types and usage.
-	Data any
-}
-
-var _ ProgramUnit = (*Module)(nil) // compile time check of interface implementation.
-
-func (m *Module) GetLabel() *string { return &m.Label }
-func (pb *Module) UnitData() any    { return pb.Data }
-func (pb *Module) UnitName() string { return pb.Name }
-
-func (m *Module) statementNode()     {}
-func (m *Module) programUnitNode()   {}
-func (m *Module) IsExecutable() bool { return false }
-func (m *Module) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "MODULE"...)
-}
-func (m *Module) AppendString(dst []byte) []byte {
-	dst = append(dst, "MODULE "...)
-	dst = append(dst, m.Name...)
-	if len(m.Contains) > 0 {
-		dst = append(dst, " CONTAINS "...)
-	}
-	return dst
-}
-
-// BlockData represents a named or unnamed BLOCK DATA program unit used in
-// Fortran 77 to initialize variables in COMMON blocks. This feature is largely
-// obsolete in modern Fortran, replaced by module initialization.
-//
-// Example:
-//
-//	BLOCK DATA [<name>]
-//	  <specification-statements>
-//	END BLOCK DATA [<name>]
-//
-//	BLOCK DATA init_common
-//	  COMMON /shared/ x, y
-//	  DATA x, y /1.0, 2.0/
-//	END BLOCK DATA init_common
-type BlockData struct {
-	Name  string
-	Body  []Statement
-	Label string
-	Position
-	// Data stores program unit data.
-	// Example: Parser result of variable resolved types and usage.
-	Data any
-}
-
-var _ ProgramUnit = (*BlockData)(nil) // compile time check of interface implementation.
-
-func (bd *BlockData) GetLabel() *string { return &bd.Label }
-func (pb *BlockData) UnitData() any     { return pb.Data }
-func (pb *BlockData) UnitName() string  { return pb.Name }
-
-func (bd *BlockData) statementNode()     {}
-func (bd *BlockData) programUnitNode()   {}
-func (bd *BlockData) IsExecutable() bool { return false }
-func (bd *BlockData) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "BLOCKDATA"...)
-}
-func (bd *BlockData) AppendString(dst []byte) []byte {
-	dst = append(dst, "BLOCK DATA"...)
-	if bd.Name != "" {
-		dst = append(dst, ' ')
-		dst = append(dst, bd.Name...)
 	}
 	return dst
 }

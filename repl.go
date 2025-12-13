@@ -71,7 +71,7 @@ type REPL struct {
 	// registered stores all modules that have been registered
 	// using RegisterModule since Reset call. These modules can then be
 	// loaded to the USE scope via "Use".
-	registered []f90.ProgramUnit
+	registered []f90.Unit
 
 	// use stores modules/subroutines/functions/data blocks that have been loaded via Use.
 	// The used modules are flattened here, so _use contains functions/subroutines contained within modules as well.
@@ -158,10 +158,10 @@ func (repl *REPL) DefineStmtFunc(name string, params []string, expr f90.Expressi
 }
 
 // RegisteredUnit returns a program unit that was previously registered with RegisterUnit.
-func (repl *REPL) RegisteredUnit(name string) f90.ProgramUnit {
+func (repl *REPL) RegisteredUnit(name string) *f90.Unit {
 	for i := range repl.registered {
 		if strings.EqualFold(repl.registered[i].UnitName(), name) {
-			return repl.registered[i]
+			return &repl.registered[i]
 		}
 	}
 	return nil
@@ -169,7 +169,7 @@ func (repl *REPL) RegisteredUnit(name string) f90.ProgramUnit {
 
 // RegisterUnits registers a set of program units to the REPL. These units
 // are registered at a top level and are not accessed except in the case of function/subroutine lookup.
-func (repl *REPL) RegisterUnits(pu ...f90.ProgramUnit) error {
+func (repl *REPL) RegisterUnits(pu ...f90.Unit) error {
 	for i := range pu {
 		name := pu[i].UnitName()
 		exists := repl.RegisteredUnit(name)
@@ -194,7 +194,7 @@ func (repl *REPL) Use(name string, only ...string) (err error) {
 	return nil
 }
 
-func (repl *REPL) appendUnitData(dst []*ParserUnitData, only []string, pu f90.ProgramUnit) (_ []*ParserUnitData, err error) {
+func (repl *REPL) appendUnitData(dst []*ParserUnitData, only []string, pu *f90.Unit) (_ []*ParserUnitData, err error) {
 	data, ok := pu.UnitData().(*ParserUnitData)
 	if !ok {
 		return dst, fmt.Errorf("program unit %s has incompatible UnitData %T", pu.UnitName(), pu.UnitData())
@@ -217,14 +217,15 @@ func (repl *REPL) appendUnitData(dst []*ParserUnitData, only []string, pu f90.Pr
 	}
 	dst = append(dst, data)
 	// Also register module-contained procedures so they can be found by ContainedOrExtern.
-	if mod, ok := pu.(*f90.Module); ok {
-		for _, contained := range mod.Contains {
+	if pu.Token == f90token.MODULE {
+		for i := range pu.Contains {
+			contained := &pu.Contains[i]
 			if only != nil && !identifierIn(only, contained.UnitName()) {
 				continue
 			}
 			dst, err = repl.appendUnitData(dst, only, contained)
 			if err != nil {
-				return dst, fmt.Errorf("%s contained within %s: %w", contained.UnitName(), mod.Name, err)
+				return dst, fmt.Errorf("%s contained within %s: %w", contained.UnitName(), pu.Name, err)
 			}
 		}
 	}
@@ -273,7 +274,7 @@ func (repl *REPL) ScopeParams() []Varinfo {
 	return repl.scope.vars // all variables are parameters... or no variables.
 }
 
-func (repl *REPL) SetScope(pu f90.ProgramUnit) (err error) {
+func (repl *REPL) SetScope(pu f90.Unit) (err error) {
 	data, ok := pu.UnitData().(*ParserUnitData)
 	if !ok {
 		return errors.New("missing parser unit data")
@@ -292,28 +293,25 @@ func (repl *REPL) SetScope(pu f90.ProgramUnit) (err error) {
 	}
 	repl.collectCommonBlocks(repl.scope.vars)
 	repl._use = repl._use[:0]
-	var toAdd []f90.ProgramUnit
-	switch unit := pu.(type) {
-	case *f90.ProgramBlock:
+	var toAdd []f90.Unit
+	if !ok {
+		return nil
+	}
+	switch pu.Token {
+	case f90token.PROGRAM, f90token.MODULE:
 		repl._contains = repl._contains[:0]
-		toAdd = unit.Contains
-	case *f90.Module:
-		repl._contains = repl._contains[:0]
-		toAdd = unit.Contains
-	case *f90.Function:
-		if slices.Contains(unit.Attributes, f90token.RECURSIVE) {
-			toAdd = []f90.ProgramUnit{unit}
-		}
-	case *f90.Subroutine:
-		if slices.Contains(unit.Attributes, f90token.RECURSIVE) {
-			toAdd = []f90.ProgramUnit{unit}
+		toAdd = pu.Contains
+	case f90token.FUNCTION, f90token.SUBROUTINE:
+		if pu.ResultType.Attr(f90token.RECURSIVE) != nil {
+			toAdd = []f90.Unit{pu}
 		}
 	default:
 		return nil
 	}
 	// reset contains on Module or Program block.
-	for _, pu := range toAdd {
-		repl._contains, err = repl.appendUnitData(repl._contains, nil, pu)
+	for i := range toAdd {
+		add := &toAdd[i]
+		repl._contains, err = repl.appendUnitData(repl._contains, nil, add)
 		if err != nil {
 			return fmt.Errorf("adding contains %s: %w", pu.UnitName(), err)
 		}

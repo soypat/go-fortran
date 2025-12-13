@@ -32,7 +32,7 @@ func (tg *ToGo) SetSource(source string, r io.ReaderAt) {
 	tg.sourceFile = r
 }
 
-func (tg *ToGo) RegisterUnits(pus ...f90.ProgramUnit) error {
+func (tg *ToGo) RegisterUnits(pus ...f90.Unit) error {
 	return tg.repl.RegisterUnits(pus...)
 }
 
@@ -62,9 +62,11 @@ func (tg *ToGo) TransformRegistered(dst []ast.Decl) (_ []ast.Decl, err error) {
 	return dst, nil
 }
 
-func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
-	if prog == nil {
-		return nil, errors.New("nil program block")
+func (tg *ToGo) TransformProgram(prog f90.Unit) ([]ast.Decl, error) {
+	if prog.IsValid() {
+		return nil, errors.New("invalid program unit")
+	} else if prog.Token != f90token.PROGRAM {
+		return nil, errors.New("expected PROGRAM unit")
 	}
 	err := tg.repl.SetScope(prog)
 	if err != nil {
@@ -105,22 +107,25 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 	return decls, nil
 }
 
-func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.ProgramUnit) (_ []ast.Decl, err error) {
-	for _, contained := range pus {
+func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.Unit) (_ []ast.Decl, err error) {
+	for i := range pus {
+		contained := &pus[i]
+		if !contained.IsValid() {
+			return dst, errors.New("invalid program unit")
+		}
 		tg.currentNode = contained
 		var decl ast.Decl
-		switch c := contained.(type) {
-		case *f90.Subroutine:
-			decl, err = tg.TransformSubroutine(c)
-		case *f90.Function:
-			decl, err = tg.TransformFunction(c)
-		case *f90.Module:
-			dst, err = tg.transformProcedures(dst, c.Contains)
-		case *f90.BlockData:
+		switch contained.Token {
+		case f90token.SUBROUTINE:
+			decl, err = tg.TransformSubroutine(contained)
+		case f90token.FUNCTION:
+			decl, err = tg.TransformFunction(contained)
+		case f90token.MODULE:
+			dst, err = tg.transformProcedures(dst, contained.Contains)
+		case f90token.BLOCK:
 			// TODO: handle block data.
 		default:
-			panic(fmt.Sprintf("unexpected program unit %s", c))
-
+			panic(fmt.Sprintf("unexpected program unit %v", contained.Token))
 		}
 		if err != nil {
 			return dst, err
@@ -136,35 +141,31 @@ func (tg *ToGo) astIdent(name string) *ast.Ident {
 }
 
 // TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration
-func (tg *ToGo) TransformSubroutine(sub *f90.Subroutine) (_ *ast.FuncDecl, err error) {
+func (tg *ToGo) TransformSubroutine(sub *f90.Unit) (_ *ast.FuncDecl, err error) {
 	return tg.transformProcedure(sub)
 }
 
-// TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration
-func (tg *ToGo) TransformFunction(fn *f90.Function) (_ *ast.FuncDecl, err error) {
+// TransformFunction transforms a Fortran FUNCTION to a Go function declaration
+func (tg *ToGo) TransformFunction(fn *f90.Unit) (_ *ast.FuncDecl, err error) {
 	return tg.transformProcedure(fn)
 }
 
-func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.FuncDecl, err error) {
+func (tg *ToGo) transformProcedure(subroutineOrFunc *f90.Unit) (_ *ast.FuncDecl, err error) {
+	if subroutineOrFunc.Token != f90token.FUNCTION && subroutineOrFunc.Token != f90token.SUBROUTINE {
+		return nil, errors.New("not procedure")
+	}
 	tg.currentNode = subroutineOrFunc
-	err = tg.repl.SetScope(subroutineOrFunc)
+	err = tg.repl.SetScope(*subroutineOrFunc)
 	if err != nil {
 		return nil, err
 	}
-	// Collect COMMON blocks from this procedure's scope
-	var body []f90.Statement
 	var returned *ast.FieldList
-	if fn, ok := subroutineOrFunc.(*f90.Function); ok {
-		body = fn.Body
+	if subroutineOrFunc.Token == f90token.FUNCTION {
 		field := tg.getReturnParam()
 		if field == nil {
-			return nil, fmt.Errorf("failed to acquire return parameter type for %s", fn.Name)
+			return nil, fmt.Errorf("failed to acquire return parameter type for %s", subroutineOrFunc.Name)
 		}
 		returned = &ast.FieldList{List: []*ast.Field{field}}
-	} else if sub, ok := subroutineOrFunc.(*f90.Subroutine); ok {
-		body = sub.Body
-	} else {
-		panic("unexpected argument")
 	}
 
 	fn := &ast.FuncDecl{
@@ -177,7 +178,7 @@ func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.Fun
 		},
 		Body: &ast.BlockStmt{},
 	}
-	fn.Body.List, err = tg.transformStatements(nil, body)
+	fn.Body.List, err = tg.transformStatements(nil, subroutineOrFunc.Body)
 	if err != nil {
 		return fn, err
 	}
@@ -220,6 +221,9 @@ func (tg *ToGo) getReturnParam() *ast.Field {
 func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("label" + f90Label) }
 
 func (tg *ToGo) makeErrAtStmt(msg string) error {
+	if tg.currentNode == nil {
+		return tg.makeErrWithPos(f90.Position{}, msg)
+	}
 	return tg.makeErr(tg.currentNode, msg)
 }
 

@@ -526,7 +526,7 @@ func (tt toktuple) String() string {
 // Returns nil when EOF is reached or no more units are available.
 // This method can be called repeatedly to incrementally parse a Fortran file.
 // Phase 1: Parses only top-level program units (PROGRAM, SUBROUTINE, FUNCTION, MODULE)
-func (p *Parser90) ParseNextProgramUnit() (unit ast.ProgramUnit) {
+func (p *Parser90) ParseNextProgramUnit() (unit ast.Unit) {
 	puStart := p.sourcePos()
 	panicked := true
 	defer func() {
@@ -537,7 +537,7 @@ func (p *Parser90) ParseNextProgramUnit() (unit ast.ProgramUnit) {
 		}
 	}()
 
-	for !p.IsDone() && unit == nil {
+	for !p.IsDone() && unit.Token == 0 {
 		// Skip leading newlines and comments
 		// Parse one program unit
 		puStart = p.sourcePos()
@@ -551,10 +551,10 @@ func (p *Parser90) ParseNextProgramUnit() (unit ast.ProgramUnit) {
 // registerTopLevelParsers registers all statement-level parsing functions
 
 // parseTopLevelUnit dispatches to the appropriate registered statement parser
-func (p *Parser90) parseTopLevelUnit() (unit ast.ProgramUnit) {
+func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 	p.skipNewlinesAndComments()
 	if p.IsDone() || p.current.tok.IsEnd() {
-		return nil
+		return unit
 	}
 	switch p.current.tok {
 	case token.SUBROUTINE:
@@ -575,18 +575,18 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.ProgramUnit) {
 	default:
 		p.addError("unexpected token at top level: " + p.current.String())
 		p.nextToken()
-		return nil
+		return unit
 	}
-	if unit == nil {
-		p.addError("nil program unit for token: " + p.current.String())
+	if !unit.IsValid() {
+		p.addError("bad program unit for token: " + p.current.String())
 	}
 	return unit
 }
 
-func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramUnit {
+func (p *Parser90) parseAppendProgramUnits(dst []ast.Unit) []ast.Unit {
 	for p.loopUntil(token.END, token.ENDMODULE, token.ENDPROGRAM, token.ENDFUNCTION, token.ENDSUBROUTINE) {
 		unit := p.parseTopLevelUnit()
-		if unit != nil {
+		if unit.IsValid() {
 			dst = append(dst, unit)
 		} else {
 			// parseTopLevelUnit returns nil when it encounters END tokens
@@ -600,161 +600,162 @@ func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramU
 
 // parseProgramBlock parses a PROGRAM...END PROGRAM block
 // Precondition: current token is PROGRAM
-func (p *Parser90) parseProgramBlock() ast.ProgramUnit {
+func (p *Parser90) parseProgramBlock() (unit ast.Unit) {
 	p.varResetAll()
 	start := p.sourcePos()
 	if !p.expect(token.PROGRAM, "") {
-		return nil
+		return unit
 	}
-	block := &ast.ProgramBlock{}
+	unit.Token = token.PROGRAM
 	// Parse program name (keywords can be used as program names)
-	p.expectIdentifier(&block.Name, "program name")
+	p.expectIdentifier(&unit.Name, "program name")
 
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
-	block.Body = p.parseBody(nil)
-	block.Data = p.makeUnitData(block.Name, token.PROGRAM)
+	unit.Body = p.parseBody(nil)
+	unit.Data = p.makeUnitData(unit.Name, token.PROGRAM)
 
 	// Handle CONTAINS section (internal procedures)
 	if p.consumeIf(token.CONTAINS) {
-		block.Contains = p.parseAppendProgramUnits(block.Contains[:0])
+		unit.Contains = p.parseAppendProgramUnits(unit.Contains[:0])
 	}
 
-	p.expectEndProgramUnit(token.PROGRAM, token.ENDPROGRAM, start, block.Name)
+	p.expectEndProgramUnit(token.PROGRAM, token.ENDPROGRAM, start, unit.Name)
 	p.consumeIf(token.Identifier)
-	block.Position = ast.Pos(start.Pos, p.current.start)
-	return block
+	unit.Position = ast.Pos(start.Pos, p.current.start)
+	return unit
 }
 
 // parseModule parses a MODULE...END MODULE block
 // Precondition: current token is MODULE
-func (p *Parser90) parseModule() ast.ProgramUnit {
+func (p *Parser90) parseModule() (unit ast.Unit) {
 	start := p.sourcePos()
 	if !p.expect(token.MODULE, "") {
-		return nil
+		return unit
 	}
-	mod := &ast.Module{}
+	unit.Token = token.MODULE
 	// Parse module name (keywords can be used as module names)
-	p.expectIdentifier(&mod.Name, "module name")
+	p.expectIdentifier(&unit.Name, "module name")
 	p.skipNewlinesAndComments()
 	// Parse body statements
-	mod.Body = p.parseBody(nil)
-	mod.Data = p.makeUnitData(mod.Name, token.MODULE)
+	unit.Body = p.parseBody(nil)
+	unit.Data = p.makeUnitData(unit.Name, token.MODULE)
 
 	// Handle CONTAINS section with recursive parsing
 	if p.consumeIf(token.CONTAINS) {
-		mod.Contains = p.parseAppendProgramUnits(mod.Contains[:0])
+		unit.Contains = p.parseAppendProgramUnits(unit.Contains[:0])
 	}
-	p.expectEndProgramUnit(token.MODULE, token.ENDMODULE, start, mod.Name)
+	p.expectEndProgramUnit(token.MODULE, token.ENDMODULE, start, unit.Name)
 	p.consumeIf(token.Identifier)
-	mod.Position = ast.Pos(start.Pos, p.current.start)
+	unit.Position = ast.Pos(start.Pos, p.current.start)
 
-	return mod
+	return unit
 }
 
 // parseSubroutine parses a SUBROUTINE...END SUBROUTINE block
 // Precondition: current token is SUBROUTINE
-func (p *Parser90) parseSubroutine() ast.ProgramUnit {
+func (p *Parser90) parseSubroutine() (unit ast.Unit) {
 	p.varResetAll()
 	start := p.sourcePos()
-	sub := &ast.Subroutine{}
+	unit.Token = token.SUBROUTINE
 
 	p.expect(token.SUBROUTINE, "")
 
 	// Parse subroutine name (keywords can be used as subroutine names)
-	p.expectIdentifier(&sub.Name, "subroutine name")
+	p.expectIdentifier(&unit.Name, "subroutine name")
 
 	// Parse parameter list if present
 	if p.currentTokenIs(token.LParen) {
-		sub.Parameters = p.parseParameterList()
+		unit.Parameters = p.parseParameterList()
 	}
 
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
-	sub.Body = p.parseBody(sub.Parameters)
+	unit.Body = p.parseBody(unit.Parameters)
 
-	p.expectEndProgramUnit(token.SUBROUTINE, token.ENDSUBROUTINE, start, sub.Name)
+	p.expectEndProgramUnit(token.SUBROUTINE, token.ENDSUBROUTINE, start, unit.Name)
 	p.consumeIf(token.Identifier)
-	pud := p.makeUnitData(sub.Name, token.SUBROUTINE)
-	sub.Data = pud
-	sub.Position = ast.Pos(start.Pos, p.current.start)
+	pud := p.makeUnitData(unit.Name, token.SUBROUTINE)
+	unit.Data = pud
+	unit.Position = ast.Pos(start.Pos, p.current.start)
 	pud.resolveImplicitTypes()
-	return sub
+	return unit
 }
 
 // parseFunction parses a FUNCTION...END FUNCTION block
 // Precondition: current token is FUNCTION
-func (p *Parser90) parseFunction() ast.ProgramUnit {
+func (p *Parser90) parseFunction() (unit ast.Unit) {
 	p.varResetAll()
 	start := p.sourcePos()
 	if !p.expect(token.FUNCTION, "") {
-		return nil
+		return unit
 	}
-	fn := &ast.Function{}
+	unit.Token = token.FUNCTION
 	// Parse function name (can be Identifier, FormatSpec, or keyword used as identifier)
-	p.expectIdentifier(&fn.Name, "function name")
+	p.expectIdentifier(&unit.Name, "function name")
 	// Parse parameter list
 	if p.currentTokenIs(token.LParen) {
-		fn.Parameters = p.parseParameterList()
+		unit.Parameters = p.parseParameterList()
 	}
 
 	// Check for RESULT clause
 	var returnType *Varinfo
+	var resultVarName string
 	if p.consumeIf(token.RESULT) {
 		if p.expect(token.LParen, "RESULT open") {
-			if p.expectIdentifier(&fn.ResultVariable, "function RESULT variable specification") {
-				returnType = p.varInit(fn.ResultVariable, nil, VFlagReturned, "")
+			if p.expectIdentifier(&resultVarName, "function RESULT variable specification") {
+				returnType = p.varInit(resultVarName, nil, VFlagReturned, "")
 			}
 			p.expect(token.RParen, "RESULT close")
 		}
 	}
 
 	// Parse body statements
-	fn.Body = p.parseBody(fn.Parameters)
+	unit.Body = p.parseBody(unit.Parameters)
 
-	p.expectEndProgramUnit(token.FUNCTION, token.ENDFUNCTION, start, fn.Name)
+	p.expectEndProgramUnit(token.FUNCTION, token.ENDFUNCTION, start, unit.Name)
 	p.consumeIf(token.Identifier)
-	fn.Position = ast.Pos(start.Pos, p.current.start)
+	unit.Position = ast.Pos(start.Pos, p.current.start)
 
 	// Create unit data AFTER parseBody so type declarations are captured
-	pud := p.makeUnitData(fn.Name, token.FUNCTION)
+	pud := p.makeUnitData(unit.Name, token.FUNCTION)
 	pud.returnType = returnType
-	fn.Data = pud
+	unit.Data = pud
 	missingResult := returnType == nil
 	if missingResult {
 		// For bare FUNCTION without RESULT clause, the function name is the return variable.
 		// Look for the variable with the function name and mark it as returned.
-		vinfo := pud.Var(fn.Name)
+		vinfo := pud.Var(unit.Name)
 		if vinfo != nil {
 			vinfo.flags |= VFlagReturned
 			pud.returnType = vinfo
 		} else {
 			// Function name not used in body - create return variable with nil decl.
 			// resolveImplicitTypes will assign the correct implicit type.
-			pud.returnType, _ = pud.varInit(start, fn.Name, nil, VFlagReturned, "")
+			pud.returnType, _ = pud.varInit(start, unit.Name, nil, VFlagReturned, "")
 		}
 	}
 	pud.resolveImplicitTypes()
-	return fn
+	return unit
 }
 
 // parseBlockData parses a BLOCK DATA...END [BLOCK DATA] block
-func (p *Parser90) parseBlockData() ast.ProgramUnit {
+func (p *Parser90) parseBlockData() (unit ast.Unit) {
 	start := p.current.start
 	// Consume BLOCK identifier
 	if !p.consumeIf2(token.BLOCK, token.DATA) {
 		p.addError("DATA BLOCK expected: " + p.current.String())
-		return nil
+		return unit
 	}
-	bd := &ast.BlockData{}
+	unit.Token = token.BLOCK
 	// Parse optional block data name
-	p.consumeIdentifier(&bd.Name)
+	p.consumeIdentifier(&unit.Name)
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
-	bd.Body = p.parseBody(nil)
+	unit.Body = p.parseBody(nil)
 
 	p.expect(token.END, "expected END after DATA BLOCK body")
 
@@ -763,9 +764,79 @@ func (p *Parser90) parseBlockData() ast.ProgramUnit {
 		p.consumeIf(token.DATA)
 	}
 	p.consumeIf(token.Identifier) // Optional name after END BLOCK DATA
-	bd.Position = ast.Pos(start, p.current.start)
-	bd.Data = p.makeUnitData(bd.Name, token.DATA)
-	return bd
+	unit.Position = ast.Pos(start, p.current.start)
+	unit.Data = p.makeUnitData(unit.Name, token.DATA)
+	return unit
+}
+
+// parseTypePrefixedConstruct handles type-prefixed functions like "INTEGER FUNCTION foo()"
+func (p *Parser90) parseTypePrefixedConstruct() (unit ast.Unit) {
+	// Save the type token
+	start := p.sourcePos()
+	ts := p.expectTypeSpecIntrinsic()
+	// Parse as function - this creates unit.Data with variable info
+	unit = p.parseFunction()
+	if !unit.IsValid() {
+		return unit
+	}
+	unit.ResultType = ts
+	pud := unit.Data.(*ParserUnitData)
+
+	// For type-prefixed functions, the function name is the return variable with the prefix type.
+	// Create the declaration with the correct type from the prefix.
+	decl := &ast.DeclEntity{
+		Name:     unit.Name,
+		Type:     &unit.ResultType,
+		Position: unit.Position,
+	}
+
+	if pud.returnType == nil {
+		// returnType not set - create or find the variable
+		vinfo := pud.Var(unit.Name)
+		if vinfo == nil {
+			var err error
+			vinfo, err = pud.varInit(start, unit.Name, decl, VFlagReturned, "")
+			if err != nil {
+				panic(err)
+			}
+		} else {
+			vinfo.decl = decl
+			vinfo.flags |= VFlagReturned
+		}
+		pud.returnType = vinfo
+	} else {
+		// returnType already set by parseFunction - update its decl with the correct type
+		pud.returnType.decl = decl
+	}
+	return unit
+}
+
+// parseProcedureWithAttributes handles procedures with attributes like RECURSIVE, PURE, ELEMENTAL
+func (p *Parser90) parseProcedureWithAttributes() (unit ast.Unit) {
+	// Collect all attributes
+	attributes := []token.Token{}
+	for p.current.tok.IsAttributeKeyword() && !p.IsDone() {
+		attributes = append(attributes, p.current.tok)
+		p.nextToken()
+	}
+	if p.current.tok.IsTypeDeclaration() {
+		// Is a function.
+		return p.parseTypePrefixedConstruct()
+	}
+	// Now must be SUBROUTINE or FUNCTION
+	switch p.current.tok {
+	case token.SUBROUTINE:
+		unit = p.parseSubroutine()
+	case token.FUNCTION:
+		unit = p.parseFunction()
+	default:
+		p.addError("want FUNCTION|SUBROUTINE, got " + p.current.String())
+		return unit
+	}
+	if unit.IsValid() {
+		unit.ResultType.Attributes = toTypeAttributes(attributes)
+	}
+	return unit
 }
 
 // Helper methods
@@ -4091,77 +4162,6 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 	return stmt
 }
 
-// parseTypePrefixedConstruct handles type-prefixed functions like "INTEGER FUNCTION foo()"
-func (p *Parser90) parseTypePrefixedConstruct() ast.ProgramUnit {
-	// Save the type token
-	start := p.sourcePos()
-	ts := p.expectTypeSpecIntrinsic()
-	// Parse as function - this creates fn.Data with variable info
-	fn := p.parseFunction().(*ast.Function)
-	fn.Type = ts
-	pud := fn.Data.(*ParserUnitData)
-
-	// For type-prefixed functions, the function name is the return variable with the prefix type.
-	// Create the declaration with the correct type from the prefix.
-	decl := &ast.DeclEntity{
-		Name:     fn.Name,
-		Type:     &fn.Type,
-		Position: fn.Position,
-	}
-
-	if pud.returnType == nil {
-		// returnType not set - create or find the variable
-		vinfo := pud.Var(fn.Name)
-		if vinfo == nil {
-			var err error
-			vinfo, err = pud.varInit(start, fn.Name, decl, VFlagReturned, "")
-			if err != nil {
-				panic(err)
-			}
-		} else {
-			vinfo.decl = decl
-			vinfo.flags |= VFlagReturned
-		}
-		pud.returnType = vinfo
-	} else {
-		// returnType already set by parseFunction - update its decl with the correct type
-		pud.returnType.decl = decl
-	}
-	return fn
-}
-
-// parseProcedureWithAttributes handles procedures with attributes like RECURSIVE, PURE, ELEMENTAL
-func (p *Parser90) parseProcedureWithAttributes() ast.ProgramUnit {
-	// Collect all attributes
-	attributes := []token.Token{}
-	for p.current.tok.IsAttributeKeyword() && !p.IsDone() {
-		attributes = append(attributes, p.current.tok)
-		p.nextToken()
-	}
-	if p.current.tok.IsTypeDeclaration() {
-		// Is a function.
-		return p.parseTypePrefixedConstruct()
-	}
-
-	// Now must be SUBROUTINE or FUNCTION
-	var stmt ast.ProgramUnit
-	if p.currentTokenIs(token.SUBROUTINE) {
-		stmt = p.parseSubroutine()
-		if sub, ok := stmt.(*ast.Subroutine); ok {
-			sub.Attributes = attributes
-		}
-	} else if p.currentTokenIs(token.FUNCTION) {
-		stmt = p.parseFunction()
-		if fn, ok := stmt.(*ast.Function); ok {
-			fn.Attributes = attributes
-		}
-	} else {
-		p.addError("expected SUBROUTINE after attributes")
-		return nil
-	}
-	return stmt
-}
-
 func (p *Parser90) consumeEndLabelIfPresent(tgt *string, endConstruct token.Token, continueMatch string) bool {
 	// Check for labeled END IF/ENDIF  or END DO/ENDDO/CONTINUE
 	isLabelled := p.currentTokenIs(token.IntLit) &&
@@ -4600,4 +4600,14 @@ func (p *Parser90) parseFloatValue(v string) (float64, error) {
 	v = strings.ReplaceAll(v, "q", "e")
 
 	return strconv.ParseFloat(v, 64)
+}
+
+// toTypeAttributes converts a slice of tokens (e.g., RECURSIVE, PURE, ELEMENTAL)
+// to a slice of TypeAttributes for use in Unit.ResultType.Attributes.
+func toTypeAttributes(tokens []token.Token) []ast.TypeAttribute {
+	attrs := make([]ast.TypeAttribute, len(tokens))
+	for i, tok := range tokens {
+		attrs[i] = ast.TypeAttribute{Token: tok}
+	}
+	return attrs
 }

@@ -21,43 +21,20 @@ func Walk(v Visitor, node Node) {
 	switch n := node.(type) {
 	// Root node
 	case *Program:
-		for _, unit := range n.Units {
-			Walk(v, unit)
+		for i := range n.Units {
+			Walk(v, &n.Units[i])
 		}
 
-	// Program units
-	case *ProgramBlock:
-		for _, stmt := range n.Body {
-			Walk(v, stmt)
-		}
-		for _, unit := range n.Contains {
-			Walk(v, unit)
-		}
-
-	case *Subroutine:
-		for _, stmt := range n.Body {
-			Walk(v, stmt)
-		}
-
-	case *Function:
-		if n.Type.KindOrLen != nil {
-			Walk(v, n.Type.KindOrLen)
+	// Program units (all represented by *Unit with Token discriminator)
+	case *Unit:
+		if n.ResultType.KindOrLen != nil {
+			Walk(v, n.ResultType.KindOrLen)
 		}
 		for _, stmt := range n.Body {
 			Walk(v, stmt)
 		}
-
-	case *Module:
-		for _, stmt := range n.Body {
-			Walk(v, stmt)
-		}
-		for _, proc := range n.Contains {
-			Walk(v, proc)
-		}
-
-	case *BlockData:
-		for _, stmt := range n.Body {
-			Walk(v, stmt)
+		for i := range n.Contains {
+			Walk(v, &n.Contains[i])
 		}
 
 	// Declaration statements
