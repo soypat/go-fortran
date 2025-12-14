@@ -21,14 +21,12 @@ import (
 // like 2+3.0), decl comes from templates (_tgtFloat32 etc), val.tok tracks
 // the actual evaluated type after promotion.
 type Value struct {
-	tok   f90token.Token // Evaluated type token. Can be used to check if set in REPL.
-	i64   int64          // INTEGER (all sizes)
-	f64   float64        // REAL/DOUBLE PRECISION
-	b     bool           // LOGICAL
-	s     string         // CHARACTER
-	arr   []Value        // Array elements (flattened, row-major)
-	shape []int          // Array dimensions
-	set   bool
+	tok f90token.Token // Evaluated type token. Can be used to check if set in REPL.
+	i64 int64          // INTEGER (all sizes)
+	f64 float64        // REAL/DOUBLE PRECISION
+	b   bool           // LOGICAL
+	s   string         // CHARACTER
+	set bool
 }
 
 func (v *Value) Token() f90token.Token { return v.tok }
@@ -522,7 +520,7 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 		return fmt.Errorf("intrinsic %s not found", e.Name)
 	}
 	if repl.noValueResolution {
-		// No value resolution short circuit - try V2 first, then V1.
+		// No value resolution short circuit
 		if fnV2 := getIntrinsicV2(intrTok); fnV2 != nil {
 			if call := fnV2.findBestCall(len(e.Args)); call != nil {
 				if call.returnType != nil {
@@ -534,19 +532,6 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 				} else if len(e.Args) > 0 {
 					return repl.Eval(dst, e.Args[0])
 				}
-			}
-		}
-		intr := getIntrinsic(intrTok, len(e.Args))
-		if intr != nil {
-			if intr.returnType != nil {
-				*dst = *intr.returnType
-				// Ensure val.tok is set from decl for type inference
-				if dst.val.tok == 0 && dst.decl != nil {
-					dst.val.tok = dst.decl.Type.Token
-				}
-				return nil
-			} else if len(e.Args) > 0 {
-				return repl.Eval(dst, e.Args[0])
 			}
 		}
 	}

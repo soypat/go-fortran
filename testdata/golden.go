@@ -339,15 +339,15 @@ func LEVEL12() {
 	i = 11
 	j = 52
 	k = 84
-	z = intrinsic.CMPLX2(1, 2)
+	z = intrinsic.CMPLX2[int32](1, 2)
 	angle = 0.5
 	sin_val = intrinsic.SIN[float32](angle)
 	cos_val = intrinsic.COS[float32](angle)
-	abs_val = float32(intrinsic.ABS(-5.5))
+	abs_val = float32(intrinsic.ABS[float32](-5.5))
 	max_val = intrinsic.MAX[int32](i, j, k)
 	min_val = intrinsic.MIN[int32](10, 20, 5)
 	log_val = 2.0 * intrinsic.LOG[float32](angle)
-	dot_val = intrinsic.DOT_PRODUCT[float32](v1, v2)
+	dot_val = intrinsic.DOT_PRODUCT(v1, v2)
 	zabs = intrinsic.CABS(z)
 	zreal = intrinsic.REALPART(z)
 	zimag = intrinsic.AIMAG(z)
@@ -816,11 +816,11 @@ func LEVEL27() {
 		_              = factor
 	)
 	var (
-		root3 float64 = intrinsic.SQRT(3.0)
+		root3 float64 = intrinsic.SQRT[float64](3.0)
 		_             = root3
 	)
 	var (
-		pi float64 = 4.0 * intrinsic.ATAN(1.0)
+		pi float64 = 4.0 * intrinsic.ATAN[float64](1.0)
 		_          = pi
 	)
 	var (

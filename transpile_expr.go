@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
-	"math"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -35,7 +33,12 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 			Value: strconv.FormatInt(e.Value, 10),
 		}
 	case *f90.RealLiteral:
-		resultType = _tgtGenericFloat
+		// Check if this is a double precision literal (D exponent like 3.0D0)
+		if strings.ContainsAny(e.Raw, "Dd") {
+			resultType = _tgtFloat64
+		} else {
+			resultType = _tgtGenericFloat
+		}
 		// Format float - ensure it has a decimal point so Go recognizes it as float
 		floatStr := strconv.FormatFloat(e.Value, 'g', 16, 64)
 		if !strings.ContainsAny(floatStr, ".eE") {
@@ -305,12 +308,17 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 	case f90token.Slash:
 		op = token.QUO
 	case f90token.DoubleStar:
-		// Power operator: x ** y → intrinsic.POW[float T](x, y)
+		// Power operator: x ** y → intrinsic.POW[T](x, y)
 		left = tg.wrapConversion(vitgt, leftType, left)
 		right = tg.wrapConversion(vitgt, rightType, right)
-		sel := intrinsicSelGeneric("POW")
+		sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("POW")}
+		var funcExpr ast.Expr = sel
+		if vitgt != nil && !isGenericVarinfo(vitgt) {
+			goType := goTypeBasic(vitgt.typeToken(), 0)
+			funcExpr = &ast.IndexExpr{X: sel, Index: goType}
+		}
 		return &ast.CallExpr{
-			Fun:  sel(vitgt),
+			Fun:  funcExpr,
 			Args: []ast.Expr{left, right},
 		}, vitgt, nil
 	case f90token.EQ, f90token.EqEq:
@@ -467,7 +475,7 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 	fi := tg.ContainedOrUsed(e.Name)
 	if fi == nil {
 		lookup := f90token.LookupIntrinsic(e.Name)
-		// Try V2 system first with type-aware matching
+		// Try V2 intrinsic system
 		if fnV2 := getIntrinsicV2(lookup); fnV2 != nil {
 			// Infer argument types for better matching
 			argTypes := make([]*Varinfo, len(e.Args))
@@ -477,21 +485,16 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 					argTypes[i] = &vi
 				}
 			}
+			// Try type-aware matching first, fall back to arg count matching
 			call := fnV2.findBestCallWithTypes(argTypes)
+			if call == nil {
+				call = fnV2.findBestCall(len(e.Args))
+			}
 			if call != nil {
 				return tg.intrinsicExprV2(vitgt, fnV2, call, e.Args...)
 			}
 		}
-		// Fall back to V1 system
-		fn := getIntrinsic(lookup, len(e.Args))
-		if fn == nil {
-			return nil, nil, tg.makeErr(e, "unknown intrinsic: "+e.Name)
-		}
-		expr, resultType, err := tg.intrinsicExpr(vitgt, fn, e.Args...)
-		if err != nil {
-			return nil, nil, err
-		}
-		return expr, resultType, err
+		return nil, nil, tg.makeErr(e, "unknown intrinsic: "+e.Name)
 	}
 
 	params := fi.ProcedureParams()
@@ -1000,106 +1003,6 @@ func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Ex
 	}
 }
 
-// wrapMethodIntrinsic wraps method intrinsic calls to match Fortran types.
-// Go methods return native types (int, CharacterArray) but Fortran expects specific types.
-func (tg *ToGo) wrapMethodIntrinsic(fn *intrinsicFn, call *ast.CallExpr) *ast.CallExpr {
-	if fn.returnType == nil {
-		return call
-	}
-	switch fn.returnType.typeToken() {
-	case f90token.INTEGER:
-		// Go method returns int, Fortran expects INTEGER (int32)
-		return &ast.CallExpr{Fun: ast.NewIdent("int32"), Args: []ast.Expr{call}}
-	case f90token.CHARACTER:
-		// Go method returns CharacterArray, convert to string via .String()
-		return &ast.CallExpr{
-			Fun: &ast.SelectorExpr{X: call, Sel: ast.NewIdent("String")},
-		}
-	}
-	return call
-}
-
-func (tg *ToGo) intrinsicExpr(vitgt *Varinfo, fn *intrinsicFn, args ...f90.Expression) (call *ast.CallExpr, resultType *Varinfo, err error) {
-	if fn.isVariadic {
-		if len(args) < len(fn.params) {
-			return nil, nil, fmt.Errorf("intrinsic %s requires at least %d arguments, got %d", fn.name, len(fn.params), len(args))
-		}
-	} else if len(args) != len(fn.params) {
-		return nil, nil, fmt.Errorf("intrinsic %s requires %d arguments, got %d", fn.name, len(fn.params), len(args))
-	}
-	var gargs []ast.Expr
-	var firstArgType *Varinfo // Capture first argument's type for generic intrinsics
-	for i := range args {
-		// For variadic, use the first param type for extra args
-		paramIdx := i
-		if paramIdx >= len(fn.params) {
-			paramIdx = 0
-		}
-		expr, argType, err := tg.transformExpression(fn.params[paramIdx], args[i])
-		if err != nil {
-			return nil, nil, err
-		}
-		if i == 0 {
-			firstArgType = argType
-		}
-		gargs = append(gargs, expr)
-	}
-
-	if fn.method != "" {
-		resultType = vitgt
-		call = &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X:   gargs[0],
-				Sel: ast.NewIdent(fn.method),
-			},
-			Args: gargs[1:],
-		}
-		// Method intrinsics need type conversion: Go methods return native types
-		call = tg.wrapMethodIntrinsic(fn, call)
-	} else {
-		resultType = fn.returnType
-		funcExpr := fn.expr
-		if funcExpr == nil && fn.exprGeneric != nil {
-			// For generic intrinsics, determine the type parameter:
-			// - Variadic intrinsics (MIN/MAX): use target type if valid, else first arg type
-			// - Other generics (ABS, etc.): use first argument's actual type
-			genericType := firstArgType
-			if fn.isVariadic && !isGenericVarinfo(vitgt) {
-				genericType = vitgt
-			}
-			funcExpr = fn.exprGeneric(genericType)
-			// Only use generic type as return type if no explicit return type was set
-			if resultType == nil {
-				resultType = genericType
-			}
-		}
-		call = &ast.CallExpr{
-			Fun:  funcExpr,
-			Args: gargs,
-		}
-	}
-	return call, resultType, nil
-}
-
-// intrinsicSel creates a selector expression for intrinsic.NAME
-func intrinsicSel(name f90token.Intrinsic) func(*Varinfo) ast.Expr {
-	return func(tp *Varinfo) ast.Expr {
-		return &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(name.String())}
-	}
-}
-
-// intrinsicSelGeneric creates a type-parameterized selector: intrinsic.NAME[T]
-func intrinsicSelGeneric(name string) func(*Varinfo) ast.Expr {
-	return func(tp *Varinfo) ast.Expr {
-		sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(name)}
-		if tp == nil || isGenericVarinfo(tp) {
-			return sel
-		}
-		goType := goTypeBasic(tp.typeToken(), 0)
-		return &ast.IndexExpr{X: sel, Index: goType}
-	}
-}
-
 // goTypeBasic supports primitive type transformation from fortran to Go. Anything more complex requires being a method on [ToGo].
 func goTypeBasic(tok f90token.Token, kind int) (goType ast.Expr) {
 	switch tok {
@@ -1138,311 +1041,6 @@ func goTypeBasic(tok f90token.Token, kind int) (goType ast.Expr) {
 	return goType
 }
 
-// makeIntrinsicFn creates an intrinsic that calls intrinsic.NAME (e.g., SQRT, SIN).
-// returnType is nil if return type matches first param.
-func makeIntrinsicFn(name f90token.Intrinsic, returnType *Varinfo, params ...*Varinfo) intrinsicFn {
-	return intrinsicFn{
-		name:        name,
-		exprGeneric: intrinsicSel(name),
-		returnType:  returnType,
-		params:      params,
-	}
-}
-
-// makeIntrinsicVariadic creates a variadic intrinsic like MAX, MIN.
-func makeIntrinsicVariadic(name f90token.Intrinsic, returnType *Varinfo, variadicType *Varinfo) intrinsicFn {
-	return intrinsicFn{
-		name:        name,
-		exprGeneric: intrinsicSel(name),
-		returnType:  returnType,
-		params:      []*Varinfo{variadicType},
-		isVariadic:  true,
-	}
-}
-
-// makeIntrinsicFnGeneric creates a generic intrinsic that emits intrinsic.NAME[T].
-func makeIntrinsicFnGeneric(name f90token.Intrinsic, returnType *Varinfo, params ...*Varinfo) intrinsicFn {
-	return intrinsicFn{
-		name:        name,
-		exprGeneric: intrinsicSelGeneric(name.String()),
-		returnType:  returnType,
-		params:      params,
-	}
-}
-
-// makeIntrinsicVariadicGeneric creates a variadic generic intrinsic like MAX, MIN.
-func makeIntrinsicVariadicGeneric(name f90token.Intrinsic, returnType *Varinfo, variadicType *Varinfo) intrinsicFn {
-	return intrinsicFn{
-		name:        name,
-		exprGeneric: intrinsicSelGeneric(name.String()),
-		returnType:  returnType,
-		params:      []*Varinfo{variadicType},
-		isVariadic:  true,
-	}
-}
-
-// makeIntrinsicCast creates a type cast intrinsic like REAL, INT, DBLE.
-func makeIntrinsicCast(name f90token.Intrinsic, goType string, returnType, paramType *Varinfo) intrinsicFn {
-	return intrinsicFn{
-		name:       name,
-		expr:       ast.NewIdent(goType),
-		returnType: returnType,
-		params:     []*Varinfo{paramType},
-	}
-}
-
-// makeIntrinsicMethod creates a method-call intrinsic like LEN, TRIM.
-func makeIntrinsicMethod(name f90token.Intrinsic, methodName string, returnType, receiverType *Varinfo, params ...*Varinfo) intrinsicFn {
-	allParams := make([]*Varinfo, 0, 1+len(params))
-	allParams = append(allParams, receiverType)
-	allParams = append(allParams, params...)
-	return intrinsicFn{
-		name:       name,
-		method:     methodName,
-		returnType: returnType,
-		params:     allParams,
-	}
-}
-
-func (fn *intrinsicFn) inferReturnType(tgt *Varinfo) (inferred *Varinfo) {
-	if fn.returnType != nil {
-		inferred = fn.returnType
-	} else {
-		inferred = fn.params[0]
-	}
-	var dflt *Varinfo
-	switch inferred {
-	case _tgtGenericFloat:
-		dflt = _tgtFloat32
-	case _tgtGenericInt:
-		dflt = _tgtInt32
-	}
-	if dflt != nil {
-		if tgt == nil {
-			inferred = dflt
-		} else {
-			inferred = tgt
-		}
-	}
-	return inferred
-}
-
-func init() {
-	slices.SortStableFunc(intrinsics, func(a, b intrinsicFn) int {
-		diff := int(a.name) - int(b.name)
-		if diff == 0 {
-			diff = len(a.params) - len(b.params)
-		}
-		return diff
-	})
-}
-
-func getIntrinsic(name f90token.Intrinsic, nargs int) *intrinsicFn {
-	if name == 0 {
-		return nil
-	}
-	idx, found := slices.BinarySearchFunc(intrinsics, name, func(e intrinsicFn, a f90token.Intrinsic) int {
-		diff := int(e.name) - int(a)
-		if diff == 0 {
-			if e.isVariadic {
-				return 0 // Prioritize isVariadic.
-			}
-			diff = len(e.params) - nargs
-		}
-		return diff
-	})
-	if !found {
-		return nil
-	} else if nargs == len(intrinsics[idx].params) || intrinsics[idx].isVariadic {
-		return &intrinsics[idx]
-	}
-	return nil
-}
-
-type intrinsicFn struct {
-	name        f90token.Intrinsic
-	expr        ast.Expr
-	exprGeneric func(tp *Varinfo) ast.Expr
-	method      string
-	returnType  *Varinfo
-	params      []*Varinfo
-	isVariadic  bool
-}
-
-var intrinsics = []intrinsicFn{
-	// Type conversions
-	makeIntrinsicCast(f90token.IntrinsicREAL, "float32", _tgtFloat32, _tgtGenericFloat),
-	makeIntrinsicCast(f90token.IntrinsicDBLE, "float64", _tgtFloat64, _tgtGenericFloat),
-	makeIntrinsicCast(f90token.IntrinsicINT, "int32", _tgtInt32, _tgtGenericInt),
-	makeIntrinsicCast(f90token.IntrinsicIFIX, "int32", _tgtInt32, _tgtGenericFloat), // IFIX truncates REAL to INTEGER
-
-	// Math intrinsics - single float argument (return type matches input)
-	makeIntrinsicFn(f90token.IntrinsicSQRT, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicSIN, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicCOS, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicTAN, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicASIN, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicACOS, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicATAN, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicATAN2, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicEXP, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicLOG, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicLOG10, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicSINH, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicCOSH, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicTANH, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicFLOOR, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicCEILING, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicAINT, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicANINT, nil, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicNINT, _tgtInt32, _tgtGenericFloat), // NINT returns INTEGER
-
-	// Math intrinsics - two float arguments
-	makeIntrinsicFn(f90token.IntrinsicATAN2, nil, _tgtGenericFloat, _tgtGenericFloat),
-
-	// Math intrinsics - signed/numeric
-	makeIntrinsicFnGeneric(f90token.IntrinsicABS, nil, _tgtGenericFloat),
-	makeIntrinsicFnGeneric(f90token.IntrinsicIABS, nil, _tgtGenericInt), // IABS for integers
-	makeIntrinsicFn(f90token.IntrinsicCABS, _tgtFloat32, _tgtComplex64), // CABS returns REAL
-	makeIntrinsicFn(f90token.IntrinsicSIGN, nil, _tgtGenericFloat, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicMOD, nil, _tgtGenericInt, _tgtGenericInt),
-	makeIntrinsicFn(f90token.IntrinsicDIM, nil, _tgtGenericFloat, _tgtGenericFloat),
-	makeIntrinsicFn(f90token.IntrinsicDPROD, _tgtFloat64, _tgtGenericFloat, _tgtGenericFloat), // DPROD returns DOUBLE
-
-	// Variadic intrinsics
-	makeIntrinsicVariadicGeneric(f90token.IntrinsicMAX, nil, _tgtGenericFloat),
-	makeIntrinsicVariadicGeneric(f90token.IntrinsicMIN, nil, _tgtGenericFloat),
-
-	// Character methods
-	makeIntrinsicMethod(f90token.IntrinsicLEN, "Len", _tgtInt32, _tgtChar),
-	makeIntrinsicMethod(f90token.IntrinsicLEN_TRIM, "LenTrim", _tgtInt32, _tgtChar),
-	makeIntrinsicMethod(f90token.IntrinsicTRIM, "Trim", _tgtChar, _tgtChar),
-	makeIntrinsicMethod(f90token.IntrinsicADJUSTL, "AdjustL", _tgtChar, _tgtChar),
-	makeIntrinsicMethod(f90token.IntrinsicADJUSTR, "AdjustR", _tgtChar, _tgtChar),
-	makeIntrinsicMethod(f90token.IntrinsicINDEX, "Index", _tgtInt32, _tgtChar, _tgtChar),
-
-	// Array methods - 1 arg versions
-	makeIntrinsicMethod(f90token.IntrinsicSIZE, "Size", _tgtInt32, _tgtArray),
-	makeIntrinsicMethod(f90token.IntrinsicSHAPE, "Shape", nil, _tgtArray), // returns array
-	// Array methods - 2 arg versions (with dimension)
-	makeIntrinsicMethod(f90token.IntrinsicSIZE, "SizeDim", _tgtInt32, _tgtArray, _tgtInt32),
-	makeIntrinsicMethod(f90token.IntrinsicLBOUND, "LowerDim", _tgtInt32, _tgtArray, _tgtInt32),
-	makeIntrinsicMethod(f90token.IntrinsicUBOUND, "UpperDim", _tgtInt32, _tgtArray, _tgtInt32),
-
-	// Array reduction intrinsics
-	makeIntrinsicFnGeneric(f90token.IntrinsicDOT_PRODUCT, nil, _tgtArray, _tgtArray),
-	makeIntrinsicFn(f90token.IntrinsicALL, _tgtBool, _tgtArray),
-
-	// Note: MALLOC is handled specially in transformMALLOC, not here
-}
-
-type intrinsicFnV2 struct {
-	redirectTo f90token.Intrinsic // signal this intrinsic is effectively replaced by another.
-	calls      []intrinsicCall
-	isVariadic bool
-	f1         func(float64) float64
-	f2         func(float64, float64) float64
-}
-
-type intrinsicCall struct {
-	args []*Varinfo
-	// if is nil return type decided by args[0] on instantiation.
-	returnType *Varinfo
-	// Rules for deciding how to use this prioritized in order of appearance:
-	//  - If args[0] is array or character we know this is a method.
-	//  - If first letter is upper case then is function in intrinsic package.
-	//  - Else is a built in in Go.
-	methodOrCall string
-	allowKindArg bool
-}
-
-func makeCall(methodOrGoCall string, returnType *Varinfo, args ...*Varinfo) intrinsicCall {
-	return intrinsicCall{
-		methodOrCall: methodOrGoCall,
-		args:         args,
-		returnType:   returnType,
-	}
-}
-
-// getIntrinsicV2 looks up a V2 intrinsic by token.
-// Returns nil if not found or if redirectTo chain leads to undefined.
-func getIntrinsicV2(lookup f90token.Intrinsic) *intrinsicFnV2 {
-	if int(lookup) >= len(intrinsicsv2) {
-		return nil
-	}
-	fn := &intrinsicsv2[lookup]
-	// Follow redirect chain
-	for fn.redirectTo != 0 {
-		if int(fn.redirectTo) >= len(intrinsicsv2) {
-			return nil
-		}
-		fn = &intrinsicsv2[fn.redirectTo]
-	}
-	if len(fn.calls) == 0 {
-		return nil // Not defined in V2
-	}
-	return fn
-}
-
-// findBestCall finds the best matching intrinsicCall for the given arguments.
-// Returns nil if no match found.
-func (fn *intrinsicFnV2) findBestCall(nargs int) *intrinsicCall {
-	for i := range fn.calls {
-		c := &fn.calls[i]
-		if fn.isVariadic {
-			if nargs >= len(c.args) {
-				return c
-			}
-		} else if len(c.args) == nargs {
-			return c
-		}
-	}
-	return nil
-}
-
-// findBestCallWithTypes finds the best matching intrinsicCall considering argument types.
-func (fn *intrinsicFnV2) findBestCallWithTypes(argTypes []*Varinfo) *intrinsicCall {
-	nargs := len(argTypes)
-	var genericMatch *intrinsicCall
-	for i := range fn.calls {
-		c := &fn.calls[i]
-		if fn.isVariadic {
-			if nargs < len(c.args) {
-				continue
-			}
-		} else if len(c.args) != nargs {
-			continue
-		}
-		// Check if all argument types are compatible
-		match := true
-		isGeneric := false
-		for j := range c.args {
-			argIdx := j
-			if argIdx >= nargs {
-				break
-			}
-			paramType := c.args[j]
-			argType := argTypes[argIdx]
-			if !typeCompatible(paramType, argType) {
-				match = false
-				break
-			}
-			if isGenericVarinfo(paramType) {
-				isGeneric = true
-			}
-		}
-		if match {
-			if !isGeneric {
-				return c // Prefer exact matches over generic matches
-			}
-			if genericMatch == nil {
-				genericMatch = c
-			}
-		}
-	}
-	return genericMatch
-}
-
 // typeCompatible checks if argType is compatible with paramType.
 func typeCompatible(paramType, argType *Varinfo) bool {
 	if paramType == nil || argType == nil {
@@ -1459,298 +1057,4 @@ func typeCompatible(paramType, argType *Varinfo) bool {
 	}
 	// Exact type match
 	return paramType.typeToken() == argType.typeToken()
-}
-
-// intrinsicExprV2 transforms an intrinsic call using the V2 system.
-func (tg *ToGo) intrinsicExprV2(vitgt *Varinfo, fn *intrinsicFnV2, call *intrinsicCall, args ...f90.Expression) (*ast.CallExpr, *Varinfo, error) {
-	// Transform arguments
-	var gargs []ast.Expr
-	var firstArgType *Varinfo
-	for i := range args {
-		paramIdx := i
-		if paramIdx >= len(call.args) {
-			paramIdx = 0 // For variadic, use first param type
-		}
-		expr, argType, err := tg.transformExpression(call.args[paramIdx], args[i])
-		if err != nil {
-			return nil, nil, err
-		}
-		if i == 0 {
-			firstArgType = argType
-		}
-		gargs = append(gargs, expr)
-	}
-
-	// Determine return type
-	resultType := call.returnType
-	if resultType == nil {
-		resultType = firstArgType
-	}
-
-	// Determine function expression based on methodOrCall convention
-	var funcExpr ast.Expr
-	name := call.methodOrCall
-
-	// Check if first arg is array/char → method call
-	if len(call.args) > 0 && (call.args[0] == _tgtArray || call.args[0] == _tgtChar) {
-		// Method call: gargs[0].methodName(gargs[1:]...)
-		return &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X:   gargs[0],
-				Sel: ast.NewIdent(name),
-			},
-			Args: gargs[1:],
-		}, resultType, nil
-	}
-
-	// Check naming convention
-	if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
-		// Uppercase: intrinsic.NAME or intrinsic.NAME[T]
-		sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(name)}
-		// Add type parameter only if first param is generic (function needs type instantiation)
-		isGenericFn := len(call.args) > 0 && isGenericVarinfo(call.args[0])
-		if isGenericFn && firstArgType != nil && !isGenericVarinfo(firstArgType) {
-			goType := goTypeBasic(firstArgType.typeToken(), 0)
-			funcExpr = &ast.IndexExpr{X: sel, Index: goType}
-		} else {
-			funcExpr = sel
-		}
-	} else {
-		// Lowercase: Go builtin (int32, float32, etc.)
-		funcExpr = ast.NewIdent(name)
-	}
-
-	return &ast.CallExpr{
-		Fun:  funcExpr,
-		Args: gargs,
-	}, resultType, nil
-}
-
-var intrinsicsv2 = []intrinsicFnV2{
-	f90token.IntrinsicREAL: {
-		calls: []intrinsicCall{
-			makeCall("float32", _tgtFloat32, _tgtGenericInt),
-			makeCall("float32", _tgtFloat32, _tgtGenericFloat),
-			makeCall("REALPART", _tgtFloat32, _tgtComplex64), // REAL(complex) returns real part
-		},
-	},
-	f90token.IntrinsicINT: {
-		calls: []intrinsicCall{
-			makeCall("int32", _tgtInt32, _tgtGenericInt),
-			makeCall("int32", _tgtInt32, _tgtGenericFloat),
-		},
-	},
-	f90token.IntrinsicIFIX: {redirectTo: f90token.IntrinsicINT},
-	f90token.IntrinsicMAX: {
-		isVariadic: true,
-		calls:      []intrinsicCall{makeCall("MAX", nil, _tgtGenericFloat)},
-	},
-	f90token.IntrinsicCMPLX: {
-		calls: []intrinsicCall{
-			// CMPLX(x) - single arg, imaginary = 0
-			makeCall("CMPLX", _tgtComplex64, _tgtGenericFloat),
-			makeCall("CMPLX", _tgtComplex64, _tgtGenericInt),
-			// CMPLX(x, y) - two args, real and imaginary parts
-			makeCall("CMPLX2", _tgtComplex64, _tgtGenericFloat, _tgtGenericFloat),
-			makeCall("CMPLX2", _tgtComplex64, _tgtGenericInt, _tgtGenericInt),
-		},
-	},
-	f90token.IntrinsicSQRT: {
-		calls: []intrinsicCall{makeCall("SQRT", nil, _tgtGenericFloat)},
-		f1:    math.Sqrt,
-	},
-	f90token.IntrinsicDSQRT: {redirectTo: f90token.IntrinsicSQRT},
-	f90token.IntrinsicAIMAG: {
-		calls: []intrinsicCall{makeCall("AIMAG", _tgtFloat32, _tgtComplex64)},
-	},
-
-	// Type conversions
-	f90token.IntrinsicDBLE: {
-		calls: []intrinsicCall{
-			makeCall("float64", _tgtFloat64, _tgtGenericInt),
-			makeCall("float64", _tgtFloat64, _tgtGenericFloat),
-		},
-	},
-
-	// Trig intrinsics
-	f90token.IntrinsicSIN: {
-		calls: []intrinsicCall{makeCall("SIN", nil, _tgtGenericFloat)},
-		f1:    math.Sin,
-	},
-	f90token.IntrinsicDSIN: {redirectTo: f90token.IntrinsicSIN},
-	f90token.IntrinsicCOS: {
-		calls: []intrinsicCall{makeCall("COS", nil, _tgtGenericFloat)},
-		f1:    math.Cos,
-	},
-	f90token.IntrinsicDCOS: {redirectTo: f90token.IntrinsicCOS},
-	f90token.IntrinsicTAN: {
-		calls: []intrinsicCall{makeCall("TAN", nil, _tgtGenericFloat)},
-		f1:    math.Tan,
-	},
-	f90token.IntrinsicDTAN: {redirectTo: f90token.IntrinsicTAN},
-	f90token.IntrinsicASIN: {
-		calls: []intrinsicCall{makeCall("ASIN", nil, _tgtGenericFloat)},
-		f1:    math.Asin,
-	},
-	f90token.IntrinsicDASIN: {redirectTo: f90token.IntrinsicASIN},
-	f90token.IntrinsicACOS: {
-		calls: []intrinsicCall{makeCall("ACOS", nil, _tgtGenericFloat)},
-		f1:    math.Acos,
-	},
-	f90token.IntrinsicDACOS: {redirectTo: f90token.IntrinsicACOS},
-	f90token.IntrinsicATAN: {
-		calls: []intrinsicCall{makeCall("ATAN", nil, _tgtGenericFloat)},
-		f1:    math.Atan,
-	},
-	f90token.IntrinsicDATAN: {redirectTo: f90token.IntrinsicATAN},
-	f90token.IntrinsicATAN2: {
-		calls: []intrinsicCall{makeCall("ATAN2", nil, _tgtGenericFloat, _tgtGenericFloat)},
-		f2:    math.Atan2,
-	},
-	f90token.IntrinsicDATAN2: {redirectTo: f90token.IntrinsicATAN2},
-
-	// Hyperbolic intrinsics
-	f90token.IntrinsicSINH: {
-		calls: []intrinsicCall{makeCall("SINH", nil, _tgtGenericFloat)},
-		f1:    math.Sinh,
-	},
-	f90token.IntrinsicDSINH: {redirectTo: f90token.IntrinsicSINH},
-	f90token.IntrinsicCOSH: {
-		calls: []intrinsicCall{makeCall("COSH", nil, _tgtGenericFloat)},
-		f1:    math.Cosh,
-	},
-	f90token.IntrinsicDCOSH: {redirectTo: f90token.IntrinsicCOSH},
-	f90token.IntrinsicTANH: {
-		calls: []intrinsicCall{makeCall("TANH", nil, _tgtGenericFloat)},
-		f1:    math.Tanh,
-	},
-	f90token.IntrinsicDTANH: {redirectTo: f90token.IntrinsicTANH},
-
-	// Exponential and logarithmic
-	f90token.IntrinsicEXP: {
-		calls: []intrinsicCall{makeCall("EXP", nil, _tgtGenericFloat)},
-		f1:    math.Exp,
-	},
-	f90token.IntrinsicDEXP: {redirectTo: f90token.IntrinsicEXP},
-	f90token.IntrinsicLOG: {
-		calls: []intrinsicCall{makeCall("LOG", nil, _tgtGenericFloat)},
-		f1:    math.Log,
-	},
-	f90token.IntrinsicDLOG: {redirectTo: f90token.IntrinsicLOG},
-	f90token.IntrinsicLOG10: {
-		calls: []intrinsicCall{makeCall("LOG10", nil, _tgtGenericFloat)},
-		f1:    math.Log10,
-	},
-	f90token.IntrinsicDLOG10: {redirectTo: f90token.IntrinsicLOG10},
-
-	// Truncation and rounding
-	f90token.IntrinsicFLOOR: {
-		calls: []intrinsicCall{makeCall("FLOOR", nil, _tgtGenericFloat)},
-		f1:    math.Floor,
-	},
-	f90token.IntrinsicCEILING: {
-		calls: []intrinsicCall{makeCall("CEILING", nil, _tgtGenericFloat)},
-		f1:    math.Ceil,
-	},
-	f90token.IntrinsicAINT: {
-		calls: []intrinsicCall{makeCall("AINT", nil, _tgtGenericFloat)},
-		f1:    math.Trunc,
-	},
-	f90token.IntrinsicANINT: {
-		calls: []intrinsicCall{makeCall("ANINT", nil, _tgtGenericFloat)},
-		f1:    math.Round,
-	},
-	f90token.IntrinsicNINT: {
-		calls: []intrinsicCall{makeCall("NINT", _tgtInt32, _tgtGenericFloat)},
-	},
-	f90token.IntrinsicDNINT:  {redirectTo: f90token.IntrinsicANINT},
-	f90token.IntrinsicIDNINT: {redirectTo: f90token.IntrinsicNINT},
-
-	// Absolute value and sign
-	f90token.IntrinsicABS: {
-		calls: []intrinsicCall{makeCall("ABS", nil, _tgtGenericFloat)},
-		f1:    math.Abs,
-	},
-	f90token.IntrinsicDABS: {redirectTo: f90token.IntrinsicABS},
-	f90token.IntrinsicIABS: {
-		calls: []intrinsicCall{makeCall("IABS", nil, _tgtGenericInt)},
-	},
-	f90token.IntrinsicCABS: {
-		calls: []intrinsicCall{makeCall("CABS", _tgtFloat32, _tgtComplex64)},
-	},
-	f90token.IntrinsicSIGN: {
-		calls: []intrinsicCall{makeCall("SIGN", nil, _tgtGenericFloat, _tgtGenericFloat)},
-	},
-	f90token.IntrinsicISIGN: {
-		calls: []intrinsicCall{makeCall("SIGN", nil, _tgtGenericInt, _tgtGenericInt)},
-	},
-	f90token.IntrinsicDSIGN: {redirectTo: f90token.IntrinsicSIGN},
-
-	// Modulo and remainder
-	f90token.IntrinsicMOD: {
-		calls: []intrinsicCall{
-			makeCall("MOD", nil, _tgtGenericInt, _tgtGenericInt),
-			makeCall("MODREAL", nil, _tgtGenericFloat, _tgtGenericFloat),
-		},
-	},
-	f90token.IntrinsicDIM: {
-		calls: []intrinsicCall{makeCall("DIM", nil, _tgtGenericFloat, _tgtGenericFloat)},
-	},
-	f90token.IntrinsicIDIM: {
-		calls: []intrinsicCall{makeCall("DIM", nil, _tgtGenericInt, _tgtGenericInt)},
-	},
-	f90token.IntrinsicDDIM: {redirectTo: f90token.IntrinsicDIM},
-	f90token.IntrinsicDPROD: {
-		calls: []intrinsicCall{makeCall("DPROD", _tgtFloat64, _tgtFloat32, _tgtFloat32)},
-	},
-
-	// Variadic min
-	f90token.IntrinsicMIN: {
-		isVariadic: true,
-		calls:      []intrinsicCall{makeCall("MIN", nil, _tgtGenericFloat)},
-	},
-	f90token.IntrinsicMAX0: {
-		isVariadic: true,
-		calls:      []intrinsicCall{makeCall("MAX", nil, _tgtGenericInt)},
-	},
-	f90token.IntrinsicMIN0: {
-		isVariadic: true,
-		calls:      []intrinsicCall{makeCall("MIN", nil, _tgtGenericInt)},
-	},
-	f90token.IntrinsicAMAX1: {redirectTo: f90token.IntrinsicMAX},
-	f90token.IntrinsicAMIN1: {redirectTo: f90token.IntrinsicMIN},
-	f90token.IntrinsicDMAX1: {redirectTo: f90token.IntrinsicMAX},
-	f90token.IntrinsicDMIN1: {redirectTo: f90token.IntrinsicMIN},
-
-	// Note: Character methods (LEN, TRIM, etc.) and array methods (SIZE, LBOUND, etc.)
-	// are handled by V1 which has special method call handling.
-}
-
-func defaultVarinfo(tok f90token.Token) *Varinfo {
-	return &Varinfo{
-		_varname: fmt.Sprintf("<default %s varinfo>", tok.String()),
-		decl:     &f90.DeclEntity{Type: &f90.TypeSpec{Token: tok}},
-	}
-}
-
-var (
-	_astFalse        = ast.NewIdent("false")
-	_astTrue         = ast.NewIdent("true")
-	_astSet          = ast.NewIdent("Set")
-	_astOne          = &ast.BasicLit{Kind: token.INT, Value: "1"}
-	_tgtInt32        = defaultVarinfo(f90token.INTEGER)
-	_tgtInt          = defaultVarinfo(f90token.INTEGER)
-	_tgtFloat32      = defaultVarinfo(f90token.REAL)
-	_tgtBool         = defaultVarinfo(f90token.LOGICAL)
-	_tgtFloat64      = defaultVarinfo(f90token.DOUBLEPRECISION)
-	_tgtChar         = defaultVarinfo(f90token.CHARACTER)
-	_tgtStringLit    = defaultVarinfo(f90token.StringLit)
-	_tgtGenericFloat = defaultVarinfo(f90token.FloatLit)
-	_tgtGenericInt   = defaultVarinfo(f90token.IntLit)
-	_tgtComplex64    = defaultVarinfo(f90token.COMPLEX)
-	_tgtArray        = defaultVarinfo(f90token.DIMENSION)
-)
-
-func isGenericVarinfo(vi *Varinfo) bool {
-	return vi == _tgtGenericFloat || vi == _tgtGenericInt
 }
