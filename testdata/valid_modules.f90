@@ -1,15 +1,19 @@
 MODULE constants
 	IMPLICIT NONE
 	REAL, PARAMETER :: PI = 3.14159
-	END MODULE constants
+END MODULE constants
 
 MODULE math
 	CONTAINS
+	FUNCTION abc()
+		INTEGER abc
+		abc = add(1,2)
+	END FUNCTION
 	FUNCTION add(a, b)
 		INTEGER :: a, b, add
 		add = a + b
 	END FUNCTION
-	END MODULE
+END MODULE
 
 MODULE utils
 	CONTAINS
@@ -20,7 +24,7 @@ MODULE utils
 		REAL :: x, double
 		double = x * 2.0
 	END FUNCTION
-	END MODULE utils
+END MODULE utils
 
 MODULE types
 	TYPE :: point
@@ -34,8 +38,9 @@ MODULE interfaces
 			REAL :: x
 		END SUBROUTINE
 	END INTERFACE
-	END MODULE
+END MODULE
 
 MODULE outer
 	INTEGER :: outer_var
-	END MODULE
+END MODULE
+

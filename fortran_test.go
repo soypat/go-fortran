@@ -115,7 +115,7 @@ func testTranspile(t testing.TB, tg *ToGo, pus []f90.Unit, srcPath string, src s
 		}
 		// TODO: add other routines here.
 	} else {
-		_, err := tg.transformProcedures(nil, pus)
+		_, err := tg.TransformUnits(nil, pus...)
 		if err != nil {
 			t.Fatal(srcPath, err)
 		}

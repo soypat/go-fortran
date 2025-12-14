@@ -152,7 +152,7 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 	var mainBlock *f90.Unit
 	for !ps.IsDone() {
 		unit := ps.ParseNextProgramUnit()
-		if unit.IsValid() {
+		if !unit.IsValid() {
 			break
 		}
 		if unit.Token == f90token.PROGRAM {
@@ -171,6 +171,7 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 	var decls []ast.Decl
 	if mainBlock == nil {
 		decls, err = tg.TransformRegistered([]ast.Decl{tg.ImportDecl()})
+		decls = tg.AppendCommonDecls(decls)
 	} else {
 		decls, err = tg.TransformProgram(*mainBlock)
 	}

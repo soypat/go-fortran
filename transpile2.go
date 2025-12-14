@@ -14,10 +14,11 @@ import (
 )
 
 type ToGo struct {
-	repl        REPL
-	source      string
-	sourceFile  io.ReaderAt
-	currentNode f90.Node
+	repl           REPL
+	containedStack []f90.Unit
+	source         string
+	sourceFile     io.ReaderAt
+	currentNode    f90.Node
 }
 
 func (tg *ToGo) Reset() {
@@ -37,11 +38,20 @@ func (tg *ToGo) RegisterUnits(pus ...f90.Unit) error {
 }
 
 func (tg *ToGo) Contained(name string) *ParserUnitData {
+	for i := len(tg.containedStack) - 1; i >= 0; i-- {
+		if strings.EqualFold(tg.containedStack[i].Name, name) {
+			return tg.containedStack[i].Data.(*ParserUnitData)
+		}
+	}
 	return tg.repl.Contained(name)
 }
 
 func (tg *ToGo) ContainedOrUsed(name string) *ParserUnitData {
-	return tg.repl.ContainedOrUsed(name)
+	data := tg.Contained(name)
+	if data == nil {
+		data = tg.repl.GetUsed(name)
+	}
+	return data
 }
 
 func (tg *ToGo) ImportDecl() ast.Decl {
@@ -54,11 +64,10 @@ func (tg *ToGo) ImportDecl() ast.Decl {
 }
 
 func (tg *ToGo) TransformRegistered(dst []ast.Decl) (_ []ast.Decl, err error) {
-	dst, err = tg.transformProcedures(dst, tg.repl.registered)
+	dst, err = tg.TransformUnits(dst, tg.repl.registered...)
 	if err != nil {
 		return dst, err
 	}
-	dst = tg.AppendCommonDecls(dst)
 	return dst, nil
 }
 
@@ -96,7 +105,7 @@ func (tg *ToGo) TransformProgram(prog f90.Unit) ([]ast.Decl, error) {
 	// Append COMMON block declarations at start.
 
 	// Transform contained procedures (CONTAINS section)
-	decls, err = tg.transformProcedures(decls, prog.Contains)
+	decls, err = tg.TransformUnits(decls, prog.Contains...)
 	if err != nil {
 		return decls, fmt.Errorf("in CONTAINS of %s: %w", prog.Name, err)
 	}
@@ -104,31 +113,69 @@ func (tg *ToGo) TransformProgram(prog f90.Unit) ([]ast.Decl, error) {
 	if err != nil {
 		return decls, fmt.Errorf("adding registered units for %s: %w", prog.Name, err)
 	}
+	decls = tg.AppendCommonDecls(decls)
 	return decls, nil
 }
 
-func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.Unit) (_ []ast.Decl, err error) {
-	for i := range pus {
-		contained := &pus[i]
-		if !contained.IsValid() {
+func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl, err error) {
+	origLen := len(tg.containedStack)
+	tg.containedStack = append(tg.containedStack, units...)
+	defer func() {
+		tg.containedStack = tg.containedStack[:origLen]
+	}()
+	for i := range units {
+		unit := &units[i]
+		if !unit.IsValid() {
 			return dst, errors.New("invalid program unit")
 		}
-		tg.currentNode = contained
-		var decl ast.Decl
-		switch contained.Token {
-		case f90token.SUBROUTINE, f90token.FUNCTION:
-			decl, err = tg.transformProcedure(*contained)
-		case f90token.MODULE:
-			dst, err = tg.transformProcedures(dst, contained.Contains)
-		case f90token.BLOCK:
-			// TODO: handle block data.
-		default:
-			panic(fmt.Sprintf("unexpected program unit %v", contained.Token))
-		}
+		tg.currentNode = unit
+		var fn *ast.FuncDecl
+		var results *ast.FieldList
+		err = tg.repl.SetScope(*unit)
 		if err != nil {
-			return dst, err
-		} else if decl != nil {
-			dst = append(dst, decl)
+			return dst, fmt.Errorf("setting scope for %s: %w", unit.Name, err)
+		}
+		switch unit.Token {
+		default:
+			panic("unsupported unit token: " + unit.Token.String())
+		case f90token.FUNCTION:
+			field := tg.getReturnParam()
+			if field == nil {
+				return dst, fmt.Errorf("failed to acquire return parameter type for FUNCTION %s", unit.Name)
+			}
+			results = &ast.FieldList{List: []*ast.Field{field}}
+			fallthrough
+		case f90token.SUBROUTINE, f90token.PROGRAM:
+			fn = &ast.FuncDecl{
+				Name: ast.NewIdent(unit.Name),
+				Type: &ast.FuncType{
+					Params: &ast.FieldList{
+						List: tg.getScopeParams(nil),
+					},
+					Results: results,
+				},
+				Body: &ast.BlockStmt{},
+			}
+			fn.Body.List, err = tg.transformStatements(nil, unit.Body)
+			if err != nil {
+				return dst, fmt.Errorf("transforming statements of %s: %w", unit.Name, err)
+			}
+			if results != nil {
+				fn.Body.List = append(fn.Body.List, &ast.ReturnStmt{}) // FUNCTION has return value.
+			}
+			dst = append(dst, fn)
+			if unit.Token == f90token.SUBROUTINE || unit.Token == f90token.FUNCTION {
+				break // No contains statements, continue.
+			}
+			fallthrough
+		case f90token.MODULE:
+			// CONTAINS
+			dst, err = tg.TransformUnits(dst, unit.Contains...)
+			if err != nil {
+				return dst, fmt.Errorf("transforming CONTAINS of %s: %w", unit.Name, err)
+			}
+		case f90token.BLOCK:
+			// TODO: support.
 		}
 	}
 	return dst, nil

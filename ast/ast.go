@@ -223,7 +223,7 @@ type Unit struct {
 func (pb *Unit) GetLabel() *string  { return &pb.Label }
 func (pb *Unit) UnitData() any      { return pb.Data }
 func (pb *Unit) UnitName() string   { return pb.Name }
-func (pb *Unit) IsValid() bool      { return pb.Token != 0 }
+func (pb *Unit) IsValid() bool      { return pb.Token != 0 && pb.Position.end >= pb.Position.start }
 func (pb *Unit) statementNode()     {}
 func (pb *Unit) programUnitNode()   {}
 func (pb *Unit) IsExecutable() bool { return false }

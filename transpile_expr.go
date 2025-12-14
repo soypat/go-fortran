@@ -122,7 +122,7 @@ func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructo
 	} else if len(e.Values) > 0 {
 		// Infer element type from first value. Use _tgtGenericInt as placeholder vitgt
 		// since literals always return their own type regardless of target.
-		_, elemVinfo, err = tg.transformExpression(vitgt, e.Values[0])
+		_, elemVinfo, err = tg.transformExpression(_tgtGenericInt, e.Values[0])
 		if err != nil {
 			return nil, err
 		}

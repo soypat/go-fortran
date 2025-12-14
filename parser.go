@@ -607,7 +607,7 @@ func (p *Parser90) ParseNextProgramUnit() (unit ast.Unit) {
 		}
 	}()
 
-	for !p.IsDone() && unit.Token == 0 {
+	for !p.IsDone() && !unit.IsValid() {
 		// Skip leading newlines and comments
 		// Parse one program unit
 		puStart = p.sourcePos()
