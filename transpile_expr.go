@@ -17,6 +17,8 @@ import (
 func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result ast.Expr, resultType *Varinfo, err error) {
 	if expr == nil {
 		return nil, nil, tg.makeErrAtStmt("nil expression")
+	} else if vitgt == nil {
+		panic("vitgt cannot be nil")
 	}
 	switch e := expr.(type) {
 	case *f90.StringLiteral:
@@ -93,8 +95,7 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 	if err != nil {
 		return nil, nil, err
 	}
-	doWrap := vitgt == _tgtInt ||
-		(tg.varIsPointerTo(resultType) != tg.varIsPointerTo(vitgt))
+	doWrap := vitgt == _tgtInt || resultType.IsPointer() != vitgt.IsPointer()
 	if doWrap {
 		result = tg.wrapConversion(vitgt, resultType, result)
 	}
@@ -111,13 +112,29 @@ func (tg *ToGo) transformExprIdentifer(vitgt *Varinfo, e *f90.Identifier) (resul
 }
 
 func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructor) (result ast.Expr, err error) {
-	// Infer element type from target
-	elemIdent := tg.baseGotype(vitgt.val.tok, tg.resolveKind(vitgt))
+	var elemType ast.Expr
+	var elemVinfo *Varinfo = vitgt
+
+	// Try to infer element type from target, but not DIMENSION (means "array of unknown type")
+	targetTok := vitgt.typeToken()
+	if targetTok != f90token.Undefined && targetTok != f90token.DIMENSION {
+		elemType = tg.baseGotype(targetTok, tg.resolveKind(vitgt))
+	} else if len(e.Values) > 0 {
+		// Infer element type from first value. Use _tgtGenericInt as placeholder vitgt
+		// since literals always return their own type regardless of target.
+		_, elemVinfo, err = tg.transformExpression(_tgtGenericInt, e.Values[0])
+		if err != nil {
+			return nil, err
+		}
+		elemType = tg.baseGotype(elemVinfo.typeToken(), tg.resolveKind(elemVinfo))
+	} else {
+		return nil, tg.makeErr(e, "cannot infer array constructor element type")
+	}
 
 	// Transform values
 	var elts []ast.Expr
 	for _, val := range e.Values {
-		elt, _, err := tg.transformExpression(vitgt, val)
+		elt, _, err := tg.transformExpression(elemVinfo, val)
 		if err != nil {
 			return nil, err
 		}
@@ -127,10 +144,10 @@ func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructo
 	// Generate: intrinsic.NewArray[T]([]T{elts...}, len)
 	// Returns pointer which matches array pointer types
 	return &ast.CallExpr{
-		Fun: &ast.IndexExpr{X: _astFnNewArray, Index: elemIdent},
+		Fun: &ast.IndexExpr{X: _astFnNewArray, Index: elemType},
 		Args: []ast.Expr{
 			&ast.CompositeLit{
-				Type: &ast.ArrayType{Elt: elemIdent},
+				Type: &ast.ArrayType{Elt: elemType},
 				Elts: elts,
 			},
 			&ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(len(e.Values))},
@@ -160,11 +177,7 @@ func (tg *ToGo) transformComponentAccess(vitgt *Varinfo, e *f90.ComponentAccess)
 
 	// For now, return vitgt as resultType since we don't track derived type field types
 	// This works for simple cases where the target type is known
-	if vitgt != nil {
-		return result, vitgt, nil
-	}
-	// If no target type, use base variable info
-	return result, baseVinfo, nil
+	return result, vitgt, nil
 }
 
 func (tg *ToGo) transformUnaryExpr(vitgt *Varinfo, e *f90.UnaryExpr) (result ast.Expr, resultType *Varinfo, err error) {
@@ -264,7 +277,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 	if err != nil {
 		return nil, nil, err
 	}
-	if tg.varIsCharlike(rightType) || tg.varIsCharlike(leftType) {
+	if rightType.IsChar() || leftType.IsChar() {
 		return tg.transformBinaryExprChar(vitgt, e.Op, left, right, leftType, rightType)
 	}
 	lpromote, rpromote, err := tg.checkPromotion(leftType, rightType)
@@ -558,7 +571,7 @@ func (tg *ToGo) transformMALLOC(vitgt *Varinfo, e *f90.CallExpr) (result ast.Exp
 
 	// Determine element type from target's pointee
 	var elemType ast.Expr
-	if vitgt != nil && vitgt.pointee != "" {
+	if vitgt.pointee != "" {
 		pointeeVar := tg.repl.Var(vitgt.pointee)
 		if pointeeVar != nil {
 			elemType = tg.baseGotype(pointeeVar.typeToken(), tg.resolveKind(pointeeVar))
@@ -588,7 +601,7 @@ func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.CallExpr) (result ast.E
 	isRanged := f90.IsRanged(e.Args...)
 	if isRanged {
 		// Check if it's a 1D character substring: str(2:4) → str.Substring(start, end)
-		if len(e.Args) == 1 && vi.decl.Type.Token == f90token.CHARACTER && !tg.varIsArray(vi) {
+		if len(e.Args) == 1 && vi.decl.Type.Token == f90token.CHARACTER && !vi.IsArray() {
 			args, err := tg.transformRangeExprToArgs(e.Args[0].(*f90.RangeExpr), vi)
 			receiver := tg.astVarExpr(vi)
 			return &ast.CallExpr{
@@ -729,7 +742,7 @@ func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.CallExpr, 
 		return dst, nil
 	}
 
-	if tg.varIsArray(vi) || isRanged && len(fexpr.Args) > 1 || fexpr.SecondaryAccess != nil {
+	if vi.IsArray() || isRanged && len(fexpr.Args) > 1 || fexpr.SecondaryAccess != nil {
 		return dst, tg.makeErrWithPos(fexpr.Position, "unsupported character type attributes for range set")
 	}
 	args, err := tg.transformRangeExprToArgs(fexpr.Args[0].(*f90.RangeExpr), vi)
@@ -939,7 +952,7 @@ func (tg *ToGo) transformExprSlice(vitgt *Varinfo, dst []ast.Expr, src []f90.Exp
 
 // wrapConversion wraps expr with a type conversion if target type differs from sourceType.
 func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Expr) ast.Expr {
-	ptrDerefFirst := tg.varIsPointerTo(sourceType)
+	ptrDerefFirst := sourceType.IsPointer()
 	// isArray := tg.varIsArray(sourceType)
 	switch {
 	case ptrDerefFirst:
@@ -1044,7 +1057,7 @@ func (tg *ToGo) intrinsicExpr(vitgt *Varinfo, fn *intrinsicFn, args ...f90.Expre
 			// - Variadic intrinsics (MIN/MAX): use target type if valid, else first arg type
 			// - Other generics (ABS, etc.): use first argument's actual type
 			genericType := firstArgType
-			if fn.isVariadic && vitgt != nil && !isGenericVarinfo(vitgt) {
+			if fn.isVariadic && !isGenericVarinfo(vitgt) {
 				genericType = vitgt
 			}
 			funcExpr = fn.exprGeneric(genericType)

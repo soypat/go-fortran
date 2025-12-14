@@ -1,6 +1,7 @@
 package fortran
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -13,10 +14,11 @@ import (
 )
 
 type ToGo struct {
-	repl        REPL
-	source      string
-	sourceFile  io.ReaderAt
-	currentNode f90.Node
+	repl           REPL
+	containedStack []f90.Unit
+	source         string
+	sourceFile     io.ReaderAt
+	currentNode    f90.Node
 }
 
 func (tg *ToGo) Reset() {
@@ -31,19 +33,50 @@ func (tg *ToGo) SetSource(source string, r io.ReaderAt) {
 	tg.sourceFile = r
 }
 
-func (tg *ToGo) RegisterUnits(pus ...f90.ProgramUnit) error {
+func (tg *ToGo) RegisterUnits(pus ...f90.Unit) error {
 	return tg.repl.RegisterUnits(pus...)
 }
 
 func (tg *ToGo) Contained(name string) *ParserUnitData {
+	for i := len(tg.containedStack) - 1; i >= 0; i-- {
+		if strings.EqualFold(tg.containedStack[i].Name, name) {
+			return tg.containedStack[i].Data.(*ParserUnitData)
+		}
+	}
 	return tg.repl.Contained(name)
 }
 
 func (tg *ToGo) ContainedOrUsed(name string) *ParserUnitData {
-	return tg.repl.ContainedOrUsed(name)
+	data := tg.Contained(name)
+	if data == nil {
+		data = tg.repl.GetUsed(name)
+	}
+	return data
 }
 
-func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
+func (tg *ToGo) ImportDecl() ast.Decl {
+	return &ast.GenDecl{
+		Tok: token.IMPORT,
+		Specs: []ast.Spec{&ast.ImportSpec{
+			Path: &ast.BasicLit{Value: fmt.Sprintf("%q", "github.com/soypat/go-fortran/intrinsic")},
+		}},
+	}
+}
+
+func (tg *ToGo) TransformRegistered(dst []ast.Decl) (_ []ast.Decl, err error) {
+	dst, err = tg.TransformUnits(dst, tg.repl.registered...)
+	if err != nil {
+		return dst, err
+	}
+	return dst, nil
+}
+
+func (tg *ToGo) TransformProgram(prog f90.Unit) ([]ast.Decl, error) {
+	if !prog.IsValid() {
+		return nil, errors.New("invalid program unit")
+	} else if prog.Token != f90token.PROGRAM {
+		return nil, errors.New("expected PROGRAM unit")
+	}
 	err := tg.repl.SetScope(prog)
 	if err != nil {
 		return nil, err
@@ -63,12 +96,7 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 
 	// Start with import and main function
 	decls := []ast.Decl{
-		&ast.GenDecl{
-			Tok: token.IMPORT,
-			Specs: []ast.Spec{&ast.ImportSpec{
-				Path: &ast.BasicLit{Value: fmt.Sprintf("%q", "github.com/soypat/go-fortran/intrinsic")},
-			}},
-		},
+		tg.ImportDecl(),
 		mainFunc,
 	}
 	if err != nil {
@@ -77,39 +105,77 @@ func (tg *ToGo) TransformProgram(prog *f90.ProgramBlock) ([]ast.Decl, error) {
 	// Append COMMON block declarations at start.
 
 	// Transform contained procedures (CONTAINS section)
-	decls, err = tg.transformProcedures(decls, prog.Contains)
+	decls, err = tg.TransformUnits(decls, prog.Contains...)
 	if err != nil {
 		return decls, fmt.Errorf("in CONTAINS of %s: %w", prog.Name, err)
 	}
-	decls, err = tg.transformProcedures(decls, tg.repl.registered)
+	decls, err = tg.TransformRegistered(decls)
 	if err != nil {
-		return decls, fmt.Errorf("in USE added routines for %s: %w", prog.Name, err)
+		return decls, fmt.Errorf("adding registered units for %s: %w", prog.Name, err)
 	}
 	decls = tg.AppendCommonDecls(decls)
 	return decls, nil
 }
 
-func (tg *ToGo) transformProcedures(dst []ast.Decl, pus []f90.ProgramUnit) (_ []ast.Decl, err error) {
-	for _, contained := range pus {
-		tg.currentNode = contained
-		var decl ast.Decl
-		switch c := contained.(type) {
-		case *f90.Subroutine:
-			decl, err = tg.TransformSubroutine(c)
-		case *f90.Function:
-			decl, err = tg.TransformFunction(c)
-		case *f90.Module:
-			dst, err = tg.transformProcedures(dst, c.Contains)
-		case *f90.BlockData:
-			// TODO: handle block data.
-		default:
-			panic(fmt.Sprintf("unexpected program unit %s", c))
-
+func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl, err error) {
+	origLen := len(tg.containedStack)
+	tg.containedStack = append(tg.containedStack, units...)
+	defer func() {
+		tg.containedStack = tg.containedStack[:origLen]
+	}()
+	for i := range units {
+		unit := &units[i]
+		if !unit.IsValid() {
+			return dst, errors.New("invalid program unit")
 		}
+		tg.currentNode = unit
+		var fn *ast.FuncDecl
+		var results *ast.FieldList
+		err = tg.repl.SetScope(*unit)
 		if err != nil {
-			return dst, err
-		} else if decl != nil {
-			dst = append(dst, decl)
+			return dst, fmt.Errorf("setting scope for %s: %w", unit.Name, err)
+		}
+		switch unit.Token {
+		default:
+			panic("unsupported unit token: " + unit.Token.String())
+		case f90token.FUNCTION:
+			field := tg.getReturnParam()
+			if field == nil {
+				return dst, fmt.Errorf("failed to acquire return parameter type for FUNCTION %s", unit.Name)
+			}
+			results = &ast.FieldList{List: []*ast.Field{field}}
+			fallthrough
+		case f90token.SUBROUTINE, f90token.PROGRAM:
+			fn = &ast.FuncDecl{
+				Name: ast.NewIdent(unit.Name),
+				Type: &ast.FuncType{
+					Params: &ast.FieldList{
+						List: tg.getScopeParams(nil),
+					},
+					Results: results,
+				},
+				Body: &ast.BlockStmt{},
+			}
+			fn.Body.List, err = tg.transformStatements(nil, unit.Body)
+			if err != nil {
+				return dst, fmt.Errorf("transforming statements of %s: %w", unit.Name, err)
+			}
+			if results != nil {
+				fn.Body.List = append(fn.Body.List, &ast.ReturnStmt{}) // FUNCTION has return value.
+			}
+			dst = append(dst, fn)
+			if unit.Token == f90token.SUBROUTINE || unit.Token == f90token.FUNCTION {
+				break // No contains statements, continue.
+			}
+			fallthrough
+		case f90token.MODULE:
+			// CONTAINS
+			dst, err = tg.TransformUnits(dst, unit.Contains...)
+			if err != nil {
+				return dst, fmt.Errorf("transforming CONTAINS of %s: %w", unit.Name, err)
+			}
+		case f90token.BLOCK:
+			// TODO: support.
 		}
 	}
 	return dst, nil
@@ -120,35 +186,31 @@ func (tg *ToGo) astIdent(name string) *ast.Ident {
 }
 
 // TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration
-func (tg *ToGo) TransformSubroutine(sub *f90.Subroutine) (_ *ast.FuncDecl, err error) {
+func (tg *ToGo) TransformSubroutine(sub f90.Unit) (_ *ast.FuncDecl, err error) {
 	return tg.transformProcedure(sub)
 }
 
-// TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration
-func (tg *ToGo) TransformFunction(fn *f90.Function) (_ *ast.FuncDecl, err error) {
+// TransformFunction transforms a Fortran FUNCTION to a Go function declaration
+func (tg *ToGo) TransformFunction(fn f90.Unit) (_ *ast.FuncDecl, err error) {
 	return tg.transformProcedure(fn)
 }
 
-func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.FuncDecl, err error) {
-	tg.currentNode = subroutineOrFunc
+func (tg *ToGo) transformProcedure(subroutineOrFunc f90.Unit) (_ *ast.FuncDecl, err error) {
+	if subroutineOrFunc.Token != f90token.FUNCTION && subroutineOrFunc.Token != f90token.SUBROUTINE {
+		return nil, errors.New("not procedure")
+	}
+	tg.currentNode = &subroutineOrFunc
 	err = tg.repl.SetScope(subroutineOrFunc)
 	if err != nil {
 		return nil, err
 	}
-	// Collect COMMON blocks from this procedure's scope
-	var body []f90.Statement
 	var returned *ast.FieldList
-	if fn, ok := subroutineOrFunc.(*f90.Function); ok {
-		body = fn.Body
+	if subroutineOrFunc.Token == f90token.FUNCTION {
 		field := tg.getReturnParam()
 		if field == nil {
-			return nil, fmt.Errorf("failed to acquire return parameter type for %s", fn.Name)
+			return nil, fmt.Errorf("failed to acquire return parameter type for %s", subroutineOrFunc.Name)
 		}
 		returned = &ast.FieldList{List: []*ast.Field{field}}
-	} else if sub, ok := subroutineOrFunc.(*f90.Subroutine); ok {
-		body = sub.Body
-	} else {
-		panic("unexpected argument")
 	}
 
 	fn := &ast.FuncDecl{
@@ -161,7 +223,7 @@ func (tg *ToGo) transformProcedure(subroutineOrFunc f90.ProgramUnit) (_ *ast.Fun
 		},
 		Body: &ast.BlockStmt{},
 	}
-	fn.Body.List, err = tg.transformStatements(nil, body)
+	fn.Body.List, err = tg.transformStatements(nil, subroutineOrFunc.Body)
 	if err != nil {
 		return fn, err
 	}
@@ -179,7 +241,7 @@ func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 		tp := tg.goType(vi)
 		// For INTENT(OUT) or INTENT(INOUT) non-array scalars, use pointer type
 		intent := vi.decl.Type.Intent()
-		isArray := tg.varIsArray(vi)
+		isArray := vi.IsArray()
 		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
 			tp = &ast.StarExpr{X: tp}
 		}
@@ -204,6 +266,9 @@ func (tg *ToGo) getReturnParam() *ast.Field {
 func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("label" + f90Label) }
 
 func (tg *ToGo) makeErrAtStmt(msg string) error {
+	if tg.currentNode == nil {
+		return tg.makeErrWithPos(f90.Position{}, msg)
+	}
 	return tg.makeErr(tg.currentNode, msg)
 }
 
@@ -356,7 +421,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 }
 
 func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Expr, error) {
-	if !tg.varIsArray(typ) {
+	if !typ.IsArray() {
 		return nil, tg.makeErrWithPos(typ.decl.Position, "invalid type declaration dimensions for array creation")
 	}
 	dims := typ.Dimensions()
@@ -439,7 +504,7 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 		useSpecs.Values = append(useSpecs.Values, ident)
 		// Generate array initialization for arrays with fixed dimensions
 		// Skip allocatable arrays - they're initialized by ALLOCATE statements
-		isArray := tg.varIsArray(vi)
+		isArray := vi.IsArray()
 		if isArray && !vi.IsAllocatable() {
 			newArrExpr, err := tg.makeArrayInitializer(vi, ast.NewIdent("nil"))
 			if err != nil {
@@ -471,9 +536,14 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 			// Default to length 1 if no LEN attribute (Fortran standard)
 			var lenExpr ast.Expr = _astOne
 			if charLen := ent.Charlen(); charLen != nil {
-				lenExpr, _, err = tg.transformExpression(_tgtInt, charLen)
-				if err != nil {
-					return nil, err
+				// Check for assumed-length character (*) - use default length
+				if ident, ok := charLen.(*f90.Identifier); ok && ident.Value == "*" {
+					// Assumed-length: keep default length 1
+				} else {
+					lenExpr, _, err = tg.transformExpression(_tgtInt, charLen)
+					if err != nil {
+						return nil, err
+					}
 				}
 			}
 			arrayInits = append(arrayInits, &ast.AssignStmt{
@@ -647,7 +717,7 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 		// For INTENT(OUT/INOUT) non-array scalar parameters, pass address
 		if info != nil && info.decl != nil {
 			intent := info.decl.Type.Intent()
-			isArray := tg.varIsArray(info)
+			isArray := info.IsArray()
 			if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
 				goexpr = &ast.UnaryExpr{Op: token.AND, X: goexpr}
 			}
@@ -697,7 +767,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		targetVinfo = tg.repl.Var(tgt.Name)
 		// Check for statement function definition: NAME(args) = expr
 		// where NAME is not an array and all args are simple identifiers
-		if (targetVinfo == nil || !tg.varIsArray(targetVinfo)) && allIdentifierArgs(tgt.Args) {
+		if (targetVinfo == nil || !targetVinfo.IsArray()) && allIdentifierArgs(tgt.Args) {
 			return tg.defineStatementFunction(tgt, stmt.Value)
 		}
 	case *f90.Identifier:
@@ -723,7 +793,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		lhs = tg.astVarExpr(targetVinfo)
 		// Dereference INTENT(OUT/INOUT) non-array scalar parameters
 		intent := targetVinfo.decl.Type.Intent()
-		isArray := tg.varIsArray(targetVinfo)
+		isArray := targetVinfo.IsArray()
 		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
 			lhs = &ast.StarExpr{X: lhs}
 		}
@@ -814,7 +884,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
 	// Handle equivalenced scalar assignment: f = value → f.Set(value, 1)
 	// CHARACTER types are excluded as they use SetFromString
-	isArray := tg.varIsArray(targetVinfo)
+	isArray := targetVinfo.IsArray()
 	isCharacter := targetVinfo.typeToken() == f90token.CHARACTER
 	if !isArray && !isCharacter && targetVinfo.flags.HasAny(VFlagEquivalenced) {
 		dst = append(dst, &ast.ExprStmt{
@@ -859,7 +929,7 @@ func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast
 		if err != nil {
 			return dst, err
 		}
-		if tg.varIsPointerTo(tp) {
+		if tp.IsPointer() {
 			// Print intrinsic can't just receive pointers willy nilly.
 			goExpr = &ast.CallExpr{
 				Fun: &ast.SelectorExpr{
@@ -1220,7 +1290,7 @@ func (tg *ToGo) transformDataVarInit(dst []ast.Stmt, stmt *f90.DataStmt, varExpr
 		return tg.transformDataArrayElement(dst, stmt, varExpr.(*f90.CallExpr), iter, targetVinfo)
 	}
 
-	isArray := tg.varIsArray(targetVinfo)
+	isArray := targetVinfo.IsArray()
 	if !isArray && valuesRemaining <= varsRemaining {
 		// Scalar variable - consume one value
 		return tg.transformDataScalar(dst, stmt, varExpr, iter, targetVinfo)
@@ -1418,7 +1488,7 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 			if vinfo == nil {
 				continue
 			}
-			isArray := tg.varIsArray(vinfo)
+			isArray := vinfo.IsArray()
 			if isArray {
 				hasArray = true
 				primaryIdx = i
@@ -1491,9 +1561,9 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 				}
 
 				varExpr := tg.astVarExpr(vinfo)
-				isArray := tg.varIsArray(vinfo)
+				isArray := vinfo.IsArray()
 				isCharacter := vinfo.typeToken() == f90token.CHARACTER
-				isPointerTo := tg.varIsPointerTo(vinfo)
+				isPointerTo := vinfo.IsPointer()
 
 				if len(ref.Args) == 0 {
 					if isArray {
@@ -1634,10 +1704,10 @@ func (tg *ToGo) transformPointerCrayStmt(dst []ast.Stmt, stmt *f90.PointerCraySt
 // Arrays are returned as pointer types (*intrinsic.Array[T]).
 func (tg *ToGo) goType(v *Varinfo) ast.Expr {
 	tok := v.typeToken()
-	isArray := tg.varIsArray(v)
+	isArray := v.IsArray()
 	// Handle Cray-style pointer variables (POINTER (ptr, pointee))
 	// The pointer variable's type is PointerTo[pointee_type]
-	if tg.varIsPointerTo(v) {
+	if v.IsPointer() {
 		if v.pointee != "" {
 			pointeeVar := tg.repl.Var(v.pointee)
 			if pointeeVar == nil {
@@ -1697,7 +1767,7 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 	default:
 		err := tg.makeErrAtStmt("unsupported type token: " + tok.String())
 		panic(err)
-	case f90token.INTEGER:
+	case f90token.IntLit, f90token.INTEGER:
 		switch kindValue {
 		case 1:
 			goType = ast.NewIdent("int8")
@@ -1712,48 +1782,24 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 		goType = ast.NewIdent("bool")
 	case f90token.DOUBLEPRECISION:
 		goType = ast.NewIdent("float64")
-	case f90token.REAL:
+	case f90token.FloatLit, f90token.REAL:
 		switch kindValue {
 		case 8:
 			goType = ast.NewIdent("float64")
 		default: // 4 or unspecified
 			goType = ast.NewIdent("float32")
 		}
+	case f90token.COMPLEX:
+		switch kindValue {
+		case 8, 16:
+			goType = ast.NewIdent("complex128")
+		default: // 4 or unspecified
+			goType = ast.NewIdent("complex64")
+		}
 	case f90token.CHARACTER:
 		goType = _astTypeCharArray
 	}
 	return goType
-}
-
-// varIsArray returns true if the variable's Go type is *intrinsic.Array[T].
-// This applies to Fortran variables declared with DIMENSION attribute or
-// explicit array bounds in their type declaration.
-func (tg *ToGo) varIsArray(v *Varinfo) bool {
-	return v.flags.HasAny(VFlagDimension)
-}
-
-func (tg *ToGo) varIsCharlike(v *Varinfo) bool {
-	return !tg.varIsArray(v) && (v.typeToken() == f90token.CHARACTER || v.typeToken() == f90token.StringLit)
-}
-
-// varIsPointerTo returns true if the variable's Go type is intrinsic.PointerTo[T]
-// AND should be automatically dereferenced when accessed.
-//
-// This applies to:
-//   - Equivalenced scalar variables (flagEquivalenced) - need dereferencing for value access
-//   - Non-array Cray-style pointee variables (flagPointee) - rare, usually pointees are arrays
-//
-// Excluded:
-//   - Cray-style pointer variables (flagPointer) - represent the pointer object, not pointee data
-//   - Arrays (flagDimension) - have their own access patterns (*intrinsic.Array[T])
-//   - CHARACTER types - use intrinsic.CharacterArray
-func (tg *ToGo) varIsPointerTo(v *Varinfo) bool {
-	// Pointer variables (like NPAA) represent the address holder, not the data.
-	// They should not be auto-dereferenced.
-	if v.flags.HasAny(VFlagPointer) {
-		return false
-	}
-	return v.flags.HasAny(VFlagEquivalenced|VFlagPointee) && !tg.varIsArray(v) && v.typeToken() != f90token.CHARACTER
 }
 
 func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, root *f90.BinaryExpr) (_ []ast.Stmt, err error) {
@@ -1878,7 +1924,7 @@ func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 				Type:  goType,
 			})
 
-			if !tg.varIsArray(v) {
+			if !v.IsArray() {
 				continue
 			}
 			args := []ast.Expr{ast.NewIdent("nil")} // First argument is array initializer, we always initialize to zeroes.

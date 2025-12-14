@@ -18,34 +18,67 @@ import (
 // Set via -ldflags: go test -ldflags="-X 'github.com/soypat/go-fortran.debugNoStuckCheck=1'"
 var debugNoStuckCheck string
 
-// Pratt parsing functions. a.k.a: Semantic Code.
-type (
-	statementParseFn func() ast.Statement // For statement-level constructs
-)
-
-// VarFlags for parser.
+// VarFlags tracks attributes and semantic properties of Fortran variables.
+// Flags are set during parsing and used during transpilation to determine
+// the correct Go representation and access patterns.
 type VarFlags uint64
 
 const (
-	VFlagImplicit     VarFlags = 1 << iota // Type inferred from IMPLICIT rules
-	VFlagUsed                              // Symbol is referenced in code
-	VFlagPointer                           // Has POINTER attribute
-	VFlagTarget                            // Has TARGET attribute
-	VFlagParameter                         // Is a function/subroutine parameter
-	VFlagPointerParam                      // OUT/INOUT scalar parameter (needs dereference)
-	VFlagAllocatable                       // Has ALLOCATABLE attribute
-	VFlagCommon                            // Variable is in a COMMON block
-	VFlagPointee                           // Cray-style pointee (accessed through pointer variable)
-	VFlagDimension                         // DIMENSION attribute or implicit dimension set. Variable is an array type.
+	// VFlagImplicit: Type was inferred from IMPLICIT rules rather than explicit declaration.
+	// Set when: Variable used without prior declaration, type derived from first letter.
+	VFlagImplicit VarFlags = 1 << iota
+	// VFlagUsed: Symbol is referenced somewhere in the code.
+	// Set when: Any use of the identifier in expressions or statements.
+	VFlagUsed
+	// VFlagPointer: Variable has POINTER attribute or is a Cray-style pointer.
+	// Set when: "INTEGER, POINTER :: x" (F90) or "POINTER (ptr, pointee)" (Cray ptr).
+	// For Cray: the pointer variable (ptr) holds an address, not auto-dereferenced.
+	// For F90 POINTER: typically combined with VFlagDimension for pointer arrays.
+	VFlagPointer
+	// VFlagTarget: Variable has TARGET attribute (can be pointed to by F90 pointers).
+	// Set when: "INTEGER, TARGET :: x"
+	VFlagTarget
+	// VFlagParameter: Is a dummy argument (parameter) of a function/subroutine.
+	// Set when: Variable appears in procedure's parameter list.
+	VFlagParameter
+	// VFlagPointerParam: OUT/INOUT scalar parameter that needs dereferencing.
+	// Set when: Scalar parameter with INTENT(OUT) or INTENT(INOUT).
+	VFlagPointerParam
+	// VFlagAllocatable: Variable has ALLOCATABLE attribute.
+	// Set when: "INTEGER, ALLOCATABLE :: arr(:)" - dynamic allocation via ALLOCATE.
+	VFlagAllocatable
+	// VFlagCommon: Variable is in a COMMON block (shared storage).
+	// Set when: Variable appears in a COMMON statement.
+	VFlagCommon
+	// VFlagPointee: Cray-style pointee accessed through a pointer variable.
+	// Set when: "POINTER (ptr, pointee)" - pointee is accessed via ptr.
+	// Access to pointee requires dereferencing the pointer variable.
+	VFlagPointee
+	// VFlagDimension: Variable is an array (has DIMENSION attribute or explicit bounds).
+	// Set when: "INTEGER :: arr(10)" or "INTEGER, DIMENSION(:) :: arr"
+	// Go type: *intrinsic.Array[T]
+	VFlagDimension
+	// VFlagIntentOut: Parameter has INTENT(OUT) - callee provides value.
 	VFlagIntentOut
+	// VFlagIntentIn: Parameter has INTENT(IN) - caller provides value.
 	VFlagIntentIn
+	// VFlagArrayInit: Array has been initialized via DATA or inline initializer.
 	VFlagArrayInit
-	VFlagArraySpec // ArraySpec used in type declaration.
+	// VFlagArraySpec: ArraySpec was used in the type declaration.
+	VFlagArraySpec
+	// VFlagReturned: Variable is the function return value.
 	VFlagReturned
+	// VFlagRecursive: Function/subroutine has RECURSIVE attribute.
 	VFlagRecursive
-	VFlagEquivalenced      // Participates in EQUIVALENCE statement (scalars become PointerTo[T])
-	VFlagConstantParameter // Declared with PARAMETER attribute or part of PARAMETER statement
-	VFlagStmtFunc          // Statement function (one-line inline function)
+	// VFlagEquivalenced: Variable shares storage via EQUIVALENCE statement.
+	// Set when: "EQUIVALENCE (a, b)" - scalars become PointerTo[T] in Go.
+	VFlagEquivalenced
+	// VFlagConstantParameter: Compile-time constant (PARAMETER statement or attribute).
+	// Set when: "PARAMETER (PI = 3.14159)" or "REAL, PARAMETER :: PI = 3.14"
+	VFlagConstantParameter
+	// VFlagStmtFunc: Statement function (one-line inline function).
+	// Set when: "AREA(R) = 3.14159 * R * R"
+	VFlagStmtFunc
 )
 
 func (f VarFlags) HasAny(hasBits VarFlags) bool { return f&hasBits != 0 }
@@ -385,18 +418,18 @@ type Varinfo struct {
 	stmtFuncParams []string       // parameter names
 }
 
-func (p *Varinfo) Flags() VarFlags            { return p.flags }
-func (p *Varinfo) Value() Value               { return p.val }
-func (p *Varinfo) Charlen() ast.Expression    { return p.decl.Charlen() }
-func (p *Varinfo) Kind() ast.Expression       { return p.decl.Kind() }
-func (p *Varinfo) Dimensions() *ast.ArraySpec { return p.decl.Dimension() }
-func (p *Varinfo) Identifier() string         { return p._varname }
-func (p *Varinfo) IsParameter() bool          { return p.flags.HasAny(VFlagParameter) }
-func (p *Varinfo) IsAllocatable() bool        { return p.flags.HasAny(VFlagAllocatable) }
-func (p *Varinfo) IsStmtFunc() bool           { return p.flags.HasAny(VFlagStmtFunc) }
+func (p *Varinfo) Flags() VarFlags              { return p.flags }
+func (p *Varinfo) Value() Value                 { return p.val }
+func (p *Varinfo) Charlen() ast.Expression      { return p.decl.Charlen() }
+func (p *Varinfo) Kind() ast.Expression         { return p.decl.Kind() }
+func (p *Varinfo) Dimensions() *ast.ArraySpec   { return p.decl.Dimension() }
+func (p *Varinfo) Identifier() string           { return p._varname }
+func (p *Varinfo) IsParameter() bool            { return p.flags.HasAny(VFlagParameter) }
+func (p *Varinfo) IsAllocatable() bool          { return p.flags.HasAny(VFlagAllocatable) }
+func (p *Varinfo) IsStmtFunc() bool             { return p.flags.HasAny(VFlagStmtFunc) }
 func (p *Varinfo) StmtFuncExpr() ast.Expression { return p.stmtFuncExpr }
-func (p *Varinfo) StmtFuncParams() []string   { return p.stmtFuncParams }
-func (p *Varinfo) CommonBlock() string        { return p.common }
+func (p *Varinfo) StmtFuncParams() []string     { return p.stmtFuncParams }
+func (p *Varinfo) CommonBlock() string          { return p.common }
 func (p *Varinfo) DeclPos() (source string, line, col int) {
 	return p.declPos.Source, p.declPos.Line, p.declPos.Col
 }
@@ -405,6 +438,43 @@ func (p *Varinfo) TypeToken() token.Token {
 		return token.Undefined
 	}
 	return p.decl.Type.Token
+}
+
+// IsArray returns true if this is an array (has DIMENSION).
+func (p *Varinfo) IsArray() bool {
+	return p.flags.HasAny(VFlagDimension)
+}
+
+// IsChar returns true if this is a character type (not an array of characters).
+func (p *Varinfo) IsChar() bool {
+	if p.flags.HasAny(VFlagDimension) {
+		return false
+	}
+	tok := p.TypeToken()
+	return tok == token.CHARACTER || tok == token.StringLit
+}
+
+// IsPointer returns true if accessing this variable requires automatic pointer dereferencing.
+//
+// Fortran pointer semantics:
+//   - VFlagPointer (Cray pointer): In "POINTER (NPAA, AA(1))", NPAA holds an address.
+//     Accessing NPAA returns the address VALUE, not the pointed-to data. Never auto-deref.
+//   - VFlagPointee: AA in the above example. Accessing AA(i) implicitly dereferences NPAA
+//     to reach the data. Pointees need auto-dereferencing.
+//   - VFlagEquivalenced: Variables sharing storage via EQUIVALENCE. In Go, we use pointers
+//     so they share memory, and accessing them requires dereferencing.
+//
+// Returns false for VFlagPointer because you want the address, not what it points to.
+// Returns false for arrays (VFlagDimension) which have their own access patterns.
+// Returns false for CHARACTER types which use intrinsic.CharacterArray.
+func (p *Varinfo) IsPointer() bool {
+	if p.flags.HasAny(VFlagPointer | VFlagDimension) {
+		return false
+	}
+	if p.TypeToken() == token.CHARACTER {
+		return false
+	}
+	return p.flags.HasAny(VFlagEquivalenced | VFlagPointee)
 }
 func (p *Varinfo) reset()                             { *p = Varinfo{} }
 func (p *Parser90) varResetAll()                      { p.vars.reset() }
@@ -526,7 +596,7 @@ func (tt toktuple) String() string {
 // Returns nil when EOF is reached or no more units are available.
 // This method can be called repeatedly to incrementally parse a Fortran file.
 // Phase 1: Parses only top-level program units (PROGRAM, SUBROUTINE, FUNCTION, MODULE)
-func (p *Parser90) ParseNextProgramUnit() (unit ast.ProgramUnit) {
+func (p *Parser90) ParseNextProgramUnit() (unit ast.Unit) {
 	puStart := p.sourcePos()
 	panicked := true
 	defer func() {
@@ -537,7 +607,7 @@ func (p *Parser90) ParseNextProgramUnit() (unit ast.ProgramUnit) {
 		}
 	}()
 
-	for !p.IsDone() && unit == nil {
+	for !p.IsDone() && !unit.IsValid() {
 		// Skip leading newlines and comments
 		// Parse one program unit
 		puStart = p.sourcePos()
@@ -551,10 +621,10 @@ func (p *Parser90) ParseNextProgramUnit() (unit ast.ProgramUnit) {
 // registerTopLevelParsers registers all statement-level parsing functions
 
 // parseTopLevelUnit dispatches to the appropriate registered statement parser
-func (p *Parser90) parseTopLevelUnit() (unit ast.ProgramUnit) {
+func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 	p.skipNewlinesAndComments()
 	if p.IsDone() || p.current.tok.IsEnd() {
-		return nil
+		return unit
 	}
 	switch p.current.tok {
 	case token.SUBROUTINE:
@@ -575,18 +645,18 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.ProgramUnit) {
 	default:
 		p.addError("unexpected token at top level: " + p.current.String())
 		p.nextToken()
-		return nil
+		return unit
 	}
-	if unit == nil {
-		p.addError("nil program unit for token: " + p.current.String())
+	if !unit.IsValid() {
+		p.addError("bad program unit for token: " + p.current.String())
 	}
 	return unit
 }
 
-func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramUnit {
+func (p *Parser90) parseAppendProgramUnits(dst []ast.Unit) []ast.Unit {
 	for p.loopUntil(token.END, token.ENDMODULE, token.ENDPROGRAM, token.ENDFUNCTION, token.ENDSUBROUTINE) {
 		unit := p.parseTopLevelUnit()
-		if unit != nil {
+		if unit.IsValid() {
 			dst = append(dst, unit)
 		} else {
 			// parseTopLevelUnit returns nil when it encounters END tokens
@@ -600,161 +670,162 @@ func (p *Parser90) parseAppendProgramUnits(dst []ast.ProgramUnit) []ast.ProgramU
 
 // parseProgramBlock parses a PROGRAM...END PROGRAM block
 // Precondition: current token is PROGRAM
-func (p *Parser90) parseProgramBlock() ast.ProgramUnit {
+func (p *Parser90) parseProgramBlock() (unit ast.Unit) {
 	p.varResetAll()
 	start := p.sourcePos()
 	if !p.expect(token.PROGRAM, "") {
-		return nil
+		return unit
 	}
-	block := &ast.ProgramBlock{}
+	unit.Token = token.PROGRAM
 	// Parse program name (keywords can be used as program names)
-	p.expectIdentifier(&block.Name, "program name")
+	p.expectIdentifier(&unit.Name, "program name")
 
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
-	block.Body = p.parseBody(nil)
-	block.Data = p.makeUnitData(block.Name, token.PROGRAM)
+	unit.Body = p.parseBody(nil)
+	unit.Data = p.makeUnitData(unit.Name, token.PROGRAM)
 
 	// Handle CONTAINS section (internal procedures)
 	if p.consumeIf(token.CONTAINS) {
-		block.Contains = p.parseAppendProgramUnits(block.Contains[:0])
+		unit.Contains = p.parseAppendProgramUnits(unit.Contains[:0])
 	}
 
-	p.expectEndProgramUnit(token.PROGRAM, token.ENDPROGRAM, start, block.Name)
+	p.expectEndProgramUnit(token.PROGRAM, token.ENDPROGRAM, start, unit.Name)
 	p.consumeIf(token.Identifier)
-	block.Position = ast.Pos(start.Pos, p.current.start)
-	return block
+	unit.Position = ast.Pos(start.Pos, p.current.start)
+	return unit
 }
 
 // parseModule parses a MODULE...END MODULE block
 // Precondition: current token is MODULE
-func (p *Parser90) parseModule() ast.ProgramUnit {
+func (p *Parser90) parseModule() (unit ast.Unit) {
 	start := p.sourcePos()
 	if !p.expect(token.MODULE, "") {
-		return nil
+		return unit
 	}
-	mod := &ast.Module{}
+	unit.Token = token.MODULE
 	// Parse module name (keywords can be used as module names)
-	p.expectIdentifier(&mod.Name, "module name")
+	p.expectIdentifier(&unit.Name, "module name")
 	p.skipNewlinesAndComments()
 	// Parse body statements
-	mod.Body = p.parseBody(nil)
-	mod.Data = p.makeUnitData(mod.Name, token.MODULE)
+	unit.Body = p.parseBody(nil)
+	unit.Data = p.makeUnitData(unit.Name, token.MODULE)
 
 	// Handle CONTAINS section with recursive parsing
 	if p.consumeIf(token.CONTAINS) {
-		mod.Contains = p.parseAppendProgramUnits(mod.Contains[:0])
+		unit.Contains = p.parseAppendProgramUnits(unit.Contains[:0])
 	}
-	p.expectEndProgramUnit(token.MODULE, token.ENDMODULE, start, mod.Name)
+	p.expectEndProgramUnit(token.MODULE, token.ENDMODULE, start, unit.Name)
 	p.consumeIf(token.Identifier)
-	mod.Position = ast.Pos(start.Pos, p.current.start)
+	unit.Position = ast.Pos(start.Pos, p.current.start)
 
-	return mod
+	return unit
 }
 
 // parseSubroutine parses a SUBROUTINE...END SUBROUTINE block
 // Precondition: current token is SUBROUTINE
-func (p *Parser90) parseSubroutine() ast.ProgramUnit {
+func (p *Parser90) parseSubroutine() (unit ast.Unit) {
 	p.varResetAll()
 	start := p.sourcePos()
-	sub := &ast.Subroutine{}
+	unit.Token = token.SUBROUTINE
 
 	p.expect(token.SUBROUTINE, "")
 
 	// Parse subroutine name (keywords can be used as subroutine names)
-	p.expectIdentifier(&sub.Name, "subroutine name")
+	p.expectIdentifier(&unit.Name, "subroutine name")
 
 	// Parse parameter list if present
 	if p.currentTokenIs(token.LParen) {
-		sub.Parameters = p.parseParameterList()
+		unit.Parameters = p.parseParameterList()
 	}
 
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
-	sub.Body = p.parseBody(sub.Parameters)
+	unit.Body = p.parseBody(unit.Parameters)
 
-	p.expectEndProgramUnit(token.SUBROUTINE, token.ENDSUBROUTINE, start, sub.Name)
+	p.expectEndProgramUnit(token.SUBROUTINE, token.ENDSUBROUTINE, start, unit.Name)
 	p.consumeIf(token.Identifier)
-	pud := p.makeUnitData(sub.Name, token.SUBROUTINE)
-	sub.Data = pud
-	sub.Position = ast.Pos(start.Pos, p.current.start)
+	pud := p.makeUnitData(unit.Name, token.SUBROUTINE)
+	unit.Data = pud
+	unit.Position = ast.Pos(start.Pos, p.current.start)
 	pud.resolveImplicitTypes()
-	return sub
+	return unit
 }
 
 // parseFunction parses a FUNCTION...END FUNCTION block
 // Precondition: current token is FUNCTION
-func (p *Parser90) parseFunction() ast.ProgramUnit {
+func (p *Parser90) parseFunction() (unit ast.Unit) {
 	p.varResetAll()
 	start := p.sourcePos()
 	if !p.expect(token.FUNCTION, "") {
-		return nil
+		return unit
 	}
-	fn := &ast.Function{}
+	unit.Token = token.FUNCTION
 	// Parse function name (can be Identifier, FormatSpec, or keyword used as identifier)
-	p.expectIdentifier(&fn.Name, "function name")
+	p.expectIdentifier(&unit.Name, "function name")
 	// Parse parameter list
 	if p.currentTokenIs(token.LParen) {
-		fn.Parameters = p.parseParameterList()
+		unit.Parameters = p.parseParameterList()
 	}
 
 	// Check for RESULT clause
 	var returnType *Varinfo
+	var resultVarName string
 	if p.consumeIf(token.RESULT) {
 		if p.expect(token.LParen, "RESULT open") {
-			if p.expectIdentifier(&fn.ResultVariable, "function RESULT variable specification") {
-				returnType = p.varInit(fn.ResultVariable, nil, VFlagReturned, "")
+			if p.expectIdentifier(&resultVarName, "function RESULT variable specification") {
+				returnType = p.varInit(resultVarName, nil, VFlagReturned, "")
 			}
 			p.expect(token.RParen, "RESULT close")
 		}
 	}
 
 	// Parse body statements
-	fn.Body = p.parseBody(fn.Parameters)
+	unit.Body = p.parseBody(unit.Parameters)
 
-	p.expectEndProgramUnit(token.FUNCTION, token.ENDFUNCTION, start, fn.Name)
+	p.expectEndProgramUnit(token.FUNCTION, token.ENDFUNCTION, start, unit.Name)
 	p.consumeIf(token.Identifier)
-	fn.Position = ast.Pos(start.Pos, p.current.start)
+	unit.Position = ast.Pos(start.Pos, p.current.start)
 
 	// Create unit data AFTER parseBody so type declarations are captured
-	pud := p.makeUnitData(fn.Name, token.FUNCTION)
+	pud := p.makeUnitData(unit.Name, token.FUNCTION)
 	pud.returnType = returnType
-	fn.Data = pud
+	unit.Data = pud
 	missingResult := returnType == nil
 	if missingResult {
 		// For bare FUNCTION without RESULT clause, the function name is the return variable.
 		// Look for the variable with the function name and mark it as returned.
-		vinfo := pud.Var(fn.Name)
+		vinfo := pud.Var(unit.Name)
 		if vinfo != nil {
 			vinfo.flags |= VFlagReturned
 			pud.returnType = vinfo
 		} else {
 			// Function name not used in body - create return variable with nil decl.
 			// resolveImplicitTypes will assign the correct implicit type.
-			pud.returnType, _ = pud.varInit(start, fn.Name, nil, VFlagReturned, "")
+			pud.returnType, _ = pud.varInit(start, unit.Name, nil, VFlagReturned, "")
 		}
 	}
 	pud.resolveImplicitTypes()
-	return fn
+	return unit
 }
 
 // parseBlockData parses a BLOCK DATA...END [BLOCK DATA] block
-func (p *Parser90) parseBlockData() ast.ProgramUnit {
+func (p *Parser90) parseBlockData() (unit ast.Unit) {
 	start := p.current.start
 	// Consume BLOCK identifier
 	if !p.consumeIf2(token.BLOCK, token.DATA) {
 		p.addError("DATA BLOCK expected: " + p.current.String())
-		return nil
+		return unit
 	}
-	bd := &ast.BlockData{}
+	unit.Token = token.BLOCK
 	// Parse optional block data name
-	p.consumeIdentifier(&bd.Name)
+	p.consumeIdentifier(&unit.Name)
 	p.skipNewlinesAndComments()
 
 	// Parse body statements
-	bd.Body = p.parseBody(nil)
+	unit.Body = p.parseBody(nil)
 
 	p.expect(token.END, "expected END after DATA BLOCK body")
 
@@ -763,9 +834,79 @@ func (p *Parser90) parseBlockData() ast.ProgramUnit {
 		p.consumeIf(token.DATA)
 	}
 	p.consumeIf(token.Identifier) // Optional name after END BLOCK DATA
-	bd.Position = ast.Pos(start, p.current.start)
-	bd.Data = p.makeUnitData(bd.Name, token.DATA)
-	return bd
+	unit.Position = ast.Pos(start, p.current.start)
+	unit.Data = p.makeUnitData(unit.Name, token.DATA)
+	return unit
+}
+
+// parseTypePrefixedConstruct handles type-prefixed functions like "INTEGER FUNCTION foo()"
+func (p *Parser90) parseTypePrefixedConstruct() (unit ast.Unit) {
+	// Save the type token
+	start := p.sourcePos()
+	ts := p.expectTypeSpecIntrinsic()
+	// Parse as function - this creates unit.Data with variable info
+	unit = p.parseFunction()
+	if !unit.IsValid() {
+		return unit
+	}
+	unit.ResultType = ts
+	pud := unit.Data.(*ParserUnitData)
+
+	// For type-prefixed functions, the function name is the return variable with the prefix type.
+	// Create the declaration with the correct type from the prefix.
+	decl := &ast.DeclEntity{
+		Name:     unit.Name,
+		Type:     &unit.ResultType,
+		Position: unit.Position,
+	}
+
+	if pud.returnType == nil {
+		// returnType not set - create or find the variable
+		vinfo := pud.Var(unit.Name)
+		if vinfo == nil {
+			var err error
+			vinfo, err = pud.varInit(start, unit.Name, decl, VFlagReturned, "")
+			if err != nil {
+				panic(err)
+			}
+		} else {
+			vinfo.decl = decl
+			vinfo.flags |= VFlagReturned
+		}
+		pud.returnType = vinfo
+	} else {
+		// returnType already set by parseFunction - update its decl with the correct type
+		pud.returnType.decl = decl
+	}
+	return unit
+}
+
+// parseProcedureWithAttributes handles procedures with attributes like RECURSIVE, PURE, ELEMENTAL
+func (p *Parser90) parseProcedureWithAttributes() (unit ast.Unit) {
+	// Collect all attributes
+	attributes := []token.Token{}
+	for p.current.tok.IsAttributeKeyword() && !p.IsDone() {
+		attributes = append(attributes, p.current.tok)
+		p.nextToken()
+	}
+	if p.current.tok.IsTypeDeclaration() {
+		// Is a function.
+		return p.parseTypePrefixedConstruct()
+	}
+	// Now must be SUBROUTINE or FUNCTION
+	switch p.current.tok {
+	case token.SUBROUTINE:
+		unit = p.parseSubroutine()
+	case token.FUNCTION:
+		unit = p.parseFunction()
+	default:
+		p.addError("want FUNCTION|SUBROUTINE, got " + p.current.String())
+		return unit
+	}
+	if unit.IsValid() {
+		unit.ResultType.Attributes = toTypeAttributes(attributes)
+	}
+	return unit
 }
 
 // Helper methods
@@ -3413,8 +3554,14 @@ func (p *Parser90) parseTypeAttributess() (attrs []ast.TypeAttribute) {
 		switch {
 		case p.consumeIf(token.INTENT):
 			p.expect(token.LParen, "INTENT attribute")
-			attr.Expr = p.currentTokenExpr()
-			p.nextToken() // consume intent.
+			tok := p.current.tok
+			pos := p.currentAstPos()
+			p.nextToken()
+			if tok == token.IN && p.current.tok == token.OUT {
+				tok = token.INOUT // Join IN OUT -> INOUT
+				p.nextToken()
+			}
+			attr.Expr = &ast.TokenExpr{Token: tok, Position: pos}
 			p.expect(token.RParen, "INTENT attribute")
 		case p.consumeIf(token.DIMENSION):
 			attr.Dimension = p.parseArraySpec()
@@ -4085,77 +4232,6 @@ func (p *Parser90) parseArrayConstructor() ast.Expression {
 	return stmt
 }
 
-// parseTypePrefixedConstruct handles type-prefixed functions like "INTEGER FUNCTION foo()"
-func (p *Parser90) parseTypePrefixedConstruct() ast.ProgramUnit {
-	// Save the type token
-	start := p.sourcePos()
-	ts := p.expectTypeSpecIntrinsic()
-	// Parse as function - this creates fn.Data with variable info
-	fn := p.parseFunction().(*ast.Function)
-	fn.Type = ts
-	pud := fn.Data.(*ParserUnitData)
-
-	// For type-prefixed functions, the function name is the return variable with the prefix type.
-	// Create the declaration with the correct type from the prefix.
-	decl := &ast.DeclEntity{
-		Name:     fn.Name,
-		Type:     &fn.Type,
-		Position: fn.Position,
-	}
-
-	if pud.returnType == nil {
-		// returnType not set - create or find the variable
-		vinfo := pud.Var(fn.Name)
-		if vinfo == nil {
-			var err error
-			vinfo, err = pud.varInit(start, fn.Name, decl, VFlagReturned, "")
-			if err != nil {
-				panic(err)
-			}
-		} else {
-			vinfo.decl = decl
-			vinfo.flags |= VFlagReturned
-		}
-		pud.returnType = vinfo
-	} else {
-		// returnType already set by parseFunction - update its decl with the correct type
-		pud.returnType.decl = decl
-	}
-	return fn
-}
-
-// parseProcedureWithAttributes handles procedures with attributes like RECURSIVE, PURE, ELEMENTAL
-func (p *Parser90) parseProcedureWithAttributes() ast.ProgramUnit {
-	// Collect all attributes
-	attributes := []token.Token{}
-	for p.current.tok.IsAttributeKeyword() && !p.IsDone() {
-		attributes = append(attributes, p.current.tok)
-		p.nextToken()
-	}
-	if p.current.tok.IsTypeDeclaration() {
-		// Is a function.
-		return p.parseTypePrefixedConstruct()
-	}
-
-	// Now must be SUBROUTINE or FUNCTION
-	var stmt ast.ProgramUnit
-	if p.currentTokenIs(token.SUBROUTINE) {
-		stmt = p.parseSubroutine()
-		if sub, ok := stmt.(*ast.Subroutine); ok {
-			sub.Attributes = attributes
-		}
-	} else if p.currentTokenIs(token.FUNCTION) {
-		stmt = p.parseFunction()
-		if fn, ok := stmt.(*ast.Function); ok {
-			fn.Attributes = attributes
-		}
-	} else {
-		p.addError("expected SUBROUTINE after attributes")
-		return nil
-	}
-	return stmt
-}
-
 func (p *Parser90) consumeEndLabelIfPresent(tgt *string, endConstruct token.Token, continueMatch string) bool {
 	// Check for labeled END IF/ENDIF  or END DO/ENDDO/CONTINUE
 	isLabelled := p.currentTokenIs(token.IntLit) &&
@@ -4594,4 +4670,14 @@ func (p *Parser90) parseFloatValue(v string) (float64, error) {
 	v = strings.ReplaceAll(v, "q", "e")
 
 	return strconv.ParseFloat(v, 64)
+}
+
+// toTypeAttributes converts a slice of tokens (e.g., RECURSIVE, PURE, ELEMENTAL)
+// to a slice of TypeAttributes for use in Unit.ResultType.Attributes.
+func toTypeAttributes(tokens []token.Token) []ast.TypeAttribute {
+	attrs := make([]ast.TypeAttribute, len(tokens))
+	for i, tok := range tokens {
+		attrs[i] = ast.TypeAttribute{Token: tok}
+	}
+	return attrs
 }

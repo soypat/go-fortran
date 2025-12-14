@@ -23,6 +23,7 @@ import (
 
 	fortran "github.com/soypat/go-fortran"
 	"github.com/soypat/go-fortran/ast"
+	"github.com/soypat/go-fortran/token"
 )
 
 var (
@@ -61,10 +62,10 @@ func processFile(filename string) error {
 
 	for {
 		unit := parser.ParseNextProgramUnit()
-		if unit == nil {
+		if !unit.IsValid() {
 			break
 		}
-		printUnitVars(unit)
+		printUnitVars(&unit)
 	}
 
 	if errs := parser.Errors(); len(errs) > 0 {
@@ -75,11 +76,11 @@ func processFile(filename string) error {
 	return nil
 }
 
-func printUnitVars(unit ast.ProgramUnit) {
+func printUnitVars(unit *ast.Unit) {
 	printUnitVarsRecursive(unit)
 }
 
-func printUnitVarsRecursive(unit ast.ProgramUnit) {
+func printUnitVarsRecursive(unit *ast.Unit) {
 	data := unit.UnitData()
 	pud, ok := data.(*fortran.ParserUnitData)
 	if ok && pud != nil {
@@ -119,29 +120,24 @@ func printUnitVarsRecursive(unit ast.ProgramUnit) {
 	}
 
 	// Process contained procedures
-	switch u := unit.(type) {
-	case *ast.ProgramBlock:
-		for _, contained := range u.Contains {
-			printUnitVarsRecursive(contained)
-		}
-	case *ast.Module:
-		for _, contained := range u.Contains {
-			printUnitVarsRecursive(contained)
+	if unit.Token == token.PROGRAM || unit.Token == token.MODULE {
+		for i := range unit.Contains {
+			printUnitVarsRecursive(&unit.Contains[i])
 		}
 	}
 }
 
-func unitKindString(unit ast.ProgramUnit) string {
-	switch unit.(type) {
-	case *ast.ProgramBlock:
+func unitKindString(unit *ast.Unit) string {
+	switch unit.Token {
+	case token.PROGRAM:
 		return "PROG"
-	case *ast.Subroutine:
+	case token.SUBROUTINE:
 		return "SUB"
-	case *ast.Function:
+	case token.FUNCTION:
 		return "FUNC"
-	case *ast.Module:
+	case token.MODULE:
 		return "MOD"
-	case *ast.BlockData:
+	case token.BLOCK:
 		return "BDATA"
 	default:
 		return "UNIT"

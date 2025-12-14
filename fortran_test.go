@@ -10,6 +10,7 @@ import (
 
 	"github.com/soypat/go-fortran/ast"
 	f90 "github.com/soypat/go-fortran/ast"
+	"github.com/soypat/go-fortran/token"
 )
 
 //go:embed testdata
@@ -42,7 +43,8 @@ func TestData_valid(t *testing.T) {
 			ssrc := string(src)
 			units := testParse(t, &parser, path, ssrc, false)
 			tg.Reset()
-			testTranspile(t, &tg, units, path, ssrc)
+			allowMultiProg := name == "valid_programs.f90"
+			testTranspile(t, &tg, units, path, ssrc, allowMultiProg)
 			finishedNormally = true
 		})
 	}
@@ -89,27 +91,31 @@ func expectedErrors(src string) map[int]string {
 	return errors
 }
 
-func testTranspile(t testing.TB, tg *ToGo, pus []f90.ProgramUnit, srcPath string, src string) {
+func testTranspile(t testing.TB, tg *ToGo, pus []f90.Unit, srcPath string, src string, allowMultiProg bool) {
 	tg.SetSource(srcPath, strings.NewReader(src))
-	var mainProg *f90.ProgramBlock
-	for _, unit := range pus {
-		if block, ok := unit.(*f90.ProgramBlock); ok {
-			mainProg = block
+	var mainProg *f90.Unit
+	for i := range pus {
+		unit := &pus[i]
+		if unit.Token == token.PROGRAM {
+			if mainProg != nil && !allowMultiProg {
+				t.Errorf("two main programs detected in %s: %s and %s", srcPath, mainProg.Name, unit.Name)
+			}
+			mainProg = unit
 			continue
 		}
-		err := tg.RegisterUnits(unit)
+		err := tg.RegisterUnits(*unit)
 		if err != nil {
 			t.Fatal(srcPath, err)
 		}
 	}
 	if mainProg != nil {
-		_, err := tg.TransformProgram(mainProg)
+		_, err := tg.TransformProgram(*mainProg)
 		if err != nil {
 			t.Fatal(srcPath, err)
 		}
 		// TODO: add other routines here.
 	} else {
-		_, err := tg.transformProcedures(nil, pus)
+		_, err := tg.TransformUnits(nil, pus...)
 		if err != nil {
 			t.Fatal(srcPath, err)
 		}
@@ -117,7 +123,7 @@ func testTranspile(t testing.TB, tg *ToGo, pus []f90.ProgramUnit, srcPath string
 
 }
 
-func testParse(t testing.TB, p *Parser90, srcPath string, src string, expectErrors bool) []f90.ProgramUnit {
+func testParse(t testing.TB, p *Parser90, srcPath string, src string, expectErrors bool) []f90.Unit {
 	expected := map[int]string{}
 	if expectErrors {
 		expected = expectedErrors(src)
@@ -127,10 +133,10 @@ func testParse(t testing.TB, p *Parser90, srcPath string, src string, expectErro
 		t.Fatalf("Failed to reset parser: %v", err)
 	}
 	// Parse all units
-	var units []f90.ProgramUnit
-	for {
+	var units []f90.Unit
+	for !p.IsDone() {
 		unit := p.ParseNextProgramUnit()
-		if unit == nil {
+		if !unit.IsValid() {
 			break
 		}
 		units = append(units, unit)

@@ -2241,20 +2241,15 @@ END SELECT`,
 			}
 			parser.ignoreUndeclaredVars = true
 			unit := parser.ParseNextProgramUnit()
-			if unit == nil {
+			if !unit.IsValid() {
 				t.Fatal("ParseNextProgramUnit returned nil")
 			}
-
 			helperFatalErrors(t, &parser, "statement:\n"+wrappedSrc)
-
-			// Extract the statement from the parsed program
-			progBlock := helperWantNode[*ast.ProgramBlock](t, unit, "")
-
 			// The statement should be in Body
-			if len(progBlock.Body) == 0 {
+			if len(unit.Body) == 0 {
 				t.Fatal("No statements found in parsed program")
 			}
-			stmt := progBlock.Body[0]
+			stmt := unit.Body[0]
 
 			// Run the validation function
 			tt.validate(t, stmt)

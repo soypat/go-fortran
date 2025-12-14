@@ -1,6 +1,7 @@
 package fortran
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -14,7 +15,7 @@ func TestProgramUnitParsing(t *testing.T) {
 	tests := []struct {
 		name     string
 		src      string
-		validate func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData)
+		validate func(t *testing.T, unit *ast.Unit, data *ParserUnitData)
 	}{
 		{
 			name: "standalone DIMENSION statement registers array variable",
@@ -24,8 +25,8 @@ func TestProgramUnitParsing(t *testing.T) {
       DATA IPTBEG/1, 9,11,19/
       IBEG=IPTBEG(ICENTR)
 END SUBROUTINE`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				sub := helperWantNode[*ast.Subroutine](t, unit, "")
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				sub := helperWantUnit(t, unit, token.SUBROUTINE, "")
 
 				// CRITICAL: Verify IPTBEG is registered as an array variable
 				vi := data.Var("IPTBEG")
@@ -77,8 +78,8 @@ END SUBROUTINE`,
   x = arr(5)
   x = UNKNOWN_FUNC(5)
 END SUBROUTINE`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				sub := helperWantNode[*ast.Subroutine](t, unit, "")
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				sub := helperWantUnit(t, unit, token.SUBROUTINE, "")
 
 				// Verify arr is registered with VFlagDimension
 				vi := data.Var("arr")
@@ -119,7 +120,7 @@ END SUBROUTINE`,
       DATA D40/1.0D40/
       PRINT *, D40
 END PROGRAM`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
 				// Verify D40 is registered
 				vi := data.Var("D40")
 				if vi == nil {
@@ -143,14 +144,14 @@ END PROGRAM`,
       DATA NPREPW/0/,NORBVX/0/
       PRINT *, HALF, NPREPW, NORBVX
 END PROGRAM`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
 				expectedVars := []struct {
 					name     string
 					typeName string
 				}{
-					{name: "HALF", typeName: "REAL"},       // H -> REAL
-					{name: "NPREPW", typeName: "INTEGER"},  // N -> INTEGER (I-N rule)
-					{name: "NORBVX", typeName: "INTEGER"},  // N -> INTEGER
+					{name: "HALF", typeName: "REAL"},      // H -> REAL
+					{name: "NPREPW", typeName: "INTEGER"}, // N -> INTEGER (I-N rule)
+					{name: "NORBVX", typeName: "INTEGER"}, // N -> INTEGER
 				}
 				for _, expected := range expectedVars {
 					vi := data.Var(expected.name)
@@ -175,7 +176,7 @@ END PROGRAM`,
       DATA I_DEFALT(1) /777/
       PRINT *, I_DEFALT(1)
 END PROGRAM`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
 				vi := data.Var("I_DEFALT")
 				if vi == nil {
 					t.Errorf("Variable I_DEFALT not registered")
@@ -199,7 +200,7 @@ END PROGRAM`,
       DATA UNDECLARED/2.0D0/
       PRINT *, DECLARED, UNDECLARED
 END PROGRAM`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
 				expectedVars := []struct {
 					name     string
 					typeName string
@@ -229,8 +230,8 @@ END PROGRAM`,
 			src: `SUBROUTINE TOBNRY(IN,HDATAS,END,INTYPE,IDAT,MWORDS)
    X = 1
 END SUBROUTINE`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				sub := helperWantNode[*ast.Subroutine](t, unit, "")
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				sub := helperWantUnit(t, unit, token.SUBROUTINE, "")
 				params := sub.Parameters
 				if len(params) != 6 {
 					t.Errorf("Expected 6 parameters, got %d", len(params))
@@ -253,8 +254,8 @@ END SUBROUTINE`,
 			src: `SUBROUTINE EXAMPLE(IN,DATA,OUT)
    X = 1
 END SUBROUTINE`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				sub := helperWantNode[*ast.Subroutine](t, unit, "")
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				sub := helperWantUnit(t, unit, token.SUBROUTINE, "")
 				params := sub.Parameters
 				if len(params) != 3 {
 					t.Errorf("Expected 3 parameters, got %d", len(params))
@@ -277,8 +278,8 @@ END SUBROUTINE`,
 			src: `SUBROUTINE TESTFUNC(START,END,DATA,RESULT)
    X = 1
 END SUBROUTINE`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				sub := helperWantNode[*ast.Subroutine](t, unit, "")
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				sub := helperWantUnit(t, unit, token.SUBROUTINE, "")
 				params := sub.Parameters
 				if len(params) != 4 {
 					t.Errorf("Expected 4 parameters, got %d", len(params))
@@ -297,8 +298,8 @@ END SUBROUTINE`,
 			src: `FUNCTION CALCULATE(BEGIN,END) RESULT(VALUE)
    VALUE = 1
 END FUNCTION`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				fn := helperWantNode[*ast.Function](t, unit, "")
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				fn := helperWantUnit(t, unit, token.FUNCTION, "")
 				params := fn.Parameters
 				if len(params) != 2 {
 					t.Errorf("Expected 2 parameters, got %d", len(params))
@@ -322,8 +323,8 @@ END FUNCTION`,
 	INTEGER :: x, y, add
 	add = x + y
 END FUNCTION`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				fn := helperWantNode[*ast.Function](t, unit, "")
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				fn := helperWantUnit(t, unit, token.FUNCTION, "")
 				if fn.Name != "add" {
 					t.Errorf("Expected function name 'add', got %q", fn.Name)
 				}
@@ -347,8 +348,8 @@ END FUNCTION`,
 	INTEGER :: n
 	square = n * n
 END FUNCTION`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				fn := helperWantNode[*ast.Function](t, unit, "")
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				fn := helperWantUnit(t, unit, token.FUNCTION, "")
 				if fn.Name != "square" {
 					t.Errorf("Expected function name 'square', got %q", fn.Name)
 				}
@@ -378,13 +379,10 @@ END FUNCTION`,
 	REAL :: x, res
 	res = x * 2.0
 END FUNCTION`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				fn := helperWantNode[*ast.Function](t, unit, "")
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				fn := helperWantUnit(t, unit, token.FUNCTION, "")
 				if fn.Name != "compute" {
 					t.Errorf("Expected function name 'compute', got %q", fn.Name)
-				}
-				if fn.ResultVariable != "res" {
-					t.Errorf("Expected ResultVariable 'res', got %q", fn.ResultVariable)
 				}
 				// returnType must be set for RESULT functions
 				if data.returnType == nil {
@@ -407,12 +405,12 @@ END FUNCTION`,
     res = x * 2.0
   END FUNCTION public_func
 END MODULE test_mod`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				mod := helperWantNode[*ast.Module](t, unit, "")
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				mod := helperWantUnit(t, unit, token.MODULE, "")
 				if len(mod.Contains) != 1 {
 					t.Fatalf("Expected 1 contained unit, got %d", len(mod.Contains))
 				}
-				fn := helperWantNode[*ast.Function](t, mod.Contains[0], "Contains[0]")
+				fn := helperWantUnit(t, &mod.Contains[0], token.FUNCTION, "Contains[0]")
 				fnData, ok := fn.Data.(*ParserUnitData)
 				if !ok {
 					t.Fatalf("Expected *ParserUnitData for function, got %T", fn.Data)
@@ -441,8 +439,8 @@ END MODULE test_mod`,
     REAL :: res
     res = x * 2.0
 END FUNCTION standalone_func`,
-			validate: func(t *testing.T, unit ast.ProgramUnit, data *ParserUnitData) {
-				fn := helperWantNode[*ast.Function](t, unit, "")
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				fn := helperWantUnit(t, unit, token.FUNCTION, "")
 				// Debug: print all variables in function
 				t.Logf("Function %s variables:", fn.Name)
 				vars := data.AppendVarinfo(nil)
@@ -460,6 +458,55 @@ END FUNCTION standalone_func`,
 				t.Logf("x decl: %+v", xVar.decl)
 			},
 		},
+		{
+			name: "array parameter with inline array spec has VFlagDimension",
+			src: `SUBROUTINE MATMUL_TEST(nk, a)
+    INTEGER,INTENT(IN):: nk
+    COMPLEX,INTENT(IN OUT):: a(nk,nk)
+    INTEGER:: i, j
+    DO i = 1, nk
+        DO j = 1, nk
+            a(i,j) = a(i,j) * 2.0
+        END DO
+    END DO
+END SUBROUTINE`,
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				sub := helperWantUnit(t, unit, token.SUBROUTINE, "")
+				if sub.Name != "MATMUL_TEST" {
+					t.Errorf("Expected subroutine name 'MATMUL_TEST', got %q", sub.Name)
+				}
+				// Debug: print all variables
+				t.Logf("Subroutine %s variables:", sub.Name)
+				vars := data.AppendVarinfo(nil)
+				for i, v := range vars {
+					t.Logf("  [%d] %s: decl=%v flags=%v dims=%v",
+						i, v.Identifier(), v.decl != nil, v.Flags(),
+						v.Dimensions() != nil && len(v.Dimensions().Bounds) > 0)
+				}
+				// CRITICAL: Check that array parameter 'a' has VFlagDimension
+				aVar := data.Var("a")
+				if aVar == nil {
+					t.Fatal("BUG: parameter 'a' not found in variable table")
+				}
+				if aVar.decl == nil {
+					t.Fatal("BUG: parameter 'a' has nil decl")
+				}
+				// Check ArraySpec is set
+				if aVar.decl.ArraySpec == nil {
+					t.Error("BUG: parameter 'a' declaration missing ArraySpec for a(nk,nk)")
+				} else {
+					t.Logf("a ArraySpec bounds: %d", len(aVar.decl.ArraySpec.Bounds))
+				}
+				// Check VFlagDimension is set
+				if !aVar.Flags().HasAny(VFlagDimension) {
+					t.Error("BUG: array parameter 'a' missing VFlagDimension flag")
+				}
+				// Verify parameter flag is also set
+				if !aVar.Flags().HasAny(VFlagParameter) {
+					t.Error("BUG: parameter 'a' missing VFlagParameter flag")
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -471,7 +518,7 @@ END FUNCTION standalone_func`,
 			}
 
 			unit := parser.ParseNextProgramUnit()
-			if unit == nil {
+			if !unit.IsValid() {
 				t.Fatal("ParseNextProgramUnit returned nil")
 			}
 
@@ -483,7 +530,24 @@ END FUNCTION standalone_func`,
 				t.Fatalf("Expected *ParserUnitData, got %T", unit.UnitData())
 			}
 
-			tt.validate(t, unit, data)
+			tt.validate(t, &unit, data)
 		})
 	}
+}
+func helperWantUnit(t testing.TB, unit *ast.Unit, tok token.Token, context string) *ast.Unit {
+	t.Helper()
+	msg := ""
+	if !unit.IsValid() {
+		msg += "[invalid unit]"
+	}
+	if unit.Token != tok {
+		msg += fmt.Sprintf("want %s unit, got %s", tok.String(), unit.Token.String())
+	}
+	if msg != "" {
+		msg = context + ": " + msg
+	}
+	if msg != "" {
+		t.Fatal(msg)
+	}
+	return unit // return same unit, just for renaming convenience.
 }

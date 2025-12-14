@@ -71,7 +71,7 @@ type REPL struct {
 	// registered stores all modules that have been registered
 	// using RegisterModule since Reset call. These modules can then be
 	// loaded to the USE scope via "Use".
-	registered []f90.ProgramUnit
+	registered []f90.Unit
 
 	// use stores modules/subroutines/functions/data blocks that have been loaded via Use.
 	// The used modules are flattened here, so _use contains functions/subroutines contained within modules as well.
@@ -158,10 +158,10 @@ func (repl *REPL) DefineStmtFunc(name string, params []string, expr f90.Expressi
 }
 
 // RegisteredUnit returns a program unit that was previously registered with RegisterUnit.
-func (repl *REPL) RegisteredUnit(name string) f90.ProgramUnit {
+func (repl *REPL) RegisteredUnit(name string) *f90.Unit {
 	for i := range repl.registered {
 		if strings.EqualFold(repl.registered[i].UnitName(), name) {
-			return repl.registered[i]
+			return &repl.registered[i]
 		}
 	}
 	return nil
@@ -169,7 +169,7 @@ func (repl *REPL) RegisteredUnit(name string) f90.ProgramUnit {
 
 // RegisterUnits registers a set of program units to the REPL. These units
 // are registered at a top level and are not accessed except in the case of function/subroutine lookup.
-func (repl *REPL) RegisterUnits(pu ...f90.ProgramUnit) error {
+func (repl *REPL) RegisterUnits(pu ...f90.Unit) error {
 	for i := range pu {
 		name := pu[i].UnitName()
 		exists := repl.RegisteredUnit(name)
@@ -194,7 +194,7 @@ func (repl *REPL) Use(name string, only ...string) (err error) {
 	return nil
 }
 
-func (repl *REPL) appendUnitData(dst []*ParserUnitData, only []string, pu f90.ProgramUnit) (_ []*ParserUnitData, err error) {
+func (repl *REPL) appendUnitData(dst []*ParserUnitData, only []string, pu *f90.Unit) (_ []*ParserUnitData, err error) {
 	data, ok := pu.UnitData().(*ParserUnitData)
 	if !ok {
 		return dst, fmt.Errorf("program unit %s has incompatible UnitData %T", pu.UnitName(), pu.UnitData())
@@ -217,14 +217,15 @@ func (repl *REPL) appendUnitData(dst []*ParserUnitData, only []string, pu f90.Pr
 	}
 	dst = append(dst, data)
 	// Also register module-contained procedures so they can be found by ContainedOrExtern.
-	if mod, ok := pu.(*f90.Module); ok {
-		for _, contained := range mod.Contains {
+	if pu.Token == f90token.MODULE {
+		for i := range pu.Contains {
+			contained := &pu.Contains[i]
 			if only != nil && !identifierIn(only, contained.UnitName()) {
 				continue
 			}
 			dst, err = repl.appendUnitData(dst, only, contained)
 			if err != nil {
-				return dst, fmt.Errorf("%s contained within %s: %w", contained.UnitName(), mod.Name, err)
+				return dst, fmt.Errorf("%s contained within %s: %w", contained.UnitName(), pu.Name, err)
 			}
 		}
 	}
@@ -273,7 +274,7 @@ func (repl *REPL) ScopeParams() []Varinfo {
 	return repl.scope.vars // all variables are parameters... or no variables.
 }
 
-func (repl *REPL) SetScope(pu f90.ProgramUnit) (err error) {
+func (repl *REPL) SetScope(pu f90.Unit) (err error) {
 	data, ok := pu.UnitData().(*ParserUnitData)
 	if !ok {
 		return errors.New("missing parser unit data")
@@ -292,28 +293,25 @@ func (repl *REPL) SetScope(pu f90.ProgramUnit) (err error) {
 	}
 	repl.collectCommonBlocks(repl.scope.vars)
 	repl._use = repl._use[:0]
-	var toAdd []f90.ProgramUnit
-	switch unit := pu.(type) {
-	case *f90.ProgramBlock:
+	var toAdd []f90.Unit
+	if !ok {
+		return nil
+	}
+	switch pu.Token {
+	case f90token.PROGRAM, f90token.MODULE:
 		repl._contains = repl._contains[:0]
-		toAdd = unit.Contains
-	case *f90.Module:
-		repl._contains = repl._contains[:0]
-		toAdd = unit.Contains
-	case *f90.Function:
-		if slices.Contains(unit.Attributes, f90token.RECURSIVE) {
-			toAdd = []f90.ProgramUnit{unit}
-		}
-	case *f90.Subroutine:
-		if slices.Contains(unit.Attributes, f90token.RECURSIVE) {
-			toAdd = []f90.ProgramUnit{unit}
+		toAdd = pu.Contains
+	case f90token.FUNCTION, f90token.SUBROUTINE:
+		if pu.ResultType.Attr(f90token.RECURSIVE) != nil {
+			toAdd = []f90.Unit{pu}
 		}
 	default:
 		return nil
 	}
 	// reset contains on Module or Program block.
-	for _, pu := range toAdd {
-		repl._contains, err = repl.appendUnitData(repl._contains, nil, pu)
+	for i := range toAdd {
+		add := &toAdd[i]
+		repl._contains, err = repl.appendUnitData(repl._contains, nil, add)
 		if err != nil {
 			return fmt.Errorf("adding contains %s: %w", pu.UnitName(), err)
 		}
@@ -359,6 +357,10 @@ func (repl *REPL) Eval(dst *Varinfo, expr f90.Expression) (err error) {
 			dst.val.tok = vi.typeToken()
 		} else {
 			// It's a function call (intrinsic or external)
+			if fn := repl.ContainedOrUsed(e.Name); fn != nil && fn.returnType != nil {
+				*dst = *fn.returnType
+				return nil
+			}
 			err = repl.evalIntrinsic(dst, e)
 		}
 	case *f90.ArrayConstructor:
@@ -508,22 +510,36 @@ func (repl *REPL) evalFloatBinary(dst, typ *Varinfo, l float64, op f90token.Toke
 }
 
 func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
-	intr := f90token.LookupIntrinsic(e.Name)
+	// Handle MALLOC specially - it's a vendor extension not in the standard intrinsics
+	if strings.EqualFold(e.Name, "MALLOC") {
+		// MALLOC returns a pointer (INTEGER type in Fortran)
+		dst.decl = &f90.DeclEntity{Type: &f90.TypeSpec{Token: f90token.INTEGER}}
+		dst.val.tok = f90token.INTEGER
+		return nil
+	}
+	intrTok := f90token.LookupIntrinsic(e.Name)
+	if intrTok == 0 {
+		return fmt.Errorf("intrinsic %s not found", e.Name)
+	}
 	if repl.noValueResolution {
 		// No value resolution short circuit.
-		intr := getIntrinsic(intr, len(e.Args))
+		intr := getIntrinsic(intrTok, len(e.Args))
 		if intr != nil {
 			if intr.returnType != nil {
 				*dst = *intr.returnType
+				// Ensure val.tok is set from decl for type inference
+				if dst.val.tok == 0 && dst.decl != nil {
+					dst.val.tok = dst.decl.Type.Token
+				}
 				return nil
 			} else if len(e.Args) > 0 {
 				return repl.Eval(dst, e.Args[0])
 			}
 		}
 	}
-	name := strings.ToUpper(e.Name)
+
 	if len(e.Args) == 0 {
-		return fmt.Errorf("%s intrinsic requires arguments", name)
+		return fmt.Errorf("%s intrinsic requires arguments", intrTok.String())
 	}
 	var arg0 Varinfo
 	err := repl.Eval(&arg0, e.Args[0])
@@ -532,17 +548,17 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 	}
 
 	// Check single-argument float function table.
-	if int(intr) < len(_intrinsicEvalf1) {
-		if fn1 := _intrinsicEvalf1[intr]; fn1 != nil {
+	if int(intrTok) < len(_intrinsicEvalf1) {
+		if fn1 := _intrinsicEvalf1[intrTok]; fn1 != nil {
 			return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(fn1, arg0.val.Float()))
 		}
 	}
 
 	// Check two-argument float function table.
-	if int(intr) < len(_intrinsicEvalf2) {
-		if fn2 := _intrinsicEvalf2[intr]; fn2 != nil {
+	if int(intrTok) < len(_intrinsicEvalf2) {
+		if fn2 := _intrinsicEvalf2[intrTok]; fn2 != nil {
 			if len(e.Args) < 2 {
-				return fmt.Errorf("%s requires 2 arguments", name)
+				return fmt.Errorf("%s requires 2 arguments", intrTok.String())
 			}
 			var arg1 Varinfo
 			if err := repl.Eval(&arg1, e.Args[1]); err != nil {
@@ -554,7 +570,7 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 
 	// Handle special cases not covered by lookup tables.
 	f0 := arg0.val.Float()
-	switch intr {
+	switch intrTok {
 	case f90token.IntrinsicREAL, f90token.IntrinsicFLOAT, f90token.IntrinsicSNGL:
 		err = repl.assignFloat32(dst, f0)
 	case f90token.IntrinsicDBLE:
@@ -575,7 +591,7 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 		err = repl.assignInt(dst, int64(math.Abs(float64(arg0.val.Int()))))
 	case f90token.IntrinsicISIGN, f90token.IntrinsicDSIGN, f90token.IntrinsicSIGN:
 		if len(e.Args) < 2 {
-			return fmt.Errorf("%s requires 2 arguments", name)
+			return fmt.Errorf("%s requires 2 arguments", intrTok.String())
 		}
 		var arg1 Varinfo
 		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
@@ -584,7 +600,7 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 		err = repl.assignFloatLike(dst, &arg0, math.Copysign(f0, arg1.val.Float()))
 	case f90token.IntrinsicDPROD:
 		if len(e.Args) < 2 {
-			return fmt.Errorf("%s requires 2 arguments", name)
+			return fmt.Errorf("%s requires 2 arguments", intrTok.String())
 		}
 		var arg1 Varinfo
 		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
@@ -592,24 +608,7 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 		}
 		err = repl.assignFloat64(dst, f0*arg1.val.Float())
 	default:
-		// Check for user-defined functions.
-		if fn := repl.ContainedOrUsed(e.Name); fn != nil && fn.returnType != nil {
-			dst.val.tok = fn.returnType.typeToken()
-			return nil
-		}
-		// Handle non-standard extensions by string matching.
-		switch name {
-		case "MALLOC", "IACHAR":
-			err = repl.assignInt(dst, int64(len(arg0.val.StringValue())))
-		case "ACHAR":
-			err = repl.assignString(dst, arg0.val.StringValue())
-		default:
-			if f90token.IsIntrinsic(name) {
-				err = fmt.Errorf("intrinsic not yet implemented: %s", name)
-			} else {
-				err = fmt.Errorf("unknown intrinsic: %s", name)
-			}
-		}
+		err = fmt.Errorf("intrinsic not yet implemented: %s", intrTok.String())
 	}
 	return err
 }

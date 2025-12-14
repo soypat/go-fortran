@@ -27,7 +27,7 @@ func TestTranspileGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	program := parser.ParseNextProgramUnit().(*f90.ProgramBlock)
+	program := parser.ParseNextProgramUnit()
 	var tg ToGo
 	tg.SetSource(filename, strings.NewReader(goldensrc))
 	decls, err := tg.TransformProgram(program)
@@ -86,7 +86,7 @@ func helperRunFortran(t *testing.T, filepath string) (output []byte) {
 	cmd = exec.Command(binFile)
 	output, err = cmd.CombinedOutput()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("running fortran:", string(output), err)
 	}
 	return output
 }
@@ -128,9 +128,9 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 			t.Fatal(err)
 		}
 		tg.SetSource(module, file)
-		for {
+		for !ps.IsDone() {
 			unit := ps.ParseNextProgramUnit()
-			if unit == nil {
+			if !unit.IsValid() {
 				break
 			}
 			helperFatalErrors(t, &ps, "parsing unit "+unit.UnitName())
@@ -149,27 +149,33 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 	defer file.Close()
 	ps.Reset(programPath, file)
 	tg.SetSource(programPath, file)
-	var mainBlock *f90.ProgramBlock
-	for {
+	var mainBlock *f90.Unit
+	for !ps.IsDone() {
 		unit := ps.ParseNextProgramUnit()
-		if unit == nil {
+		if !unit.IsValid() {
 			break
 		}
-		if pb, ok := unit.(*f90.ProgramBlock); ok {
+		if unit.Token == f90token.PROGRAM {
 			if mainBlock != nil {
 				t.Fatal("two main blocks found")
 			}
-			mainBlock = pb
+			mainBlock = &unit
 			continue
 		}
 		err = tg.RegisterUnits(unit)
 		if err != nil {
-			err2 := tg.makeErr(unit, "failed to add")
+			err2 := tg.makeErr(&unit, "failed to add")
 			t.Fatal("adding main program unit failed:", err, err2)
 		}
 	}
-	// helperFatalErrors(t, &ps, "parsing") // Temporarily disabled to see transpile errors
-	decls, err := tg.TransformProgram(mainBlock)
+	var decls []ast.Decl
+	if mainBlock == nil {
+		decls, err = tg.TransformRegistered([]ast.Decl{tg.ImportDecl()})
+		decls = tg.AppendCommonDecls(decls)
+	} else {
+		decls, err = tg.TransformProgram(*mainBlock)
+	}
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,15 +241,9 @@ END PROGRAM`,
 			}
 
 			unit := parser.ParseNextProgramUnit()
-			if unit == nil {
-				t.Fatal("ParseNextProgramUnit returned nil")
+			if !unit.IsValid() {
+				t.Fatal("ParseNextProgramUnit returned invalid unit")
 			}
-
-			program, ok := unit.(*f90.ProgramBlock)
-			if !ok {
-				t.Fatalf("Expected *ProgramBlock, got %T", unit)
-			}
-
 			// Verify no parsing errors
 			errs := parser.Errors()
 			for _, e := range errs {
@@ -253,7 +253,7 @@ END PROGRAM`,
 			// Transpile - this should not panic
 			var tg ToGo
 			tg.SetSource(tt.name+".f90", strings.NewReader(tt.src))
-			_, err = tg.TransformProgram(program)
+			_, err = tg.TransformProgram(unit)
 			if err != nil {
 				t.Errorf("TransformProgram failed: %v", err)
 			}
@@ -282,13 +282,10 @@ func TestComparisonOperatorReturnsLogical(t *testing.T) {
 	}
 
 	unit := parser.ParseNextProgramUnit()
-	if unit == nil {
-		t.Fatal("ParseNextProgramUnit returned nil")
+	if !unit.IsValid() {
+		t.Fatal("ParseNextProgramUnit returned invalid")
 	}
-
-	program := unit.(*f90.ProgramBlock)
-	data := program.Data.(*ParserUnitData)
-
+	data := unit.Data.(*ParserUnitData)
 	// Verify LRAY gets LOGICAL type from IMPLICIT LOGICAL(L)
 	lray := data.Var("LRAY")
 	if lray == nil {
@@ -311,7 +308,7 @@ func TestComparisonOperatorReturnsLogical(t *testing.T) {
 	// because .GT. returned INTEGER instead of LOGICAL
 	var tg ToGo
 	tg.SetSource("test.f90", strings.NewReader(src))
-	_, err = tg.TransformProgram(program)
+	_, err = tg.TransformProgram(unit)
 	if err != nil {
 		t.Errorf("TransformProgram failed: %v", err)
 	}
@@ -338,10 +335,10 @@ func TestModuleVariableImport(t *testing.T) {
 	}
 
 	// Parse all program units (module + program)
-	var units []f90.ProgramUnit
-	for {
+	var units []f90.Unit
+	for !parser.IsDone() {
 		unit := parser.ParseNextProgramUnit()
-		if unit == nil {
+		if !unit.IsValid() {
 			break
 		}
 		units = append(units, unit)
@@ -350,13 +347,10 @@ func TestModuleVariableImport(t *testing.T) {
 		t.Fatalf("Expected 2 program units (module + program), got %d", len(units))
 	}
 
-	mod, ok := units[0].(*f90.Module)
-	if !ok {
-		t.Fatalf("Expected Module, got %T", units[0])
-	}
-	program, ok := units[1].(*f90.ProgramBlock)
-	if !ok {
-		t.Fatalf("Expected ProgramBlock, got %T", units[1])
+	mod := units[0]
+	program := units[1]
+	if mod.Token != f90token.MODULE || program.Token != f90token.PROGRAM {
+		t.Fatalf("Expected MDOULE followed by ProgramBlock, got %s %s", units[0].Token, units[1].Token)
 	}
 
 	// Transpile with module as extern
@@ -390,17 +384,16 @@ func TestStatementFunction(t *testing.T) {
 	}
 
 	unit := parser.ParseNextProgramUnit()
-	if unit == nil {
-		t.Fatal("Expected program unit")
+	if !unit.IsValid() {
+		t.Fatal("Expected valid program unit")
 	}
-	program, ok := unit.(*f90.ProgramBlock)
-	if !ok {
-		t.Fatalf("Expected ProgramBlock, got %T", unit)
+	if unit.Token != f90token.PROGRAM {
+		t.Fatalf("Expected ProgramBlock, got %s", unit.Token)
 	}
 
 	var tg ToGo
 	tg.SetSource("test.f90", strings.NewReader(src))
-	_, err = tg.TransformProgram(program)
+	_, err = tg.TransformProgram(unit)
 	if err != nil {
 		t.Errorf("TransformProgram failed: %v", err)
 	}
