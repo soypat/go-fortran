@@ -279,6 +279,10 @@ func LookupIntrinsic(s string) Intrinsic {
 	if intr != 0 && strings.EqualFold(s, intr.String()) {
 		return intr
 	}
+	// Handle aliases: COMPLEX → CMPLX
+	if strings.EqualFold(s, "COMPLEX") {
+		return IntrinsicCMPLX
+	}
 	return 0
 }
 

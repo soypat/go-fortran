@@ -21,7 +21,7 @@ type float interface {
 	~float32 | ~float64
 }
 
-type complex interface {
+type complexNum interface {
 	~complex64 | ~complex128
 }
 
@@ -63,6 +63,56 @@ func CABS(z complex64) float32 {
 // Fortran: CDABS(z) - returns DOUBLE PRECISION
 func CDABS(z complex128) float64 {
 	return cmplx.Abs(z)
+}
+
+// CMPLX converts a real or integer to complex with zero imaginary part.
+// Fortran: CMPLX(x) - returns COMPLEX
+func CMPLX[T float | signed](x T) complex64 {
+	r := float64(x)
+	return complex64(complex(r, 0))
+}
+
+// CMPLX2 creates a complex number from real and imaginary parts.
+// Fortran: CMPLX(x, y) - returns COMPLEX
+func CMPLX2[T float | signed](x, y T) complex64 {
+	r, i := float64(x), float64(y)
+	return complex64(complex(r, i))
+}
+
+// DCMPLX converts to double complex with zero imaginary part.
+// Fortran: DCMPLX(x) - returns DOUBLE COMPLEX
+func DCMPLX[T float | signed](x T) complex128 {
+	return complex(float64(x), 0)
+}
+
+// DCMPLX2 creates a double complex number from real and imaginary parts.
+// Fortran: DCMPLX(x, y) - returns DOUBLE COMPLEX
+func DCMPLX2[T float | signed](x, y T) complex128 {
+	return complex(float64(x), float64(y))
+}
+
+// AIMAG returns the imaginary part of a complex number.
+// Fortran: AIMAG(z) - returns REAL
+func AIMAG(z complex64) float32 {
+	return imag(z)
+}
+
+// REALPART returns the real part of a complex number.
+// Fortran: REAL(z) when z is complex - returns REAL
+func REALPART(z complex64) float32 {
+	return real(z)
+}
+
+// DREALPART returns the real part of a double complex number.
+// Fortran: DREAL(z) - returns DOUBLE PRECISION
+func DREALPART(z complex128) float64 {
+	return real(z)
+}
+
+// DIMAG returns the imaginary part of a double complex number.
+// Fortran: DIMAG(z) - returns DOUBLE PRECISION
+func DIMAG(z complex128) float64 {
+	return imag(z)
 }
 
 // SQRT returns the square root of x

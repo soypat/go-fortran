@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -466,9 +467,17 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 	fi := tg.ContainedOrUsed(e.Name)
 	if fi == nil {
 		lookup := f90token.LookupIntrinsic(e.Name)
-		// Try V2 system first
+		// Try V2 system first with type-aware matching
 		if fnV2 := getIntrinsicV2(lookup); fnV2 != nil {
-			call := fnV2.findBestCall(len(e.Args))
+			// Infer argument types for better matching
+			argTypes := make([]*Varinfo, len(e.Args))
+			for i, arg := range e.Args {
+				var vi Varinfo
+				if err := tg.repl.InferType(&vi, arg); err == nil {
+					argTypes[i] = &vi
+				}
+			}
+			call := fnV2.findBestCallWithTypes(argTypes)
 			if call != nil {
 				return tg.intrinsicExprV2(vitgt, fnV2, call, e.Args...)
 			}
@@ -1344,7 +1353,7 @@ type intrinsicCall struct {
 	//  - If first letter is upper case then is function in intrinsic package.
 	//  - Else is a built in in Go.
 	methodOrCall string
-	isVariadic   bool
+	allowKindArg bool
 }
 
 func makeCall(methodOrGoCall string, returnType *Varinfo, args ...*Varinfo) intrinsicCall {
@@ -1375,12 +1384,12 @@ func getIntrinsicV2(lookup f90token.Intrinsic) *intrinsicFnV2 {
 	return fn
 }
 
-// findBestCall finds the best matching intrinsicCall for the given argument count.
+// findBestCall finds the best matching intrinsicCall for the given arguments.
 // Returns nil if no match found.
 func (fn *intrinsicFnV2) findBestCall(nargs int) *intrinsicCall {
 	for i := range fn.calls {
 		c := &fn.calls[i]
-		if c.isVariadic || fn.isVariadic {
+		if fn.isVariadic {
 			if nargs >= len(c.args) {
 				return c
 			}
@@ -1389,6 +1398,67 @@ func (fn *intrinsicFnV2) findBestCall(nargs int) *intrinsicCall {
 		}
 	}
 	return nil
+}
+
+// findBestCallWithTypes finds the best matching intrinsicCall considering argument types.
+func (fn *intrinsicFnV2) findBestCallWithTypes(argTypes []*Varinfo) *intrinsicCall {
+	nargs := len(argTypes)
+	var genericMatch *intrinsicCall
+	for i := range fn.calls {
+		c := &fn.calls[i]
+		if fn.isVariadic {
+			if nargs < len(c.args) {
+				continue
+			}
+		} else if len(c.args) != nargs {
+			continue
+		}
+		// Check if all argument types are compatible
+		match := true
+		isGeneric := false
+		for j := range c.args {
+			argIdx := j
+			if argIdx >= nargs {
+				break
+			}
+			paramType := c.args[j]
+			argType := argTypes[argIdx]
+			if !typeCompatible(paramType, argType) {
+				match = false
+				break
+			}
+			if isGenericVarinfo(paramType) {
+				isGeneric = true
+			}
+		}
+		if match {
+			if !isGeneric {
+				return c // Prefer exact matches over generic matches
+			}
+			if genericMatch == nil {
+				genericMatch = c
+			}
+		}
+	}
+	return genericMatch
+}
+
+// typeCompatible checks if argType is compatible with paramType.
+func typeCompatible(paramType, argType *Varinfo) bool {
+	if paramType == nil || argType == nil {
+		return true
+	}
+	// Generic types accept anything of their category
+	if paramType == _tgtGenericFloat {
+		tok := argType.typeToken()
+		return tok == f90token.REAL || tok == f90token.DOUBLEPRECISION || tok == f90token.FloatLit
+	}
+	if paramType == _tgtGenericInt {
+		tok := argType.typeToken()
+		return tok == f90token.INTEGER || tok == f90token.IntLit
+	}
+	// Exact type match
+	return paramType.typeToken() == argType.typeToken()
 }
 
 // intrinsicExprV2 transforms an intrinsic call using the V2 system.
@@ -1437,9 +1507,10 @@ func (tg *ToGo) intrinsicExprV2(vitgt *Varinfo, fn *intrinsicFnV2, call *intrins
 	if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
 		// Uppercase: intrinsic.NAME or intrinsic.NAME[T]
 		sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(name)}
-		// Add type parameter if needed for generics
-		if resultType != nil && !isGenericVarinfo(resultType) && resultType != _tgtBool {
-			goType := goTypeBasic(resultType.typeToken(), 0)
+		// Add type parameter only if first param is generic (function needs type instantiation)
+		isGenericFn := len(call.args) > 0 && isGenericVarinfo(call.args[0])
+		if isGenericFn && firstArgType != nil && !isGenericVarinfo(firstArgType) {
+			goType := goTypeBasic(firstArgType.typeToken(), 0)
 			funcExpr = &ast.IndexExpr{X: sel, Index: goType}
 		} else {
 			funcExpr = sel
@@ -1460,6 +1531,7 @@ var intrinsicsv2 = []intrinsicFnV2{
 		calls: []intrinsicCall{
 			makeCall("float32", _tgtFloat32, _tgtGenericInt),
 			makeCall("float32", _tgtFloat32, _tgtGenericFloat),
+			makeCall("REALPART", _tgtFloat32, _tgtComplex64), // REAL(complex) returns real part
 		},
 	},
 	f90token.IntrinsicINT: {
@@ -1469,13 +1541,189 @@ var intrinsicsv2 = []intrinsicFnV2{
 		},
 	},
 	f90token.IntrinsicIFIX: {redirectTo: f90token.IntrinsicINT},
-	f90token.IntrinsicSIZE: {
-		calls: []intrinsicCall{makeCall("Size", _tgtInt32, _tgtArray)},
-	},
 	f90token.IntrinsicMAX: {
 		isVariadic: true,
 		calls:      []intrinsicCall{makeCall("MAX", nil, _tgtGenericFloat)},
 	},
+	f90token.IntrinsicCMPLX: {
+		calls: []intrinsicCall{
+			// CMPLX(x) - single arg, imaginary = 0
+			makeCall("CMPLX", _tgtComplex64, _tgtGenericFloat),
+			makeCall("CMPLX", _tgtComplex64, _tgtGenericInt),
+			// CMPLX(x, y) - two args, real and imaginary parts
+			makeCall("CMPLX2", _tgtComplex64, _tgtGenericFloat, _tgtGenericFloat),
+			makeCall("CMPLX2", _tgtComplex64, _tgtGenericInt, _tgtGenericInt),
+		},
+	},
+	f90token.IntrinsicSQRT: {
+		calls: []intrinsicCall{makeCall("SQRT", nil, _tgtGenericFloat)},
+		f1:    math.Sqrt,
+	},
+	f90token.IntrinsicDSQRT: {redirectTo: f90token.IntrinsicSQRT},
+	f90token.IntrinsicAIMAG: {
+		calls: []intrinsicCall{makeCall("AIMAG", _tgtFloat32, _tgtComplex64)},
+	},
+
+	// Type conversions
+	f90token.IntrinsicDBLE: {
+		calls: []intrinsicCall{
+			makeCall("float64", _tgtFloat64, _tgtGenericInt),
+			makeCall("float64", _tgtFloat64, _tgtGenericFloat),
+		},
+	},
+
+	// Trig intrinsics
+	f90token.IntrinsicSIN: {
+		calls: []intrinsicCall{makeCall("SIN", nil, _tgtGenericFloat)},
+		f1:    math.Sin,
+	},
+	f90token.IntrinsicDSIN: {redirectTo: f90token.IntrinsicSIN},
+	f90token.IntrinsicCOS: {
+		calls: []intrinsicCall{makeCall("COS", nil, _tgtGenericFloat)},
+		f1:    math.Cos,
+	},
+	f90token.IntrinsicDCOS: {redirectTo: f90token.IntrinsicCOS},
+	f90token.IntrinsicTAN: {
+		calls: []intrinsicCall{makeCall("TAN", nil, _tgtGenericFloat)},
+		f1:    math.Tan,
+	},
+	f90token.IntrinsicDTAN: {redirectTo: f90token.IntrinsicTAN},
+	f90token.IntrinsicASIN: {
+		calls: []intrinsicCall{makeCall("ASIN", nil, _tgtGenericFloat)},
+		f1:    math.Asin,
+	},
+	f90token.IntrinsicDASIN: {redirectTo: f90token.IntrinsicASIN},
+	f90token.IntrinsicACOS: {
+		calls: []intrinsicCall{makeCall("ACOS", nil, _tgtGenericFloat)},
+		f1:    math.Acos,
+	},
+	f90token.IntrinsicDACOS: {redirectTo: f90token.IntrinsicACOS},
+	f90token.IntrinsicATAN: {
+		calls: []intrinsicCall{makeCall("ATAN", nil, _tgtGenericFloat)},
+		f1:    math.Atan,
+	},
+	f90token.IntrinsicDATAN: {redirectTo: f90token.IntrinsicATAN},
+	f90token.IntrinsicATAN2: {
+		calls: []intrinsicCall{makeCall("ATAN2", nil, _tgtGenericFloat, _tgtGenericFloat)},
+		f2:    math.Atan2,
+	},
+	f90token.IntrinsicDATAN2: {redirectTo: f90token.IntrinsicATAN2},
+
+	// Hyperbolic intrinsics
+	f90token.IntrinsicSINH: {
+		calls: []intrinsicCall{makeCall("SINH", nil, _tgtGenericFloat)},
+		f1:    math.Sinh,
+	},
+	f90token.IntrinsicDSINH: {redirectTo: f90token.IntrinsicSINH},
+	f90token.IntrinsicCOSH: {
+		calls: []intrinsicCall{makeCall("COSH", nil, _tgtGenericFloat)},
+		f1:    math.Cosh,
+	},
+	f90token.IntrinsicDCOSH: {redirectTo: f90token.IntrinsicCOSH},
+	f90token.IntrinsicTANH: {
+		calls: []intrinsicCall{makeCall("TANH", nil, _tgtGenericFloat)},
+		f1:    math.Tanh,
+	},
+	f90token.IntrinsicDTANH: {redirectTo: f90token.IntrinsicTANH},
+
+	// Exponential and logarithmic
+	f90token.IntrinsicEXP: {
+		calls: []intrinsicCall{makeCall("EXP", nil, _tgtGenericFloat)},
+		f1:    math.Exp,
+	},
+	f90token.IntrinsicDEXP: {redirectTo: f90token.IntrinsicEXP},
+	f90token.IntrinsicLOG: {
+		calls: []intrinsicCall{makeCall("LOG", nil, _tgtGenericFloat)},
+		f1:    math.Log,
+	},
+	f90token.IntrinsicDLOG: {redirectTo: f90token.IntrinsicLOG},
+	f90token.IntrinsicLOG10: {
+		calls: []intrinsicCall{makeCall("LOG10", nil, _tgtGenericFloat)},
+		f1:    math.Log10,
+	},
+	f90token.IntrinsicDLOG10: {redirectTo: f90token.IntrinsicLOG10},
+
+	// Truncation and rounding
+	f90token.IntrinsicFLOOR: {
+		calls: []intrinsicCall{makeCall("FLOOR", nil, _tgtGenericFloat)},
+		f1:    math.Floor,
+	},
+	f90token.IntrinsicCEILING: {
+		calls: []intrinsicCall{makeCall("CEILING", nil, _tgtGenericFloat)},
+		f1:    math.Ceil,
+	},
+	f90token.IntrinsicAINT: {
+		calls: []intrinsicCall{makeCall("AINT", nil, _tgtGenericFloat)},
+		f1:    math.Trunc,
+	},
+	f90token.IntrinsicANINT: {
+		calls: []intrinsicCall{makeCall("ANINT", nil, _tgtGenericFloat)},
+		f1:    math.Round,
+	},
+	f90token.IntrinsicNINT: {
+		calls: []intrinsicCall{makeCall("NINT", _tgtInt32, _tgtGenericFloat)},
+	},
+	f90token.IntrinsicDNINT:  {redirectTo: f90token.IntrinsicANINT},
+	f90token.IntrinsicIDNINT: {redirectTo: f90token.IntrinsicNINT},
+
+	// Absolute value and sign
+	f90token.IntrinsicABS: {
+		calls: []intrinsicCall{makeCall("ABS", nil, _tgtGenericFloat)},
+		f1:    math.Abs,
+	},
+	f90token.IntrinsicDABS: {redirectTo: f90token.IntrinsicABS},
+	f90token.IntrinsicIABS: {
+		calls: []intrinsicCall{makeCall("IABS", nil, _tgtGenericInt)},
+	},
+	f90token.IntrinsicCABS: {
+		calls: []intrinsicCall{makeCall("CABS", _tgtFloat32, _tgtComplex64)},
+	},
+	f90token.IntrinsicSIGN: {
+		calls: []intrinsicCall{makeCall("SIGN", nil, _tgtGenericFloat, _tgtGenericFloat)},
+	},
+	f90token.IntrinsicISIGN: {
+		calls: []intrinsicCall{makeCall("SIGN", nil, _tgtGenericInt, _tgtGenericInt)},
+	},
+	f90token.IntrinsicDSIGN: {redirectTo: f90token.IntrinsicSIGN},
+
+	// Modulo and remainder
+	f90token.IntrinsicMOD: {
+		calls: []intrinsicCall{
+			makeCall("MOD", nil, _tgtGenericInt, _tgtGenericInt),
+			makeCall("MODREAL", nil, _tgtGenericFloat, _tgtGenericFloat),
+		},
+	},
+	f90token.IntrinsicDIM: {
+		calls: []intrinsicCall{makeCall("DIM", nil, _tgtGenericFloat, _tgtGenericFloat)},
+	},
+	f90token.IntrinsicIDIM: {
+		calls: []intrinsicCall{makeCall("DIM", nil, _tgtGenericInt, _tgtGenericInt)},
+	},
+	f90token.IntrinsicDDIM: {redirectTo: f90token.IntrinsicDIM},
+	f90token.IntrinsicDPROD: {
+		calls: []intrinsicCall{makeCall("DPROD", _tgtFloat64, _tgtFloat32, _tgtFloat32)},
+	},
+
+	// Variadic min
+	f90token.IntrinsicMIN: {
+		isVariadic: true,
+		calls:      []intrinsicCall{makeCall("MIN", nil, _tgtGenericFloat)},
+	},
+	f90token.IntrinsicMAX0: {
+		isVariadic: true,
+		calls:      []intrinsicCall{makeCall("MAX", nil, _tgtGenericInt)},
+	},
+	f90token.IntrinsicMIN0: {
+		isVariadic: true,
+		calls:      []intrinsicCall{makeCall("MIN", nil, _tgtGenericInt)},
+	},
+	f90token.IntrinsicAMAX1: {redirectTo: f90token.IntrinsicMAX},
+	f90token.IntrinsicAMIN1: {redirectTo: f90token.IntrinsicMIN},
+	f90token.IntrinsicDMAX1: {redirectTo: f90token.IntrinsicMAX},
+	f90token.IntrinsicDMIN1: {redirectTo: f90token.IntrinsicMIN},
+
+	// Note: Character methods (LEN, TRIM, etc.) and array methods (SIZE, LBOUND, etc.)
+	// are handled by V1 which has special method call handling.
 }
 
 func defaultVarinfo(tok f90token.Token) *Varinfo {

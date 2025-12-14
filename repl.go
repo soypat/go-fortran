@@ -522,7 +522,20 @@ func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
 		return fmt.Errorf("intrinsic %s not found", e.Name)
 	}
 	if repl.noValueResolution {
-		// No value resolution short circuit.
+		// No value resolution short circuit - try V2 first, then V1.
+		if fnV2 := getIntrinsicV2(intrTok); fnV2 != nil {
+			if call := fnV2.findBestCall(len(e.Args)); call != nil {
+				if call.returnType != nil {
+					*dst = *call.returnType
+					if dst.val.tok == 0 && dst.decl != nil {
+						dst.val.tok = dst.decl.Type.Token
+					}
+					return nil
+				} else if len(e.Args) > 0 {
+					return repl.Eval(dst, e.Args[0])
+				}
+			}
+		}
 		intr := getIntrinsic(intrTok, len(e.Args))
 		if intr != nil {
 			if intr.returnType != nil {
