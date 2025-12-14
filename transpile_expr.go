@@ -95,8 +95,7 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 	if err != nil {
 		return nil, nil, err
 	}
-	doWrap := vitgt == _tgtInt ||
-		(vitgt != nil && resultType.IsPointer() != vitgt.IsPointer())
+	doWrap := vitgt == _tgtInt || resultType.IsPointer() != vitgt.IsPointer()
 	if doWrap {
 		result = tg.wrapConversion(vitgt, resultType, result)
 	}
@@ -117,13 +116,13 @@ func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructo
 	var elemVinfo *Varinfo = vitgt
 
 	// Try to infer element type from target, but not DIMENSION (means "array of unknown type")
-	targetTok := f90token.Undefined
-	targetTok = vitgt.typeToken()
+	targetTok := vitgt.typeToken()
 	if targetTok != f90token.Undefined && targetTok != f90token.DIMENSION {
 		elemType = tg.baseGotype(targetTok, tg.resolveKind(vitgt))
 	} else if len(e.Values) > 0 {
-		// Infer from first element
-		_, elemVinfo, err = tg.transformExpression(nil, e.Values[0])
+		// Infer element type from first value. Use _tgtGenericInt as placeholder vitgt
+		// since literals always return their own type regardless of target.
+		_, elemVinfo, err = tg.transformExpression(vitgt, e.Values[0])
 		if err != nil {
 			return nil, err
 		}
@@ -178,11 +177,7 @@ func (tg *ToGo) transformComponentAccess(vitgt *Varinfo, e *f90.ComponentAccess)
 
 	// For now, return vitgt as resultType since we don't track derived type field types
 	// This works for simple cases where the target type is known
-	if vitgt != nil {
-		return result, vitgt, nil
-	}
-	// If no target type, use base variable info
-	return result, baseVinfo, nil
+	return result, vitgt, nil
 }
 
 func (tg *ToGo) transformUnaryExpr(vitgt *Varinfo, e *f90.UnaryExpr) (result ast.Expr, resultType *Varinfo, err error) {
@@ -576,7 +571,7 @@ func (tg *ToGo) transformMALLOC(vitgt *Varinfo, e *f90.CallExpr) (result ast.Exp
 
 	// Determine element type from target's pointee
 	var elemType ast.Expr
-	if vitgt != nil && vitgt.pointee != "" {
+	if vitgt.pointee != "" {
 		pointeeVar := tg.repl.Var(vitgt.pointee)
 		if pointeeVar != nil {
 			elemType = tg.baseGotype(pointeeVar.typeToken(), tg.resolveKind(pointeeVar))
@@ -1062,7 +1057,7 @@ func (tg *ToGo) intrinsicExpr(vitgt *Varinfo, fn *intrinsicFn, args ...f90.Expre
 			// - Variadic intrinsics (MIN/MAX): use target type if valid, else first arg type
 			// - Other generics (ABS, etc.): use first argument's actual type
 			genericType := firstArgType
-			if fn.isVariadic && vitgt != nil && !isGenericVarinfo(vitgt) {
+			if fn.isVariadic && !isGenericVarinfo(vitgt) {
 				genericType = vitgt
 			}
 			funcExpr = fn.exprGeneric(genericType)
