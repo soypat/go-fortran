@@ -18,34 +18,67 @@ import (
 // Set via -ldflags: go test -ldflags="-X 'github.com/soypat/go-fortran.debugNoStuckCheck=1'"
 var debugNoStuckCheck string
 
-// Pratt parsing functions. a.k.a: Semantic Code.
-type (
-	statementParseFn func() ast.Statement // For statement-level constructs
-)
-
-// VarFlags for parser.
+// VarFlags tracks attributes and semantic properties of Fortran variables.
+// Flags are set during parsing and used during transpilation to determine
+// the correct Go representation and access patterns.
 type VarFlags uint64
 
 const (
-	VFlagImplicit     VarFlags = 1 << iota // Type inferred from IMPLICIT rules
-	VFlagUsed                              // Symbol is referenced in code
-	VFlagPointer                           // Has POINTER attribute
-	VFlagTarget                            // Has TARGET attribute
-	VFlagParameter                         // Is a function/subroutine parameter
-	VFlagPointerParam                      // OUT/INOUT scalar parameter (needs dereference)
-	VFlagAllocatable                       // Has ALLOCATABLE attribute
-	VFlagCommon                            // Variable is in a COMMON block
-	VFlagPointee                           // Cray-style pointee (accessed through pointer variable)
-	VFlagDimension                         // DIMENSION attribute or implicit dimension set. Variable is an array type.
+	// VFlagImplicit: Type was inferred from IMPLICIT rules rather than explicit declaration.
+	// Set when: Variable used without prior declaration, type derived from first letter.
+	VFlagImplicit VarFlags = 1 << iota
+	// VFlagUsed: Symbol is referenced somewhere in the code.
+	// Set when: Any use of the identifier in expressions or statements.
+	VFlagUsed
+	// VFlagPointer: Variable has POINTER attribute or is a Cray-style pointer.
+	// Set when: "INTEGER, POINTER :: x" (F90) or "POINTER (ptr, pointee)" (Cray ptr).
+	// For Cray: the pointer variable (ptr) holds an address, not auto-dereferenced.
+	// For F90 POINTER: typically combined with VFlagDimension for pointer arrays.
+	VFlagPointer
+	// VFlagTarget: Variable has TARGET attribute (can be pointed to by F90 pointers).
+	// Set when: "INTEGER, TARGET :: x"
+	VFlagTarget
+	// VFlagParameter: Is a dummy argument (parameter) of a function/subroutine.
+	// Set when: Variable appears in procedure's parameter list.
+	VFlagParameter
+	// VFlagPointerParam: OUT/INOUT scalar parameter that needs dereferencing.
+	// Set when: Scalar parameter with INTENT(OUT) or INTENT(INOUT).
+	VFlagPointerParam
+	// VFlagAllocatable: Variable has ALLOCATABLE attribute.
+	// Set when: "INTEGER, ALLOCATABLE :: arr(:)" - dynamic allocation via ALLOCATE.
+	VFlagAllocatable
+	// VFlagCommon: Variable is in a COMMON block (shared storage).
+	// Set when: Variable appears in a COMMON statement.
+	VFlagCommon
+	// VFlagPointee: Cray-style pointee accessed through a pointer variable.
+	// Set when: "POINTER (ptr, pointee)" - pointee is accessed via ptr.
+	// Access to pointee requires dereferencing the pointer variable.
+	VFlagPointee
+	// VFlagDimension: Variable is an array (has DIMENSION attribute or explicit bounds).
+	// Set when: "INTEGER :: arr(10)" or "INTEGER, DIMENSION(:) :: arr"
+	// Go type: *intrinsic.Array[T]
+	VFlagDimension
+	// VFlagIntentOut: Parameter has INTENT(OUT) - callee provides value.
 	VFlagIntentOut
+	// VFlagIntentIn: Parameter has INTENT(IN) - caller provides value.
 	VFlagIntentIn
+	// VFlagArrayInit: Array has been initialized via DATA or inline initializer.
 	VFlagArrayInit
-	VFlagArraySpec // ArraySpec used in type declaration.
+	// VFlagArraySpec: ArraySpec was used in the type declaration.
+	VFlagArraySpec
+	// VFlagReturned: Variable is the function return value.
 	VFlagReturned
+	// VFlagRecursive: Function/subroutine has RECURSIVE attribute.
 	VFlagRecursive
-	VFlagEquivalenced      // Participates in EQUIVALENCE statement (scalars become PointerTo[T])
-	VFlagConstantParameter // Declared with PARAMETER attribute or part of PARAMETER statement
-	VFlagStmtFunc          // Statement function (one-line inline function)
+	// VFlagEquivalenced: Variable shares storage via EQUIVALENCE statement.
+	// Set when: "EQUIVALENCE (a, b)" - scalars become PointerTo[T] in Go.
+	VFlagEquivalenced
+	// VFlagConstantParameter: Compile-time constant (PARAMETER statement or attribute).
+	// Set when: "PARAMETER (PI = 3.14159)" or "REAL, PARAMETER :: PI = 3.14"
+	VFlagConstantParameter
+	// VFlagStmtFunc: Statement function (one-line inline function).
+	// Set when: "AREA(R) = 3.14159 * R * R"
+	VFlagStmtFunc
 )
 
 func (f VarFlags) HasAny(hasBits VarFlags) bool { return f&hasBits != 0 }
@@ -405,6 +438,43 @@ func (p *Varinfo) TypeToken() token.Token {
 		return token.Undefined
 	}
 	return p.decl.Type.Token
+}
+
+// IsArray returns true if this is an array (has DIMENSION).
+func (p *Varinfo) IsArray() bool {
+	return p.flags.HasAny(VFlagDimension)
+}
+
+// IsChar returns true if this is a character type (not an array of characters).
+func (p *Varinfo) IsChar() bool {
+	if p.flags.HasAny(VFlagDimension) {
+		return false
+	}
+	tok := p.TypeToken()
+	return tok == token.CHARACTER || tok == token.StringLit
+}
+
+// IsPointer returns true if accessing this variable requires automatic pointer dereferencing.
+//
+// Fortran pointer semantics:
+//   - VFlagPointer (Cray pointer): In "POINTER (NPAA, AA(1))", NPAA holds an address.
+//     Accessing NPAA returns the address VALUE, not the pointed-to data. Never auto-deref.
+//   - VFlagPointee: AA in the above example. Accessing AA(i) implicitly dereferences NPAA
+//     to reach the data. Pointees need auto-dereferencing.
+//   - VFlagEquivalenced: Variables sharing storage via EQUIVALENCE. In Go, we use pointers
+//     so they share memory, and accessing them requires dereferencing.
+//
+// Returns false for VFlagPointer because you want the address, not what it points to.
+// Returns false for arrays (VFlagDimension) which have their own access patterns.
+// Returns false for CHARACTER types which use intrinsic.CharacterArray.
+func (p *Varinfo) IsPointer() bool {
+	if p.flags.HasAny(VFlagPointer | VFlagDimension) {
+		return false
+	}
+	if p.TypeToken() == token.CHARACTER {
+		return false
+	}
+	return p.flags.HasAny(VFlagEquivalenced | VFlagPointee)
 }
 func (p *Varinfo) reset()                             { *p = Varinfo{} }
 func (p *Parser90) varResetAll()                      { p.vars.reset() }

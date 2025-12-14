@@ -194,7 +194,7 @@ func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 		tp := tg.goType(vi)
 		// For INTENT(OUT) or INTENT(INOUT) non-array scalars, use pointer type
 		intent := vi.decl.Type.Intent()
-		isArray := tg.varIsArray(vi)
+		isArray := vi.IsArray()
 		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
 			tp = &ast.StarExpr{X: tp}
 		}
@@ -374,7 +374,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 }
 
 func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Expr, error) {
-	if !tg.varIsArray(typ) {
+	if !typ.IsArray() {
 		return nil, tg.makeErrWithPos(typ.decl.Position, "invalid type declaration dimensions for array creation")
 	}
 	dims := typ.Dimensions()
@@ -457,7 +457,7 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 		useSpecs.Values = append(useSpecs.Values, ident)
 		// Generate array initialization for arrays with fixed dimensions
 		// Skip allocatable arrays - they're initialized by ALLOCATE statements
-		isArray := tg.varIsArray(vi)
+		isArray := vi.IsArray()
 		if isArray && !vi.IsAllocatable() {
 			newArrExpr, err := tg.makeArrayInitializer(vi, ast.NewIdent("nil"))
 			if err != nil {
@@ -670,7 +670,7 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 		// For INTENT(OUT/INOUT) non-array scalar parameters, pass address
 		if info != nil && info.decl != nil {
 			intent := info.decl.Type.Intent()
-			isArray := tg.varIsArray(info)
+			isArray := info.IsArray()
 			if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
 				goexpr = &ast.UnaryExpr{Op: token.AND, X: goexpr}
 			}
@@ -720,7 +720,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		targetVinfo = tg.repl.Var(tgt.Name)
 		// Check for statement function definition: NAME(args) = expr
 		// where NAME is not an array and all args are simple identifiers
-		if (targetVinfo == nil || !tg.varIsArray(targetVinfo)) && allIdentifierArgs(tgt.Args) {
+		if (targetVinfo == nil || !targetVinfo.IsArray()) && allIdentifierArgs(tgt.Args) {
 			return tg.defineStatementFunction(tgt, stmt.Value)
 		}
 	case *f90.Identifier:
@@ -746,7 +746,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		lhs = tg.astVarExpr(targetVinfo)
 		// Dereference INTENT(OUT/INOUT) non-array scalar parameters
 		intent := targetVinfo.decl.Type.Intent()
-		isArray := tg.varIsArray(targetVinfo)
+		isArray := targetVinfo.IsArray()
 		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
 			lhs = &ast.StarExpr{X: lhs}
 		}
@@ -837,7 +837,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
 	// Handle equivalenced scalar assignment: f = value → f.Set(value, 1)
 	// CHARACTER types are excluded as they use SetFromString
-	isArray := tg.varIsArray(targetVinfo)
+	isArray := targetVinfo.IsArray()
 	isCharacter := targetVinfo.typeToken() == f90token.CHARACTER
 	if !isArray && !isCharacter && targetVinfo.flags.HasAny(VFlagEquivalenced) {
 		dst = append(dst, &ast.ExprStmt{
@@ -882,7 +882,7 @@ func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast
 		if err != nil {
 			return dst, err
 		}
-		if tg.varIsPointerTo(tp) {
+		if tp.IsPointer() {
 			// Print intrinsic can't just receive pointers willy nilly.
 			goExpr = &ast.CallExpr{
 				Fun: &ast.SelectorExpr{
@@ -1243,7 +1243,7 @@ func (tg *ToGo) transformDataVarInit(dst []ast.Stmt, stmt *f90.DataStmt, varExpr
 		return tg.transformDataArrayElement(dst, stmt, varExpr.(*f90.CallExpr), iter, targetVinfo)
 	}
 
-	isArray := tg.varIsArray(targetVinfo)
+	isArray := targetVinfo.IsArray()
 	if !isArray && valuesRemaining <= varsRemaining {
 		// Scalar variable - consume one value
 		return tg.transformDataScalar(dst, stmt, varExpr, iter, targetVinfo)
@@ -1441,7 +1441,7 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 			if vinfo == nil {
 				continue
 			}
-			isArray := tg.varIsArray(vinfo)
+			isArray := vinfo.IsArray()
 			if isArray {
 				hasArray = true
 				primaryIdx = i
@@ -1514,9 +1514,9 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 				}
 
 				varExpr := tg.astVarExpr(vinfo)
-				isArray := tg.varIsArray(vinfo)
+				isArray := vinfo.IsArray()
 				isCharacter := vinfo.typeToken() == f90token.CHARACTER
-				isPointerTo := tg.varIsPointerTo(vinfo)
+				isPointerTo := vinfo.IsPointer()
 
 				if len(ref.Args) == 0 {
 					if isArray {
@@ -1657,10 +1657,10 @@ func (tg *ToGo) transformPointerCrayStmt(dst []ast.Stmt, stmt *f90.PointerCraySt
 // Arrays are returned as pointer types (*intrinsic.Array[T]).
 func (tg *ToGo) goType(v *Varinfo) ast.Expr {
 	tok := v.typeToken()
-	isArray := tg.varIsArray(v)
+	isArray := v.IsArray()
 	// Handle Cray-style pointer variables (POINTER (ptr, pointee))
 	// The pointer variable's type is PointerTo[pointee_type]
-	if tg.varIsPointerTo(v) {
+	if v.IsPointer() {
 		if v.pointee != "" {
 			pointeeVar := tg.repl.Var(v.pointee)
 			if pointeeVar == nil {
@@ -1720,7 +1720,7 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 	default:
 		err := tg.makeErrAtStmt("unsupported type token: " + tok.String())
 		panic(err)
-	case f90token.INTEGER:
+	case f90token.IntLit, f90token.INTEGER:
 		switch kindValue {
 		case 1:
 			goType = ast.NewIdent("int8")
@@ -1735,7 +1735,7 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 		goType = ast.NewIdent("bool")
 	case f90token.DOUBLEPRECISION:
 		goType = ast.NewIdent("float64")
-	case f90token.REAL:
+	case f90token.FloatLit, f90token.REAL:
 		switch kindValue {
 		case 8:
 			goType = ast.NewIdent("float64")
@@ -1753,37 +1753,6 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 		goType = _astTypeCharArray
 	}
 	return goType
-}
-
-// varIsArray returns true if the variable's Go type is *intrinsic.Array[T].
-// This applies to Fortran variables declared with DIMENSION attribute or
-// explicit array bounds in their type declaration.
-func (tg *ToGo) varIsArray(v *Varinfo) bool {
-	return v.flags.HasAny(VFlagDimension)
-}
-
-func (tg *ToGo) varIsCharlike(v *Varinfo) bool {
-	return !tg.varIsArray(v) && (v.typeToken() == f90token.CHARACTER || v.typeToken() == f90token.StringLit)
-}
-
-// varIsPointerTo returns true if the variable's Go type is intrinsic.PointerTo[T]
-// AND should be automatically dereferenced when accessed.
-//
-// This applies to:
-//   - Equivalenced scalar variables (flagEquivalenced) - need dereferencing for value access
-//   - Non-array Cray-style pointee variables (flagPointee) - rare, usually pointees are arrays
-//
-// Excluded:
-//   - Cray-style pointer variables (flagPointer) - represent the pointer object, not pointee data
-//   - Arrays (flagDimension) - have their own access patterns (*intrinsic.Array[T])
-//   - CHARACTER types - use intrinsic.CharacterArray
-func (tg *ToGo) varIsPointerTo(v *Varinfo) bool {
-	// Pointer variables (like NPAA) represent the address holder, not the data.
-	// They should not be auto-dereferenced.
-	if v.flags.HasAny(VFlagPointer) {
-		return false
-	}
-	return v.flags.HasAny(VFlagEquivalenced|VFlagPointee) && !tg.varIsArray(v) && v.typeToken() != f90token.CHARACTER
 }
 
 func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, root *f90.BinaryExpr) (_ []ast.Stmt, err error) {
@@ -1908,7 +1877,7 @@ func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 				Type:  goType,
 			})
 
-			if !tg.varIsArray(v) {
+			if !v.IsArray() {
 				continue
 			}
 			args := []ast.Expr{ast.NewIdent("nil")} // First argument is array initializer, we always initialize to zeroes.
