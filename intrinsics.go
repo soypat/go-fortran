@@ -487,6 +487,7 @@ var (
 	_tgtGenericFloat = defaultVarinfo(f90token.FloatLit)
 	_tgtGenericInt   = defaultVarinfo(f90token.IntLit)
 	_tgtComplex64    = defaultVarinfo(f90token.COMPLEX)
+	_tgtComplex128   = &Varinfo{_varname: "<default complex128 varinfo>"}
 	_tgtArray        = defaultVarinfo(f90token.DIMENSION)
 )
 

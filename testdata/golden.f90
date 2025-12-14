@@ -287,7 +287,9 @@
 ! ==============================================================================
       SUBROUTINE LEVEL12()
           REAL :: angle, sin_val, cos_val, abs_val, log_val, v1(3),v2(3), dot_val,zabs,zreal,zimag
+          DOUBLEPRECISION :: zzabs, zzreal, zzimag
           COMPLEX :: z, z2=(3.0,4.0)
+          DOUBLECOMPLEX :: zz = (3.0, 1.0)
           INTEGER :: i, j, k, max_val, min_val
           do i = 1, 3
             v1(i) = i
@@ -309,6 +311,9 @@
           zabs = CABS(z)
           zreal = REAL(z)
           zimag = AIMAG(z)
+          zzabs = CDABS(zz)
+          zzreal = DREAL(zz)
+          zzimag = DIMAG(zz)
 
         !   PRINT *, 'LEVEL 12: LOG(0.5) = ', log_val
           PRINT *, 'LEVEL 12: SIN(0.5) =', sin_val
@@ -317,6 +322,7 @@
           PRINT *, 'LEVEL 12: MAX =', max_val, ', MIN =', min_val
           PRINT *, 'LEVEL 12: dot product:', dot_val
           PRINT *, 'LEVEL 12: z=1+2i, ZABS,ZREAL,ZIMAG ', zabs, zreal, zimag
+          PRINT *, 'LEVEL 12: zz=3+1i, ZZABS,ZZREAL,ZZIMAG',zzabs,zzreal,zzimag
       END SUBROUTINE LEVEL12
 
 ! ==============================================================================

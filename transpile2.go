@@ -1780,6 +1780,8 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 		}
 	case f90token.LOGICAL:
 		goType = ast.NewIdent("bool")
+	case f90token.DOUBLECOMPLEX:
+		goType = ast.NewIdent("complex128")
 	case f90token.DOUBLEPRECISION:
 		goType = ast.NewIdent("float64")
 	case f90token.FloatLit, f90token.REAL:

@@ -30,6 +30,7 @@ const (
 	CHARACTER       // CHARACTER
 	DOUBLE          // DOUBLE
 	PRECISION       // PRECISION
+	DOUBLECOMPLEX   // DOUBLECOMPLEX
 	DOUBLEPRECISION // DOUBLEPRECISION
 
 	// Program structure keywords

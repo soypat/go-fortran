@@ -634,7 +634,7 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 	case token.RECURSIVE, token.PURE, token.ELEMENTAL:
 		unit = p.parseProcedureWithAttributes()
 	case token.INTEGER, token.REAL, token.LOGICAL, token.CHARACTER,
-		token.DOUBLEPRECISION, token.DOUBLE, token.COMPLEX:
+		token.DOUBLEPRECISION, token.DOUBLE, token.COMPLEX, token.DOUBLECOMPLEX:
 		unit = p.parseTypePrefixedConstruct()
 	case token.MODULE:
 		unit = p.parseModule()
@@ -843,7 +843,7 @@ func (p *Parser90) parseBlockData() (unit ast.Unit) {
 func (p *Parser90) parseTypePrefixedConstruct() (unit ast.Unit) {
 	// Save the type token
 	start := p.sourcePos()
-	ts := p.expectTypeSpecIntrinsic()
+	ts := p.parseTypeSpecIntrinsic()
 	// Parse as function - this creates unit.Data with variable info
 	unit = p.parseFunction()
 	if !unit.IsValid() {
@@ -1269,7 +1269,7 @@ func (p *Parser90) parseStatement(inExec bool) ast.Statement {
 		stmt = p.parseUse()
 	case token.FORMAT:
 		stmt = p.parseFormatStmt()
-	case token.INTEGER, token.REAL, token.DOUBLE, token.DOUBLEPRECISION, token.COMPLEX, token.LOGICAL, token.CHARACTER:
+	case token.INTEGER, token.REAL, token.DOUBLE, token.DOUBLEPRECISION, token.DOUBLECOMPLEX, token.COMPLEX, token.LOGICAL, token.CHARACTER:
 		stmt = p.parseTypeDecl()
 	case token.TYPE:
 		// Distinguish between TYPE definition and TYPE(typename) declaration
@@ -3214,18 +3214,7 @@ func (p *Parser90) parseImplicit() ast.Statement {
 			p.addError("expected type specification in IMPLICIT statement")
 			break
 		}
-
-		tok := p.current.tok
-		p.nextToken()
-
-		// Handle DOUBLE PRECISION (two tokens) or DOUBLEPRECISION (one token)
-		if tok == token.DOUBLE && p.currentTokenIs(token.PRECISION) {
-			tok = token.DOUBLEPRECISION
-			p.nextToken()
-		} else if tok == token.DOUBLEPRECISION {
-			tok = token.DOUBLEPRECISION // Already normalized
-		}
-
+		tok := p.parseTypeToken()
 		// Parse optional KIND or CHARACTER length
 		// In IMPLICIT statements, KIND/length must be specified before letter ranges
 		// Valid: IMPLICIT REAL*8 (A-H) or IMPLICIT REAL(KIND=8) (A-H)
@@ -3368,14 +3357,14 @@ func (p *Parser90) parseUse() ast.Statement {
 	return stmt
 }
 
-// expectTypeSpecIntrinsic parses an intrinsic type specification and returns a TypeSpec.
+// parseTypeSpecIntrinsic parses an intrinsic type specification and returns a TypeSpec.
 //
 // Fortran Spec: intrinsic-type-spec (F90 R502, F77 Table 5)
 //
 // Syntax:
 //   - INTEGER [ kind-selector ]
 //   - REAL [ kind-selector ]
-//   - DOUBLE PRECISION
+//   - DOUBLE PRECISION or DOUBLE COMPLEX
 //   - COMPLEX [ kind-selector ]
 //   - LOGICAL [ kind-selector ]
 //   - CHARACTER [ char-selector ]
@@ -3395,19 +3384,12 @@ func (p *Parser90) parseUse() ast.Statement {
 //   - REAL*8            → TypeSpec{Token: REAL, KindOrLen: 8}
 //   - CHARACTER(LEN=20) → TypeSpec{Token: CHARACTER, KindOrLen: 20}
 //   - DOUBLE PRECISION  → TypeSpec{Token: DOUBLEPRECISION}
-func (p *Parser90) expectTypeSpecIntrinsic() (ts ast.TypeSpec) {
+func (p *Parser90) parseTypeSpecIntrinsic() (ts ast.TypeSpec) {
 	if !p.current.tok.IsTypeIntrinsic() {
 		p.addError("expected type instrinsic, got " + p.current.String())
 		return ast.TypeSpec{}
 	}
-	ts.Token = p.current.tok
-	p.nextToken()
-
-	// Handle DOUBLE PRECISION as two tokens → DOUBLEPRECISION
-	if ts.Token == token.DOUBLE && p.consumeIf(token.PRECISION) {
-		ts.Token = token.DOUBLEPRECISION
-	}
-
+	ts.Token = p.parseTypeToken()
 	// Parse optional KIND selector or CHARACTER length
 	if p.currentTokenIs(token.LParen) || p.currentTokenIs(token.Asterisk) {
 		switch ts.Token {
@@ -3421,6 +3403,23 @@ func (p *Parser90) expectTypeSpecIntrinsic() (ts ast.TypeSpec) {
 		}
 	}
 	return ts
+}
+
+func (p *Parser90) parseTypeToken() (tok token.Token) {
+	tok = p.current.tok
+	p.nextToken()
+	// Handle DOUBLE PRECISION as two tokens → DOUBLEPRECISION
+	if tok == token.DOUBLE {
+		switch p.current.tok {
+		case token.PRECISION:
+			tok = token.DOUBLEPRECISION
+			p.nextToken()
+		case token.COMPLEX:
+			tok = token.DOUBLECOMPLEX
+			p.nextToken()
+		}
+	}
+	return tok
 }
 
 // expectTypeSpec parses a type specification and returns a TypeSpec.
@@ -3457,7 +3456,7 @@ func (p *Parser90) expectTypeSpec(withAttrs bool) (ts ast.TypeSpec) {
 
 		return ts // tok=TYPE
 	} else {
-		ts = p.expectTypeSpecIntrinsic()
+		ts = p.parseTypeSpecIntrinsic()
 	}
 	if withAttrs {
 		ts.Attributes = p.parseTypeAttributess()
