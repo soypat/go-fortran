@@ -286,8 +286,8 @@
 ! LEVEL 12: Intrinsic functions
 ! ==============================================================================
       SUBROUTINE LEVEL12()
-          REAL :: angle, sin_val, cos_val, abs_val, log_val, v1(3),v2(3)
-          REAL :: dot_val
+          REAL :: angle, sin_val, cos_val, abs_val, log_val, v1(3),v2(3), dot_val,zabs,zreal,zimag
+          COMPLEX :: z, z2=(3.0,4.0)
           INTEGER :: i, j, k, max_val, min_val
           do i = 1, 3
             v1(i) = i
@@ -296,6 +296,7 @@
           i = 11
           j = 52
           k = 84
+          z = COMPLEX(1, 2)
 
           angle = 0.5
           sin_val = SIN(angle)
@@ -305,6 +306,9 @@
           min_val = MIN(10, 20, 5)
           log_val = 2.*LOG(angle)
           dot_val = DOT_PRODUCT(v1,v2)
+          zabs = CABS(z)
+          zreal = REAL(z)
+          zimag = AIMAG(z)
 
         !   PRINT *, 'LEVEL 12: LOG(0.5) = ', log_val
           PRINT *, 'LEVEL 12: SIN(0.5) =', sin_val
@@ -312,6 +316,7 @@
           PRINT *, 'LEVEL 12: ABS(-5.5) =', abs_val
           PRINT *, 'LEVEL 12: MAX =', max_val, ', MIN =', min_val
           PRINT *, 'LEVEL 12: dot product:', dot_val
+          PRINT *, 'LEVEL 12: z=1+2i, ZABS,ZREAL,ZIMAG ', zabs, zreal, zimag
       END SUBROUTINE LEVEL12
 
 ! ==============================================================================

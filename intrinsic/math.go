@@ -1,6 +1,9 @@
 package intrinsic
 
-import "math"
+import (
+	"math"
+	"math/cmplx"
+)
 
 type signed interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64
@@ -39,6 +42,27 @@ func ABS[T signed | float](x T) T {
 		return -x
 	}
 	return x
+}
+
+// IABS returns the absolute value of an integer
+// Fortran: IABS(i) - works with INTEGER
+func IABS[T signed](x T) T {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// CABS returns the absolute value (magnitude) of a complex number
+// Fortran: CABS(z) - returns REAL
+func CABS(z complex64) float32 {
+	return float32(cmplx.Abs(complex128(z)))
+}
+
+// CDABS returns the absolute value (magnitude) of a double complex number
+// Fortran: CDABS(z) - returns DOUBLE PRECISION
+func CDABS(z complex128) float64 {
+	return cmplx.Abs(z)
 }
 
 // SQRT returns the square root of x
