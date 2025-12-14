@@ -489,9 +489,14 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 			// Default to length 1 if no LEN attribute (Fortran standard)
 			var lenExpr ast.Expr = _astOne
 			if charLen := ent.Charlen(); charLen != nil {
-				lenExpr, _, err = tg.transformExpression(_tgtInt, charLen)
-				if err != nil {
-					return nil, err
+				// Check for assumed-length character (*) - use default length
+				if ident, ok := charLen.(*f90.Identifier); ok && ident.Value == "*" {
+					// Assumed-length: keep default length 1
+				} else {
+					lenExpr, _, err = tg.transformExpression(_tgtInt, charLen)
+					if err != nil {
+						return nil, err
+					}
 				}
 			}
 			arrayInits = append(arrayInits, &ast.AssignStmt{

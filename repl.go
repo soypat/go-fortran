@@ -510,6 +510,13 @@ func (repl *REPL) evalFloatBinary(dst, typ *Varinfo, l float64, op f90token.Toke
 }
 
 func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
+	// Handle MALLOC specially - it's a vendor extension not in the standard intrinsics
+	if strings.EqualFold(e.Name, "MALLOC") {
+		// MALLOC returns a pointer (INTEGER type in Fortran)
+		dst.decl = &f90.DeclEntity{Type: &f90.TypeSpec{Token: f90token.INTEGER}}
+		dst.val.tok = f90token.INTEGER
+		return nil
+	}
 	intrTok := f90token.LookupIntrinsic(e.Name)
 	if intrTok == 0 {
 		return fmt.Errorf("intrinsic %s not found", e.Name)

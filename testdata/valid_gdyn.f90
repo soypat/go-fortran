@@ -1,9 +1,13 @@
+MODULE antphc_module
+END MODULE
+
 PROGRAM GDYN2E
 ! &
 !
       TYPE :: vmf_def
       REAL lat,lon
       DOUBLE PRECISION ah,aw,zdh,zdw
+      LOGICAL LNORMP, LSTINR, LSTARC
       END TYPE
       DATA  XMCON(1,1)/+169.51D0/
       character(*) :: str
