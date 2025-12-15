@@ -477,12 +477,13 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	nouse := tg.astIdent("_")
 	for i := range stmt.Entities {
 		ent := &stmt.Entities[i]
-		spec, ident, err := tg.transformTypeDeclEntity(ent, stmt)
+		vi := tg.repl.Var(ent.Name)
+		if vi.flags.HasAny(VFlagParameter) {
+			continue // Function arguments have already been declared in function signature in Go.
+		}
+		spec, ident, err := tg.transformTypeDeclEntity(ent)
 		if err != nil {
 			return dst, err
-		}
-		if spec == nil {
-			continue // Skip function parameters
 		}
 		decl.Specs = append(decl.Specs, spec)
 		useSpecs.Names = append(useSpecs.Names, nouse)
@@ -498,13 +499,9 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	return dst, nil
 }
 
-func (tg *ToGo) transformTypeDeclEntity(ent *f90.DeclEntity, stmt *f90.TypeDeclaration) (spec *ast.ValueSpec, ident *ast.Ident, err error) {
+func (tg *ToGo) transformTypeDeclEntity(ent *f90.DeclEntity) (spec *ast.ValueSpec, ident *ast.Ident, err error) {
 	vi := tg.repl.Var(ent.Name)
 	// Check if this is a PARAMETER constant (compile-time constant)
-	isParamConst := stmt.Type.Attr(f90token.PARAMETER) != nil
-	if vi.IsParameter() && !isParamConst {
-		return nil, nil, nil // Skip function parameters, they're already declared in function signature
-	}
 	tp := tg.goType(vi)
 	ident = ast.NewIdent(vi.Identifier())
 	spec = &ast.ValueSpec{
@@ -530,7 +527,7 @@ func (tg *ToGo) transformTypeDeclEntity(ent *f90.DeclEntity, stmt *f90.TypeDecla
 			Fun:  _astFnNewCharArray,
 			Args: []ast.Expr{lenExpr},
 		}
-	case (isParamConst || !isArray) && ent.Init != nil:
+	case ent.Init != nil:
 		// PARAMETER constants or non-array initializers.
 		initExpr, _, err = tg.transformExpression(vi, ent.Init)
 	case isArray && !isAlloc:

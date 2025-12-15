@@ -106,6 +106,8 @@ func flagsFromTypespec(ts *ast.TypeSpec) (flags VarFlags) {
 					flags |= VFlagIntentIn | VFlagIntentOut
 				}
 			}
+		case token.PARAMETER:
+			flags |= VFlagConstantParameter
 		case token.POINTER:
 			flags |= VFlagPointer
 		case token.ALLOCATABLE:
