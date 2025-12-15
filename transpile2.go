@@ -329,7 +329,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	}
 	switch s := stmt.(type) {
 	case *f90.TypeDeclaration:
-		dst, err = tg.transformTypeDeclaration(dst, s)
+		dst, err = tg.transformTypeDeclaration2(dst, s)
 	case *f90.DerivedTypeStmt:
 		dst, err = tg.transformDerivedType(dst, s)
 	case *f90.AssignmentStmt:
@@ -468,6 +468,90 @@ func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Ex
 	return expr, nil
 }
 
+func (tg *ToGo) transformTypeDeclaration2(dst []ast.Stmt, stmt *f90.TypeDeclaration) (_ []ast.Stmt, err error) {
+	decl := &ast.GenDecl{
+		Tok:   token.VAR,
+		Specs: make([]ast.Spec, 0, len(stmt.Entities)),
+	}
+	for i := range stmt.Entities {
+		ent := &stmt.Entities[i]
+		spec, err := tg.transformTypeDeclEntity(ent)
+		if err != nil {
+			return dst, err
+		}
+		decl.Specs = append(decl.Specs, spec)
+	}
+	if len(decl.Specs) == 0 {
+		return dst, nil // No local variables to declare
+	}
+	dst = append(dst, &ast.DeclStmt{
+		Decl: decl,
+	})
+	return dst, nil
+}
+
+func (tg *ToGo) transformTypeDeclEntity(ent *f90.DeclEntity) (spec *ast.ValueSpec, err error) {
+	vi := tg.repl.Var(ent.Name)
+	isParamConst := vi.flags.HasAny(VFlagConstantParameter)
+	tp := tg.goType(vi)
+	ident := ast.NewIdent(vi.Identifier())
+	spec = &ast.ValueSpec{
+		Names: []*ast.Ident{ident},
+		Type:  tp,
+	}
+	// For PARAMETER constants, add the initializer value
+	if isParamConst && ent.Init != nil {
+		initVal, _, err := tg.transformExpression(vi, ent.Init)
+		if err != nil {
+			return nil, err
+		}
+		spec.Values = []ast.Expr{initVal}
+	} else if ent.Init != nil && !vi.IsArray() {
+		// Non-PARAMETER initialization (like DOUBLECOMPLEX :: zz = (3.0, 1.0))
+		initVal, _, err := tg.transformExpression(vi, ent.Init)
+		if err != nil {
+			return nil, err
+		}
+		spec.Values = []ast.Expr{initVal}
+		spec.Type = nil // When we have an initializer, let Go infer the type
+	}
+	// Generate array initialization for arrays with fixed dimensions
+	// Skip allocatable arrays - they're initialized by ALLOCATE statements
+	isArray := vi.IsArray()
+	if isArray && !vi.IsAllocatable() {
+		newArrExpr, err := tg.makeArrayInitializer(vi, ast.NewIdent("nil"))
+		if err != nil {
+			return nil, err
+		}
+		// Generate: arr = intrinsic.NewArray[T](nil, sizes...)
+		spec.Values = []ast.Expr{newArrExpr}
+	} else if isArray && vi.IsAllocatable() {
+		// ALLOCATABLE arrays: initialize with new() so Allocate method can be called
+		// Generate: arr = new(intrinsic.Array[T])
+		spec.Values = []ast.Expr{&ast.CompositeLit{Type: tg.goType(vi)}}
+	} else if vi.decl.Type.Token == f90token.CHARACTER {
+		// Generate CHARACTER initialization: str = intrinsic.NewCharacterArray(len)
+		// Default to length 1 if no LEN attribute (Fortran standard)
+		var lenExpr ast.Expr = _astOne
+		if charLen := ent.Charlen(); charLen != nil {
+			// Check for assumed-length character (*) - use default length
+			if ident, ok := charLen.(*f90.Identifier); ok && ident.Value == "*" {
+				// Assumed-length: keep default length 1
+			} else {
+				lenExpr, _, err = tg.transformExpression(_tgtInt, charLen)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		spec.Values = []ast.Expr{&ast.CallExpr{
+			Fun:  _astFnNewCharArray,
+			Args: []ast.Expr{lenExpr},
+		}}
+	}
+	return spec, nil
+}
+
 func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclaration) (_ []ast.Stmt, err error) {
 	decl := &ast.GenDecl{
 		Tok:   token.VAR,
@@ -478,6 +562,12 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	nouse := tg.astIdent("_")
 	for i := range stmt.Entities {
 		ent := &stmt.Entities[i]
+		spec, err := tg.transformTypeDeclEntity(ent)
+		if err != nil {
+			return dst, err
+		}
+		decl.Specs = append(decl.Specs, spec)
+		continue
 		vi := tg.repl.Var(ent.Name)
 		// Check if this is a PARAMETER constant (compile-time constant)
 		isParamConst := stmt.Type.Attr(f90token.PARAMETER) != nil
@@ -486,7 +576,7 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 		}
 		tp := tg.goType(vi)
 		ident := ast.NewIdent(vi.Identifier())
-		spec := &ast.ValueSpec{
+		spec = &ast.ValueSpec{
 			Names: []*ast.Ident{ident},
 			Type:  tp,
 		}
