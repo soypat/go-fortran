@@ -36,6 +36,7 @@
  LEVEL 12: MAX =          84 , MIN =           5
  LEVEL 12: dot product:   14.0000000    
  LEVEL 12: z=1+2i, ZABS,ZREAL,ZIMAG    2.23606801       1.00000000       2.00000000    
+ LEVEL 12: zz=3+1i, ZZABS,ZZREAL,ZZIMAG   3.1622776601683795        3.0000000000000000        1.0000000000000000     
  LEVEL 13: sum of positive =          38
  LEVEL 13: count before >7 =           4
  LEVEL 13: last count =           3

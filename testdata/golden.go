@@ -320,8 +320,10 @@ func LEVEL12() {
 	v1 = intrinsic.NewArray[float32](nil, 3)
 	v2 = intrinsic.NewArray[float32](nil, 3)
 	var (
-		zzabs float64
-		_     = zzabs
+		zzabs   float64
+		zzreal  float64
+		zzimag  float64
+		_, _, _ = zzabs, zzreal, zzimag
 	)
 	var (
 		z    complex64
@@ -340,6 +342,7 @@ func LEVEL12() {
 		min_val       int32
 		_, _, _, _, _ = i, j, k, max_val, min_val
 	)
+	zz = intrinsic.DCMPLX2[float64](3.0, 1.0)
 	for i = 1; i <= 3; i++ {
 		v1.Set(float32(i), int(i))
 		v2.Set(float32(i), int(i))
@@ -359,14 +362,16 @@ func LEVEL12() {
 	zabs = intrinsic.CABS(z)
 	zreal = intrinsic.REALPART(z)
 	zimag = intrinsic.AIMAG(z)
-	zzabs = float64(intrinsic.CABS(zz))
+	zzabs = intrinsic.CDABS(zz)
+	zzreal = intrinsic.DREALPART(zz)
+	zzimag = intrinsic.DIMAG(zz)
 	intrinsic.Print("LEVEL 12: SIN(0.5) =", sin_val)
 	intrinsic.Print("LEVEL 12: COS(0.5) =", cos_val)
 	intrinsic.Print("LEVEL 12: ABS(-5.5) =", abs_val)
 	intrinsic.Print("LEVEL 12: MAX =", max_val, ", MIN =", min_val)
 	intrinsic.Print("LEVEL 12: dot product:", dot_val)
 	intrinsic.Print("LEVEL 12: z=1+2i, ZABS,ZREAL,ZIMAG ", zabs, zreal, zimag)
-	intrinsic.Print("LEVEL 12: zz=3+1i, ZZABS", zzabs)
+	intrinsic.Print("LEVEL 12: zz=3+1i, ZZABS,ZZREAL,ZZIMAG", zzabs, zzreal, zzimag)
 }
 func LEVEL13() {
 	var (
@@ -976,7 +981,7 @@ func LEVEL31() {
 	)
 	var (
 		m     int32
-		inits int32
+		inits = 0
 		_, _  = m, inits
 	)
 	npaa = intrinsic.MALLOC[float64](k * 8)

@@ -497,6 +497,14 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 				return nil, err
 			}
 			spec.Values = []ast.Expr{initVal}
+		} else if ent.Init != nil && !vi.IsArray() {
+			// Non-PARAMETER initialization (like DOUBLECOMPLEX :: zz = (3.0, 1.0))
+			initVal, _, err := tg.transformExpression(vi, ent.Init)
+			if err != nil {
+				return nil, err
+			}
+			spec.Values = []ast.Expr{initVal}
+			spec.Type = nil // When we have an initializer, let Go infer the type
 		}
 		decl.Specs = append(decl.Specs, spec)
 		useSpecs.Names = append(useSpecs.Names, nouse)

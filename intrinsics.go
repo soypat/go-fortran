@@ -28,7 +28,6 @@ type intrinsicCall struct {
 	//  - If first letter is upper case then is function in intrinsic package.
 	//  - Else is a built in in Go.
 	methodOrCall string
-	allowKindArg bool
 }
 
 func makeCall(methodOrGoCall string, returnType *Varinfo, args ...*Varinfo) intrinsicCall {
@@ -256,6 +255,25 @@ var intrinsicsv2 = []intrinsicFn{
 	f90token.IntrinsicDSQRT: {redirectTo: f90token.IntrinsicSQRT},
 	f90token.IntrinsicAIMAG: {
 		calls: []intrinsicCall{makeCall("AIMAG", _tgtFloat32, _tgtComplex64)},
+	},
+	f90token.IntrinsicDIMAG: {
+		calls: []intrinsicCall{makeCall("DIMAG", _tgtFloat64, _tgtComplex128)},
+	},
+	f90token.IntrinsicCDABS: {
+		calls: []intrinsicCall{makeCall("CDABS", _tgtFloat64, _tgtComplex128)},
+	},
+	f90token.IntrinsicDREAL: {
+		calls: []intrinsicCall{makeCall("DREALPART", _tgtFloat64, _tgtComplex128)},
+	},
+	f90token.IntrinsicDCMPLX: {
+		calls: []intrinsicCall{
+			// DCMPLX(x) - single arg, imaginary = 0
+			makeCall("DCMPLX", _tgtComplex128, _tgtGenericFloat),
+			makeCall("DCMPLX", _tgtComplex128, _tgtGenericInt),
+			// DCMPLX(x, y) - two args, real and imaginary parts
+			makeCall("DCMPLX2", _tgtComplex128, _tgtGenericFloat, _tgtGenericFloat),
+			makeCall("DCMPLX2", _tgtComplex128, _tgtGenericInt, _tgtGenericInt),
+		},
 	},
 
 	// Type conversions
@@ -487,7 +505,7 @@ var (
 	_tgtGenericFloat = defaultVarinfo(f90token.FloatLit)
 	_tgtGenericInt   = defaultVarinfo(f90token.IntLit)
 	_tgtComplex64    = defaultVarinfo(f90token.COMPLEX)
-	_tgtComplex128   = &Varinfo{_varname: "<default complex128 varinfo>"}
+	_tgtComplex128   = defaultVarinfo(f90token.DOUBLECOMPLEX)
 	_tgtArray        = defaultVarinfo(f90token.DIMENSION)
 )
 

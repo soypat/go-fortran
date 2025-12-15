@@ -94,6 +94,9 @@ const (
 	IntrinsicIDNINT // IDNINT
 	IntrinsicDIMAG  // DIMAG
 	IntrinsicDCONJG // DCONJG
+	IntrinsicCDABS  // CDABS
+	IntrinsicDREAL  // DREAL
+	IntrinsicDCMPLX // DCMPLX
 	fortran66End
 )
 

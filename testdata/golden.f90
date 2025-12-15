@@ -288,9 +288,10 @@
       SUBROUTINE LEVEL12()
           REAL :: angle, sin_val, cos_val, abs_val, log_val, v1(3),v2(3), dot_val,zabs,zreal,zimag
           DOUBLEPRECISION :: zzabs, zzreal, zzimag
-          COMPLEX :: z, z2=(3.0,4.0)
-          DOUBLECOMPLEX :: zz = (3.0, 1.0)
+          COMPLEX :: z, z2
+          DOUBLECOMPLEX :: zz
           INTEGER :: i, j, k, max_val, min_val
+          zz = DCMPLX(3.0D0, 1.0D0)
           do i = 1, 3
             v1(i) = i
             v2(i) = i
