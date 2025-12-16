@@ -16,11 +16,29 @@ type IOUnit struct {
 var defaultFormatter Format
 
 type Format struct {
-	// Tokens []FormatTokens
+	spec string // Raw format specification (e.g., "(I5, F10.2, A)")
+	// TODO: parsed descriptors for formatted output
+}
+
+// NewFormat creates a Format from a specification string.
+func NewFormat(spec string) *Format {
+	return &Format{spec: spec}
 }
 
 var defaultIOUnit = IOUnit{
 	rw: os.Stdout,
+}
+
+func DefaultIOUnit() IOUnit {
+	return defaultIOUnit
+}
+
+func DefaultFormat() *Format {
+	return &defaultFormatter
+}
+
+func PrintUnit(unit IOUnit, v ...any) {
+	Write(defaultIOUnit, &defaultFormatter, v...)
 }
 
 func Print(v ...any) {

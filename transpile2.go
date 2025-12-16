@@ -1421,19 +1421,47 @@ func (tg *ToGo) transformParameterStmt(dst []ast.Stmt, stmt *f90.ParameterStmt) 
 }
 
 func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast.Stmt, err error) {
-	// Check if this is list-directed output (format = *)
-	isListDirected := false
-	if fmtIdent, ok := stmt.Format.(*f90.Identifier); ok && fmtIdent.Value == "*" {
-		isListDirected = true
+	// Determine format expression
+	var formatExpr ast.Expr
+	switch format := stmt.Format.(type) {
+	case *f90.Identifier:
+		if format.Value == "*" {
+			// List-directed output
+			formatExpr = &ast.CallExpr{Fun: _astFnDefaultFormat}
+		} else {
+			return dst, tg.makeErr(stmt, "unknown write unit "+format.Value)
+		}
+	case *f90.IntegerLiteral:
+		// Format label reference - look up FORMAT statement
+		label := strconv.FormatInt(format.Value, 10)
+		fmtInfo := tg.repl.getFormat(label)
+		if fmtInfo != nil {
+			// Generate: intrinsic.NewFormat("spec")
+			formatExpr = &ast.CallExpr{
+				Fun: _astFnNewFormat,
+				Args: []ast.Expr{
+					&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(fmtInfo.Spec)},
+				},
+			}
+		}
+	case *f90.StringLiteral:
+		// Inline format string: WRITE(*,'(I5)') x
+		formatExpr = &ast.CallExpr{
+			Fun: _astFnNewFormat,
+			Args: []ast.Expr{
+				&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(format.Value)},
+			},
+		}
 	}
-
-	if !isListDirected {
-		// For formatted output, skip for now (needs FORMAT statement lookup)
+	if formatExpr == nil {
+		// Unsupported format type, skip
 		return dst, nil
 	}
 
-	// List-directed output: WRITE(*,*) or WRITE(unit,*) becomes fmt.Println(...)
-	args := make([]ast.Expr, 0, len(stmt.OutputList))
+	// Build args: unit, format, then output list
+	args := make([]ast.Expr, 0, 2+len(stmt.OutputList))
+	args = append(args, &ast.CallExpr{Fun: _astFnDefaultIOUnit})
+	args = append(args, formatExpr)
 	for _, expr := range stmt.OutputList {
 		var exprType Varinfo
 		if err := tg.repl.InferType(&exprType, expr); err != nil {
@@ -1446,15 +1474,12 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 		args = append(args, goExpr)
 	}
 
-	// Generate: fmt.Println(args...)
-	printCall := &ast.CallExpr{
-		Fun: &ast.SelectorExpr{
-			X:   ast.NewIdent("fmt"),
-			Sel: ast.NewIdent("Println"),
-		},
+	// Generate: intrinsic.Write(unit, format, args...)
+	writeCall := &ast.CallExpr{
+		Fun:  _astFnWrite,
 		Args: args,
 	}
-	dst = append(dst, &ast.ExprStmt{X: printCall})
+	dst = append(dst, &ast.ExprStmt{X: writeCall})
 	return dst, nil
 }
 
@@ -1926,6 +1951,22 @@ var (
 	_astFnPrint = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("Print"),
+	}
+	_astFnWrite = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("Write"),
+	}
+	_astFnDefaultIOUnit = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("DefaultIOUnit"),
+	}
+	_astFnDefaultFormat = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("DefaultFormat"),
+	}
+	_astFnNewFormat = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewFormat"),
 	}
 	_astTypeCharArray = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),

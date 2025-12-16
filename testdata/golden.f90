@@ -37,6 +37,7 @@
       CALL LEVEL32()
       CALL LEVEL33()
       CALL LEVEL34()
+      CALL LEVEL35()
       STOP 0
       CONTAINS
 
@@ -867,7 +868,28 @@
         VOLUME(RADIUS) = 4.189*RADIUS**3
         PRINT *, 'LEVEL 34:', IDX(2), IDX(3), VOLUME(23.0)
     END SUBROUTINE LEVEL34
-! ==============================================================================
+
+    SUBROUTINE LEVEL35() ! WRITE statement variants
+        INTEGER :: m, n
+        REAL :: x
+        m = 3
+        n = 5
+        x = 2.5
+        ! List-directed with string
+        WRITE(*,*) "Hello from WRITE"
+        ! List-directed with multiple values
+        WRITE(*,*) m, n, x
+        ! List-directed with mixed string and values
+        WRITE(*,*) "Values:", m, n
+        ! Formatted with label (no outputs)
+        WRITE(*,220)
+        ! Formatted with label (with outputs)
+        WRITE(*,230) m, n, x
+220     FORMAT('Formatted output line')
+230     FORMAT('m=',I3,' n=',I3,' x=',F5.2)
+    END SUBROUTINE LEVEL35
+
+    ! ==============================================================================
 ! Helper Subroutines and Functions
 ! ==============================================================================
 

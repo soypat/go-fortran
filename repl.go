@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/soypat/go-fortran/ast"
 	f90 "github.com/soypat/go-fortran/ast"
 	f90token "github.com/soypat/go-fortran/token"
 )
@@ -76,6 +77,7 @@ type REPL struct {
 	_use              []*ParserUnitData
 	_contains         []*ParserUnitData
 	commonblocks      []commonBlockInfo // COMMON block name -> info (file-level, not reset per procedure)
+	formatSpecs       []ast.FormatStmt  // FORMAT statements collected per unit
 	noValueResolution bool              // When true, Eval skips value computation (type inference only)
 	_varCache         *Varinfo
 }
@@ -86,6 +88,7 @@ func (repl *REPL) Reset() {
 		_contains:    repl._contains[:0],
 		scope:        repl.scope,
 		commonblocks: repl.commonblocks[:0],
+		formatSpecs:  repl.formatSpecs[:0],
 		registered:   repl.registered[:0],
 	}
 	repl.scope.reset()
@@ -120,6 +123,16 @@ func (tg *REPL) getCommon(name string) *commonBlockInfo {
 	for i := range tg.commonblocks {
 		if strings.EqualFold(tg.commonblocks[i].Name, name) {
 			return &tg.commonblocks[i]
+		}
+	}
+	return nil
+}
+
+// getFormat looks up a FORMAT statement by its label.
+func (repl *REPL) getFormat(label string) *ast.FormatStmt {
+	for i := range repl.formatSpecs {
+		if repl.formatSpecs[i].Label == label {
+			return &repl.formatSpecs[i]
 		}
 	}
 	return nil
@@ -295,6 +308,12 @@ func (repl *REPL) SetScope(pu f90.Unit) (err error) {
 		v._varname = sanitizeIdent(v._varname)
 		v.common = sanitizeIdent(v.common)
 		v.pointee = sanitizeIdent(v.pointee)
+	}
+	repl.formatSpecs = repl.formatSpecs[:0]
+	for _, stmt := range pu.Body {
+		if fs, ok := stmt.(*f90.FormatStmt); ok && fs.Label != "" {
+			repl.formatSpecs = append(repl.formatSpecs, *fs)
+		}
 	}
 	repl.collectCommonBlocks(repl.scope.vars)
 	repl._use = repl._use[:0]

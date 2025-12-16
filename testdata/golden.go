@@ -36,6 +36,7 @@ func main() {
 	LEVEL32()
 	LEVEL33()
 	LEVEL34()
+	LEVEL35()
 	intrinsic.Stop(0)
 }
 func LEVEL01() {
@@ -1071,6 +1072,33 @@ func LEVEL33() {
 }
 func LEVEL34() {
 	intrinsic.Print("LEVEL 34:", (2*(2/2))*2, (3*(3/2))*2, 4.189*intrinsic.POW[float32](float32(23.0), float32(3)))
+}
+func LEVEL35() {
+	var (
+		m    int32
+		n    int32
+		_, _ = m, n
+	)
+	var (
+		x float32
+		_ = x
+	)
+	m = 3
+	n = 5
+	x = 2.5
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), "Hello from WRITE")
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), m, n, x)
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), "Values:", m, n)
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("Formatted output line"))
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("m=, I3,  n=, I3,  x=, F5.2"), m, n, x)
+	goto label220
+label220:
+	{
+	}
+	goto label230
+label230:
+	{
+	}
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
