@@ -196,6 +196,7 @@ func (p *Parser90) makeUnitData(name string, token token.Token) *ParserUnitData 
 		implicits:                slices.Clone(p.vars.implicits),
 		usesKeywordAsIdentifiers: slices.Clone(p.vars.usesKeywordAsIdentifiers),
 		returnType:               p.vars.returnType,
+		source:                   p.l.Source(),
 	}
 }
 
@@ -206,6 +207,7 @@ type ParserUnitData struct {
 	returnType               *Varinfo
 	implicits                []*ast.ImplicitStatement
 	usesKeywordAsIdentifiers []token.Token
+	source                   string // Source path.
 }
 
 func (p *ParserUnitData) AppendVarinfo(dst []Varinfo) []Varinfo {

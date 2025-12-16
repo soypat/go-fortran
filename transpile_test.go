@@ -115,67 +115,37 @@ func helperFormatGoSrc(t testing.TB, filePath string) {
 	}
 }
 
-func helperTranspile(t testing.TB, dstfile string, programPath string, modules ...string) {
-	var tg ToGo
-	var ps Parser90
-	for _, module := range modules {
-		file, err := os.Open(module)
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = ps.Reset(module, file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		tg.SetSource(module, file)
-		for !ps.IsDone() {
-			unit := ps.ParseNextProgramUnit()
-			if !unit.IsValid() {
-				break
-			}
-			helperFatalErrors(t, &ps, "parsing unit "+unit.UnitName())
-			err = tg.RegisterUnits(unit)
-			if err != nil {
-				t.Fatal("failed to use unit", unit.UnitName(), module, err)
-			}
-		}
-		file.Close()
-		helperFatalErrors(t, &ps, "parsing module "+module)
-	}
+func helperParseUnits(t testing.TB, ps *Parser90, programPath string) (units []f90.Unit) {
 	file, err := os.Open(programPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	ps.Reset(programPath, file)
-	tg.SetSource(programPath, file)
-	var mainBlock *f90.Unit
+	err = ps.Reset(programPath, file)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for !ps.IsDone() {
 		unit := ps.ParseNextProgramUnit()
 		if !unit.IsValid() {
 			break
 		}
-		if unit.Token == f90token.PROGRAM {
-			if mainBlock != nil {
-				t.Fatal("two main blocks found")
-			}
-			mainBlock = &unit
-			continue
-		}
-		err = tg.RegisterUnits(unit)
-		if err != nil {
-			err2 := tg.makeErr(&unit, "failed to add")
-			t.Fatal("adding main program unit failed:", err, err2)
-		}
+		helperFatalErrors(t, ps, "parsing unit "+unit.UnitName())
+		units = append(units, unit)
 	}
-	var decls []ast.Decl
-	if mainBlock == nil {
-		decls, err = tg.TransformRegistered([]ast.Decl{tg.ImportDecl()})
-		decls = tg.AppendCommonDecls(decls)
-	} else {
-		decls, err = tg.TransformProgram(*mainBlock)
-	}
+	helperFatalErrors(t, ps, "parsing module "+programPath)
+	return units
+}
 
+func helperTranspile(t testing.TB, dstfile string, programPath string, modules ...string) {
+	var ps Parser90
+	var units []f90.Unit = helperParseUnits(t, &ps, programPath)
+	for _, module := range modules {
+		modunits := helperParseUnits(t, &ps, module)
+		units = append(units, modunits...)
+	}
+	var tg ToGo
+	decls, err := tg.TransformUnits(nil, units...)
 	if err != nil {
 		t.Fatal(err)
 	}

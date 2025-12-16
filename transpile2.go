@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/token"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 
@@ -31,6 +32,10 @@ func (tg *ToGo) Reset() {
 func (tg *ToGo) SetSource(source string, r io.ReaderAt) {
 	tg.source = source
 	tg.sourceFile = r
+}
+
+func (tg *ToGo) SetDeferredSource(source string) {
+	tg.SetSource(source, nil)
 }
 
 func (tg *ToGo) RegisterUnits(pus ...f90.Unit) error {
@@ -128,6 +133,11 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 		if !unit.IsValid() {
 			return dst, errors.New("invalid program unit")
 		}
+		data, ok := unit.Data.(*ParserUnitData)
+		if !ok {
+			return dst, fmt.Errorf("program unit does not have compatible data: %T", unit.Data)
+		}
+		tg.SetDeferredSource(data.source)
 		tg.currentNode = unit
 		var fn *ast.FuncDecl
 		var results *ast.FieldList
@@ -245,14 +255,27 @@ func (tg *ToGo) makeErr(node f90.Node, msg string) error {
 
 func (tg *ToGo) makeErrWithPos(pos f90.Position, msg string) error {
 	// If source is available, compute line:column
-	if tg.sourceFile != nil {
+	src := tg.sourceFile
+	if tg.source != "" {
+		if src == nil {
+			fp, err := os.Open(tg.source)
+			if err == nil {
+				src = fp
+				defer fp.Close()
+			}
+		}
 		callStr := getCallStack(2)
-		var buf [1024]byte
-		line, col, _, err := pos.ToLineCol(tg.sourceFile, buf[:])
+		var err error
+		var line, col int
+		if src != nil {
+			var buf [1024]byte
+			line, col, _, err = pos.ToLineCol(src, buf[:])
+		}
 		if err == nil && line > 0 {
 			return fmt.Errorf("%s:%d:%d: %s\n%s", tg.source, line, col, msg, callStr)
 		}
 	}
+
 	return fmt.Errorf("%s @ %d", msg, pos.Start())
 }
 
@@ -770,10 +793,8 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	}
 	if isIdentifier {
 		lhs = tg.astVarExpr(targetVinfo)
-		// Dereference INTENT(OUT/INOUT) non-array scalar parameters
-		intent := targetVinfo.decl.Type.Intent()
-		isArray := targetVinfo.IsArray()
-		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
+		if tg.isGoPointer(targetVinfo) {
+			// Dereference INTENT(OUT/INOUT) non-array scalar parameters
 			lhs = &ast.StarExpr{X: lhs}
 		}
 		if binop, ok := stmt.Value.(*f90.BinaryExpr); ok && binop.Op == f90token.StringConcat {
