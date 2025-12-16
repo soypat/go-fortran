@@ -38,10 +38,6 @@ func (tg *ToGo) SetDeferredSource(source string) {
 	tg.SetSource(source, nil)
 }
 
-func (tg *ToGo) RegisterUnits(pus ...f90.Unit) error {
-	return tg.repl.RegisterUnits(pus...)
-}
-
 func (tg *ToGo) Contained(name string) *ParserUnitData {
 	for i := len(tg.containedStack) - 1; i >= 0; i-- {
 		if strings.EqualFold(tg.containedStack[i].Name, name) {
@@ -114,10 +110,6 @@ func (tg *ToGo) TransformProgram(prog f90.Unit) ([]ast.Decl, error) {
 	if err != nil {
 		return decls, fmt.Errorf("in CONTAINS of %s: %w", prog.Name, err)
 	}
-	decls, err = tg.TransformRegistered(decls)
-	if err != nil {
-		return decls, fmt.Errorf("adding registered units for %s: %w", prog.Name, err)
-	}
 	decls = tg.AppendCommonDecls(decls)
 	return decls, nil
 }
@@ -128,6 +120,10 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 	defer func() {
 		tg.containedStack = tg.containedStack[:origLen]
 	}()
+	err = tg.repl.RegisterUnits(units...)
+	if err != nil {
+		return dst, err
+	}
 	for i := range units {
 		unit := &units[i]
 		if !unit.IsValid() {

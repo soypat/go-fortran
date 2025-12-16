@@ -647,7 +647,7 @@
 ! LEVEL 24: Array Constructors
 ! ==============================================================================
       SUBROUTINE LEVEL24()
-          INTEGER, DIMENSION(3) :: vec1
+          INTEGER, DIMENSION(3) :: vec1, vec3
           INTEGER, DIMENSION(5) :: vec2
 
           ! Array constructor with explicit values
@@ -659,9 +659,14 @@
 
           ! Array constructor with multiple values
           vec2 = (/ 100, 200, 300, 400, 500 /)
-
+          vec3 = (/ 20, 30, 40/)
           PRINT *, 'LEVEL 24: vec2(1) =', vec2(1)
           PRINT *, 'LEVEL 24: vec2(5) =', vec2(5)
+          if (ALL(vec1 == vec3)) then
+            PRINT *, 'LEVEL 24: vec eq'
+          else 
+            PRINT *, 'LEVEL 24: vec neq'
+          end if
       END SUBROUTINE LEVEL24
 
 ! ==============================================================================

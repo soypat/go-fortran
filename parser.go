@@ -377,8 +377,16 @@ func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEnti
 	vi = pud.Var(name)
 	if vi != nil {
 		if decl != nil && vi.decl != nil {
-			err = errors.New("double variable initialization with " + vi.declPos.String())
-			return vi, err
+			// Both have decls - check if we can merge array specs
+			if vi.decl.ArraySpec == nil && decl.ArraySpec != nil {
+				// Existing decl has no array spec, new one does - merge it
+				vi.decl.ArraySpec = decl.ArraySpec
+			} else if vi.decl.ArraySpec != nil && decl.ArraySpec != nil {
+				// Both have array specs - error (conflicting definitions)
+				err = errors.New("double variable initialization with " + vi.declPos.String())
+				return vi, err
+			}
+			// If existing has array spec and new doesn't, keep existing (no change needed)
 		}
 	} else {
 		maybeIdentifier := token.LookupKeyword(unsafe.Slice(unsafe.StringData(name), len(name)))

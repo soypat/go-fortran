@@ -143,6 +143,7 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 	for _, module := range modules {
 		modunits := helperParseUnits(t, &ps, module)
 		units = append(units, modunits...)
+
 	}
 	var tg ToGo
 	decls, err := tg.TransformUnits(nil, units...)
@@ -326,11 +327,8 @@ func TestModuleVariableImport(t *testing.T) {
 	// Transpile with module as extern
 	var tg ToGo
 	tg.SetSource("test.f90", strings.NewReader(src))
-	err = tg.RegisterUnits(mod)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = tg.TransformProgram(program)
+
+	_, err = tg.TransformUnits(nil, units...)
 	if err != nil {
 		t.Errorf("TransformProgram failed: %v", err)
 	}

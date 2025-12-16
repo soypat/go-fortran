@@ -10,7 +10,6 @@ import (
 
 	"github.com/soypat/go-fortran/ast"
 	f90 "github.com/soypat/go-fortran/ast"
-	"github.com/soypat/go-fortran/token"
 )
 
 //go:embed testdata
@@ -43,8 +42,7 @@ func TestData_valid(t *testing.T) {
 			ssrc := string(src)
 			units := testParse(t, &parser, path, ssrc, false)
 			tg.Reset()
-			allowMultiProg := name == "valid_programs.f90"
-			testTranspile(t, &tg, units, path, ssrc, allowMultiProg)
+			testTranspile(t, &tg, units, path, ssrc)
 			finishedNormally = true
 		})
 	}
@@ -91,36 +89,12 @@ func expectedErrors(src string) map[int]string {
 	return errors
 }
 
-func testTranspile(t testing.TB, tg *ToGo, pus []f90.Unit, srcPath string, src string, allowMultiProg bool) {
+func testTranspile(t testing.TB, tg *ToGo, pus []f90.Unit, srcPath string, src string) {
 	tg.SetSource(srcPath, strings.NewReader(src))
-	var mainProg *f90.Unit
-	for i := range pus {
-		unit := &pus[i]
-		if unit.Token == token.PROGRAM {
-			if mainProg != nil && !allowMultiProg {
-				t.Errorf("two main programs detected in %s: %s and %s", srcPath, mainProg.Name, unit.Name)
-			}
-			mainProg = unit
-			continue
-		}
-		err := tg.RegisterUnits(*unit)
-		if err != nil {
-			t.Fatal(srcPath, err)
-		}
+	_, err := tg.TransformUnits(nil, pus...)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if mainProg != nil {
-		_, err := tg.TransformProgram(*mainProg)
-		if err != nil {
-			t.Fatal(srcPath, err)
-		}
-		// TODO: add other routines here.
-	} else {
-		_, err := tg.TransformUnits(nil, pus...)
-		if err != nil {
-			t.Fatal(srcPath, err)
-		}
-	}
-
 }
 
 func testParse(t testing.TB, p *Parser90, srcPath string, src string, expectErrors bool) []f90.Unit {

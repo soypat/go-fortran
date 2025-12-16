@@ -765,7 +765,8 @@ func LEVEL23() {
 func LEVEL24() {
 	var (
 		vec1 = intrinsic.NewArray[int32](nil, 3)
-		_    = vec1
+		vec3 = intrinsic.NewArray[int32](nil, 3)
+		_, _ = vec1, vec3
 	)
 	var (
 		vec2 = intrinsic.NewArray[int32](nil, 5)
@@ -776,8 +777,14 @@ func LEVEL24() {
 	intrinsic.Print("LEVEL 24: vec1(2) =", vec1.At(2))
 	intrinsic.Print("LEVEL 24: vec1(3) =", vec1.At(3))
 	vec2 = intrinsic.NewArray[int32]([]int32{100, 200, 300, 400, 500}, 5)
+	vec3 = intrinsic.NewArray[int32]([]int32{20, 30, 40}, 3)
 	intrinsic.Print("LEVEL 24: vec2(1) =", vec2.At(1))
 	intrinsic.Print("LEVEL 24: vec2(5) =", vec2.At(5))
+	if (vec1 == vec3).All() {
+		intrinsic.Print("LEVEL 24: vec eq")
+	} else {
+		intrinsic.Print("LEVEL 24: vec neq")
+	}
 }
 func LEVEL25() {
 	var (
