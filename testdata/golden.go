@@ -932,12 +932,6 @@ func LEVEL30() {
 	intrinsic.Print("LEVEL 30: DEFALT", defalt.At(1), i_defalt.At(1), i_defalt.At(2))
 }
 func LEVEL31() {
-	//Implicit declarations.
-	var (
-		k  int32 = 16
-		aa       = intrinsic.NewArray[float64](nil, 1)
-		ii       = intrinsic.NewArray[int32](nil, 1)
-	)
 	const k int32 = 16
 	var (
 		npaa intrinsic.PointerTo[float64]
@@ -1018,21 +1012,10 @@ func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
 }
 func ADD_VALUES(a int32, b int32, result *int32) {
-	//Implicit declarations.
-	var (
-		a      int32
-		b      int32
-		result int32
-	)
 	*result = a + b
 	intrinsic.Print("LEVEL 7: Inside ADD_VALUES")
 }
 func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
-	//Implicit declarations.
-	var (
-		arr = intrinsic.NewArray[int32](nil, int(n))
-		n   int32
-	)
 	var (
 		i int32
 		_ = i
@@ -1043,11 +1026,6 @@ func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 	intrinsic.Print("LEVEL 7: Inside MODIFY_ARRAY")
 }
 func FACTORIAL(n int32) (factorial int32) {
-	//Implicit declarations.
-	var (
-		n         int32
-		factorial int32
-	)
 	var (
 		i      int32
 		result int32
@@ -1061,20 +1039,10 @@ func FACTORIAL(n int32) (factorial int32) {
 	return
 }
 func SQUARE_ROOT(x float32) (square_root float32) {
-	//Implicit declarations.
-	var (
-		x           float32
-		square_root float32
-	)
 	square_root = intrinsic.SQRT[float32](x)
 	return
 }
 func FIBONACCI(n int32) (fibonacci int32) {
-	//Implicit declarations.
-	var (
-		n         int32
-		fibonacci int32
-	)
 	var (
 		a          int32
 		b          int32

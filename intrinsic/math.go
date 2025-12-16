@@ -218,6 +218,11 @@ func POW[T float](a, exponent T) T {
 	return T(math.Pow(float64(a), float64(exponent)))
 }
 
+// POW returns a to the power of exponent. In fortran represented as a**exponent.
+func CPOW[T complexNum](a, exponent T) T {
+	return T(cmplx.Pow(complex128(a), complex128(exponent)))
+}
+
 // SIGN transfers the sign of b to the magnitude of a
 // Fortran: SIGN(a, b) returns |a| if b >= 0, -|a| if b < 0
 func SIGN[T signed | float](a, b T) T {

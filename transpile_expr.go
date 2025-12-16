@@ -311,7 +311,12 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 		// Power operator: x ** y → intrinsic.POW[T](x, y)
 		left = tg.wrapConversion(vitgt, leftType, left)
 		right = tg.wrapConversion(vitgt, rightType, right)
-		sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("POW")}
+		fnName := "POW"
+		switch leftType.typeToken() {
+		case f90token.COMPLEX, f90token.DOUBLECOMPLEX:
+			fnName = "CPOW"
+		}
+		sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(fnName)}
 		var funcExpr ast.Expr = sel
 		if vitgt != nil && !isGenericVarinfo(vitgt) {
 			goType := goTypeBasic(vitgt.typeToken(), 0)

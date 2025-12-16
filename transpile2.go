@@ -425,25 +425,31 @@ func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Ex
 
 func (tg *ToGo) transformImplicitTypeDeclarations(dst []ast.Stmt) (_ []ast.Stmt, err error) {
 	implicitDecl := &ast.GenDecl{
-		Doc:   &ast.CommentGroup{List: []*ast.Comment{{Text: "\n//Implicit declarations."}}},
+		Doc:   &ast.CommentGroup{List: []*ast.Comment{{Text: "\n// Implicit declarations."}}},
 		Tok:   token.VAR,
 		Specs: make([]ast.Spec, 0, 10),
 	}
+	var useSpecs ast.ValueSpec // _ = var1, var2, ... to avoid unused variable errors
+	nouse := tg.astIdent("_")
 	for i := range tg.repl.scope.vars {
-		_ = i
 		v := &tg.repl.scope.vars[i]
-		if !v.flags.HasAny(VFlagImplicit | VFlagParameter) {
+		// Only process truly implicit variables
+		if !v.flags.HasAny(VFlagImplicit) ||
+			v.flags.HasAny(VFlagParameter|VFlagReturned| // Skip function parameters and return values - they're in function signature
+				VFlagPointee| // Skip pointees - they're accessed through their pointer
+				VFlagConstantParameter) { // Skip PARAMETER constants - they're handled as const by explicit decl{
 			continue
 		}
-		fmt.Println(v.decl.Name, string(v.decl.Type.AppendString(nil)))
-
 		spec, err := tg.transformTypeDeclEntity(v.decl)
 		if err != nil {
 			return dst, err
 		}
 		implicitDecl.Specs = append(implicitDecl.Specs, spec)
+		useSpecs.Names = append(useSpecs.Names, nouse)
+		useSpecs.Values = append(useSpecs.Values, spec.Names[0])
 	}
 	if len(implicitDecl.Specs) != 0 {
+		// implicitDecl.Specs = append(implicitDecl.Specs, &useSpecs)
 		dst = append(dst, &ast.DeclStmt{Decl: implicitDecl})
 	}
 	return dst, nil
