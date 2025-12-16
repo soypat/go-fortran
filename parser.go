@@ -668,6 +668,8 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 	switch unit.Token {
 	case token.FUNCTION:
 		unit.Data = pud
+		// Check for type-prefixed function (e.g., "INTEGER FUNCTION foo()")
+		hasExplicitType := unit.ResultType.Token != 0
 		missingResult := pud.returnType == nil
 		if missingResult {
 			// For bare FUNCTION without RESULT clause, the function name is the return variable.
@@ -675,11 +677,23 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 			vinfo := pud.Var(unit.Name)
 			if vinfo != nil {
 				vinfo.flags |= VFlagReturned
+				// If type-prefixed, override the declaration type
+				if hasExplicitType {
+					if vinfo.decl != nil {
+						vinfo.decl.Type = &unit.ResultType
+					} else {
+						vinfo.decl = &ast.DeclEntity{Name: unit.Name, Type: &unit.ResultType}
+					}
+				}
 				pud.returnType = vinfo
 			} else {
-				// Function name not used in body - create return variable with nil decl.
-				// resolveImplicitTypes will assign the correct implicit type.
-				pud.returnType, _ = pud.varInit(start, unit.Name, nil, VFlagReturned, "")
+				// Function name not used in body - create return variable.
+				var decl *ast.DeclEntity
+				if hasExplicitType {
+					decl = &ast.DeclEntity{Name: unit.Name, Type: &unit.ResultType}
+				}
+				// resolveImplicitTypes will assign implicit type if decl is nil.
+				pud.returnType, _ = pud.varInit(start, unit.Name, decl, VFlagReturned, "")
 			}
 		}
 	}
@@ -1222,8 +1236,6 @@ func (p *Parser90) parseBody(params []ast.Parameter) []ast.Statement {
 			}
 		}
 	}
-	// Resolve spec statements again after all statements parsed.
-	p.vars.resolveImplicitTypes()
 	return stmts
 }
 
