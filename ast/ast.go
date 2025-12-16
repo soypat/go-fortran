@@ -118,27 +118,24 @@ func (ts *TypeSpec) Intent() IntentType {
 }
 
 func (ts TypeSpec) AppendString(dst []byte) []byte {
-	dst = appendTypenameOrTok(dst, ts.Name, ts.Token)
-	if len(ts.Attributes) > 0 {
-		dst = append(dst, ", "...)
-		for i := range ts.Attributes {
-			if i > 0 {
-				dst = append(dst, ", "...)
-			}
-			dst = ts.Attributes[i].AppendString(dst)
-		}
+	dst = append(dst, ts.Token.String()...)
+	if ts.KindOrLen != nil {
+		dst = append(dst, '(')
+		dst = ts.KindOrLen.AppendString(dst)
+		dst = append(dst, ')')
 	}
-	return dst
-}
-
-func appendTypenameOrTok(dst []byte, typename string, tok token.Token) []byte {
-	if typename != "" {
-		dst = append(dst, typename...)
-	} else {
-		if tok != token.TYPE {
-			dst = append(dst, "<unexpected token type>"...)
+	for i := range ts.Attributes {
+		dst = append(dst, ',')
+		dst = ts.Attributes[i].AppendString(dst)
+	}
+	if ts.Name != "" {
+		dst = append(dst, "::"...)
+		if ts.Token != token.TYPE {
+			dst = append(dst, "<type name set for non TYPE spec>"...)
 		}
-		dst = append(dst, tok.String()...)
+		dst = append(dst, '(')
+		dst = append(dst, ts.Name...)
+		dst = append(dst, ')')
 	}
 	return dst
 }
@@ -973,7 +970,7 @@ func (te *TokenExpr) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, te.Token.String()...)
 }
 func (te *TokenExpr) AppendString(dst []byte) []byte {
-	return te.AppendString(dst)
+	return te.AppendTokenLiteral(dst)
 }
 
 // DeclEntity represents a single entity in a type declaration.

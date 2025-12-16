@@ -77,6 +77,7 @@ type REPL struct {
 	_contains         []*ParserUnitData
 	commonblocks      []commonBlockInfo // COMMON block name -> info (file-level, not reset per procedure)
 	noValueResolution bool              // When true, Eval skips value computation (type inference only)
+	_varCache         *Varinfo
 }
 
 func (repl *REPL) Reset() {
@@ -125,13 +126,18 @@ func (tg *REPL) getCommon(name string) *commonBlockInfo {
 }
 
 func (repl *REPL) Var(name string) *Varinfo {
+	if repl._varCache != nil && repl._varCache._varname == name {
+		return repl._varCache
+	}
 	vi := repl.scope.Var(name)
 	if vi != nil {
+		repl._varCache = vi
 		return vi
 	}
 	for _, mod := range repl._use {
 		vi = mod.Var(name)
 		if vi != nil {
+			repl._varCache = vi
 			return vi
 		}
 	}
@@ -273,6 +279,7 @@ func (repl *REPL) ScopeParams() []Varinfo {
 }
 
 func (repl *REPL) SetScope(pu f90.Unit) (err error) {
+	repl._varCache = nil
 	data, ok := pu.UnitData().(*ParserUnitData)
 	if !ok {
 		return errors.New("missing parser unit data")

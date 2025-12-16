@@ -156,7 +156,11 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 				},
 				Body: &ast.BlockStmt{},
 			}
-			fn.Body.List, err = tg.transformStatements(nil, unit.Body)
+			fn.Body.List, err = tg.transformImplicitTypeDeclarations(nil)
+			if err != nil {
+				return dst, fmt.Errorf("transforming implicit type declarations of %s: %w", unit.Name, err)
+			}
+			fn.Body.List, err = tg.transformStatements(fn.Body.List, unit.Body)
 			if err != nil {
 				return dst, fmt.Errorf("transforming statements of %s: %w", unit.Name, err)
 			}
@@ -183,55 +187,6 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 
 func (tg *ToGo) astIdent(name string) *ast.Ident {
 	return ast.NewIdent(name)
-}
-
-// TransformSubroutine transforms a Fortran SUBROUTINE to a Go function declaration
-func (tg *ToGo) TransformSubroutine(sub f90.Unit) (_ *ast.FuncDecl, err error) {
-	return tg.transformProcedure(sub)
-}
-
-// TransformFunction transforms a Fortran FUNCTION to a Go function declaration
-func (tg *ToGo) TransformFunction(fn f90.Unit) (_ *ast.FuncDecl, err error) {
-	return tg.transformProcedure(fn)
-}
-
-func (tg *ToGo) transformProcedure(subroutineOrFunc f90.Unit) (_ *ast.FuncDecl, err error) {
-	if subroutineOrFunc.Token != f90token.FUNCTION && subroutineOrFunc.Token != f90token.SUBROUTINE {
-		return nil, errors.New("not procedure")
-	}
-	tg.currentNode = &subroutineOrFunc
-	err = tg.repl.SetScope(subroutineOrFunc)
-	if err != nil {
-		return nil, err
-	}
-	var returned *ast.FieldList
-	if subroutineOrFunc.Token == f90token.FUNCTION {
-		field := tg.getReturnParam()
-		if field == nil {
-			return nil, fmt.Errorf("failed to acquire return parameter type for %s", subroutineOrFunc.Name)
-		}
-		returned = &ast.FieldList{List: []*ast.Field{field}}
-	}
-
-	fn := &ast.FuncDecl{
-		Name: ast.NewIdent(subroutineOrFunc.UnitName()),
-		Type: &ast.FuncType{
-			Params: &ast.FieldList{
-				List: tg.getScopeParams(nil),
-			},
-			Results: returned,
-		},
-		Body: &ast.BlockStmt{},
-	}
-	fn.Body.List, err = tg.transformStatements(nil, subroutineOrFunc.Body)
-	if err != nil {
-		return fn, err
-	}
-	// Add return statement for functions with return values (uses named return)
-	if returned != nil {
-		fn.Body.List = append(fn.Body.List, &ast.ReturnStmt{})
-	}
-	return fn, nil
 }
 
 func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
@@ -468,6 +423,32 @@ func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Ex
 	return expr, nil
 }
 
+func (tg *ToGo) transformImplicitTypeDeclarations(dst []ast.Stmt) (_ []ast.Stmt, err error) {
+	implicitDecl := &ast.GenDecl{
+		Doc:   &ast.CommentGroup{List: []*ast.Comment{{Text: "\n//Implicit declarations."}}},
+		Tok:   token.VAR,
+		Specs: make([]ast.Spec, 0, 10),
+	}
+	for i := range tg.repl.scope.vars {
+		_ = i
+		v := &tg.repl.scope.vars[i]
+		if !v.flags.HasAny(VFlagImplicit | VFlagParameter) {
+			continue
+		}
+		fmt.Println(v.decl.Name, string(v.decl.Type.AppendString(nil)))
+
+		spec, err := tg.transformTypeDeclEntity(v.decl)
+		if err != nil {
+			return dst, err
+		}
+		implicitDecl.Specs = append(implicitDecl.Specs, spec)
+	}
+	if len(implicitDecl.Specs) != 0 {
+		dst = append(dst, &ast.DeclStmt{Decl: implicitDecl})
+	}
+	return dst, nil
+}
+
 func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclaration) (_ []ast.Stmt, err error) {
 	decl := &ast.GenDecl{
 		Tok:   token.VAR,
@@ -478,32 +459,30 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	for i := range stmt.Entities {
 		ent := &stmt.Entities[i]
 		vi := tg.repl.Var(ent.Name)
-		if vi.flags.HasAny(VFlagParameter) {
+		if vi.flags.HasAny(VFlagParameter | VFlagImplicit) {
 			continue // Function arguments have already been declared in function signature in Go.
 		}
-		spec, ident, err := tg.transformTypeDeclEntity(ent)
+		spec, err := tg.transformTypeDeclEntity(ent)
 		if err != nil {
 			return dst, err
 		}
 		decl.Specs = append(decl.Specs, spec)
 		useSpecs.Names = append(useSpecs.Names, nouse)
-		useSpecs.Values = append(useSpecs.Values, ident)
+		useSpecs.Values = append(useSpecs.Values, spec.Names[0])
 	}
 	if len(decl.Specs) == 0 {
 		return dst, nil // No local variables to declare
 	}
 	decl.Specs = append(decl.Specs, &useSpecs)
-	dst = append(dst, &ast.DeclStmt{
-		Decl: decl,
-	})
+	dst = append(dst, &ast.DeclStmt{Decl: decl})
 	return dst, nil
 }
 
-func (tg *ToGo) transformTypeDeclEntity(ent *f90.DeclEntity) (spec *ast.ValueSpec, ident *ast.Ident, err error) {
+func (tg *ToGo) transformTypeDeclEntity(ent *f90.DeclEntity) (spec *ast.ValueSpec, err error) {
 	vi := tg.repl.Var(ent.Name)
 	// Check if this is a PARAMETER constant (compile-time constant)
 	tp := tg.goType(vi)
-	ident = ast.NewIdent(vi.Identifier())
+	ident := ast.NewIdent(vi.Identifier())
 	spec = &ast.ValueSpec{
 		Names: []*ast.Ident{ident},
 		Type:  tp,
@@ -543,12 +522,12 @@ func (tg *ToGo) transformTypeDeclEntity(ent *f90.DeclEntity) (spec *ast.ValueSpe
 		}
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if initExpr != nil {
 		spec.Values = []ast.Expr{initExpr}
 	}
-	return spec, ident, nil
+	return spec, nil
 }
 
 // transformDerivedType transforms a Fortran TYPE definition into a Go struct type.
