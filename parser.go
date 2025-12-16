@@ -638,6 +638,7 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 	if p.IsDone() || p.current.tok.IsEnd() {
 		return unit
 	}
+	start := p.sourcePos()
 	switch p.current.tok {
 	case token.SUBROUTINE:
 		unit = p.parseSubroutine()
@@ -647,7 +648,7 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 		unit = p.parseProcedureWithAttributes()
 	case token.INTEGER, token.REAL, token.LOGICAL, token.CHARACTER,
 		token.DOUBLEPRECISION, token.DOUBLE, token.COMPLEX, token.DOUBLECOMPLEX:
-		unit = p.parseTypePrefixedConstruct()
+		unit = p.parseTypePrefixedUnit()
 	case token.MODULE:
 		unit = p.parseModule()
 	case token.BLOCK:
@@ -661,7 +662,29 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 	}
 	if !unit.IsValid() {
 		p.addError("bad program unit for token: " + p.current.String())
+		return unit
 	}
+	pud := p.makeUnitData(unit.Name, unit.Token)
+	switch unit.Token {
+	case token.FUNCTION:
+		unit.Data = pud
+		missingResult := pud.returnType == nil
+		if missingResult {
+			// For bare FUNCTION without RESULT clause, the function name is the return variable.
+			// Look for the variable with the function name and mark it as returned.
+			vinfo := pud.Var(unit.Name)
+			if vinfo != nil {
+				vinfo.flags |= VFlagReturned
+				pud.returnType = vinfo
+			} else {
+				// Function name not used in body - create return variable with nil decl.
+				// resolveImplicitTypes will assign the correct implicit type.
+				pud.returnType, _ = pud.varInit(start, unit.Name, nil, VFlagReturned, "")
+			}
+		}
+	}
+	pud.resolveImplicitTypes()
+	unit.Data = pud
 	return unit
 }
 
@@ -696,15 +719,11 @@ func (p *Parser90) parseProgramBlock() (unit ast.Unit) {
 
 	// Parse body statements
 	unit.Body = p.parseBody(nil)
-	unit.Data = p.makeUnitData(unit.Name, token.PROGRAM)
-
 	// Handle CONTAINS section (internal procedures)
 	if p.consumeIf(token.CONTAINS) {
 		unit.Contains = p.parseAppendProgramUnits(unit.Contains[:0])
 	}
-
 	p.expectEndProgramUnit(token.PROGRAM, token.ENDPROGRAM, start, unit.Name)
-	p.consumeIf(token.Identifier)
 	unit.Position = ast.Pos(start.Pos, p.current.start)
 	return unit
 }
@@ -722,16 +741,12 @@ func (p *Parser90) parseModule() (unit ast.Unit) {
 	p.skipNewlinesAndComments()
 	// Parse body statements
 	unit.Body = p.parseBody(nil)
-	unit.Data = p.makeUnitData(unit.Name, token.MODULE)
-
 	// Handle CONTAINS section with recursive parsing
 	if p.consumeIf(token.CONTAINS) {
 		unit.Contains = p.parseAppendProgramUnits(unit.Contains[:0])
 	}
 	p.expectEndProgramUnit(token.MODULE, token.ENDMODULE, start, unit.Name)
-	p.consumeIf(token.Identifier)
 	unit.Position = ast.Pos(start.Pos, p.current.start)
-
 	return unit
 }
 
@@ -758,11 +773,18 @@ func (p *Parser90) parseSubroutine() (unit ast.Unit) {
 	unit.Body = p.parseBody(unit.Parameters)
 
 	p.expectEndProgramUnit(token.SUBROUTINE, token.ENDSUBROUTINE, start, unit.Name)
-	p.consumeIf(token.Identifier)
-	pud := p.makeUnitData(unit.Name, token.SUBROUTINE)
-	unit.Data = pud
 	unit.Position = ast.Pos(start.Pos, p.current.start)
-	pud.resolveImplicitTypes()
+	return unit
+}
+
+// parseTypePrefixedUnit handles type-prefixed functions like "INTEGER FUNCTION foo()"
+func (p *Parser90) parseTypePrefixedUnit() (unit ast.Unit) {
+	ts := p.parseTypeSpecIntrinsic() // Save the type specification to set result type.
+	unit = p.parseFunction()
+	if !unit.IsValid() {
+		return unit
+	}
+	unit.ResultType = ts
 	return unit
 }
 
@@ -783,12 +805,11 @@ func (p *Parser90) parseFunction() (unit ast.Unit) {
 	}
 
 	// Check for RESULT clause
-	var returnType *Varinfo
-	var resultVarName string
 	if p.consumeIf(token.RESULT) {
 		if p.expect(token.LParen, "RESULT open") {
+			var resultVarName string
 			if p.expectIdentifier(&resultVarName, "function RESULT variable specification") {
-				returnType = p.varInit(resultVarName, nil, VFlagReturned, "")
+				p.varInit(resultVarName, nil, VFlagReturned, "")
 			}
 			p.expect(token.RParen, "RESULT close")
 		}
@@ -796,36 +817,14 @@ func (p *Parser90) parseFunction() (unit ast.Unit) {
 
 	// Parse body statements
 	unit.Body = p.parseBody(unit.Parameters)
-
 	p.expectEndProgramUnit(token.FUNCTION, token.ENDFUNCTION, start, unit.Name)
-	p.consumeIf(token.Identifier)
 	unit.Position = ast.Pos(start.Pos, p.current.start)
-
-	// Create unit data AFTER parseBody so type declarations are captured
-	pud := p.makeUnitData(unit.Name, token.FUNCTION)
-	pud.returnType = returnType
-	unit.Data = pud
-	missingResult := returnType == nil
-	if missingResult {
-		// For bare FUNCTION without RESULT clause, the function name is the return variable.
-		// Look for the variable with the function name and mark it as returned.
-		vinfo := pud.Var(unit.Name)
-		if vinfo != nil {
-			vinfo.flags |= VFlagReturned
-			pud.returnType = vinfo
-		} else {
-			// Function name not used in body - create return variable with nil decl.
-			// resolveImplicitTypes will assign the correct implicit type.
-			pud.returnType, _ = pud.varInit(start, unit.Name, nil, VFlagReturned, "")
-		}
-	}
-	pud.resolveImplicitTypes()
 	return unit
 }
 
 // parseBlockData parses a BLOCK DATA...END [BLOCK DATA] block
 func (p *Parser90) parseBlockData() (unit ast.Unit) {
-	start := p.current.start
+	start := p.sourcePos()
 	// Consume BLOCK identifier
 	if !p.consumeIf2(token.BLOCK, token.DATA) {
 		p.addError("DATA BLOCK expected: " + p.current.String())
@@ -838,58 +837,8 @@ func (p *Parser90) parseBlockData() (unit ast.Unit) {
 
 	// Parse body statements
 	unit.Body = p.parseBody(nil)
-
-	p.expect(token.END, "expected END after DATA BLOCK body")
-
-	// Consume optional BLOCK DATA after END
-	if p.consumeIf(token.BLOCK) {
-		p.consumeIf(token.DATA)
-	}
-	p.consumeIf(token.Identifier) // Optional name after END BLOCK DATA
-	unit.Position = ast.Pos(start, p.current.start)
-	unit.Data = p.makeUnitData(unit.Name, token.DATA)
-	return unit
-}
-
-// parseTypePrefixedConstruct handles type-prefixed functions like "INTEGER FUNCTION foo()"
-func (p *Parser90) parseTypePrefixedConstruct() (unit ast.Unit) {
-	// Save the type token
-	start := p.sourcePos()
-	ts := p.parseTypeSpecIntrinsic()
-	// Parse as function - this creates unit.Data with variable info
-	unit = p.parseFunction()
-	if !unit.IsValid() {
-		return unit
-	}
-	unit.ResultType = ts
-	pud := unit.Data.(*ParserUnitData)
-
-	// For type-prefixed functions, the function name is the return variable with the prefix type.
-	// Create the declaration with the correct type from the prefix.
-	decl := &ast.DeclEntity{
-		Name:     unit.Name,
-		Type:     &unit.ResultType,
-		Position: unit.Position,
-	}
-
-	if pud.returnType == nil {
-		// returnType not set - create or find the variable
-		vinfo := pud.Var(unit.Name)
-		if vinfo == nil {
-			var err error
-			vinfo, err = pud.varInit(start, unit.Name, decl, VFlagReturned, "")
-			if err != nil {
-				panic(err)
-			}
-		} else {
-			vinfo.decl = decl
-			vinfo.flags |= VFlagReturned
-		}
-		pud.returnType = vinfo
-	} else {
-		// returnType already set by parseFunction - update its decl with the correct type
-		pud.returnType.decl = decl
-	}
+	p.expectEndProgramUnit(token.BLOCK, 0, start, unit.Name)
+	unit.Position = ast.Pos(start.Pos, p.current.start)
 	return unit
 }
 
@@ -903,7 +852,7 @@ func (p *Parser90) parseProcedureWithAttributes() (unit ast.Unit) {
 	}
 	if p.current.tok.IsTypeDeclaration() {
 		// Is a function.
-		return p.parseTypePrefixedConstruct()
+		return p.parseTypePrefixedUnit()
 	}
 	// Now must be SUBROUTINE or FUNCTION
 	switch p.current.tok {
@@ -1054,6 +1003,13 @@ func (p *Parser90) expectEndConstruct(keyword, singleEndForm token.Token, start 
 func (p *Parser90) expectEndProgramUnit(keyword, singleEndForm token.Token, start sourcePos, name string) bool {
 	// Check for F77 single-token form e.g: ENDPROGRAM or F90 two-token form e.g: END PROGRAM
 	if p.consumeIf(singleEndForm) || p.consumeIf2(token.END, keyword) {
+		if keyword == token.BLOCK {
+			p.consumeIf(token.DATA)
+		}
+		// Consume optional program unit name (can be keyword used as identifier, e.g. "END SUBROUTINE Print")
+		if p.canUseAsIdentifier() {
+			p.nextToken()
+		}
 		return true
 	} else if p.consumeIf(token.END) {
 		// Program units do not need keyword specifier, can be single END form.
@@ -3064,7 +3020,9 @@ func (p *Parser90) skipConstruct(keyword, endComposed token.Token) {
 			depth--
 			if depth == 0 {
 				// Consume optional name after END <keyword>
-				p.consumeIf(token.Identifier)
+				if p.canUseAsIdentifier() {
+					p.nextToken()
+				}
 			}
 		} else {
 			p.nextToken()
