@@ -1425,13 +1425,17 @@ func IsRanged(expr ...Expression) bool {
 // to override operator precedence. The parentheses do not change the value
 // but may affect evaluation order.
 //
+// When Imag is non-nil, this represents a complex literal constructor: (real, imag)
+//
 // Example:
 //
 //	(<expression>)
 //	(a + b)
 //	(x * y) / z
+//	(0.0, 1.0)  // complex literal with Imag set
 type ParenExpr struct {
 	Expr Expression
+	Imag Expression // Optional: for complex literals (real, imag), nil for normal paren exprs
 	Position
 }
 
@@ -1439,11 +1443,18 @@ var _ Expression = (*ParenExpr)(nil) // compile time check of interface implemen
 
 func (pe *ParenExpr) expressionNode() {}
 func (pe *ParenExpr) AppendTokenLiteral(dst []byte) []byte {
+	if pe.Imag != nil {
+		return append(dst, "COMPLEXINIT"...)
+	}
 	return pe.Expr.AppendTokenLiteral(dst)
 }
 func (pe *ParenExpr) AppendString(dst []byte) []byte {
 	dst = append(dst, '(')
 	dst = pe.Expr.AppendString(dst)
+	if pe.Imag != nil {
+		dst = append(dst, ',')
+		dst = pe.Imag.AppendString(dst)
+	}
 	dst = append(dst, ')')
 	return dst
 }

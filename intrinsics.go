@@ -380,8 +380,12 @@ var intrinsicsv2 = []intrinsicFn{
 
 	// Absolute value and sign
 	f90token.IntrinsicABS: {
-		calls: []intrinsicCall{makeCall("ABS", nil, _tgtGenericFloat)},
-		f1:    math.Abs,
+		calls: []intrinsicCall{
+			makeCall("ABS", nil, _tgtGenericFloat),
+			makeCall("CABS", _tgtFloat32, _tgtComplex64),   // ABS(complex) → float32
+			makeCall("CDABS", _tgtFloat64, _tgtComplex128), // ABS(double complex) → float64
+		},
+		f1: math.Abs,
 	},
 	f90token.IntrinsicDABS: {redirectTo: f90token.IntrinsicABS},
 	f90token.IntrinsicIABS: {
@@ -495,6 +499,7 @@ var (
 	_astTrue         = ast.NewIdent("true")
 	_astSet          = ast.NewIdent("Set")
 	_astOne          = &ast.BasicLit{Kind: token.INT, Value: "1"}
+	_astZero         = &ast.BasicLit{Kind: token.INT, Value: "0"}
 	_tgtInt32        = defaultVarinfo(f90token.INTEGER)
 	_tgtInt          = defaultVarinfo(f90token.INTEGER)
 	_tgtFloat32      = defaultVarinfo(f90token.REAL)

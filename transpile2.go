@@ -220,6 +220,16 @@ func (tg *ToGo) getReturnParam() *ast.Field {
 
 func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("label" + f90Label) }
 
+// isGoPointer returns true if vi is a scalar INTENT(OUT/INOUT) parameter
+// that becomes a Go pointer (*T) and needs dereferencing when used as a value.
+// This is distinct from Varinfo.IsPointer() which handles Fortran-level pointers.
+func (tg *ToGo) isGoPointer(vi *Varinfo) bool {
+	if vi == nil || vi.decl == nil {
+		return false
+	}
+	return !vi.IsArray() && vi.flags.HasAny(VFlagIntentOut)
+}
+
 func (tg *ToGo) makeErrAtStmt(msg string) error {
 	if tg.currentNode == nil {
 		return tg.makeErrWithPos(f90.Position{}, msg)
@@ -342,7 +352,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		if s.Code != nil {
 			code, _, err = tg.transformExpression(_tgtInt, s.Code)
 		} else {
-			code = &ast.BasicLit{Kind: token.INT, Value: "0"}
+			code = _astZero
 		}
 		dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{Fun: _astIntrinsicStop, Args: []ast.Expr{code}}})
 	case *f90.ParameterStmt:
@@ -1402,7 +1412,7 @@ func (tg *ToGo) transformArithmeticIfStmt(dst []ast.Stmt, stmt *f90.ArithmeticIf
 	}
 
 	jmpSelect := ast.NewIdent("jmpSelect")
-	zero := &ast.BasicLit{Kind: token.INT, Value: "0"}
+	zero := _astZero
 
 	// if jmpSelect := condition; jmpSelect < 0 { goto negLabel }
 	negIf := &ast.IfStmt{

@@ -72,13 +72,30 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 	case *f90.UnaryExpr:
 		result, resultType, err = tg.transformUnaryExpr(vitgt, e)
 	case *f90.ParenExpr:
-		var inner ast.Expr
-		// Parentheses for grouping - transform the inner expression and wrap in parens
-		inner, resultType, err = tg.transformExpression(vitgt, e.Expr)
-		if err != nil {
-			return nil, nil, err
+		if e.Imag != nil {
+			// Complex literal: (real, imag) -> complex(real, imag)
+			realExpr, _, err := tg.transformExpression(_tgtGenericFloat, e.Expr)
+			if err != nil {
+				return nil, nil, err
+			}
+			imagExpr, _, err := tg.transformExpression(_tgtGenericFloat, e.Imag)
+			if err != nil {
+				return nil, nil, err
+			}
+			resultType = _tgtComplex64
+			result = &ast.CallExpr{
+				Fun:  ast.NewIdent("complex"),
+				Args: []ast.Expr{realExpr, imagExpr},
+			}
+		} else {
+			var inner ast.Expr
+			// Parentheses for grouping - transform the inner expression and wrap in parens
+			inner, resultType, err = tg.transformExpression(vitgt, e.Expr)
+			if err != nil {
+				return nil, nil, err
+			}
+			result = &ast.ParenExpr{X: inner}
 		}
-		result = &ast.ParenExpr{X: inner}
 
 	case *f90.ArrayConstructor:
 		resultType = vitgt
@@ -112,7 +129,12 @@ func (tg *ToGo) transformExprIdentifer(vitgt *Varinfo, e *f90.Identifier) (resul
 		err = tg.makeErr(e, "identifier not found")
 		return nil, nil, err
 	}
-	return tg.astVarExpr(resultType), resultType, nil
+	result = tg.astVarExpr(resultType)
+	// Dereference INTENT(OUT/INOUT) scalar parameters when used as values
+	if tg.isGoPointer(resultType) {
+		result = &ast.StarExpr{X: result}
+	}
+	return result, resultType, nil
 }
 
 func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructor) (result ast.Expr, err error) {
@@ -1000,6 +1022,15 @@ func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Ex
 	targetType := target.typeToken()
 	if srcType == targetType || targetType == f90token.FloatLit {
 		return expr
+	}
+	// Special case: converting real to complex requires complex(real, 0)
+	if (targetType == f90token.COMPLEX || targetType == f90token.DOUBLECOMPLEX) &&
+		(srcType == f90token.REAL || srcType == f90token.DOUBLEPRECISION ||
+			srcType == f90token.INTEGER || srcType == f90token.FloatLit || srcType == f90token.IntLit) {
+		return &ast.CallExpr{
+			Fun:  ast.NewIdent("complex"),
+			Args: []ast.Expr{expr, _astZero},
+		}
 	}
 	conv := tg.baseGotype(targetType, tg.resolveKind(target))
 	return &ast.CallExpr{

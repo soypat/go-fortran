@@ -200,6 +200,11 @@ func LEVEL07() {
 		result int32
 		_      = result
 	)
+	var (
+		x    float32 = 1
+		y    float32 = 2
+		_, _         = x, y
+	)
 	arr1.Set(10, 1)
 	arr1.Set(20, 2)
 	arr1.Set(30, 3)
@@ -210,6 +215,8 @@ func LEVEL07() {
 	intrinsic.Print("LEVEL 7: ADD_VALUES(10, 20) =", result)
 	MODIFY_ARRAY(arr1, 5)
 	intrinsic.Print("LEVEL 7: arr1 after modify:", arr1.At(1), arr1.At(2), arr1.At(3))
+	MULDST(&x, y)
+	intrinsic.Print("LEVEL 7: x=x*y", x, y)
 }
 func LEVEL08() {
 	var (
@@ -1064,6 +1071,9 @@ func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 		arr.Set(arr.At(int(i))*2, int(i))
 	}
 	intrinsic.Print("LEVEL 7: Inside MODIFY_ARRAY")
+}
+func MULDST(x *float32, y float32) {
+	*x = y * *x
 }
 func FACTORIAL(n int32) (factorial int32) {
 	var (

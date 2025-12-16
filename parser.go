@@ -994,6 +994,26 @@ func (p *Parser90) consumeIf2(current, next token.Token) bool {
 	return false
 }
 
+// looksLikeImpliedDoLoop checks if the current position (at comma) looks like an implied DO loop
+// rather than a complex literal. Called when parsing (expr, ...) - current token is comma.
+// Complex literal: (real, imag) - peek is literal/sign, then followed by )
+// Implied DO loop: (expr, ..., var = start, end) - will have identifier = pattern
+func (p *Parser90) looksLikeImpliedDoLoop() bool {
+	// If peek is a literal followed by ), it's definitely a complex literal
+	if p.peekTokenIs(token.IntLit) || p.peekTokenIs(token.FloatLit) {
+		if p.uberpeek.tok == token.RParen {
+			return false // It's (expr, literal) - complex literal
+		}
+	}
+	// Handle signed imaginary part: (expr, -literal) or (expr, +literal)
+	if p.peekTokenIs(token.Minus) || p.peekTokenIs(token.Plus) {
+		if p.uberpeek.tok == token.IntLit || p.uberpeek.tok == token.FloatLit {
+			return false // It's (expr, ±literal) - complex literal
+		}
+	}
+	return true // Likely an implied DO loop
+}
+
 // expect2IfFirst checks if current token is present, if present also expects a next token to be present, else makes no checks.
 func (p *Parser90) expect2IfFirst(current, next token.Token, reason string) {
 	if p.consumeIf(current) {
@@ -2614,7 +2634,9 @@ func (p *Parser90) parseDoLoop() ast.Statement {
 
 		if p.consumeEndLabelIfPresent(&stmt.EndLabel, token.DO, stmt.TargetLabel) {
 			if p.peekTokenIs(token.CONTINUE) {
-				// Found closing target continue statement.
+				// Found closing target continue statement - consume both label and CONTINUE
+				p.nextToken() // consume the label
+				p.nextToken() // consume CONTINUE
 				stmt.Position = ast.Pos(start.Pos, p.current.start)
 				return stmt
 			}
@@ -3971,8 +3993,33 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 			return nil
 		}
 
-		// Check for implied DO loop: (expr1, expr2, ..., var = start, end [, stride])
+		// Check for comma - could be implied DO loop or complex literal (real, imag)
 		if p.currentTokenIs(token.Comma) {
+			// Implied DO loop requires pattern: (expr, ..., identifier = start, end)
+			// Complex literal is: (real, imag) where imag is followed by )
+			// Peek ahead to check: if next is a simple expression followed by ), it's complex
+			if p.peekTokenIs(token.IntLit) || p.peekTokenIs(token.FloatLit) || p.peekTokenIs(token.Minus) || p.peekTokenIs(token.Plus) {
+				// Could be complex literal - check if we have simple (expr, expr) pattern
+				// by looking for identifier = pattern which would indicate implied DO
+				if !p.looksLikeImpliedDoLoop() {
+					// Parse as complex literal
+					p.nextToken() // consume comma
+					imagExpr := p.parseExpression(0)
+					if imagExpr == nil {
+						p.addError("expected expression after comma in parenthesized expression")
+						return nil
+					}
+					endPos := p.current.start
+					if !p.expect(token.RParen, "after complex literal") {
+						return nil
+					}
+					return &ast.ParenExpr{
+						Expr:     expr,
+						Imag:     imagExpr,
+						Position: ast.Pos(startPos, endPos),
+					}
+				}
+			}
 			// Try to parse as implied DO loop
 			if impliedDo := p.tryParseImpliedDoLoop(startPos, expr); impliedDo != nil {
 				return impliedDo
@@ -4432,7 +4479,8 @@ func (p *Parser90) parseDimensionStmt() ast.Statement {
 					Type:      implicitDecl.Type,
 					ArraySpec: arraySpec,
 				}
-				p.varInit(varName, decl, VFlagDimension, "")
+				// VFlagImplicit ensures the variable will be declared in generated code
+				p.varInit(varName, decl, VFlagDimension|VFlagImplicit, "")
 			} else {
 				// Variable exists, update with dimension info
 				if vi.decl != nil {

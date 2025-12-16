@@ -22,6 +22,7 @@
  LEVEL 7: ADD_VALUES(10, 20) =          30
  LEVEL 7: Inside MODIFY_ARRAY
  LEVEL 7: arr1 after modify:          20          40          60
+ LEVEL 7: x=x*y   2.00000000       2.00000000    
  LEVEL 8: FACTORIAL(5) =         120
  LEVEL 8: SQUARE_ROOT(16.0) =   4.00000000    
  LEVEL 9: FIBONACCI(7) =          13

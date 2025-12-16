@@ -191,6 +191,7 @@
       SUBROUTINE LEVEL07()
           INTEGER, DIMENSION(5) :: arr1
           INTEGER :: result
+          REAL :: x=1,y=2
 
           arr1(1) = 10
           arr1(2) = 20
@@ -204,6 +205,8 @@
 
           CALL MODIFY_ARRAY(arr1, 5)
           PRINT *, 'LEVEL 7: arr1 after modify:', arr1(1), arr1(2), arr1(3)
+          CALL MULDST(x,y)
+          PRINT *, 'LEVEL 7: x=x*y', x, y
       END SUBROUTINE LEVEL07
 
 ! ==============================================================================
@@ -878,7 +881,11 @@
           END DO
           PRINT *, 'LEVEL 7: Inside MODIFY_ARRAY'
       END SUBROUTINE MODIFY_ARRAY
-
+      SUBROUTINE MULDST(x,y)
+        REAL, INTENT(OUT) :: x
+        REAL, INTENT(IN) :: y
+        x = y*x
+      END SUBROUTINE
       INTEGER FUNCTION FACTORIAL(n)
           INTEGER, INTENT(IN) :: n
           INTEGER :: i, result
