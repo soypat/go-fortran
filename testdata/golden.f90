@@ -367,6 +367,12 @@
               count = i
           END DO
           PRINT *, 'LEVEL 13: last count =', count
+          ! Test goto ENDDO
+          DO 30 i = 1, 2
+            PRINT *, 'LEVEL 13: do,goto,end do', i
+            goto 30
+            PRINT *, 'LEVEL 13: not printed', i
+30        END DO
       END SUBROUTINE LEVEL13
 
 ! ==============================================================================

@@ -40,6 +40,8 @@
  LEVEL 13: sum of positive =          38
  LEVEL 13: count before >7 =           4
  LEVEL 13: last count =           3
+ LEVEL 13: do,goto,end do           1
+ LEVEL 13: do,goto,end do           2
  LEVEL 14: x =          10 , y =           5
  LEVEL 15: choice =           2 , result =          20
  LEVEL 15: choice =           5 , result =         200

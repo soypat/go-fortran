@@ -405,6 +405,13 @@ func LEVEL13() {
 		count = i
 	}
 	intrinsic.Print("LEVEL 13: last count =", count)
+	for i = 1; i <= 2; i++ {
+		intrinsic.Print("LEVEL 13: do,goto,end do", i)
+		goto label30
+		intrinsic.Print("LEVEL 13: not printed", i)
+		goto label30
+	label30:
+	}
 }
 func LEVEL14() {
 	var (
@@ -989,6 +996,8 @@ func LEVEL31() {
 	for m = 1; m <= k; m += 2 {
 		inits = inits + 1
 		aa.Set(float64(inits), int(m))
+		goto label900
+	label900:
 	}
 	intrinsic.Print("LEVEL 31: INITS", inits)
 	intrinsic.Print("LEVEL 31: AA(1),AA(2),AA(3),AA(4)", aa.At(1), aa.At(2), aa.At(3), aa.At(4))

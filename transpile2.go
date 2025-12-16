@@ -1047,6 +1047,16 @@ func (tg *ToGo) transformDoLoop(dst []ast.Stmt, stmt *f90.DoLoop) (_ []ast.Stmt,
 		}
 	}
 
+	// If END DO has a label, add it at the end of the body
+	// Also add a goto to the label to ensure it's "used" (Go requires labels to be used)
+	if stmt.EndLabel != "" {
+		label := tg.astLabel(stmt.EndLabel)
+		bodyStmts = append(bodyStmts,
+			&ast.BranchStmt{Tok: token.GOTO, Label: label},
+			&ast.LabeledStmt{Label: label, Stmt: &ast.EmptyStmt{}},
+		)
+	}
+
 	forStmt := &ast.ForStmt{
 		Init: initStmt,
 		Cond: condExpr,
