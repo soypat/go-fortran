@@ -348,12 +348,9 @@ func (pud *ParserUnitData) resolveImplicitTypes() {
 		// TODO: From cray pointer we now have special case where decl is non-nil but type is nil. Can we just consolidate both cases?
 		// Assign type, preserving any existing ArraySpec from partial decl
 		if vi.decl == nil {
-			vi.decl = &ast.DeclEntity{
-				Name: vi._varname,
-				Type: implicitType,
-			}
+			vi.decl = &ast.DeclEntity{Type: implicitType}
 		} else {
-			// Partial decl exists (e.g., from Cray POINTER) - just fill in Type
+			// Partial decl exists (e.g., from Cray POINTER, DIMENSION statement) - just fill in Type
 			vi.decl.Type = implicitType
 		}
 	}
@@ -4449,11 +4446,9 @@ func (p *Parser90) parseDimensionStmt() ast.Statement {
 			// Check if variable already exists (might have prior type declaration)
 			vi := p.varSGet(varName)
 			if vi == nil {
-				// Create new declaration with implicit type
-				implicitDecl := p.vars.implicitDeclFor(varName)
+				// Note we don't set Type here- in any case will be set in implicit resolving.
 				decl := &ast.DeclEntity{
 					Name:      varName,
-					Type:      implicitDecl.Type,
 					ArraySpec: arraySpec,
 				}
 				// VFlagImplicit ensures the variable will be declared in generated code
@@ -4462,6 +4457,11 @@ func (p *Parser90) parseDimensionStmt() ast.Statement {
 				// Variable exists, update with dimension info
 				if vi.decl != nil {
 					vi.decl.ArraySpec = arraySpec
+				} else {
+					vi.decl = &ast.DeclEntity{
+						Name:      varName,
+						ArraySpec: arraySpec,
+					}
 				}
 				vi.flags |= VFlagDimension
 			}

@@ -909,6 +909,9 @@ type ArraySpec struct {
 }
 
 func (as *ArraySpec) IsDeferred() bool {
+	if as.Kind == ArraySpecDeferred {
+		return true
+	}
 	for i := range as.Bounds {
 		if as.Bounds[i].Upper == nil {
 			return true

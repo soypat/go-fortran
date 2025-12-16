@@ -605,10 +605,12 @@ var (
 	_tgtComplex64    = defaultVarinfo(f90token.COMPLEX)
 	_tgtComplex128   = defaultVarinfo(f90token.DOUBLECOMPLEX)
 	_tgtArrayGeneric = _tgtArray(f90token.DIMENSION)
+	_tgtSpecDeferred = &f90.ArraySpec{Kind: f90.ArraySpecDeferred}
 )
 
 func _tgtArray(elem f90token.Token) *Varinfo {
 	di := defaultVarinfo(elem)
+	di.decl.ArraySpec = _tgtSpecDeferred
 	di.flags |= VFlagDimension
 	return di
 }
