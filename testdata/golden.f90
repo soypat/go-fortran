@@ -667,6 +667,11 @@
           else 
             PRINT *, 'LEVEL 24: vec neq'
           end if
+          if (ALL(vec1 == (/10, 20, 30/))) then
+            PRINT *, 'LEVEL 24: vecinline eq'
+          else
+            PRINT *, 'LEVEL 24: vecinline neq'
+          endif
       END SUBROUTINE LEVEL24
 
 ! ==============================================================================
@@ -827,11 +832,13 @@
     END SUBROUTINE LEVEL31
     SUBROUTINE LEVEL32()
         CHARACTER(LEN=10) :: A(2,2)
+        CHARACTER(3), DIMENSION(2) :: B=(/'ABC', 'CBA'/)
         A(1,1) = 'ABC'
         A(1,2) = 'DEF'
         A(2,1) = 'GHI'
         A(2,2) = 'JKL'
         PRINT *, 'LEVEL 32:', A(1,1),A(1,2),A(2,1),A(2,2)
+        PRINT *, 'LEVEL 32:', B(1), B(2)
     END SUBROUTINE LEVEL32
     SUBROUTINE LEVEL33() ! ARRAY RANGES.
         INTEGER, PARAMETER :: NM=3

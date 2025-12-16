@@ -98,8 +98,7 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 		}
 
 	case *f90.ArrayConstructor:
-		resultType = vitgt
-		result, err = tg.transformArrayConstructor(vitgt, e)
+		result, resultType, err = tg.transformArrayConstructor(vitgt, e)
 	case *f90.RangeExpr:
 		// Range expressions in subscripts (e.g., arr(1:5), str(2:3))
 		// TODO: implement proper range transformation
@@ -137,24 +136,28 @@ func (tg *ToGo) transformExprIdentifer(vitgt *Varinfo, e *f90.Identifier) (resul
 	return result, resultType, nil
 }
 
-func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructor) (result ast.Expr, err error) {
+func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructor) (result ast.Expr, resultType *Varinfo, err error) {
 	var elemType ast.Expr
-	var elemVinfo *Varinfo = vitgt
+	var elemVinfo *Varinfo
 
-	// Try to infer element type from target, but not DIMENSION (means "array of unknown type")
-	targetTok := vitgt.typeToken()
-	if targetTok != f90token.Undefined && targetTok != f90token.DIMENSION {
-		elemType = tg.baseGotype(targetTok, tg.resolveKind(vitgt))
-	} else if len(e.Values) > 0 {
+	// Always infer element type from values when present (priority over target type)
+	if len(e.Values) > 0 {
 		// Infer element type from first value. Use _tgtGenericInt as placeholder vitgt
 		// since literals always return their own type regardless of target.
 		_, elemVinfo, err = tg.transformExpression(_tgtGenericInt, e.Values[0])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		elemType = tg.baseGotype(elemVinfo.typeToken(), tg.resolveKind(elemVinfo))
 	} else {
-		return nil, tg.makeErr(e, "cannot infer array constructor element type")
+		// No values - try to use target type (but not DIMENSION which means "array of unknown type")
+		targetTok := vitgt.typeToken()
+		if targetTok != f90token.Undefined && targetTok != f90token.DIMENSION {
+			elemVinfo = vitgt
+			elemType = tg.baseGotype(targetTok, tg.resolveKind(vitgt))
+		} else {
+			return nil, nil, tg.makeErr(e, "cannot infer array constructor element type")
+		}
 	}
 
 	// Transform values
@@ -162,10 +165,21 @@ func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructo
 	for _, val := range e.Values {
 		elt, _, err := tg.transformExpression(elemVinfo, val)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		elts = append(elts, elt)
 	}
+
+	// Create result type: array of the inferred element type
+	// Normalize literal tokens to concrete types (IntLit → INTEGER, FloatLit → REAL)
+	elemTok := elemVinfo.typeToken()
+	switch elemTok {
+	case f90token.IntLit:
+		elemTok = f90token.INTEGER
+	case f90token.FloatLit:
+		elemTok = f90token.REAL
+	}
+	resultType = _tgtArray(elemTok)
 
 	// Generate: intrinsic.NewArray[T]([]T{elts...}, len)
 	// Returns pointer which matches array pointer types
@@ -178,7 +192,7 @@ func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructo
 			},
 			&ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(len(e.Values))},
 		},
-	}, nil
+	}, resultType, nil
 }
 
 // transformComponentAccess transforms Fortran component access (p%age) to Go field access (p.age).

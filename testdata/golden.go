@@ -785,6 +785,11 @@ func LEVEL24() {
 	} else {
 		intrinsic.Print("LEVEL 24: vec neq")
 	}
+	if intrinsic.ALL(intrinsic.ArraySetEqual[int32](nil, vec1, intrinsic.NewArray[int32]([]int32{10, 20, 30}, 3))) {
+		intrinsic.Print("LEVEL 24: vecinline eq")
+	} else {
+		intrinsic.Print("LEVEL 24: vecinline neq")
+	}
 }
 func LEVEL25() {
 	var (

@@ -90,6 +90,7 @@
  LEVEL 24: vec2(1) =         100
  LEVEL 24: vec2(5) =         500
  LEVEL 24: vec neq
+ LEVEL 24: vecinline eq
  LEVEL 25: i1 =  127
  LEVEL 25: i2 =  32767
  LEVEL 25: i4 =  2147483647
