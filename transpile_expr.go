@@ -171,13 +171,32 @@ func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructo
 	}
 
 	// Create result type: array of the inferred element type
-	// Normalize literal tokens to concrete types (IntLit → INTEGER, FloatLit → REAL)
+	// Normalize literal tokens to concrete types (IntLit → INTEGER, FloatLit → REAL, StringLit → CHARACTER)
 	elemTok := elemVinfo.typeToken()
 	switch elemTok {
 	case f90token.IntLit:
 		elemTok = f90token.INTEGER
 	case f90token.FloatLit:
 		elemTok = f90token.REAL
+	case f90token.StringLit:
+		// CHARACTER array constructor - use NewCharacterArrayFromStrings
+		// Get charlen from target type (vitgt has the declaration info)
+		var charlenExpr ast.Expr = _astOne
+		if charLen := vitgt.Charlen(); charLen != nil {
+			charlenExpr, _, err = tg.transformExpression(_tgtInt, charLen)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		// Generate: intrinsic.NewCharacterArrayFromStrings(charlen, []string{elts...}, len)
+		return &ast.CallExpr{
+			Fun: _astFnNewCharacterArrayFromStrings,
+			Args: []ast.Expr{
+				charlenExpr,
+				&ast.CompositeLit{Type: &ast.ArrayType{Elt: ast.NewIdent("string")}, Elts: elts},
+				&ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(len(e.Values))},
+			},
+		}, _tgtArray(f90token.CHARACTER), nil
 	}
 	resultType = _tgtArray(elemTok)
 
@@ -527,16 +546,11 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 		return result, vi, err
 	}
 
-	// Special handling for MALLOC - type parameter comes from target's pointee
-	if strings.EqualFold(e.Name, "MALLOC") {
-		return tg.transformMALLOC(vitgt, e)
-	}
-
 	fi := tg.ContainedOrUsed(e.Name)
 	if fi == nil {
+		// Try standard intrinsic first
 		lookup := f90token.LookupIntrinsic(e.Name)
-		// Try V2 intrinsic system
-		if fnV2 := getIntrinsicV2(lookup); fnV2 != nil {
+		if fnV2 := getIntrinsic(lookup); fnV2 != nil {
 			// Infer argument types for better matching
 			argTypes := make([]*Varinfo, len(e.Args))
 			for i, arg := range e.Args {
@@ -554,6 +568,34 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 				return tg.intrinsicExprV2(vitgt, fnV2, call, e.Args...)
 			}
 		}
+
+		// Try vendor intrinsic
+		vendorTok := f90token.LookupVendorIntrinsic(e.Name)
+		if vendorTok != 0 {
+			// Special handling for MALLOC - type parameter comes from target's pointee
+			if vendorTok == f90token.VendorMALLOC {
+				return tg.transformMALLOC(vitgt, e)
+			}
+			// Generic vendor intrinsic handling
+			if fnV2 := getVendoredIntrinsic(vendorTok); fnV2 != nil {
+				argTypes := make([]*Varinfo, len(e.Args))
+				for i, arg := range e.Args {
+					var vi Varinfo
+					if err := tg.repl.InferType(&vi, arg); err == nil {
+						argTypes[i] = &vi
+					}
+				}
+				call := fnV2.findBestCallWithTypes(argTypes)
+				if call == nil {
+					call = fnV2.findBestCall(len(e.Args))
+				}
+				if call != nil {
+					return tg.intrinsicExprV2(vitgt, fnV2, call, e.Args...)
+				}
+			}
+			return nil, nil, tg.makeErr(e, "vendor intrinsic "+e.Name+" not implemented")
+		}
+
 		return nil, nil, tg.makeErr(e, "unknown intrinsic: "+e.Name)
 	}
 

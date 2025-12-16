@@ -1810,7 +1810,7 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 		default: // 4 or unspecified
 			goType = ast.NewIdent("complex64")
 		}
-	case f90token.CHARACTER:
+	case f90token.StringLit, f90token.CHARACTER:
 		goType = _astTypeCharArray
 	}
 	return goType
@@ -1868,6 +1868,10 @@ var (
 	_astFnNewCharArray = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("NewCharacterArray"),
+	}
+	_astFnNewCharacterArrayFromStrings = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewCharacterArrayFromStrings"),
 	}
 	_astFnNewArrayFromValues = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),

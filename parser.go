@@ -2876,9 +2876,6 @@ func (p *Parser90) registerImplicitFromTarget(target ast.Expression) {
 	if vi == nil {
 		implicitDecl := p.vars.implicitDeclFor(name)
 		p.varInit(name, implicitDecl, VFlagImplicit, "")
-	} else if vi.flags.HasAny(VFlagReturned) {
-		// This is the function return variable - don't override its type.
-		return
 	}
 }
 

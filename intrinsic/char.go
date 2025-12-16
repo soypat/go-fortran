@@ -41,6 +41,16 @@ func NewCharacterArrayArray(charlen int, dims ...int) *Array[CharacterArray] {
 	return arr
 }
 
+// NewCharacterArrayFromStrings creates a 1D array of CHARACTER(LEN=charlen) strings
+// from a slice of Go strings. Each string is padded/truncated to charlen.
+func NewCharacterArrayFromStrings(charlen int, values []string, dims ...int) *Array[CharacterArray] {
+	arr := NewCharacterArrayArray(charlen, dims...)
+	for i, s := range values {
+		arr.data[i].SetFromString(s)
+	}
+	return arr
+}
+
 var _ Pointer = CharacterArray{} // compile time check of interface implementation.
 var _ PointerSetter = (*CharacterArray)(nil)
 

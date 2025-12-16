@@ -515,62 +515,54 @@ func (repl *REPL) evalFloatBinary(dst, typ *Varinfo, l float64, op f90token.Toke
 }
 
 func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
-	// Handle MALLOC specially - it's a vendor extension not in the standard intrinsics
-	if strings.EqualFold(e.Name, "MALLOC") {
-		// MALLOC returns a pointer (INTEGER type in Fortran)
-		dst.decl = &f90.DeclEntity{Type: &f90.TypeSpec{Token: f90token.INTEGER}}
-		dst.val.tok = f90token.INTEGER
-		return nil
+	if len(e.Args) == 0 {
+		return fmt.Errorf("%s intrinsic requires arguments", e.Name)
 	}
+	var intr *intrinsicFn
 	intrTok := f90token.LookupIntrinsic(e.Name)
 	if intrTok == 0 {
+		// Try vendor intrinsic lookup
+		vendorTok := f90token.LookupVendorIntrinsic(e.Name)
+		if vendorTok != 0 {
+			intr = getVendoredIntrinsic(vendorTok)
+		}
+	} else {
+		intr = getIntrinsic(intrTok)
+	}
+	if intr == nil {
 		return fmt.Errorf("intrinsic %s not found", e.Name)
 	}
 	if repl.noValueResolution {
 		// No value resolution short circuit
-		if fnV2 := getIntrinsicV2(intrTok); fnV2 != nil {
-			if call := fnV2.findBestCall(len(e.Args)); call != nil {
-				if call.returnType != nil {
-					*dst = *call.returnType
-					if dst.val.tok == 0 && dst.decl != nil {
-						dst.val.tok = dst.decl.Type.Token
-					}
-					return nil
-				} else if len(e.Args) > 0 {
-					return repl.Eval(dst, e.Args[0])
+		if call := intr.findBestCall(len(e.Args)); call != nil {
+			if call.returnType != nil {
+				*dst = *call.returnType
+				if dst.val.tok == 0 && dst.decl != nil {
+					dst.val.tok = dst.decl.Type.Token
 				}
+				return nil
+			} else if len(e.Args) > 0 {
+				return repl.Eval(dst, e.Args[0])
 			}
 		}
 	}
 
-	if len(e.Args) == 0 {
-		return fmt.Errorf("%s intrinsic requires arguments", intrTok.String())
-	}
 	var arg0 Varinfo
 	err := repl.Eval(&arg0, e.Args[0])
 	if err != nil {
 		return err
 	}
-
-	// Check single-argument float function table.
-	if int(intrTok) < len(_intrinsicEvalf1) {
-		if fn1 := _intrinsicEvalf1[intrTok]; fn1 != nil {
-			return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(fn1, arg0.val.Float()))
+	if intr.f1 != nil {
+		return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(intr.f1, arg0.val.Float()))
+	} else if intr.f2 != nil {
+		if len(e.Args) < 2 {
+			return fmt.Errorf("%s requires 2 arguments", e.Name)
 		}
-	}
-
-	// Check two-argument float function table.
-	if int(intrTok) < len(_intrinsicEvalf2) {
-		if fn2 := _intrinsicEvalf2[intrTok]; fn2 != nil {
-			if len(e.Args) < 2 {
-				return fmt.Errorf("%s requires 2 arguments", intrTok.String())
-			}
-			var arg1 Varinfo
-			if err := repl.Eval(&arg1, e.Args[1]); err != nil {
-				return err
-			}
-			return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn2(fn2, arg0.val.Float(), arg1.val.Float()))
+		var arg1 Varinfo
+		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
+			return err
 		}
+		return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn2(intr.f2, arg0.val.Float(), arg1.val.Float()))
 	}
 
 	// Handle special cases not covered by lookup tables.

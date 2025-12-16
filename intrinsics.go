@@ -12,7 +12,7 @@ import (
 )
 
 type intrinsicFn struct {
-	redirectTo f90token.Intrinsic // signal this intrinsic is effectively replaced by another.
+	redirectTo uint // signal this intrinsic is effectively replaced by another.
 	calls      []intrinsicCall
 	isVariadic bool
 	f1         func(float64) float64
@@ -46,26 +46,6 @@ func isAllCaps(s string) bool {
 		}
 	}
 	return len(s) > 0
-}
-
-// getIntrinsicV2 looks up a V2 intrinsic by token.
-// Returns nil if not found or if redirectTo chain leads to undefined.
-func getIntrinsicV2(lookup f90token.Intrinsic) *intrinsicFn {
-	if int(lookup) >= len(intrinsicsv2) {
-		return nil
-	}
-	fn := &intrinsicsv2[lookup]
-	// Follow redirect chain
-	for fn.redirectTo != 0 {
-		if int(fn.redirectTo) >= len(intrinsicsv2) {
-			return nil
-		}
-		fn = &intrinsicsv2[fn.redirectTo]
-	}
-	if len(fn.calls) == 0 {
-		return nil // Not defined in V2
-	}
-	return fn
 }
 
 // findBestCall finds the best matching intrinsicCall for the given arguments.
@@ -227,6 +207,108 @@ func (tg *ToGo) intrinsicExprV2(vitgt *Varinfo, fn *intrinsicFn, call *intrinsic
 	}, resultType, nil
 }
 
+// getIntrinsicV2 looks up a V2 intrinsic by token.
+// Returns nil if not found or if redirectTo chain leads to undefined.
+func getVendoredIntrinsic(lookup f90token.VendorIntrinsic) *intrinsicFn {
+	if int(lookup) >= len(vendoredIntrinsics) {
+		return nil
+	}
+	fn := &vendoredIntrinsics[lookup]
+	// Follow redirect chain
+	for fn.redirectTo != 0 {
+		if int(fn.redirectTo) >= len(intrinsicsv2) {
+			return nil
+		}
+		fn = &vendoredIntrinsics[fn.redirectTo]
+	}
+	if len(fn.calls) == 0 {
+		return nil // Not defined in V2
+	}
+	return fn
+}
+
+var vendoredIntrinsics = []intrinsicFn{
+	// Memory management
+	f90token.VendorSYSTEM: {
+		calls: []intrinsicCall{makeCall("SYSTEM", _tgtInt32, _tgtChar)},
+	},
+	f90token.VendorMALLOC: {
+		calls: []intrinsicCall{makeCall("MALLOC", _tgtInt32, _tgtInt32)}, // Returns INTEGER for type compatibility (transpiler handles actual PointerTo[T] type)
+	},
+	f90token.VendorFREE: {
+		calls: []intrinsicCall{makeCall("FREE", nil, _tgtArrayGeneric)},
+	},
+
+	// Query functions
+	f90token.VendorISNAN: {
+		calls: []intrinsicCall{makeCall("ISNAN", _tgtBool, _tgtGenericFloat)},
+	},
+
+	// Type conversions (common) - same as DBLE
+	f90token.VendorDFLOAT: {
+		calls: []intrinsicCall{
+			makeCall("float64", _tgtFloat64, _tgtGenericInt),
+			makeCall("float64", _tgtFloat64, _tgtGenericFloat),
+		},
+	},
+
+	// Random numbers
+	f90token.VendorRAND: {
+		calls: []intrinsicCall{makeCall("RAND", _tgtFloat32)},
+	},
+
+	// Bit operations
+	f90token.VendorLSHIFT: {
+		calls: []intrinsicCall{makeCall("LSHIFT", nil, _tgtGenericInt, _tgtGenericInt)},
+	},
+	f90token.VendorRSHIFT: {
+		calls: []intrinsicCall{makeCall("RSHIFT", nil, _tgtGenericInt, _tgtGenericInt)},
+	},
+
+	// Degree-based trigonometric
+	f90token.VendorSIND: {
+		calls: []intrinsicCall{makeCall("SIND", nil, _tgtGenericFloat)},
+	},
+	f90token.VendorCOSD: {
+		calls: []intrinsicCall{makeCall("COSD", nil, _tgtGenericFloat)},
+	},
+	f90token.VendorTAND: {
+		calls: []intrinsicCall{makeCall("TAND", nil, _tgtGenericFloat)},
+	},
+	f90token.VendorASIND: {
+		calls: []intrinsicCall{makeCall("ASIND", nil, _tgtGenericFloat)},
+	},
+	f90token.VendorACOSD: {
+		calls: []intrinsicCall{makeCall("ACOSD", nil, _tgtGenericFloat)},
+	},
+	f90token.VendorATAND: {
+		calls: []intrinsicCall{makeCall("ATAND", nil, _tgtGenericFloat)},
+	},
+	f90token.VendorATAN2D: {
+		calls: []intrinsicCall{makeCall("ATAN2D", nil, _tgtGenericFloat, _tgtGenericFloat)},
+	},
+}
+
+// getIntrinsic looks up a V2 intrinsic by token.
+// Returns nil if not found or if redirectTo chain leads to undefined.
+func getIntrinsic(lookup f90token.Intrinsic) *intrinsicFn {
+	if int(lookup) >= len(intrinsicsv2) {
+		return nil
+	}
+	fn := &intrinsicsv2[lookup]
+	// Follow redirect chain
+	for fn.redirectTo != 0 {
+		if int(fn.redirectTo) >= len(intrinsicsv2) {
+			return nil
+		}
+		fn = &intrinsicsv2[fn.redirectTo]
+	}
+	if len(fn.calls) == 0 {
+		return nil // Not defined in V2
+	}
+	return fn
+}
+
 var intrinsicsv2 = []intrinsicFn{
 	f90token.IntrinsicREAL: {
 		calls: []intrinsicCall{
@@ -241,7 +323,7 @@ var intrinsicsv2 = []intrinsicFn{
 			makeCall("int32", _tgtInt32, _tgtGenericFloat),
 		},
 	},
-	f90token.IntrinsicIFIX: {redirectTo: f90token.IntrinsicINT},
+	f90token.IntrinsicIFIX: {redirectTo: uint(f90token.IntrinsicINT)},
 	f90token.IntrinsicMAX: {
 		isVariadic: true,
 		calls: []intrinsicCall{
@@ -263,7 +345,7 @@ var intrinsicsv2 = []intrinsicFn{
 		calls: []intrinsicCall{makeCall("SQRT", nil, _tgtGenericFloat)},
 		f1:    math.Sqrt,
 	},
-	f90token.IntrinsicDSQRT: {redirectTo: f90token.IntrinsicSQRT},
+	f90token.IntrinsicDSQRT: {redirectTo: uint(f90token.IntrinsicSQRT)},
 	f90token.IntrinsicAIMAG: {
 		calls: []intrinsicCall{makeCall("AIMAG", _tgtFloat32, _tgtComplex64)},
 	},
@@ -300,71 +382,71 @@ var intrinsicsv2 = []intrinsicFn{
 		calls: []intrinsicCall{makeCall("SIN", nil, _tgtGenericFloat)},
 		f1:    math.Sin,
 	},
-	f90token.IntrinsicDSIN: {redirectTo: f90token.IntrinsicSIN},
+	f90token.IntrinsicDSIN: {redirectTo: uint(f90token.IntrinsicSIN)},
 	f90token.IntrinsicCOS: {
 		calls: []intrinsicCall{makeCall("COS", nil, _tgtGenericFloat)},
 		f1:    math.Cos,
 	},
-	f90token.IntrinsicDCOS: {redirectTo: f90token.IntrinsicCOS},
+	f90token.IntrinsicDCOS: {redirectTo: uint(f90token.IntrinsicCOS)},
 	f90token.IntrinsicTAN: {
 		calls: []intrinsicCall{makeCall("TAN", nil, _tgtGenericFloat)},
 		f1:    math.Tan,
 	},
-	f90token.IntrinsicDTAN: {redirectTo: f90token.IntrinsicTAN},
+	f90token.IntrinsicDTAN: {redirectTo: uint(f90token.IntrinsicTAN)},
 	f90token.IntrinsicASIN: {
 		calls: []intrinsicCall{makeCall("ASIN", nil, _tgtGenericFloat)},
 		f1:    math.Asin,
 	},
-	f90token.IntrinsicDASIN: {redirectTo: f90token.IntrinsicASIN},
+	f90token.IntrinsicDASIN: {redirectTo: uint(f90token.IntrinsicASIN)},
 	f90token.IntrinsicACOS: {
 		calls: []intrinsicCall{makeCall("ACOS", nil, _tgtGenericFloat)},
 		f1:    math.Acos,
 	},
-	f90token.IntrinsicDACOS: {redirectTo: f90token.IntrinsicACOS},
+	f90token.IntrinsicDACOS: {redirectTo: uint(f90token.IntrinsicACOS)},
 	f90token.IntrinsicATAN: {
 		calls: []intrinsicCall{makeCall("ATAN", nil, _tgtGenericFloat)},
 		f1:    math.Atan,
 	},
-	f90token.IntrinsicDATAN: {redirectTo: f90token.IntrinsicATAN},
+	f90token.IntrinsicDATAN: {redirectTo: uint(f90token.IntrinsicATAN)},
 	f90token.IntrinsicATAN2: {
 		calls: []intrinsicCall{makeCall("ATAN2", nil, _tgtGenericFloat, _tgtGenericFloat)},
 		f2:    math.Atan2,
 	},
-	f90token.IntrinsicDATAN2: {redirectTo: f90token.IntrinsicATAN2},
+	f90token.IntrinsicDATAN2: {redirectTo: uint(f90token.IntrinsicATAN2)},
 
 	// Hyperbolic intrinsics
 	f90token.IntrinsicSINH: {
 		calls: []intrinsicCall{makeCall("SINH", nil, _tgtGenericFloat)},
 		f1:    math.Sinh,
 	},
-	f90token.IntrinsicDSINH: {redirectTo: f90token.IntrinsicSINH},
+	f90token.IntrinsicDSINH: {redirectTo: uint(f90token.IntrinsicSINH)},
 	f90token.IntrinsicCOSH: {
 		calls: []intrinsicCall{makeCall("COSH", nil, _tgtGenericFloat)},
 		f1:    math.Cosh,
 	},
-	f90token.IntrinsicDCOSH: {redirectTo: f90token.IntrinsicCOSH},
+	f90token.IntrinsicDCOSH: {redirectTo: uint(f90token.IntrinsicCOSH)},
 	f90token.IntrinsicTANH: {
 		calls: []intrinsicCall{makeCall("TANH", nil, _tgtGenericFloat)},
 		f1:    math.Tanh,
 	},
-	f90token.IntrinsicDTANH: {redirectTo: f90token.IntrinsicTANH},
+	f90token.IntrinsicDTANH: {redirectTo: uint(f90token.IntrinsicTANH)},
 
 	// Exponential and logarithmic
 	f90token.IntrinsicEXP: {
 		calls: []intrinsicCall{makeCall("EXP", nil, _tgtGenericFloat)},
 		f1:    math.Exp,
 	},
-	f90token.IntrinsicDEXP: {redirectTo: f90token.IntrinsicEXP},
+	f90token.IntrinsicDEXP: {redirectTo: uint(f90token.IntrinsicEXP)},
 	f90token.IntrinsicLOG: {
 		calls: []intrinsicCall{makeCall("LOG", nil, _tgtGenericFloat)},
 		f1:    math.Log,
 	},
-	f90token.IntrinsicDLOG: {redirectTo: f90token.IntrinsicLOG},
+	f90token.IntrinsicDLOG: {redirectTo: uint(f90token.IntrinsicLOG)},
 	f90token.IntrinsicLOG10: {
 		calls: []intrinsicCall{makeCall("LOG10", nil, _tgtGenericFloat)},
 		f1:    math.Log10,
 	},
-	f90token.IntrinsicDLOG10: {redirectTo: f90token.IntrinsicLOG10},
+	f90token.IntrinsicDLOG10: {redirectTo: uint(f90token.IntrinsicLOG10)},
 
 	// Truncation and rounding
 	f90token.IntrinsicFLOOR: {
@@ -386,8 +468,8 @@ var intrinsicsv2 = []intrinsicFn{
 	f90token.IntrinsicNINT: {
 		calls: []intrinsicCall{makeCall("NINT", _tgtInt32, _tgtGenericFloat)},
 	},
-	f90token.IntrinsicDNINT:  {redirectTo: f90token.IntrinsicANINT},
-	f90token.IntrinsicIDNINT: {redirectTo: f90token.IntrinsicNINT},
+	f90token.IntrinsicDNINT:  {redirectTo: uint(f90token.IntrinsicANINT)},
+	f90token.IntrinsicIDNINT: {redirectTo: uint(f90token.IntrinsicNINT)},
 
 	// Absolute value and sign
 	f90token.IntrinsicABS: {
@@ -398,7 +480,7 @@ var intrinsicsv2 = []intrinsicFn{
 		},
 		f1: math.Abs,
 	},
-	f90token.IntrinsicDABS: {redirectTo: f90token.IntrinsicABS},
+	f90token.IntrinsicDABS: {redirectTo: uint(f90token.IntrinsicABS)},
 	f90token.IntrinsicIABS: {
 		calls: []intrinsicCall{makeCall("IABS", nil, _tgtGenericInt)},
 	},
@@ -411,7 +493,7 @@ var intrinsicsv2 = []intrinsicFn{
 	f90token.IntrinsicISIGN: {
 		calls: []intrinsicCall{makeCall("SIGN", nil, _tgtGenericInt, _tgtGenericInt)},
 	},
-	f90token.IntrinsicDSIGN: {redirectTo: f90token.IntrinsicSIGN},
+	f90token.IntrinsicDSIGN: {redirectTo: uint(f90token.IntrinsicSIGN)},
 
 	// Modulo and remainder
 	f90token.IntrinsicMOD: {
@@ -426,7 +508,7 @@ var intrinsicsv2 = []intrinsicFn{
 	f90token.IntrinsicIDIM: {
 		calls: []intrinsicCall{makeCall("DIM", nil, _tgtGenericInt, _tgtGenericInt)},
 	},
-	f90token.IntrinsicDDIM: {redirectTo: f90token.IntrinsicDIM},
+	f90token.IntrinsicDDIM: {redirectTo: uint(f90token.IntrinsicDIM)},
 	f90token.IntrinsicDPROD: {
 		calls: []intrinsicCall{makeCall("DPROD", _tgtFloat64, _tgtFloat32, _tgtFloat32)},
 	},
@@ -447,10 +529,10 @@ var intrinsicsv2 = []intrinsicFn{
 		isVariadic: true,
 		calls:      []intrinsicCall{makeCall("MIN", nil, _tgtGenericInt)},
 	},
-	f90token.IntrinsicAMAX1: {redirectTo: f90token.IntrinsicMAX},
-	f90token.IntrinsicAMIN1: {redirectTo: f90token.IntrinsicMIN},
-	f90token.IntrinsicDMAX1: {redirectTo: f90token.IntrinsicMAX},
-	f90token.IntrinsicDMIN1: {redirectTo: f90token.IntrinsicMIN},
+	f90token.IntrinsicAMAX1: {redirectTo: uint(f90token.IntrinsicMAX)},
+	f90token.IntrinsicAMIN1: {redirectTo: uint(f90token.IntrinsicMIN)},
+	f90token.IntrinsicDMAX1: {redirectTo: uint(f90token.IntrinsicMAX)},
+	f90token.IntrinsicDMIN1: {redirectTo: uint(f90token.IntrinsicMIN)},
 
 	// Character methods
 	f90token.IntrinsicLEN: {
@@ -475,18 +557,18 @@ var intrinsicsv2 = []intrinsicFn{
 	// Array methods
 	f90token.IntrinsicSIZE: {
 		calls: []intrinsicCall{
-			makeCall("Size", _tgtInt32, _tgtArrayAny),
-			makeCall("SizeDim", _tgtInt32, _tgtArrayAny, _tgtInt32),
+			makeCall("Size", _tgtInt32, _tgtArrayGeneric),
+			makeCall("SizeDim", _tgtInt32, _tgtArrayGeneric, _tgtInt32),
 		},
 	},
 	f90token.IntrinsicSHAPE: {
-		calls: []intrinsicCall{makeCall("Shape", nil, _tgtArrayAny)},
+		calls: []intrinsicCall{makeCall("Shape", nil, _tgtArrayGeneric)},
 	},
 	f90token.IntrinsicLBOUND: {
-		calls: []intrinsicCall{makeCall("LowerDim", _tgtInt32, _tgtArrayAny, _tgtInt32)},
+		calls: []intrinsicCall{makeCall("LowerDim", _tgtInt32, _tgtArrayGeneric, _tgtInt32)},
 	},
 	f90token.IntrinsicUBOUND: {
-		calls: []intrinsicCall{makeCall("UpperDim", _tgtInt32, _tgtArrayAny, _tgtInt32)},
+		calls: []intrinsicCall{makeCall("UpperDim", _tgtInt32, _tgtArrayGeneric, _tgtInt32)},
 	},
 
 	// Array reduction intrinsics
@@ -522,7 +604,7 @@ var (
 	_tgtGenericInt   = defaultVarinfo(f90token.IntLit)
 	_tgtComplex64    = defaultVarinfo(f90token.COMPLEX)
 	_tgtComplex128   = defaultVarinfo(f90token.DOUBLECOMPLEX)
-	_tgtArrayAny     = _tgtArray(f90token.DIMENSION)
+	_tgtArrayGeneric = _tgtArray(f90token.DIMENSION)
 )
 
 func _tgtArray(elem f90token.Token) *Varinfo {
