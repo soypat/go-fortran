@@ -526,3 +526,40 @@ func ALL(a *Array[bool]) bool {
 	}
 	return true
 }
+
+// ArraySetEqual performs element-wise equality comparison: dst[i] = (a[i] == b[i])
+// If dst is nil, a new array with the same shape as a is allocated.
+// All arrays must have compatible shapes.
+// Corresponds to Fortran: a == b (array expressions)
+func ArraySetEqual[T comparable](dst *Array[bool], a, b *Array[T]) *Array[bool] {
+	if !shapeEqual(a.shape, b.shape) {
+		panic("array: shape mismatch in element-wise comparison")
+	}
+	if dst == nil {
+		dst = NewArray[bool](nil, a.shape...)
+	}
+	if !shapeEqual(dst.shape, a.shape) {
+		panic("array: destination shape mismatch")
+	}
+	// Iterate through all elements using linear indexing
+	indices := make([]int, len(a.shape))
+	for i := range indices {
+		indices[i] = 1
+	}
+	total := a.Size()
+	for n := 0; n < total; n++ {
+		ai := a.linearIndex(indices)
+		bi := b.linearIndex(indices)
+		di := dst.linearIndex(indices)
+		dst.data[di] = a.data[ai] == b.data[bi]
+		// Increment indices column-major
+		for d := 0; d < len(indices); d++ {
+			indices[d]++
+			if indices[d] <= a.shape[d] {
+				break
+			}
+			indices[d] = 1
+		}
+	}
+	return dst
+}

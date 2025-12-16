@@ -38,6 +38,16 @@ func makeCall(methodOrGoCall string, returnType *Varinfo, args ...*Varinfo) intr
 	}
 }
 
+// isAllCaps returns true if the string consists only of uppercase letters.
+func isAllCaps(s string) bool {
+	for _, c := range s {
+		if c < 'A' || c > 'Z' {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
 // getIntrinsicV2 looks up a V2 intrinsic by token.
 // Returns nil if not found or if redirectTo chain leads to undefined.
 func getIntrinsicV2(lookup f90token.Intrinsic) *intrinsicFn {
@@ -149,9 +159,10 @@ func (tg *ToGo) intrinsicExprV2(vitgt *Varinfo, fn *intrinsicFn, call *intrinsic
 
 	// Check if this is a method call
 	// Methods are on array/char types and have CamelCase names (e.g., "Size", "Len")
-	// Functions have SCREAMING_CASE names (e.g., "DOT_PRODUCT", "MIN")
-	isMethod := len(call.args) > 0 && (call.args[0] == _tgtArray || call.args[0] == _tgtChar) &&
-		len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' && !strings.Contains(name, "_")
+	// Functions have SCREAMING_CASE names (e.g., "DOT_PRODUCT", "MIN", "ALL")
+	isMethod := len(call.args) > 0 && (call.args[0].IsArray() || call.args[0].IsChar()) &&
+		len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' && !strings.Contains(name, "_") &&
+		!isAllCaps(name)
 	if isMethod {
 		// Method call: gargs[0].methodName(gargs[1:]...)
 		methodCall := &ast.CallExpr{
@@ -464,26 +475,26 @@ var intrinsicsv2 = []intrinsicFn{
 	// Array methods
 	f90token.IntrinsicSIZE: {
 		calls: []intrinsicCall{
-			makeCall("Size", _tgtInt32, _tgtArray),
-			makeCall("SizeDim", _tgtInt32, _tgtArray, _tgtInt32),
+			makeCall("Size", _tgtInt32, _tgtArrayAny),
+			makeCall("SizeDim", _tgtInt32, _tgtArrayAny, _tgtInt32),
 		},
 	},
 	f90token.IntrinsicSHAPE: {
-		calls: []intrinsicCall{makeCall("Shape", nil, _tgtArray)},
+		calls: []intrinsicCall{makeCall("Shape", nil, _tgtArrayAny)},
 	},
 	f90token.IntrinsicLBOUND: {
-		calls: []intrinsicCall{makeCall("LowerDim", _tgtInt32, _tgtArray, _tgtInt32)},
+		calls: []intrinsicCall{makeCall("LowerDim", _tgtInt32, _tgtArrayAny, _tgtInt32)},
 	},
 	f90token.IntrinsicUBOUND: {
-		calls: []intrinsicCall{makeCall("UpperDim", _tgtInt32, _tgtArray, _tgtInt32)},
+		calls: []intrinsicCall{makeCall("UpperDim", _tgtInt32, _tgtArrayAny, _tgtInt32)},
 	},
 
 	// Array reduction intrinsics
 	f90token.IntrinsicDOT_PRODUCT: {
-		calls: []intrinsicCall{makeCall("DOT_PRODUCT", nil, _tgtArray, _tgtArray)},
+		calls: []intrinsicCall{makeCall("DOT_PRODUCT", nil, _tgtArray(f90token.FloatLit), _tgtArray(f90token.FloatLit))},
 	},
 	f90token.IntrinsicALL: {
-		calls: []intrinsicCall{makeCall("All", _tgtBool, _tgtArray)},
+		calls: []intrinsicCall{makeCall("ALL", _tgtBool, _tgtArray(f90token.LOGICAL))},
 	},
 }
 
@@ -511,8 +522,14 @@ var (
 	_tgtGenericInt   = defaultVarinfo(f90token.IntLit)
 	_tgtComplex64    = defaultVarinfo(f90token.COMPLEX)
 	_tgtComplex128   = defaultVarinfo(f90token.DOUBLECOMPLEX)
-	_tgtArray        = defaultVarinfo(f90token.DIMENSION)
+	_tgtArrayAny     = _tgtArray(f90token.DIMENSION)
 )
+
+func _tgtArray(elem f90token.Token) *Varinfo {
+	di := defaultVarinfo(elem)
+	di.flags |= VFlagDimension
+	return di
+}
 
 func isGenericVarinfo(vi *Varinfo) bool {
 	return vi == _tgtGenericFloat || vi == _tgtGenericInt

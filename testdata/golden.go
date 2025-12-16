@@ -780,7 +780,7 @@ func LEVEL24() {
 	vec3 = intrinsic.NewArray[int32]([]int32{20, 30, 40}, 3)
 	intrinsic.Print("LEVEL 24: vec2(1) =", vec2.At(1))
 	intrinsic.Print("LEVEL 24: vec2(5) =", vec2.At(5))
-	if (vec1 == vec3).All() {
+	if intrinsic.ALL(intrinsic.ArraySetEqual[int32](nil, vec1, vec3)) {
 		intrinsic.Print("LEVEL 24: vec eq")
 	} else {
 		intrinsic.Print("LEVEL 24: vec neq")

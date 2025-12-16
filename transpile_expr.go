@@ -349,6 +349,10 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 			Args: []ast.Expr{left, right},
 		}, vitgt, nil
 	case f90token.EQ, f90token.EqEq:
+		// Special case: array comparison → ArraySetEqual
+		if leftType != nil && rightType != nil && leftType.IsArray() && rightType.IsArray() {
+			return tg.transformArrayComparison("ArraySetEqual", left, right, leftType)
+		}
 		// Special case: pointer comparison to 0 → ptr.DataUnsafe() == nil
 		if isPointerZeroComparison(leftType, rightType, e.Right) {
 			return tg.pointerNilComparison(left, token.EQL), _tgtBool, nil
@@ -407,6 +411,21 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 		Op: op,
 		Y:  right,
 	}, resultType, nil
+}
+
+// transformArrayComparison generates intrinsic.ArraySetEqual(nil, left, right) or similar
+// for element-wise array comparison operations.
+func (tg *ToGo) transformArrayComparison(funcName string, left, right ast.Expr, leftType *Varinfo) (ast.Expr, *Varinfo, error) {
+	// Generate: intrinsic.ArraySetEqual[T](nil, left, right)
+	sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(funcName)}
+	goType := goTypeBasic(leftType.typeToken(), 0)
+	funcExpr := &ast.IndexExpr{X: sel, Index: goType}
+	call := &ast.CallExpr{
+		Fun:  funcExpr,
+		Args: []ast.Expr{ast.NewIdent("nil"), left, right},
+	}
+	// Result is an array of bool with same shape as input
+	return call, _tgtArray(f90token.LOGICAL), nil
 }
 
 func (tg *ToGo) transformBinaryExprChar(vitgt *Varinfo, op f90token.Token, left, right ast.Expr, leftType, rightType *Varinfo) (result ast.Expr, resultType *Varinfo, err error) {
