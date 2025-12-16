@@ -93,17 +93,17 @@
 ! ==============================================================================
       SUBROUTINE LEVEL04()
           INTEGER :: i
-          REAL :: x
+          REAL :: x, test
           LOGICAL :: flag
 
           i = 42
           x = 3.14159
+          test = 0.
           flag = .TRUE.
-
+        
           IF (i .GT. 40) THEN
               PRINT *, 'LEVEL 4: i is greater than 40'
           END IF
-
           IF (flag) THEN
               PRINT *, 'LEVEL 4: flag is true'
           ELSE
@@ -586,18 +586,26 @@
       ! LEVEL 21: Advanced GOTO (Arithmetic IF and Computed GOTO)
       SUBROUTINE LEVEL21()
           INTEGER :: x, choice
-
+          REAL :: test
+          test = 0.
           ! Test Arithmetic IF: IF (expr) neg, zero, pos
           x = -5
           IF (x) 10, 20, 30
 10        PRINT *, 'LEVEL 21: x is negative'
-          GOTO 40
+          GOTO 90
 20        PRINT *, 'LEVEL 21: x is zero'
-          GOTO 40
+          GOTO 90
 30        PRINT *, 'LEVEL 21: x is positive'
+          
+          IF (test-.1e-13) 40,50,60
+40        PRINT *, 'LEVEL 21: test negative'
+          GOTO 90
+50        PRINT *, 'LEVEL 21: test zero'
+          GOTO 90
+60        PRINT *, 'LEVEL 21: test positive'
 
           ! Test Computed GOTO: GO TO (labels) index
-40        choice = 2
+90        choice = 2
           GO TO (100, 200, 300), choice
 100       PRINT *, 'LEVEL 21: Choice was 1'
           GOTO 400
@@ -606,6 +614,8 @@
 300       PRINT *, 'LEVEL 21: Choice was 3'
 
 400       CONTINUE
+
+
       END SUBROUTINE LEVEL21
 
       ! LEVEL 22: STOP Statement

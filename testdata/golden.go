@@ -102,8 +102,9 @@ func LEVEL04() {
 		_ = i
 	)
 	var (
-		x float32
-		_ = x
+		x    float32
+		test float32
+		_, _ = x, test
 	)
 	var (
 		flag bool
@@ -111,6 +112,7 @@ func LEVEL04() {
 	)
 	i = 42
 	x = 3.14159
+	test = 0.0
 	flag = true
 	if i > 40 {
 		intrinsic.Print("LEVEL 4: i is greater than 40")
@@ -638,10 +640,15 @@ func LEVEL21() {
 		choice int32
 		_, _   = x, choice
 	)
+	var (
+		test float32
+		_    = test
+	)
+	test = 0.0
 	x = -5
-	if int(x) < 0 {
+	if jmpSelect := x; jmpSelect < 0 {
 		goto label10
-	} else if int(x) == 0 {
+	} else if jmpSelect == 0 {
 		goto label20
 	} else {
 		goto label30
@@ -651,20 +658,44 @@ label10:
 	{
 		intrinsic.Print("LEVEL 21: x is negative")
 	}
-	goto label40
+	goto label90
 	goto label20
 label20:
 	{
 		intrinsic.Print("LEVEL 21: x is zero")
 	}
-	goto label40
+	goto label90
 	goto label30
 label30:
 	{
 		intrinsic.Print("LEVEL 21: x is positive")
 	}
+	if jmpSelect := test - 1e-14; jmpSelect < 0 {
+		goto label40
+	} else if jmpSelect == 0 {
+		goto label50
+	} else {
+		goto label60
+	}
 	goto label40
 label40:
+	{
+		intrinsic.Print("LEVEL 21: test negative")
+	}
+	goto label90
+	goto label50
+label50:
+	{
+		intrinsic.Print("LEVEL 21: test zero")
+	}
+	goto label90
+	goto label60
+label60:
+	{
+		intrinsic.Print("LEVEL 21: test positive")
+	}
+	goto label90
+label90:
 	{
 		choice = 2
 	}

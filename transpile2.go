@@ -1381,25 +1381,31 @@ func (tg *ToGo) transformParameterStmt(dst []ast.Stmt, stmt *f90.ParameterStmt) 
 
 func (tg *ToGo) transformArithmeticIfStmt(dst []ast.Stmt, stmt *f90.ArithmeticIfStmt) (_ []ast.Stmt, err error) {
 	// Arithmetic IF: IF (x) neg, zero, pos
-	// Becomes: if x < 0 { goto neg } else if x == 0 { goto zero } else { goto pos }
-	condExpr, _, err := tg.transformExpression(_tgtInt, stmt.Condition)
+	// Becomes: if jmpSelect := x; jmpSelect < 0 { goto neg } else if jmpSelect == 0 { goto zero } else { goto pos }
+	var condType Varinfo
+	if err := tg.repl.InferType(&condType, stmt.Condition); err != nil {
+		return dst, err
+	}
+	condExpr, _, err := tg.transformExpression(&condType, stmt.Condition)
 	if err != nil {
 		return dst, err
 	}
 
+	jmpSelect := ast.NewIdent("jmpSelect")
 	zero := &ast.BasicLit{Kind: token.INT, Value: "0"}
 
-	// if condition < 0 { goto negLabel }
+	// if jmpSelect := condition; jmpSelect < 0 { goto negLabel }
 	negIf := &ast.IfStmt{
-		Cond: &ast.BinaryExpr{X: condExpr, Op: token.LSS, Y: zero},
+		Init: &ast.AssignStmt{Lhs: []ast.Expr{jmpSelect}, Tok: token.DEFINE, Rhs: []ast.Expr{condExpr}},
+		Cond: &ast.BinaryExpr{X: jmpSelect, Op: token.LSS, Y: zero},
 		Body: &ast.BlockStmt{List: []ast.Stmt{
 			&ast.BranchStmt{Tok: token.GOTO, Label: tg.astLabel(stmt.NegativeLabel)},
 		}},
 	}
 
-	// else if condition == 0 { goto zeroLabel }
+	// else if jmpSelect == 0 { goto zeroLabel }
 	zeroIf := &ast.IfStmt{
-		Cond: &ast.BinaryExpr{X: condExpr, Op: token.EQL, Y: zero},
+		Cond: &ast.BinaryExpr{X: jmpSelect, Op: token.EQL, Y: zero},
 		Body: &ast.BlockStmt{List: []ast.Stmt{
 			&ast.BranchStmt{Tok: token.GOTO, Label: tg.astLabel(stmt.ZeroLabel)},
 		}},
