@@ -3,22 +3,31 @@ package intrinsic
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"strconv"
 )
 
-var defaultFormatter Formatter
+type IOUnit struct {
+	rw io.ReadWriteCloser
+}
+
+var defaultFormatter Format
+
+type Format struct {
+	// Tokens []FormatTokens
+}
+
+var defaultIOUnit = IOUnit{
+	rw: os.Stdout,
+}
 
 func Print(v ...any) {
-	defaultFormatter.Print(v...)
+	Write(defaultIOUnit, &defaultFormatter, v...)
 }
 
-type Formatter struct {
-}
-
-// Print formats and prints values with Fortran list-directed I/O formatting
-func (f Formatter) Print(v ...any) {
+func Write(unit IOUnit, f *Format, args ...any) {
 	var buf []byte
 
 	// Fortran PRINT * adds leading space (carriage control character)
@@ -28,7 +37,7 @@ func (f Formatter) Print(v ...any) {
 	// - Numeric values: field widths INCLUDE leading separator space
 	// - String values: need explicit separator space (except first)
 	prevWasString := false
-	for i, val := range v {
+	for i, val := range args {
 		// Check if this is a string (or CharacterArray) and not the first item
 		_, thisIsString := val.(string)
 		_, thisIsCharArray := val.(CharacterArray)
@@ -42,10 +51,10 @@ func (f Formatter) Print(v ...any) {
 	}
 	buf = append(buf, '\n')
 	// Print with newline (Fortran PRINT statement behavior)
-	os.Stdout.Write(buf)
+	unit.rw.Write(buf)
 }
 
-func (f Formatter) formatValue(dst []byte, value any) []byte {
+func (f Format) formatValue(dst []byte, value any) []byte {
 
 	prevLen := len(dst)
 

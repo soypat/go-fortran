@@ -377,7 +377,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	case *f90.ParameterStmt:
 		dst, err = tg.transformParameterStmt(dst, s)
 	case *f90.WriteStmt:
-		// gostmt = tg.transformWriteStmt(s)
+		dst, err = tg.transformWriteStmt(dst, s)
 	case *f90.FormatStmt:
 		// FORMAT statements are compile-time format definitions, no runtime code
 	case *f90.OpenStmt, *f90.CloseStmt, *f90.ReadStmt, *f90.BackspaceStmt, *f90.RewindStmt, *f90.EndfileStmt, *f90.InquireStmt:
@@ -1004,13 +1004,17 @@ func (tg *ToGo) transformDoLoop(dst []ast.Stmt, stmt *f90.DoLoop) (_ []ast.Stmt,
 		return dst, err
 	}
 
-	// Handle DO WHILE (no loop variable, condition in Start)
+	// Handle DO WHILE (no loop variable, condition in Start) or infinite DO
 	if stmt.Var == "" {
-		// DO WHILE: for condition { ... }
-		condExpr, _, err := tg.transformExpression(_tgtBool, stmt.Start)
-		if err != nil {
-			return dst, err
+		var condExpr ast.Expr
+		if stmt.Start != nil {
+			// DO WHILE: for condition { ... }
+			condExpr, _, err = tg.transformExpression(_tgtBool, stmt.Start)
+			if err != nil {
+				return dst, err
+			}
 		}
+		// If stmt.Start is nil, condExpr remains nil => infinite for { ... }
 		forStmt := &ast.ForStmt{
 			Cond: condExpr,
 			Body: &ast.BlockStmt{List: bodyStmts},
@@ -1413,6 +1417,44 @@ func (tg *ToGo) transformParameterStmt(dst []ast.Stmt, stmt *f90.ParameterStmt) 
 		})
 	}
 	dst = append(dst, &ast.DeclStmt{Decl: decl})
+	return dst, nil
+}
+
+func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast.Stmt, err error) {
+	// Check if this is list-directed output (format = *)
+	isListDirected := false
+	if fmtIdent, ok := stmt.Format.(*f90.Identifier); ok && fmtIdent.Value == "*" {
+		isListDirected = true
+	}
+
+	if !isListDirected {
+		// For formatted output, skip for now (needs FORMAT statement lookup)
+		return dst, nil
+	}
+
+	// List-directed output: WRITE(*,*) or WRITE(unit,*) becomes fmt.Println(...)
+	args := make([]ast.Expr, 0, len(stmt.OutputList))
+	for _, expr := range stmt.OutputList {
+		var exprType Varinfo
+		if err := tg.repl.InferType(&exprType, expr); err != nil {
+			return dst, err
+		}
+		goExpr, _, err := tg.transformExpression(&exprType, expr)
+		if err != nil {
+			return dst, err
+		}
+		args = append(args, goExpr)
+	}
+
+	// Generate: fmt.Println(args...)
+	printCall := &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   ast.NewIdent("fmt"),
+			Sel: ast.NewIdent("Println"),
+		},
+		Args: args,
+	}
+	dst = append(dst, &ast.ExprStmt{X: printCall})
 	return dst, nil
 }
 
