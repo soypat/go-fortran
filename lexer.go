@@ -395,7 +395,8 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 	return tok, startPos, literal
 }
 
-// func (l *Lexer90) readIdentifierOrNumber() (lit []byte, tok token.Token) {
+// // readIdentifierSpecifierOrNumber
+// func (l *Lexer90) readIdentifierSpecifierOrNumber() (lit []byte, tok token.Token) {
 // 	start := l.bufstart()
 // 	// Read numerical start if present.
 // 	for isDigit(l.ch) {
@@ -412,20 +413,54 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 // 	}
 // 	hasLeadingNum := len(l.idbuf[start:]) > 0
 // 	hasDecimal := false
-// 	for l.ch == '.' || isIdentifierChar(l.ch) || isDigit(l.ch) {
-// 		if l.ch == '.' {
+// 	canBeFloat := true
+// 	prevChar := rune(0)
+// 	hasIdent := false
+// LEX:
+// 	for {
+// 		isDec := l.ch == '.'
+// 		isID := isIdentifierChar(l.ch)
+// 		isDig := isDigit(l.ch)
+// 		isPlusMinus := l.ch == '-' || l.ch == '+'
+// 		if !isDec && !isID && !isDig && !isPlusMinus {
+// 			break
+// 		}
+// 		switch {
+// 		case isDec:
 // 			if !hasDecimal {
-// 				l.readChar()
 // 				// Check if we have a operator like 1.EQ. or float like 1.E2  next by checking current and peek.
-// 				if isIdentifierChar(l.ch) && isIdentifierChar(l.peek) {
-
+// 				if isIdentifierChar(l.peek[1]) && isIdentifierChar(l.peek[0]) {
+// 					break LEX
 // 				}
+// 				hasDecimal = true
+// 			} else {
+// 				break LEX
 // 			}
-// 			if hasDecimal {
-
+// 			l.idbuf = append(l.idbuf, '.')
+// 			// l.readChar()
+// 		case isID:
+// 			if !canBeFloat {
+// 				// We know its not a number, so just append
+// 			} else if hasIdent {
+// 				canBeFloat = false // Only one identifier character allowed per float.
+// 			} else if isFloatIdent(l.ch) {
+// 				hasIdent = true
+// 			} else {
+// 				canBeFloat = false
+// 			}
+// 			l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
+// 		case isDig:
+// 			l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
+// 		case isPlusMinus:
+// 			if canBeFloat && isFloatIdent(prevChar) {
+// 				l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
+// 			} else {
+// 				break LEX
 // 			}
 // 		}
 
+// 		prevChar = l.ch
+// 		l.readChar()
 // 	}
 
 // 	// Not an integer. Can be
@@ -433,6 +468,17 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 // 	// - B
 
 // }
+
+func toUpper(ch rune) rune {
+	if ch >= 'a' && ch <= 'z' {
+		ch -= 'a' - 'A'
+	}
+	return ch
+}
+
+func isFloatIdent(ch rune) bool {
+	return toUpper(ch) == 'E' || toUpper(ch) == 'D' || toUpper(ch) == 'Q'
+}
 
 func (l *Lexer90) readUntil(stopchar rune) ([]byte, token.Token) {
 	start := l.bufstart()
@@ -615,7 +661,7 @@ func (l *Lexer90) readNumber() ([]byte, bool) {
 				// - E/D/Q followed by a letter (e.g., 1.EQ.1, 1.OR.x)
 				if isIdentifierChar(next) {
 					// Check if it's E/D/Q followed by something that's NOT valid for exponent
-					if next == 'E' || next == 'e' || next == 'D' || next == 'd' || next == 'Q' || next == 'q' {
+					if isFloatIdent(next) {
 						// Look ahead one more character to see if this is scientific notation
 						peek2 := l.peek2Char()
 						// Scientific notation requires digit, +, or - after E/D/Q
@@ -635,7 +681,7 @@ func (l *Lexer90) readNumber() ([]byte, bool) {
 				l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
 				l.readChar()
 				continue
-			} else if ch == 'E' || ch == 'e' || ch == 'D' || ch == 'd' || ch == 'Q' || ch == 'q' {
+			} else if isFloatIdent(ch) {
 				// Handle scientific notation exponent (e.g., 1.5E3, 100.D0, 1.Q0)
 				seenDot = true // Numbers with exponents are always floats
 				l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
@@ -803,16 +849,6 @@ func (l *Lexer90) peekChar() rune {
 // It returns the character that comes after l.peek (i.e., two positions ahead of l.ch)
 func (l *Lexer90) peek2Char() rune {
 	return l.peek[1]
-	// Use bufio.Reader's Peek to look ahead without consuming
-	// The input reader is positioned to read the character after l.peek
-	bytes, err := l.input.Peek(1)
-	if err != nil || len(bytes) < 1 {
-		return 0
-	}
-	// Return the first byte as a rune (assuming ASCII for operators/digits)
-	// For full UTF-8 support we'd need to decode, but for our use case (checking for digits/+/-)
-	// ASCII is sufficient
-	return rune(bytes[0])
 }
 
 // peekAhead looks n characters ahead without consuming. Returns 0 if not available.
