@@ -327,14 +327,19 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 				}
 			}
 
-			// Check if this could be a format specifier (e.g., I3, F10, E12, TL5, TR10)
-			// Format specs are 1-2 format letters followed immediately by digits/dots
-			if tok == token.Identifier && len(literal) > 1 && isFormatLetter(rune(literal[0])) {
+			// Check if this could be a format specifier (e.g., I3, F10, E12, TL5, TR10, SP, BN)
+			// Format specs are 1-2 format letters optionally followed by digits/dots
+			if tok == token.Identifier && len(literal) >= 1 && isFormatLetter(rune(literal[0])) {
 				// Check if this matches format spec pattern
 				// After initial letter(s), should only be digits and dots
 				letterCount := 1
-				if len(literal) > 1 && isFormatLetter(rune(literal[1])) {
-					letterCount = 2
+				isTwoLetterCode := false
+				if len(literal) > 1 {
+					// Check for valid two-letter format codes
+					isTwoLetterCode = isValidTwoLetterFormat(literal[:2])
+					if isTwoLetterCode {
+						letterCount = 2
+					}
 				}
 
 				// Rest should be digits/dots only (for valid format spec)
@@ -352,6 +357,9 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 						}
 					}
 					isFormatSpec = allDigitsOrDots && hasDigit
+				} else if isTwoLetterCode && len(literal) == 2 {
+					// Two-letter format codes without digits (SP, SS, BN, BZ, etc.)
+					isFormatSpec = true
 				}
 
 				if isFormatSpec {
@@ -382,6 +390,12 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 				// Check if number is followed by a format letter (e.g., 1X, 2H)
 				literal = l.readFormatSpec(literal)
 				tok = token.FormatSpec
+			} else if isFloat && l.ch == '.' && isDigit(l.peekChar()) {
+				// Check if this "float" is actually a format spec like 2E12.5E3
+				// Pattern: digit+E/D+digit followed by .digit indicates format spec
+				// e.g., "2E12" followed by ".5E3" is format spec "2E12.5E3"
+				literal = l.readFormatSpec(literal)
+				tok = token.FormatSpec
 			} else if isFloat {
 				tok = token.FloatLit
 			} else {
@@ -394,80 +408,6 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 	}
 	return tok, startPos, literal
 }
-
-// // readIdentifierSpecifierOrNumber
-// func (l *Lexer90) readIdentifierSpecifierOrNumber() (lit []byte, tok token.Token) {
-// 	start := l.bufstart()
-// 	// Read numerical start if present.
-// 	for isDigit(l.ch) {
-// 		l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
-// 		l.readChar()
-// 	}
-// 	if !isIdentifierChar(l.ch) && l.ch != '.' {
-// 		// Try to emit parsed integer.
-// 		lit = l.idbuf[start:]
-// 		if len(lit) == 0 {
-// 			return nil, token.Illegal
-// 		}
-// 		return lit, token.IntLit
-// 	}
-// 	hasLeadingNum := len(l.idbuf[start:]) > 0
-// 	hasDecimal := false
-// 	canBeFloat := true
-// 	prevChar := rune(0)
-// 	hasIdent := false
-// LEX:
-// 	for {
-// 		isDec := l.ch == '.'
-// 		isID := isIdentifierChar(l.ch)
-// 		isDig := isDigit(l.ch)
-// 		isPlusMinus := l.ch == '-' || l.ch == '+'
-// 		if !isDec && !isID && !isDig && !isPlusMinus {
-// 			break
-// 		}
-// 		switch {
-// 		case isDec:
-// 			if !hasDecimal {
-// 				// Check if we have a operator like 1.EQ. or float like 1.E2  next by checking current and peek.
-// 				if isIdentifierChar(l.peek[1]) && isIdentifierChar(l.peek[0]) {
-// 					break LEX
-// 				}
-// 				hasDecimal = true
-// 			} else {
-// 				break LEX
-// 			}
-// 			l.idbuf = append(l.idbuf, '.')
-// 			// l.readChar()
-// 		case isID:
-// 			if !canBeFloat {
-// 				// We know its not a number, so just append
-// 			} else if hasIdent {
-// 				canBeFloat = false // Only one identifier character allowed per float.
-// 			} else if isFloatIdent(l.ch) {
-// 				hasIdent = true
-// 			} else {
-// 				canBeFloat = false
-// 			}
-// 			l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
-// 		case isDig:
-// 			l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
-// 		case isPlusMinus:
-// 			if canBeFloat && isFloatIdent(prevChar) {
-// 				l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
-// 			} else {
-// 				break LEX
-// 			}
-// 		}
-
-// 		prevChar = l.ch
-// 		l.readChar()
-// 	}
-
-// 	// Not an integer. Can be
-// 	// - Float 1E3, 1D3, 1Q3
-// 	// - B
-
-// }
 
 func toUpper(ch rune) rune {
 	if ch >= 'a' && ch <= 'z' {
@@ -683,6 +623,13 @@ func (l *Lexer90) readNumber() ([]byte, bool) {
 				continue
 			} else if isFloatIdent(ch) {
 				// Handle scientific notation exponent (e.g., 1.5E3, 100.D0, 1.Q0)
+				// But first check if E/D/Q is actually followed by a valid exponent
+				// (digit or sign). If not, this might be a format spec like 6ES10.3
+				next := l.peekChar()
+				if !isDigit(next) && next != '+' && next != '-' {
+					// Not a valid exponent, don't consume E/D/Q
+					break
+				}
 				seenDot = true // Numbers with exponents are always floats
 				l.idbuf = utf8.AppendRune(l.idbuf, l.ch)
 				l.readChar()
@@ -909,13 +856,50 @@ func isWhitespace(ch rune) bool {
 
 // isFormatLetter returns true if ch is a letter commonly used in Fortran format specifiers.
 // This includes data edit descriptors (I, F, E, D, G, A, L, B, O, Z),
-// positioning (X, T, P), and Hollerith (H - deprecated).
+// positioning (X, T, P), Hollerith (H - deprecated), and letters that appear
+// as the second character in two-letter format codes (S, N, R for ES, EN, TR, SP, SS, BN, BZ, etc.)
 func isFormatLetter(ch rune) bool {
 	switch ch {
 	case 'I', 'i', 'F', 'f', 'E', 'e', 'D', 'd', 'G', 'g',
 		'A', 'a', 'L', 'l', 'B', 'b', 'O', 'o', 'Z', 'z',
-		'X', 'x', 'T', 't', 'P', 'p', 'H', 'h':
+		'X', 'x', 'T', 't', 'P', 'p', 'H', 'h',
+		'S', 's', 'N', 'n', 'R', 'r': // For ES, EN, TR, SP, SS, SU, BN, BZ, RC, RD, RN, RP, RU, RZ
 		return true
+	default:
+		return false
+	}
+}
+
+// isValidTwoLetterFormat checks if a two-byte slice is a valid Fortran two-letter format code.
+// Valid codes: ES, EN (scientific/engineering), TL, TR (tab), SP, SS, SU (sign),
+// BN, BZ (blank), DC, DP, DT (decimal/derived), RC, RD, RN, RP, RU, RZ (rounding), G0 (general)
+func isValidTwoLetterFormat(lit []byte) bool {
+	if len(lit) < 2 {
+		return false
+	}
+	// Normalize to uppercase for comparison
+	c1, c2 := lit[0], lit[1]
+	if c1 >= 'a' && c1 <= 'z' {
+		c1 -= 32
+	}
+	if c2 >= 'a' && c2 <= 'z' {
+		c2 -= 32
+	}
+	switch c1 {
+	case 'E':
+		return c2 == 'S' || c2 == 'N' // ES, EN
+	case 'T':
+		return c2 == 'L' || c2 == 'R' // TL, TR
+	case 'S':
+		return c2 == 'P' || c2 == 'S' || c2 == 'U' // SP, SS, SU
+	case 'B':
+		return c2 == 'N' || c2 == 'Z' // BN, BZ
+	case 'D':
+		return c2 == 'C' || c2 == 'P' || c2 == 'T' // DC, DP, DT (F2003+)
+	case 'R':
+		return c2 == 'C' || c2 == 'D' || c2 == 'N' || c2 == 'P' || c2 == 'U' || c2 == 'Z' // RC, RD, RN, RP, RU, RZ (F2003+)
+	case 'G':
+		return c2 == '0' // G0 (F2008)
 	default:
 		return false
 	}
