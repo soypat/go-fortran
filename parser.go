@@ -2214,7 +2214,12 @@ func (p *Parser90) parseFormatStmt() ast.Statement {
 					specBuilder.WriteString(" ")
 				}
 			}
-			if len(p.current.lit) > 0 {
+			// Preserve quotes around string literals
+			if p.currentTokenIs(token.StringLit) {
+				specBuilder.WriteString("'")
+				specBuilder.WriteString(string(p.current.lit))
+				specBuilder.WriteString("'")
+			} else if len(p.current.lit) > 0 {
 				specBuilder.WriteString(string(p.current.lit))
 			} else {
 				specBuilder.WriteString(p.current.tok.String())

@@ -2,7 +2,9 @@ package main
 
 import "github.com/soypat/go-fortran/intrinsic"
 
-func main() {
+func GOLDEN(n int32) {
+	// Implicit declarations.
+	var fibonacci int32
 	LEVEL01()
 	LEVEL02()
 	LEVEL03()
@@ -1089,8 +1091,8 @@ func LEVEL35() {
 	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), "Hello from WRITE")
 	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), m, n, x)
 	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), "Values:", m, n)
-	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("Formatted output line"))
-	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("m=, I3,  n=, I3,  x=, F5.2"), m, n, x)
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("'Formatted output line'"))
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("'m=', I3, ' n=', I3, ' x=', F5.2"), m, n, x)
 	goto label220
 label220:
 	{

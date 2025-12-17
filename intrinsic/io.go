@@ -15,14 +15,104 @@ type IOUnit struct {
 
 var defaultFormatter Format
 
+// FormatDescriptor represents a single format edit descriptor.
+type FormatDescriptor struct {
+	Type      byte   // 'I', 'F', 'E', 'A', 'X', 'S' (string literal), '/' (newline)
+	Width     int    // Field width (0 means default)
+	Precision int    // Decimal places for F/E formats (-1 means default)
+	Literal   string // For string literals (Type='S')
+}
+
 type Format struct {
-	spec string // Raw format specification (e.g., "(I5, F10.2, A)")
-	// TODO: parsed descriptors for formatted output
+	spec        string             // Raw format specification
+	descriptors []FormatDescriptor // Parsed descriptors (lazily populated)
+	parsed      bool               // True if spec has been parsed
 }
 
 // NewFormat creates a Format from a specification string.
 func NewFormat(spec string) *Format {
 	return &Format{spec: spec}
+}
+
+// ensureParsed parses the format spec if not already parsed.
+func (f *Format) ensureParsed() {
+	if f.parsed {
+		return
+	}
+	f.parsed = true
+	f.descriptors = parseFormatSpec(f.spec)
+}
+
+// parseFormatSpec parses a format specification string into descriptors.
+// Example: "'m=', I3,' n=', I3,' x=', F5.2" produces:
+// [{Type:'S', Literal:"m="}, {Type:'I', Width:3}, {Type:'S', Literal:" n="}, ...]
+func parseFormatSpec(spec string) []FormatDescriptor {
+	var descriptors []FormatDescriptor
+	i := 0
+	for i < len(spec) {
+		// Skip whitespace and commas
+		for i < len(spec) && (spec[i] == ' ' || spec[i] == ',' || spec[i] == '\t') {
+			i++
+		}
+		if i >= len(spec) {
+			break
+		}
+
+		// String literal: 'text'
+		if spec[i] == '\'' {
+			i++ // skip opening quote
+			start := i
+			for i < len(spec) && spec[i] != '\'' {
+				i++
+			}
+			descriptors = append(descriptors, FormatDescriptor{
+				Type:    'S',
+				Literal: spec[start:i],
+			})
+			if i < len(spec) {
+				i++ // skip closing quote
+			}
+			continue
+		}
+
+		// Format descriptor: I3, F5.2, A, X, etc.
+		if spec[i] >= 'A' && spec[i] <= 'Z' || spec[i] >= 'a' && spec[i] <= 'z' {
+			typ := spec[i]
+			if typ >= 'a' && typ <= 'z' {
+				typ -= 32 // uppercase
+			}
+			i++
+
+			// Parse width
+			width := 0
+			for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
+				width = width*10 + int(spec[i]-'0')
+				i++
+			}
+
+			// Parse precision (for F, E formats)
+			precision := -1
+			if i < len(spec) && spec[i] == '.' {
+				i++ // skip '.'
+				precision = 0
+				for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
+					precision = precision*10 + int(spec[i]-'0')
+					i++
+				}
+			}
+
+			descriptors = append(descriptors, FormatDescriptor{
+				Type:      typ,
+				Width:     width,
+				Precision: precision,
+			})
+			continue
+		}
+
+		// Skip unknown character
+		i++
+	}
+	return descriptors
 }
 
 var defaultIOUnit = IOUnit{
@@ -48,28 +138,138 @@ func Print(v ...any) {
 func Write(unit IOUnit, f *Format, args ...any) {
 	var buf []byte
 
+	// Check if we have a format specification
+	if f.spec != "" {
+		// Formatted output using format descriptors
+		f.ensureParsed()
+		buf = f.writeFormatted(buf, args)
+	} else {
+		// List-directed output (PRINT * behavior)
+		buf = f.writeListDirected(buf, args)
+	}
+
+	buf = append(buf, '\n')
+	unit.rw.Write(buf)
+}
+
+// writeFormatted applies format descriptors to arguments.
+func (f *Format) writeFormatted(buf []byte, args []any) []byte {
+	argIdx := 0
+	for _, desc := range f.descriptors {
+		switch desc.Type {
+		case 'S': // String literal
+			buf = append(buf, desc.Literal...)
+		case 'I': // Integer
+			if argIdx < len(args) {
+				buf = f.formatInt(buf, args[argIdx], desc.Width)
+				argIdx++
+			}
+		case 'F': // Float (fixed-point)
+			if argIdx < len(args) {
+				buf = f.formatFloat(buf, args[argIdx], desc.Width, desc.Precision)
+				argIdx++
+			}
+		case 'A': // Character/string
+			if argIdx < len(args) {
+				buf = f.formatString(buf, args[argIdx], desc.Width)
+				argIdx++
+			}
+		case 'X': // Skip spaces
+			for i := 0; i < desc.Width; i++ {
+				buf = append(buf, ' ')
+			}
+		}
+	}
+	return buf
+}
+
+// writeListDirected writes values in list-directed format (PRINT * behavior).
+func (f *Format) writeListDirected(buf []byte, args []any) []byte {
 	// Fortran PRINT * adds leading space (carriage control character)
 	buf = append(buf, ' ')
 
 	// Format each value
-	// - Numeric values: field widths INCLUDE leading separator space
-	// - String values: need explicit separator space (except first)
 	prevWasString := false
 	for i, val := range args {
-		// Check if this is a string (or CharacterArray) and not the first item
 		_, thisIsString := val.(string)
 		_, thisIsCharArray := val.(CharacterArray)
 		isStringType := thisIsString || thisIsCharArray
 		dontSpace := prevWasString && isStringType
-		if !dontSpace && i > 0 { // Don't add separator before first item
+		if !dontSpace && i > 0 {
 			buf = append(buf, ' ')
 		}
 		buf = f.formatValue(buf, val)
 		prevWasString = isStringType
 	}
-	buf = append(buf, '\n')
-	// Print with newline (Fortran PRINT statement behavior)
-	unit.rw.Write(buf)
+	return buf
+}
+
+// formatInt formats an integer with specified width (right-aligned).
+func (f *Format) formatInt(buf []byte, val any, width int) []byte {
+	var n int64
+	switch v := val.(type) {
+	case int:
+		n = int64(v)
+	case int8:
+		n = int64(v)
+	case int16:
+		n = int64(v)
+	case int32:
+		n = int64(v)
+	case int64:
+		n = v
+	default:
+		return buf
+	}
+	s := strconv.FormatInt(n, 10)
+	// Right-align with spaces
+	for i := len(s); i < width; i++ {
+		buf = append(buf, ' ')
+	}
+	buf = append(buf, s...)
+	return buf
+}
+
+// formatFloat formats a float with specified width and precision.
+func (f *Format) formatFloat(buf []byte, val any, width int, precision int) []byte {
+	var x float64
+	switch v := val.(type) {
+	case float32:
+		x = float64(v)
+	case float64:
+		x = v
+	default:
+		return buf
+	}
+	if precision < 0 {
+		precision = 2 // default
+	}
+	s := strconv.FormatFloat(x, 'f', precision, 64)
+	// Right-align with spaces
+	for i := len(s); i < width; i++ {
+		buf = append(buf, ' ')
+	}
+	buf = append(buf, s...)
+	return buf
+}
+
+// formatString formats a string with specified width.
+func (f *Format) formatString(buf []byte, val any, width int) []byte {
+	var s string
+	switch v := val.(type) {
+	case string:
+		s = v
+	case CharacterArray:
+		s = string(v.data[:cap(v.data)])
+	default:
+		return buf
+	}
+	buf = append(buf, s...)
+	// Pad with spaces if width specified
+	for i := len(s); i < width; i++ {
+		buf = append(buf, ' ')
+	}
+	return buf
 }
 
 func (f Format) formatValue(dst []byte, value any) []byte {

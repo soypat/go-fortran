@@ -22,29 +22,17 @@ var goldensrc string
 
 func TestTranspileGolden(t *testing.T) {
 	const filename = "testdata/golden.f90"
+	const goFilename = "testdata/golden.go"
 	var parser Parser90
 	err := parser.Reset(filename, strings.NewReader(goldensrc))
 	if err != nil {
 		t.Fatal(err)
 	}
-	program := parser.ParseNextProgramUnit()
-	var tg ToGo
-	tg.SetSource(filename, strings.NewReader(goldensrc))
-	decls, err := tg.TransformProgram(program)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var progSrc bytes.Buffer
-	helperWriteGoAST(t, &progSrc, &ast.File{
-		Name:  ast.NewIdent("main"),
-		Decls: decls, // DO NOT ADD IMPORTS. i.e: STOP statement adds output: then we create an intrinsic.Stop function that does the same.
-	})
-	const goFile = "testdata/golden.go"
-	os.WriteFile(goFile, progSrc.Bytes(), 0777)
-	helperFormatGoSrc(t, goFile)
+	// units := helperParseUnits(t, &parser, filename)
+	helperTranspile(t, goFilename, filename)
 	expectedFull := helperRunFortran(t, "testdata/golden.f90")
 	os.WriteFile("testdata/golden.txt", expectedFull, 0777)
-	output := helperRunGoFile(t, goFile)
+	output := helperRunGoFile(t, goFilename)
 	expected := expectedFull
 	misses := 0
 	for {
@@ -143,13 +131,13 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 	for _, module := range modules {
 		modunits := helperParseUnits(t, &ps, module)
 		units = append(units, modunits...)
-
 	}
 	var tg ToGo
-	decls, err := tg.TransformUnits(nil, units...)
+	decls, err := tg.TransformUnits([]ast.Decl{tg.ImportDecl()}, units...)
 	if err != nil {
 		t.Fatal(err)
 	}
+	decls = tg.AppendCommonDecls(decls)
 	var dst bytes.Buffer
 	helperWriteGoAST(t, &dst, &ast.File{
 		Name:  ast.NewIdent("main"),
