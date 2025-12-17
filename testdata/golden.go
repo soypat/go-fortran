@@ -2,9 +2,10 @@ package main
 
 import "github.com/soypat/go-fortran/intrinsic"
 
-func GOLDEN(n int32) {
-	// Implicit declarations.
-	var fibonacci int32
+func main() {
+	GOLDEN()
+}
+func GOLDEN() {
 	LEVEL01()
 	LEVEL02()
 	LEVEL03()

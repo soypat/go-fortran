@@ -635,6 +635,7 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 	if p.IsDone() || p.current.tok.IsEnd() {
 		return unit
 	}
+	p.varResetAll()
 	start := p.sourcePos()
 	switch p.current.tok {
 	case token.SUBROUTINE:
@@ -646,12 +647,16 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 	case token.INTEGER, token.REAL, token.LOGICAL, token.CHARACTER,
 		token.DOUBLEPRECISION, token.DOUBLE, token.COMPLEX, token.DOUBLECOMPLEX:
 		unit = p.parseTypePrefixedUnit()
-	case token.MODULE:
-		unit = p.parseModule()
+	case token.MODULE, token.PROGRAM:
+		unit.Token = p.current.tok
+		p.nextToken() // consume MODULE/PROGRAM token.
+		// Parse program name (keywords can be used as program names)
+		p.expectIdentifier(&unit.Name, "PROGRAM/MODULE name")
+		p.skipNewlinesAndComments()
+		unit.Body = p.parseBody(nil) // Parse body statements
+		// CONTAINS processed after ParserUnitData generated to not mix up variables.
 	case token.BLOCK:
 		unit = p.parseBlockData()
-	case token.PROGRAM:
-		unit = p.parseProgramBlock()
 	default:
 		p.addError("unexpected token at top level: " + p.current.String())
 		p.nextToken()
@@ -693,6 +698,12 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 				pud.returnType, _ = pud.varInit(start, unit.Name, decl, VFlagReturned, "")
 			}
 		}
+	case token.MODULE, token.PROGRAM:
+		if p.consumeIf(token.CONTAINS) {
+			unit.Contains = p.parseAppendProgramUnits(unit.Contains[:0])
+		}
+		p.expectEndProgramUnit(unit.Token, unit.Token.EndConstructComposite(), start, unit.Name)
+		unit.Position = ast.Pos(start.Pos, p.current.start)
 	}
 	pud.resolveImplicitTypes()
 	unit.Data = pud
@@ -845,7 +856,6 @@ func (p *Parser90) parseBlockData() (unit ast.Unit) {
 	// Parse optional block data name
 	p.consumeIdentifier(&unit.Name)
 	p.skipNewlinesAndComments()
-
 	// Parse body statements
 	unit.Body = p.parseBody(nil)
 	p.expectEndProgramUnit(token.BLOCK, 0, start, unit.Name)

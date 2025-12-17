@@ -446,15 +446,20 @@ func (tok Token) CanBeUsedAsIdentifier() bool {
 	}
 }
 
-func (tok Token) EndConstructComposite() Token {
+func (tok Token) EndConstructComposite() (endTok Token) {
 	switch tok {
 	case IF:
-		return ENDIF
+		endTok = ENDIF
 	case DO:
-		return ENDDO
+		endTok = ENDDO
+	case PROGRAM:
+		endTok = ENDPROGRAM
+	case MODULE:
+		endTok = ENDMODULE
 	default:
 		panic(tok.String() + " has no composite")
 	}
+	return endTok
 }
 
 // IsExecutableStatement returns true if the token is a executable

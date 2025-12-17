@@ -13,7 +13,7 @@ type IOUnit struct {
 	rw io.ReadWriteCloser
 }
 
-var defaultFormatter Format
+var defaultFormat Format
 
 // FormatDescriptor represents a single format edit descriptor.
 type FormatDescriptor struct {
@@ -124,15 +124,15 @@ func DefaultIOUnit() IOUnit {
 }
 
 func DefaultFormat() *Format {
-	return &defaultFormatter
+	return &defaultFormat
 }
 
 func PrintUnit(unit IOUnit, v ...any) {
-	Write(defaultIOUnit, &defaultFormatter, v...)
+	Write(defaultIOUnit, &defaultFormat, v...)
 }
 
 func Print(v ...any) {
-	Write(defaultIOUnit, &defaultFormatter, v...)
+	Write(defaultIOUnit, &defaultFormat, v...)
 }
 
 func Write(unit IOUnit, f *Format, args ...any) {

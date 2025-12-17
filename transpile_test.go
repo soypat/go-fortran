@@ -29,7 +29,7 @@ func TestTranspileGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	// units := helperParseUnits(t, &parser, filename)
-	helperTranspile(t, goFilename, filename)
+	helperTranspile(t, "GOLDEN", goFilename, filename)
 	expectedFull := helperRunFortran(t, "testdata/golden.f90")
 	os.WriteFile("testdata/golden.txt", expectedFull, 0777)
 	output := helperRunGoFile(t, goFilename)
@@ -125,7 +125,7 @@ func helperParseUnits(t testing.TB, ps *Parser90, programPath string) (units []f
 	return units
 }
 
-func helperTranspile(t testing.TB, dstfile string, programPath string, modules ...string) {
+func helperTranspile(t testing.TB, programName, dstfile, programPath string, modules ...string) {
 	var ps Parser90
 	var units []f90.Unit = helperParseUnits(t, &ps, programPath)
 	for _, module := range modules {
@@ -133,7 +133,23 @@ func helperTranspile(t testing.TB, dstfile string, programPath string, modules .
 		units = append(units, modunits...)
 	}
 	var tg ToGo
-	decls, err := tg.TransformUnits([]ast.Decl{tg.ImportDecl()}, units...)
+	decls := []ast.Decl{
+		tg.ImportDecl(),
+		&ast.FuncDecl{
+			Name: ast.NewIdent("main"),
+			Type: &ast.FuncType{
+				Params: &ast.FieldList{}, // No parameters for main
+			},
+			Body: &ast.BlockStmt{
+				List: []ast.Stmt{
+					&ast.ExprStmt{X: &ast.CallExpr{
+						Fun: ast.NewIdent(programName),
+					}},
+				},
+			},
+		},
+	}
+	decls, err := tg.TransformUnits(decls, units...)
 	if err != nil {
 		t.Fatal(err)
 	}
