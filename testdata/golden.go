@@ -40,6 +40,7 @@ func GOLDEN() {
 	LEVEL33()
 	LEVEL34()
 	LEVEL35()
+	LEVEL36()
 	intrinsic.Stop(0)
 }
 func LEVEL01() {
@@ -1116,6 +1117,26 @@ label240:
 	{
 	}
 }
+func LEVEL36() {
+	// Implicit declarations.
+	var (
+		delta = intrinsic.NewArray[float32](nil, 3)
+		_     = delta
+	)
+	var (
+		d1k     intrinsic.PointerTo[float32]
+		d2k     float32
+		d3k     float32
+		_, _, _ = d1k, d2k, d3k
+	)
+	intrinsic.Equivalence(&blk.d1k, delta)
+	delta.Set(1.0, 1)
+	delta.Set(2.0, 2)
+	delta.Set(3.0, 3)
+	intrinsic.Print("LEVEL 36: Equiv d=", blk.d1k.At(1), blk.d2k, blk.d3k)
+	BLKINVDECL()
+	BLKDECL()
+}
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
 }
@@ -1174,7 +1195,40 @@ func FIBONACCI(n int32) (fibonacci int32) {
 	fibonacci = b
 	return
 }
+func BLKINVDECL() {
+	// Implicit declarations.
+	var (
+		d3k     float32
+		d2k     float32
+		d1k     float32
+		_, _, _ = d3k, d2k, d1k
+	)
+	intrinsic.Print("BLKINVDECL: Equiv d1k,d2k,d3k=", blk.d1k, blk.d2k, blk.d3k)
+}
+func BLKDECL() {
+	// Implicit declarations.
+	var (
+		d1k        intrinsic.PointerTo[float32]
+		d2k        float32
+		d3k        float32
+		delta      = intrinsic.NewArray[float32](nil, 3)
+		_, _, _, _ = d1k, d2k, d3k, delta
+	)
+	var (
+		dd float64 = 1.0
+		_          = dd
+	)
+	intrinsic.Equivalence(&blk.d1k, delta)
+	intrinsic.Print("BLKDECL: Equiv delta(1..3)=", delta.At(1), delta.At(2), delta.At(3))
+	intrinsic.Print("BLKDECL: Equiv d1k,d2k,d3k=", blk.d1k.At(1), blk.d2k, blk.d3k, blk.dd)
+}
 
+var blk struct {
+	d1k intrinsic.PointerTo[float32]
+	d2k float32
+	d3k float32
+	dd  float64
+}
 var holdrt = struct {
 	yqr    *intrinsic.Array[float32]
 	sumxrq *intrinsic.Array[float32]

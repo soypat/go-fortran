@@ -53,6 +53,31 @@ func NewArray[T any](data []T, dims ...int) *Array[T] {
 	return NewArrayWithBounds(data, shape, lower, upper)
 }
 
+func UnallocatedArray[T int](dims ...int) *Array[T] {
+	if len(dims) > 7 {
+		panic("array dimension too large")
+	} else if len(dims) == 0 {
+		panic("zero dimension array")
+	}
+	parambuf := make([]int, len(dims)*3)
+	shape := parambuf[:len(dims)]
+	lower := parambuf[len(dims) : len(dims)*2]
+	upper := parambuf[len(dims)*2:]
+	for i, d := range dims {
+		shape[i], lower[i], upper[i] = d, 1, d
+	}
+	totalSize := 1
+	for _, dim := range shape {
+		if dim < 0 {
+			panic("array: dimension size must be non-negative")
+		}
+		totalSize *= dim
+	}
+	var z *T = nil
+	nonallocData := unsafe.Slice(z, totalSize) // Leave slice data as nil but set size.
+	return newArrayWithBounds(nonallocData, shape, lower, upper)
+}
+
 // NewArrayWithBounds creates an array with custom bounds for each dimension.
 // Supports arbitrary lower bounds as per F77 Section 5.1.1.2 (line 2120-2121).
 //
@@ -66,11 +91,6 @@ func NewArray[T any](data []T, dims ...int) *Array[T] {
 //   - stride[0] = 1
 //   - stride[i] = stride[i-1] * shape[i-1]
 func NewArrayWithBounds[T any](data []T, shape, lower, upper []int) *Array[T] {
-	if len(shape) != len(lower) || len(shape) != len(upper) {
-		panic("array: shape, lower, and upper must have same length")
-	}
-
-	// Calculate total size (product of all dimensions)
 	totalSize := 1
 	for _, dim := range shape {
 		if dim < 0 {
@@ -80,10 +100,17 @@ func NewArrayWithBounds[T any](data []T, shape, lower, upper []int) *Array[T] {
 	}
 	if data == nil {
 		data = make([]T, totalSize)
-	} else if len(data) != totalSize {
+	}
+	if len(data) != totalSize {
 		panic("array: mismatch data with shape")
 	}
+	return newArrayWithBounds(data, shape, lower, upper)
+}
 
+func newArrayWithBounds[T any](data []T, shape, lower, upper []int) *Array[T] {
+	if len(shape) != len(lower) || len(shape) != len(upper) {
+		panic("array: shape, lower, and upper must have same length")
+	}
 	// Calculate column-major strides (F77 Table 1, F95 Table 6.1)
 	// stride[0] = 1 (first index varies fastest - column-major)
 	// stride[i] = stride[i-1] * shape[i-1]
@@ -96,7 +123,7 @@ func NewArrayWithBounds[T any](data []T, shape, lower, upper []int) *Array[T] {
 	}
 
 	return &Array[T]{
-		data:   data, // Slab allocation: single contiguous memory
+		data:   data,
 		shape:  append([]int(nil), shape...),
 		lower:  append([]int(nil), lower...),
 		upper:  append([]int(nil), upper...),
@@ -107,7 +134,7 @@ func NewArrayWithBounds[T any](data []T, shape, lower, upper []int) *Array[T] {
 // Allocate allocates the array with given dimensions (1-based bounds).
 // Panics if already allocated (Fortran semantics without STAT=).
 func (a *Array[T]) Allocate(dims ...int) {
-	if a.data != nil {
+	if unsafe.SliceData(a.data) != nil || a.data != nil {
 		panic("array already allocated")
 	}
 	*a = *NewArray[T](nil, dims...)

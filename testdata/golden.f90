@@ -38,6 +38,7 @@
       CALL LEVEL33()
       CALL LEVEL34()
       CALL LEVEL35()
+      CALL LEVEL36()
       STOP 0
       CONTAINS
 
@@ -892,6 +893,20 @@
 240     FORMAT('LEVEL35: Newline:'/'LEVEL35: WHI/WR =', 6ES12.4)
     END SUBROUTINE LEVEL35
 
+    SUBROUTINE LEVEL36() ! COMMON and EQUIVALENCE mixing
+        IMPLICIT REAL (A-H,O-Z)
+        REAL :: d1k,d2k,d3k
+        COMMON /BLK/d1k,d2k,d3k
+        DIMENSION delta(3)
+        EQUIVALENCE (d1k, delta)
+        delta(1) = 1.0
+        delta(2) = 2.0
+        delta(3) = 3.0
+        PRINT *, 'LEVEL 36: Equiv d=', d1k, d2k, d3k
+        CALL BLKINVDECL()
+        CALL BLKDECL()
+    END SUBROUTINE LEVEL36
+    
     ! ==============================================================================
 ! Helper Subroutines and Functions
 ! ==============================================================================
@@ -961,5 +976,22 @@
 
           FIBONACCI = b
       END FUNCTION FIBONACCI
+
+      SUBROUTINE BLKINVDECL()
+        IMPLICIT REAL (A-H,O-Z)
+        COMMON /BLK/d3k,d2k,d1k
+        PRINT *, 'BLKINVDECL: Equiv d1k,d2k,d3k=', d1k, d2k, d3k
+      END SUBROUTINE BLKINVDECL
+
+      SUBROUTINE BLKDECL()
+        IMPLICIT REAL (A-H,O-Z)
+        DOUBLEPRECISION :: dd=1.0
+        COMMON /BLK/d1k,dd,d2k,d3k
+        DIMENSION delta(3)
+        EQUIVALENCE (d1k, delta)
+        PRINT *, 'BLKDECL: Equiv delta(1..3)=', delta(1), delta(2), delta(3)
+        PRINT *, 'BLKDECL: Equiv d1k,d2k,d3k=', d1k, d2k, d3k,dd
+      END SUBROUTINE BLKDECL
+
 
       END PROGRAM GOLDEN

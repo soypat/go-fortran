@@ -432,7 +432,7 @@ func (tg *ToGo) transformImplicitTypeDeclarations(dst []ast.Stmt) (_ []ast.Stmt,
 		useSpecs.Values = append(useSpecs.Values, spec.Names[0])
 	}
 	if len(implicitDecl.Specs) != 0 {
-		// implicitDecl.Specs = append(implicitDecl.Specs, &useSpecs)
+		implicitDecl.Specs = append(implicitDecl.Specs, &useSpecs)
 		dst = append(dst, &ast.DeclStmt{Decl: implicitDecl})
 	}
 	return dst, nil
@@ -1391,7 +1391,7 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 		fmtInfo := tg.repl.getFormat(label)
 		if fmtInfo != nil {
 			// Generate: intrinsic.NewFormat(parsed components...)
-			formatArgs := parseFormatSpecAtTranspile(fmtInfo.Spec)
+			formatArgs := formatSpecsToGoAST(fmtInfo.Specs)
 			formatExpr = &ast.CallExpr{
 				Fun:  _astFnNewFormat,
 				Args: formatArgs,
@@ -1399,7 +1399,8 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 		}
 	case *f90.StringLiteral:
 		// Inline format string: WRITE(*,'(I5)') x
-		formatArgs := parseFormatSpecAtTranspile(format.Value)
+		specs := f90.ParseFormatString(format.Value)
+		formatArgs := formatSpecsToGoAST(specs)
 		formatExpr = &ast.CallExpr{
 			Fun:  _astFnNewFormat,
 			Args: formatArgs,
@@ -2123,206 +2124,101 @@ var (
 	}
 )
 
-// parseFormatSpecAtTranspile parses a Fortran format specification string
-// and returns Go AST expressions for pre-parsed format components.
-// Example: "/'WHI/WR =',6ES12.4" produces:
-//   - intrinsic.FmtNewline
-//   - "WHI/WR ="
-//   - intrinsic.FormatDescriptor{Type: 'E', Width: 12, Precision: 4, Repeat: 6}
-func parseFormatSpecAtTranspile(spec string) []ast.Expr {
+// formatSpecsToGoAST converts parsed FormatSpec slice to Go AST expressions.
+func formatSpecsToGoAST(specs []f90.FormatSpec) []ast.Expr {
 	var exprs []ast.Expr
-	i := 0
-	for i < len(spec) {
-		// Skip whitespace and commas
-		for i < len(spec) && (spec[i] == ' ' || spec[i] == ',' || spec[i] == '\t') {
-			i++
-		}
-		if i >= len(spec) {
-			break
-		}
+	for i := range specs {
+		exprs = appendFormatSpecToGoAST(exprs, &specs[i])
+	}
+	return exprs
+}
 
-		// Newline control character: /
-		if spec[i] == '/' {
-			exprs = append(exprs, _astFmtNewline)
-			i++
-			continue
-		}
-
-		// String literal: 'text'
-		if spec[i] == '\'' {
-			i++ // skip opening quote
-			start := i
-			for i < len(spec) && spec[i] != '\'' {
-				i++
-			}
-			literal := spec[start:i]
-			// Use FormatDescriptor to avoid backward compat issue with single string arg
-			exprs = append(exprs, &ast.CompositeLit{
-				Type: _astTypeFormatDescriptor,
-				Elts: []ast.Expr{
-					&ast.KeyValueExpr{
-						Key:   ast.NewIdent("Type"),
-						Value: &ast.BasicLit{Kind: token.CHAR, Value: "'S'"},
-					},
-					&ast.KeyValueExpr{
-						Key:   ast.NewIdent("Literal"),
-						Value: &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(literal)},
-					},
-				},
-			})
-			if i < len(spec) {
-				i++ // skip closing quote
-			}
-			continue
-		}
-
-		// Format descriptor with optional repeat count: 6ES12.4, I3, F5.2, A, X, etc.
-		// First check for repeat count (digits before letter)
-		repeat := 0
-		for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
-			repeat = repeat*10 + int(spec[i]-'0')
-			i++
-		}
-
-		if i >= len(spec) {
-			break
-		}
-
-		// Now expect a type letter
-		if spec[i] >= 'A' && spec[i] <= 'Z' || spec[i] >= 'a' && spec[i] <= 'z' {
-			typ := spec[i]
-			if typ >= 'a' && typ <= 'z' {
-				typ -= 32 // uppercase
-			}
-			i++
-
-			// Skip whitespace (parser may add spaces between tokens)
-			for i < len(spec) && (spec[i] == ' ' || spec[i] == '\t') {
-				i++
-			}
-
-			// Check for 'S' modifier (ES, DS for scientific notation)
-			// Parser tokenizes 6ES12.4 as "6E S12 .4" so we need to handle this
-			if typ == 'E' || typ == 'D' {
-				if i < len(spec) && (spec[i] == 'S' || spec[i] == 's') {
-					// ES/DS format - consume the S and following identifier
-					i++
-					// Skip any digits that might be attached (e.g., "S12" from "6E S12")
-					startWidth := i
-					for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
-						i++
-					}
-					// The width was part of the S token
-					width := 0
-					for j := startWidth; j < i; j++ {
-						width = width*10 + int(spec[j]-'0')
-					}
-					// Skip whitespace before precision
-					for i < len(spec) && (spec[i] == ' ' || spec[i] == '\t') {
-						i++
-					}
-					// Parse precision (may be ".4" as separate token)
-					precision := -1
-					if i < len(spec) && spec[i] == '.' {
-						i++ // skip '.'
-						precision = 0
-						for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
-							precision = precision*10 + int(spec[i]-'0')
-							i++
-						}
-					}
-					// Build FormatDescriptor for E/ES format
-					elts := []ast.Expr{
-						&ast.KeyValueExpr{
-							Key:   ast.NewIdent("Type"),
-							Value: &ast.BasicLit{Kind: token.CHAR, Value: "'E'"},
-						},
-					}
-					if width > 0 {
-						elts = append(elts, &ast.KeyValueExpr{
-							Key:   ast.NewIdent("Width"),
-							Value: &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(width)},
-						})
-					}
-					if precision >= 0 {
-						elts = append(elts, &ast.KeyValueExpr{
-							Key:   ast.NewIdent("Precision"),
-							Value: &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(precision)},
-						})
-					}
-					if repeat > 0 {
-						elts = append(elts, &ast.KeyValueExpr{
-							Key:   ast.NewIdent("Repeat"),
-							Value: &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(repeat)},
-						})
-					}
-					exprs = append(exprs, &ast.CompositeLit{
-						Type: _astTypeFormatDescriptor,
-						Elts: elts,
-					})
-					continue
-				}
-			}
-
-			// Parse width
-			width := 0
-			for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
-				width = width*10 + int(spec[i]-'0')
-				i++
-			}
-
-			// Skip whitespace before precision
-			for i < len(spec) && (spec[i] == ' ' || spec[i] == '\t') {
-				i++
-			}
-
-			// Parse precision (for F, E formats)
-			precision := -1
-			if i < len(spec) && spec[i] == '.' {
-				i++ // skip '.'
-				precision = 0
-				for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
-					precision = precision*10 + int(spec[i]-'0')
-					i++
-				}
-			}
-
-			// Build FormatDescriptor composite literal
-			elts := []ast.Expr{
+// appendFormatSpecToGoAST converts a single FormatSpec to Go AST expressions.
+func appendFormatSpecToGoAST(exprs []ast.Expr, spec *f90.FormatSpec) []ast.Expr {
+	// Handle string literal
+	if spec.StringLit != "" {
+		exprs = append(exprs, &ast.CompositeLit{
+			Type: _astTypeFormatDescriptor,
+			Elts: []ast.Expr{
 				&ast.KeyValueExpr{
 					Key:   ast.NewIdent("Type"),
-					Value: &ast.BasicLit{Kind: token.CHAR, Value: "'" + string(typ) + "'"},
+					Value: &ast.BasicLit{Kind: token.CHAR, Value: "'S'"},
 				},
-			}
-			if width > 0 {
-				elts = append(elts, &ast.KeyValueExpr{
-					Key:   ast.NewIdent("Width"),
-					Value: &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(width)},
-				})
-			}
-			if precision >= 0 {
-				elts = append(elts, &ast.KeyValueExpr{
-					Key:   ast.NewIdent("Precision"),
-					Value: &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(precision)},
-				})
-			}
-			if repeat > 0 {
-				elts = append(elts, &ast.KeyValueExpr{
-					Key:   ast.NewIdent("Repeat"),
-					Value: &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(repeat)},
-				})
-			}
+				&ast.KeyValueExpr{
+					Key:   ast.NewIdent("Literal"),
+					Value: &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(spec.StringLit)},
+				},
+			},
+		})
+		return exprs
+	}
 
-			exprs = append(exprs, &ast.CompositeLit{
-				Type: _astTypeFormatDescriptor,
-				Elts: elts,
-			})
-			continue
+	// Handle grouped repeat: 3(I3,F6.2)
+	if len(spec.Group) > 0 {
+		for range spec.Repeat {
+			for i := range spec.Group {
+				exprs = appendFormatSpecToGoAST(exprs, &spec.Group[i])
+			}
+		}
+		return exprs
+	}
+
+	// Handle newline control /
+	if spec.Descriptor[0] == '/' {
+		repeat := spec.Repeat
+		if repeat == 0 {
+			repeat = 1
+		}
+		for range repeat {
+			exprs = append(exprs, _astFmtNewline)
+		}
+		return exprs
+	}
+
+	// Handle control characters with no output (:, $)
+	if spec.Descriptor[0] == ':' || spec.Descriptor[0] == '$' {
+		// These are control characters, skip for now
+		return exprs
+	}
+
+	// Handle regular descriptors
+	if spec.Descriptor[0] != 0 {
+		typ := spec.Descriptor[0]
+		if typ >= 'a' && typ <= 'z' {
+			typ -= 32 // uppercase
 		}
 
-		// Skip unknown character
-		i++
+		elts := []ast.Expr{
+			&ast.KeyValueExpr{
+				Key:   ast.NewIdent("Type"),
+				Value: &ast.BasicLit{Kind: token.CHAR, Value: "'" + string(typ) + "'"},
+			},
+		}
+		if spec.Width > 0 {
+			elts = append(elts, &ast.KeyValueExpr{
+				Key:   ast.NewIdent("Width"),
+				Value: &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(int(spec.Width))},
+			})
+		}
+		if spec.Decimals > 0 {
+			elts = append(elts, &ast.KeyValueExpr{
+				Key:   ast.NewIdent("Precision"),
+				Value: &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(int(spec.Decimals))},
+			})
+		}
+		if spec.Repeat > 0 {
+			elts = append(elts, &ast.KeyValueExpr{
+				Key:   ast.NewIdent("Repeat"),
+				Value: &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(spec.Repeat)},
+			})
+		}
+
+		exprs = append(exprs, &ast.CompositeLit{
+			Type: _astTypeFormatDescriptor,
+			Elts: elts,
+		})
 	}
+
 	return exprs
 }
 

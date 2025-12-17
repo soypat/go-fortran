@@ -2198,49 +2198,111 @@ func (p *Parser90) parseFormatStmt() ast.Statement {
 		Position: ast.Pos(start, p.current.start),
 	}
 
-	// Collect all tokens inside parentheses as the format specification
-	// We'll store it as a string rather than parsing it in detail
-	var specBuilder strings.Builder
-	parenDepth := 1
-
-	for parenDepth > 0 && !p.IsDone() {
-		if p.currentTokenIs(token.RParen) {
-			parenDepth--
-			if parenDepth == 0 {
-				p.nextToken() // consume closing )
-				break
-			}
-			specBuilder.WriteString(")")
-			p.nextToken()
-		} else if p.currentTokenIs(token.LParen) {
-			parenDepth++
-			specBuilder.WriteString("(")
-			p.nextToken()
-		} else {
-			// Add token to spec
-			if specBuilder.Len() > 0 && !p.currentTokenIs(token.Comma) {
-				// Add space between tokens except before commas
-				if len(p.current.lit) > 0 && p.current.lit[0] != ',' {
-					specBuilder.WriteString(" ")
-				}
-			}
-			// Preserve quotes around string literals
-			if p.currentTokenIs(token.StringLit) {
-				specBuilder.WriteString("'")
-				specBuilder.WriteString(string(p.current.lit))
-				specBuilder.WriteString("'")
-			} else if len(p.current.lit) > 0 {
-				specBuilder.WriteString(string(p.current.lit))
-			} else {
-				specBuilder.WriteString(p.current.tok.String())
-			}
-			p.nextToken()
-		}
-	}
-
-	stmt.Spec = specBuilder.String()
+	stmt.Specs = p.parseFormatSpecs()
 	stmt.Position = ast.Pos(start, p.current.start)
 	return stmt
+}
+
+// parseFormatSpecs parses format specifications until closing paren.
+// Handles: descriptors, groups, string literals, control characters.
+func (p *Parser90) parseFormatSpecs() []ast.FormatSpec {
+	var specs []ast.FormatSpec
+
+	for !p.currentTokenIs(token.RParen) && !p.IsDone() {
+		// Skip commas
+		if p.currentTokenIs(token.Comma) {
+			p.nextToken()
+			continue
+		}
+
+		spec := p.parseOneFormatSpec()
+		specs = append(specs, spec)
+	}
+
+	if p.currentTokenIs(token.RParen) {
+		p.nextToken() // consume closing )
+	}
+
+	return specs
+}
+
+// parseOneFormatSpec parses a single format specification element.
+func (p *Parser90) parseOneFormatSpec() ast.FormatSpec {
+	var spec ast.FormatSpec
+
+	switch p.current.tok {
+	case token.FormatSpec, token.Identifier:
+		// Parse format spec token like I3, F10.2, ES12.5, 6I3, E12.5E3
+		spec = parseFormatSpecLiteral(string(p.current.lit))
+		p.nextToken()
+
+	case token.IntLit:
+		// Could be repeat count followed by group:  3(I3,F6.2)
+		repeat := p.parseSimpleInt()
+		if p.currentTokenIs(token.LParen) {
+			// Grouped repeat: 3(I3,F6.2)
+			p.nextToken() // consume (
+			spec.Repeat = repeat
+			spec.Group = p.parseFormatSpecs()
+		} else {
+			p.addError("unexpected token after integer in FORMAT")
+		}
+
+	case token.StringLit:
+		spec.StringLit = string(p.current.lit)
+		p.nextToken()
+
+	case token.Slash:
+		// Record terminator /
+		spec.Descriptor[0] = '/'
+		p.nextToken()
+
+	case token.Colon:
+		// Conditional terminator :
+		spec.Descriptor[0] = ':'
+		p.nextToken()
+
+	case token.Asterisk:
+		// Unlimited repeat: *(...)
+		p.nextToken()
+		if p.currentTokenIs(token.LParen) {
+			p.nextToken() // consume (
+			spec.Repeat = -1
+			spec.Group = p.parseFormatSpecs()
+		}
+
+	case token.LParen:
+		// Ungrouped parentheses (just a group without repeat)
+		p.nextToken() // consume (
+		spec.Group = p.parseFormatSpecs()
+
+	default:
+		// Unknown token - skip it
+		p.nextToken()
+	}
+
+	return spec
+}
+
+// parseSimpleInt parses an integer literal and returns its value.
+func (p *Parser90) parseSimpleInt() int {
+	if !p.currentTokenIs(token.IntLit) {
+		return 0
+	}
+	val := 0
+	for _, b := range p.current.lit {
+		if b >= '0' && b <= '9' {
+			val = val*10 + int(b-'0')
+		}
+	}
+	p.nextToken()
+	return val
+}
+
+// parseFormatSpecLiteral parses a format spec string like "I3", "F10.2", "ES12.5", "6I3", "E12.5E3"
+func parseFormatSpecLiteral(lit string) (spec ast.FormatSpec) {
+	spec.SetFromString(lit)
+	return spec
 }
 
 // parseAllocateOrDeallocateStmt parses ALLOCATE or DEALLOCATE statements

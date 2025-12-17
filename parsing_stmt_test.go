@@ -830,8 +830,16 @@ func TestStatementParsing(t *testing.T) {
 				if formatStmt.Label != "100" {
 					t.Errorf("Expected label '100', got %q", formatStmt.Label)
 				}
-				if formatStmt.Spec == "" {
-					t.Error("Expected non-empty Spec")
+				if len(formatStmt.Specs) != 1 {
+					t.Errorf("Expected 1 spec, got %d", len(formatStmt.Specs))
+				} else {
+					spec := formatStmt.Specs[0]
+					if spec.Descriptor[0] != 'I' {
+						t.Errorf("Expected descriptor 'I', got %q", spec.Descriptor[0])
+					}
+					if spec.Width != 5 {
+						t.Errorf("Expected width 5, got %d", spec.Width)
+					}
 				}
 			},
 		},
@@ -843,8 +851,8 @@ func TestStatementParsing(t *testing.T) {
 				if formatStmt.Label != "200" {
 					t.Errorf("Expected label '200', got %q", formatStmt.Label)
 				}
-				if formatStmt.Spec == "" {
-					t.Error("Expected non-empty Spec")
+				if len(formatStmt.Specs) != 3 {
+					t.Errorf("Expected 3 specs, got %d", len(formatStmt.Specs))
 				}
 			},
 		},
@@ -855,6 +863,98 @@ func TestStatementParsing(t *testing.T) {
 				formatStmt := helperWantNode[*ast.FormatStmt](t, stmt, "")
 				if formatStmt.Label != "300" {
 					t.Errorf("Expected label '300', got %q", formatStmt.Label)
+				}
+				if len(formatStmt.Specs) != 2 {
+					t.Errorf("Expected 2 specs, got %d", len(formatStmt.Specs))
+				} else if formatStmt.Specs[0].StringLit != "Result = " {
+					t.Errorf("Expected string literal 'Result = ', got %q", formatStmt.Specs[0].StringLit)
+				}
+			},
+		},
+		{
+			name: "FORMAT with repeat count",
+			src:  "400 FORMAT(6I3, 3F10.2)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				formatStmt := helperWantNode[*ast.FormatStmt](t, stmt, "")
+				if len(formatStmt.Specs) != 2 {
+					t.Errorf("Expected 2 specs, got %d", len(formatStmt.Specs))
+					return
+				}
+				// Check first spec: 6I3
+				spec := formatStmt.Specs[0]
+				if spec.Repeat != 6 || spec.Descriptor[0] != 'I' || spec.Width != 3 {
+					t.Errorf("Expected 6I3, got repeat=%d desc=%c width=%d", spec.Repeat, spec.Descriptor[0], spec.Width)
+				}
+				// Check second spec: 3F10.2
+				spec = formatStmt.Specs[1]
+				if spec.Repeat != 3 || spec.Descriptor[0] != 'F' || spec.Width != 10 || spec.Decimals != 2 {
+					t.Errorf("Expected 3F10.2, got repeat=%d desc=%c width=%d decimals=%d", spec.Repeat, spec.Descriptor[0], spec.Width, spec.Decimals)
+				}
+			},
+		},
+		{
+			name: "FORMAT with two-letter descriptors",
+			src:  "500 FORMAT(ES12.5, EN15.6)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				formatStmt := helperWantNode[*ast.FormatStmt](t, stmt, "")
+				if len(formatStmt.Specs) != 2 {
+					t.Errorf("Expected 2 specs, got %d", len(formatStmt.Specs))
+					return
+				}
+				// Check ES12.5
+				spec := formatStmt.Specs[0]
+				if spec.Descriptor[0] != 'E' || spec.Descriptor[1] != 'S' || spec.Width != 12 || spec.Decimals != 5 {
+					t.Errorf("Expected ES12.5, got desc=%c%c width=%d decimals=%d", spec.Descriptor[0], spec.Descriptor[1], spec.Width, spec.Decimals)
+				}
+				// Check EN15.6
+				spec = formatStmt.Specs[1]
+				if spec.Descriptor[0] != 'E' || spec.Descriptor[1] != 'N' || spec.Width != 15 || spec.Decimals != 6 {
+					t.Errorf("Expected EN15.6, got desc=%c%c width=%d decimals=%d", spec.Descriptor[0], spec.Descriptor[1], spec.Width, spec.Decimals)
+				}
+			},
+		},
+		{
+			name: "FORMAT with exponent width",
+			src:  "600 FORMAT(E12.5E3)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				formatStmt := helperWantNode[*ast.FormatStmt](t, stmt, "")
+				if len(formatStmt.Specs) != 1 {
+					t.Errorf("Expected 1 spec, got %d", len(formatStmt.Specs))
+					return
+				}
+				spec := formatStmt.Specs[0]
+				if spec.Descriptor[0] != 'E' || spec.Width != 12 || spec.Decimals != 5 || spec.Exponent != 3 {
+					t.Errorf("Expected E12.5E3, got desc=%c width=%d decimals=%d exponent=%d", spec.Descriptor[0], spec.Width, spec.Decimals, spec.Exponent)
+				}
+			},
+		},
+		{
+			name: "FORMAT with record terminator",
+			src:  "700 FORMAT(I5, /, F10.2)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				formatStmt := helperWantNode[*ast.FormatStmt](t, stmt, "")
+				if len(formatStmt.Specs) != 3 {
+					t.Errorf("Expected 3 specs, got %d", len(formatStmt.Specs))
+					return
+				}
+				// Check / (second spec)
+				if formatStmt.Specs[1].Descriptor[0] != '/' {
+					t.Errorf("Expected '/' descriptor, got %c", formatStmt.Specs[1].Descriptor[0])
+				}
+			},
+		},
+		{
+			name: "FORMAT with grouped repeat",
+			src:  "800 FORMAT(3(I3, F6.2))",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				formatStmt := helperWantNode[*ast.FormatStmt](t, stmt, "")
+				if len(formatStmt.Specs) != 1 {
+					t.Errorf("Expected 1 spec (group), got %d", len(formatStmt.Specs))
+					return
+				}
+				spec := formatStmt.Specs[0]
+				if spec.Repeat != 3 || len(spec.Group) != 2 {
+					t.Errorf("Expected grouped repeat 3 with 2 specs, got repeat=%d group=%d", spec.Repeat, len(spec.Group))
 				}
 			},
 		},

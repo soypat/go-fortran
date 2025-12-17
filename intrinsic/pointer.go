@@ -152,6 +152,15 @@ func Ptr[T any](v *T) PointerTo[T] {
 	}
 }
 
+// UnallocatedPtr declares a pointer with a length without assigning it a data portion.
+// This is typical for ALLOCATABLE declarations.
+func UnallocatedPtr[T any](numElements int) PointerTo[T] {
+	return PointerTo[T]{
+		v:        nil,
+		alloclen: numElements,
+	}
+}
+
 // MALLOC allocates memory for Fortran MALLOC calls (typically a C library function).
 // In transpiled code, actual memory allocation is handled by Go's garbage collector.
 //

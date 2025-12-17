@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"strconv"
 
 	"github.com/soypat/go-fortran/token"
 )
@@ -2513,8 +2514,8 @@ func (ss *StopStmt) AppendString(dst []byte) []byte {
 //	200 FORMAT(I5, F10.2, A)
 //	300 FORMAT('Result = ', F8.3)
 type FormatStmt struct {
-	Spec  string // Format specification (stored as string)
-	Label string // Statement label (always present for FORMAT)
+	Specs []FormatSpec // Parsed format specifications
+	Label string       // Statement label (always present for FORMAT)
 	Position
 }
 
@@ -2532,9 +2533,306 @@ func (fs *FormatStmt) AppendString(dst []byte) []byte {
 		dst = append(dst, ' ')
 	}
 	dst = append(dst, "FORMAT("...)
-	dst = append(dst, fs.Spec...)
+	for i := range fs.Specs {
+		if i > 0 {
+			dst = append(dst, ',')
+		}
+		dst = fs.Specs[i].AppendString(dst)
+	}
 	dst = append(dst, ')')
 	return dst
+}
+
+// FormatSpec represents a specification argument to the [FormatStmt] which
+// can be any of the following:
+//   - String literal: 'value='
+//   - Descriptor: rXw.dEe where X is the descriptor byte, w is width, d is decimal places, and e is exponent and r is repeat counts.
+type FormatSpec struct {
+	// First Letter of format specifier stored in Descriptor[0]
+	//  - I,F,E,D,G,A,L,B,O,Z correspond to standard fortran descriptors.
+	//  - First letter can also be a newline control character '/'.
+	// Second letter stored in Descriptor[1].
+	Descriptor [2]byte
+	Width      uint8
+	Decimals   uint8
+	Exponent   uint8
+
+	// Repeat precedes the descriptor. -1 indicates unlimited repeat.
+	Repeat int
+
+	// Group stores grouped repeat. i.e: 3(I3,F6.2)
+	Group []FormatSpec
+	// StringLit stores a string literal for when FORMAT receives a string literal argument.
+	// If StringLit is set none of other fields are set.
+	StringLit string
+	// DT derived Type.
+	Vlist []int
+}
+
+// AppendString serializes the FormatSpec back to Fortran format string notation.
+func (spec *FormatSpec) AppendString(dst []byte) []byte {
+	// Handle string literal
+	if spec.StringLit != "" {
+		dst = append(dst, '\'')
+		dst = append(dst, spec.StringLit...)
+		dst = append(dst, '\'')
+		return dst
+	}
+
+	// Handle grouped repeat: 3(I3,F6.2)
+	if len(spec.Group) > 0 {
+		if spec.Repeat > 0 {
+			dst = strconv.AppendInt(dst, int64(spec.Repeat), 10)
+		} else if spec.Repeat == -1 {
+			dst = append(dst, '*')
+		}
+		dst = append(dst, '(')
+		for i := range spec.Group {
+			if i > 0 {
+				dst = append(dst, ',')
+			}
+			dst = spec.Group[i].AppendString(dst)
+		}
+		dst = append(dst, ')')
+		return dst
+	}
+
+	// Handle repeat count
+	if spec.Repeat > 0 {
+		dst = strconv.AppendInt(dst, int64(spec.Repeat), 10)
+	} else if spec.Repeat == -1 {
+		dst = append(dst, '*')
+	}
+
+	// Handle descriptor
+	if spec.Descriptor[0] != 0 {
+		dst = append(dst, spec.Descriptor[0])
+		if spec.Descriptor[1] != 0 {
+			dst = append(dst, spec.Descriptor[1])
+		}
+	}
+
+	// Handle width
+	if spec.Width > 0 {
+		dst = strconv.AppendInt(dst, int64(spec.Width), 10)
+	}
+
+	// Handle decimals (.d)
+	if spec.Decimals > 0 || (spec.Width > 0 && needsDecimal(spec.Descriptor[0])) {
+		dst = append(dst, '.')
+		dst = strconv.AppendInt(dst, int64(spec.Decimals), 10)
+	}
+
+	// Handle exponent (Ee)
+	if spec.Exponent > 0 {
+		dst = append(dst, 'E')
+		dst = strconv.AppendInt(dst, int64(spec.Exponent), 10)
+	}
+
+	return dst
+}
+
+// needsDecimal returns true if the descriptor typically requires decimal notation.
+func needsDecimal(desc byte) bool {
+	switch desc {
+	case 'F', 'f', 'E', 'e', 'D', 'd', 'G', 'g':
+		return true
+	default:
+		return false
+	}
+}
+
+// ParseFormatString parses a complete format string like "I5, F10.2, 'text'" into a slice of FormatSpec.
+// This is useful for parsing inline format strings in WRITE/PRINT statements.
+func ParseFormatString(spec string) []FormatSpec {
+	var specs []FormatSpec
+	i := 0
+	for i < len(spec) {
+		// Skip whitespace and commas
+		for i < len(spec) && (spec[i] == ' ' || spec[i] == ',' || spec[i] == '\t') {
+			i++
+		}
+		if i >= len(spec) {
+			break
+		}
+
+		var fs FormatSpec
+
+		// Handle newline control /
+		if spec[i] == '/' {
+			fs.Descriptor[0] = '/'
+			specs = append(specs, fs)
+			i++
+			continue
+		}
+
+		// Handle colon :
+		if spec[i] == ':' {
+			fs.Descriptor[0] = ':'
+			specs = append(specs, fs)
+			i++
+			continue
+		}
+
+		// Handle string literal 'text'
+		if spec[i] == '\'' {
+			i++ // skip opening quote
+			start := i
+			for i < len(spec) && spec[i] != '\'' {
+				i++
+			}
+			fs.StringLit = spec[start:i]
+			if i < len(spec) {
+				i++ // skip closing quote
+			}
+			specs = append(specs, fs)
+			continue
+		}
+
+		// Handle grouped repeat: 3(I3,F6.2) or (I3,F6.2)
+		// First check for repeat count before (
+		repeat := 0
+		startI := i
+		for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
+			repeat = repeat*10 + int(spec[i]-'0')
+			i++
+		}
+		if i < len(spec) && spec[i] == '(' {
+			i++ // skip (
+			// Parse nested specs until )
+			depth := 1
+			groupStart := i
+			for i < len(spec) && depth > 0 {
+				if spec[i] == '(' {
+					depth++
+				} else if spec[i] == ')' {
+					depth--
+				}
+				if depth > 0 {
+					i++
+				}
+			}
+			fs.Repeat = repeat
+			fs.Group = ParseFormatString(spec[groupStart:i])
+			if i < len(spec) {
+				i++ // skip closing )
+			}
+			specs = append(specs, fs)
+			continue
+		}
+
+		// Not a group, restore position and parse as format spec
+		i = startI
+		consumed := fs.SetFromString(spec[i:])
+		if consumed > 0 {
+			specs = append(specs, fs)
+			i += consumed
+		} else {
+			// Skip unknown character
+			i++
+		}
+	}
+	return specs
+}
+
+// SetFromString parses a format spec string like "I3", "F10.2", "ES12.5", "6I3", "E12.5E3"
+// and sets the FormatSpec fields accordingly. Returns the number of bytes consumed.
+func (spec *FormatSpec) SetFromString(lit string) int {
+	*spec = FormatSpec{} // Reset
+	i := 0
+	n := len(lit)
+
+	// Parse leading repeat count (digits before letter)
+	for i < n && lit[i] >= '0' && lit[i] <= '9' {
+		spec.Repeat = spec.Repeat*10 + int(lit[i]-'0')
+		i++
+	}
+
+	// Parse descriptor letter(s)
+	if i < n && isFormatDescLetter(lit[i]) {
+		spec.Descriptor[0] = lit[i]
+		i++
+		// Check for two-letter descriptor (ES, EN, TL, TR, SP, SS, BN, BZ, etc.)
+		if i < n && isFormatSecondLetter(spec.Descriptor[0], lit[i]) {
+			spec.Descriptor[1] = lit[i]
+			i++
+		}
+	}
+
+	// Parse width (digits after descriptor)
+	width := 0
+	for i < n && lit[i] >= '0' && lit[i] <= '9' {
+		width = width*10 + int(lit[i]-'0')
+		i++
+	}
+	spec.Width = uint8(width)
+
+	// Parse decimals (.d)
+	if i < n && lit[i] == '.' {
+		i++ // skip .
+		decimals := 0
+		for i < n && lit[i] >= '0' && lit[i] <= '9' {
+			decimals = decimals*10 + int(lit[i]-'0')
+			i++
+		}
+		spec.Decimals = uint8(decimals)
+	}
+
+	// Parse exponent (Ee)
+	if i < n && (lit[i] == 'E' || lit[i] == 'e') {
+		i++ // skip E
+		exponent := 0
+		for i < n && lit[i] >= '0' && lit[i] <= '9' {
+			exponent = exponent*10 + int(lit[i]-'0')
+			i++
+		}
+		spec.Exponent = uint8(exponent)
+	}
+
+	return i
+}
+
+// isFormatDescLetter returns true if c is a valid format descriptor first letter.
+func isFormatDescLetter(c byte) bool {
+	switch c {
+	case 'I', 'i', 'F', 'f', 'E', 'e', 'D', 'd', 'G', 'g',
+		'A', 'a', 'L', 'l', 'B', 'b', 'O', 'o', 'Z', 'z',
+		'X', 'x', 'T', 't', 'P', 'p', 'H', 'h', 'Q', 'q',
+		'S', 's', 'R', 'r':
+		return true
+	default:
+		return false
+	}
+}
+
+// isFormatSecondLetter returns true if second is valid as second letter after first.
+func isFormatSecondLetter(first, second byte) bool {
+	// Normalize to uppercase
+	if first >= 'a' && first <= 'z' {
+		first -= 32
+	}
+	if second >= 'a' && second <= 'z' {
+		second -= 32
+	}
+	switch first {
+	case 'E':
+		return second == 'S' || second == 'N' // ES, EN
+	case 'T':
+		return second == 'L' || second == 'R' // TL, TR
+	case 'S':
+		return second == 'P' || second == 'S' || second == 'U' // SP, SS, SU
+	case 'B':
+		return second == 'N' || second == 'Z' // BN, BZ
+	case 'D':
+		return second == 'C' || second == 'P' || second == 'T' // DC, DP, DT
+	case 'R':
+		return second == 'C' || second == 'D' || second == 'N' ||
+			second == 'P' || second == 'U' || second == 'Z' // RC, RD, RN, RP, RU, RZ
+	case 'G':
+		return second == '0' // G0
+	default:
+		return false
+	}
 }
 
 // AllocateStmt dynamically allocates memory for allocatable arrays and pointer
