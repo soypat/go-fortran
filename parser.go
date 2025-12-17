@@ -348,7 +348,7 @@ func (pud *ParserUnitData) resolveImplicitTypes() {
 		// TODO: From cray pointer we now have special case where decl is non-nil but type is nil. Can we just consolidate both cases?
 		// Assign type, preserving any existing ArraySpec from partial decl
 		if vi.decl == nil {
-			vi.decl = &ast.DeclEntity{Type: implicitType}
+			vi.decl = &ast.DeclEntity{Name: vi._varname, Type: implicitType}
 		} else {
 			// Partial decl exists (e.g., from Cray POINTER, DIMENSION statement) - just fill in Type
 			vi.decl.Type = implicitType

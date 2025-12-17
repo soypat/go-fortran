@@ -228,7 +228,7 @@ END PROGRAM`,
 			// Transpile - this should not panic
 			var tg ToGo
 			tg.SetSource(tt.name+".f90", strings.NewReader(tt.src))
-			_, err = tg.TransformProgram(unit)
+			_, err = tg.TransformUnits(nil, unit)
 			if err != nil {
 				t.Errorf("TransformProgram failed: %v", err)
 			}
@@ -283,7 +283,7 @@ func TestComparisonOperatorReturnsLogical(t *testing.T) {
 	// because .GT. returned INTEGER instead of LOGICAL
 	var tg ToGo
 	tg.SetSource("test.f90", strings.NewReader(src))
-	_, err = tg.TransformProgram(unit)
+	_, err = tg.TransformUnits(nil, unit)
 	if err != nil {
 		t.Errorf("TransformProgram failed: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestStatementFunction(t *testing.T) {
 
 	var tg ToGo
 	tg.SetSource("test.f90", strings.NewReader(src))
-	_, err = tg.TransformProgram(unit)
+	_, err = tg.TransformUnits(nil, unit)
 	if err != nil {
 		t.Errorf("TransformProgram failed: %v", err)
 	}

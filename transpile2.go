@@ -64,56 +64,6 @@ func (tg *ToGo) ImportDecl() ast.Decl {
 	}
 }
 
-func (tg *ToGo) TransformRegistered(dst []ast.Decl) (_ []ast.Decl, err error) {
-	dst, err = tg.TransformUnits(dst, tg.repl.registered...)
-	if err != nil {
-		return dst, err
-	}
-	return dst, nil
-}
-
-func (tg *ToGo) TransformProgram(prog f90.Unit) ([]ast.Decl, error) {
-	if !prog.IsValid() {
-		return nil, errors.New("invalid program unit")
-	} else if prog.Token != f90token.PROGRAM {
-		return nil, errors.New("expected PROGRAM unit")
-	}
-	err := tg.repl.SetScope(prog)
-	if err != nil {
-		return nil, err
-	}
-
-	mainBody, err := tg.transformStatements(nil, prog.Body)
-	// Create main function declaration
-	mainFunc := &ast.FuncDecl{
-		Name: ast.NewIdent("main"),
-		Type: &ast.FuncType{
-			Params: &ast.FieldList{}, // No parameters for main
-		},
-		Body: &ast.BlockStmt{
-			List: mainBody,
-		},
-	}
-
-	// Start with import and main function
-	decls := []ast.Decl{
-		tg.ImportDecl(),
-		mainFunc,
-	}
-	if err != nil {
-		return decls, err
-	}
-	// Append COMMON block declarations at start.
-
-	// Transform contained procedures (CONTAINS section)
-	decls, err = tg.TransformUnits(decls, prog.Contains...)
-	if err != nil {
-		return decls, fmt.Errorf("in CONTAINS of %s: %w", prog.Name, err)
-	}
-	decls = tg.AppendCommonDecls(decls)
-	return decls, nil
-}
-
 func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl, err error) {
 	origLen := len(tg.containedStack)
 	tg.containedStack = append(tg.containedStack, units...)
