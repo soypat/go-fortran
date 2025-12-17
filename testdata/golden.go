@@ -1094,8 +1094,8 @@ func LEVEL35() {
 	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), "LEVEL 35: Hello from WRITE")
 	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), m, n, x)
 	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), "LEVEL 35: Values:", m, n)
-	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("'LEVEL 35: Formatted output line'"))
-	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("'LEVEL35: m=', I3, ' n=', I3, ' x=', F5.2"), m, n, x)
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat(intrinsic.FormatDescriptor{Type: 'S', Literal: "LEVEL 35: Formatted output line"}))
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat(intrinsic.FormatDescriptor{Type: 'S', Literal: "LEVEL35: m="}, intrinsic.FormatDescriptor{Type: 'I', Width: 3}, intrinsic.FormatDescriptor{Type: 'S', Literal: " n="}, intrinsic.FormatDescriptor{Type: 'I', Width: 3}, intrinsic.FormatDescriptor{Type: 'S', Literal: " x="}, intrinsic.FormatDescriptor{Type: 'F', Width: 5, Precision: 2}), m, n, x)
 	goto label220
 label220:
 	{
@@ -1109,7 +1109,7 @@ label230:
 		for i := 1; i <= int(n); i += 1 {
 			writeArgs = append(writeArgs, wh.At(int(i)))
 		}
-		intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("'LEVEL35: Newline:'/ 'LEVEL35: WHI/WR =', 6E S12 .4"), writeArgs...)
+		intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat(intrinsic.FormatDescriptor{Type: 'S', Literal: "LEVEL35: Newline:"}, intrinsic.FmtNewline, intrinsic.FormatDescriptor{Type: 'S', Literal: "LEVEL35: WHI/WR ="}, intrinsic.FormatDescriptor{Type: 'E', Width: 12, Precision: 4, Repeat: 6}), writeArgs...)
 	}
 	goto label240
 label240:

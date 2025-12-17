@@ -15,12 +15,19 @@ type IOUnit struct {
 
 var defaultFormat Format
 
+// Format control characters for compile-time tokenized formats
+const (
+	FmtNewline byte = '/' // Record separator (newline)
+)
+
 // FormatDescriptor represents a single format edit descriptor.
+// This type is exported for use by the transpiler to generate pre-parsed format calls.
 type FormatDescriptor struct {
 	Type      byte   // 'I', 'F', 'E', 'A', 'X', 'S' (string literal), '/' (newline)
 	Width     int    // Field width (0 means default)
 	Precision int    // Decimal places for F/E formats (-1 means default)
 	Literal   string // For string literals (Type='S')
+	Repeat    int    // Repeat count (e.g., 6 in 6ES12.4), 0 means 1
 }
 
 type Format struct {
@@ -29,9 +36,47 @@ type Format struct {
 	parsed      bool               // True if spec has been parsed
 }
 
-// NewFormat creates a Format from a specification string.
-func NewFormat(spec string) *Format {
-	return &Format{spec: spec}
+// NewFormat creates a Format from pre-parsed format components.
+// Arguments can be:
+//   - FormatDescriptor: a format descriptor struct
+//   - string: a string literal (shorthand for FormatDescriptor{Type:'S', Literal:s})
+//   - byte: a control character (e.g., FmtNewline for '/')
+//
+// For backward compatibility, a single string argument is treated as a raw format spec
+// to be parsed at runtime (deprecated - new code should use pre-parsed components).
+func NewFormat(args ...any) *Format {
+	// Backward compatibility: single string argument = raw format spec
+	if len(args) == 1 {
+		if spec, ok := args[0].(string); ok {
+			return &Format{spec: spec}
+		}
+	}
+
+	// Pre-parsed format components
+	f := &Format{parsed: true}
+	for _, arg := range args {
+		switch v := arg.(type) {
+		case FormatDescriptor:
+			// Handle repeat count by duplicating descriptor
+			repeat := v.Repeat
+			if repeat <= 0 {
+				repeat = 1
+			}
+			for i := 0; i < repeat; i++ {
+				f.descriptors = append(f.descriptors, FormatDescriptor{
+					Type:      v.Type,
+					Width:     v.Width,
+					Precision: v.Precision,
+					Literal:   v.Literal,
+				})
+			}
+		case string:
+			f.descriptors = append(f.descriptors, FormatDescriptor{Type: 'S', Literal: v})
+		case byte:
+			f.descriptors = append(f.descriptors, FormatDescriptor{Type: v})
+		}
+	}
+	return f
 }
 
 // ensureParsed parses the format spec if not already parsed.
@@ -138,8 +183,8 @@ func Print(v ...any) {
 func Write(unit IOUnit, f *Format, args ...any) {
 	var buf []byte
 
-	// Check if we have a format specification
-	if f.spec != "" {
+	// Check if we have a format specification (either raw spec or pre-parsed)
+	if f.spec != "" || f.parsed {
 		// Formatted output using format descriptors
 		f.ensureParsed()
 		buf = f.writeFormatted(buf, args)
@@ -177,6 +222,13 @@ func (f *Format) writeFormatted(buf []byte, args []any) []byte {
 		case 'X': // Skip spaces
 			for i := 0; i < desc.Width; i++ {
 				buf = append(buf, ' ')
+			}
+		case '/': // Newline/record separator
+			buf = append(buf, '\n')
+		case 'E': // Exponential format (scientific notation)
+			if argIdx < len(args) {
+				buf = f.formatExponential(buf, args[argIdx], desc.Width, desc.Precision)
+				argIdx++
 			}
 		}
 	}
@@ -245,6 +297,29 @@ func (f *Format) formatFloat(buf []byte, val any, width int, precision int) []by
 		precision = 2 // default
 	}
 	s := strconv.FormatFloat(x, 'f', precision, 64)
+	// Right-align with spaces
+	for i := len(s); i < width; i++ {
+		buf = append(buf, ' ')
+	}
+	buf = append(buf, s...)
+	return buf
+}
+
+// formatExponential formats a float in exponential/scientific notation (E format).
+func (f *Format) formatExponential(buf []byte, val any, width int, precision int) []byte {
+	var x float64
+	switch v := val.(type) {
+	case float32:
+		x = float64(v)
+	case float64:
+		x = v
+	default:
+		return buf
+	}
+	if precision < 0 {
+		precision = 4 // default for E format
+	}
+	s := strconv.FormatFloat(x, 'E', precision, 64)
 	// Right-align with spaces
 	for i := len(s); i < width; i++ {
 		buf = append(buf, ' ')
