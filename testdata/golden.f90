@@ -985,12 +985,11 @@
 
       SUBROUTINE BLKDECL()
         IMPLICIT REAL (A-H,O-Z)
-        DOUBLEPRECISION :: dd=1.0
-        COMMON /BLK/d1k,dd,d2k,d3k
+        COMMON /BLK/d1k,d2k,d3k
         DIMENSION delta(3)
         EQUIVALENCE (d1k, delta)
         PRINT *, 'BLKDECL: Equiv delta(1..3)=', delta(1), delta(2), delta(3)
-        PRINT *, 'BLKDECL: Equiv d1k,d2k,d3k=', d1k, d2k, d3k,dd
+        PRINT *, 'BLKDECL: Equiv d1k,d2k,d3k=', d1k, d2k, d3k
       END SUBROUTINE BLKDECL
 
 

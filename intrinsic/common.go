@@ -22,17 +22,15 @@ func (cb *CommonBlock) Reset() {
 	cb.offset = 0
 }
 
+// DeclareCommon wires a variable to share memory with a COMMON block.
+// Per Fortran standard, COMMON blocks are packed without padding (no alignment requirements).
 func DeclareCommon(set PointerSetter, cb *CommonBlock) {
 	elemsz := set.SizeElement()
-	if cb.offset%elemsz != 0 {
-		panic(fmt.Sprintf("common %s declaration failed on alignment : element size %d with offset %d", cb.name, elemsz, cb.offset))
-	}
 	sz := set.LenBuffer() * elemsz
 	if cb.offset+sz > len(cb.data) {
 		panic(fmt.Sprintf("common %s declaration failed on overflow: buffer size %d and common has %d/%d", cb.name, sz, len(cb.data)-cb.offset, len(cb.data)))
 	}
 	set.SetDataUnsafe(unsafe.Pointer(&cb.data[cb.offset]))
-
 	cb.offset += sz
 }
 

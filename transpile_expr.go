@@ -133,6 +133,15 @@ func (tg *ToGo) transformExprIdentifer(vitgt *Varinfo, e *f90.Identifier) (resul
 	if tg.isGoPointer(resultType) {
 		result = &ast.StarExpr{X: result}
 	}
+	// COMMON scalars (not EQUIVALENCED) are PointerTo[T], need .At(1) to read value.
+	// EQUIVALENCED scalars are handled by wrapConversion via IsPointer().
+	if !resultType.IsArray() && resultType.typeToken() != f90token.CHARACTER &&
+		resultType.flags.HasAny(VFlagCommon) && !resultType.flags.HasAny(VFlagEquivalenced) {
+		result = &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: result, Sel: ast.NewIdent("At")},
+			Args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "1"}},
+		}
+	}
 	return result, resultType, nil
 }
 
@@ -751,19 +760,11 @@ func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.CallExpr) (result ast.E
 	}, nil
 }
 
-// astVarExpr returns the AST expression for a variable, handling COMMON block access.
-// It does not handle access patterns.
+// astVarExpr returns the AST expression for a variable.
+// COMMON block variables are local PointerTo[T] or *Array[T] variables.
 func (tg *ToGo) astVarExpr(vi *Varinfo) ast.Expr {
-	if vi.flags.HasAny(VFlagCommon) {
-		blockName := vi.common
-		if blockName == "" {
-			blockName = tg.globalCommon // Blank COMMON block
-		}
-		return &ast.SelectorExpr{
-			X:   ast.NewIdent(blockName),
-			Sel: ast.NewIdent(vi.Identifier()),
-		}
-	}
+	// COMMON variables are now local pointer variables (declared via DeclareCommon)
+	// No longer use BlockName.fieldName selector access
 	return ast.NewIdent(vi.Identifier())
 }
 

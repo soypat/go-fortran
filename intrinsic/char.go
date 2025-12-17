@@ -79,6 +79,9 @@ func (ch *CharacterArray) Allocate(length int) {
 
 // DataUnsafe implements [Pointer] interface.
 func (ch CharacterArray) DataUnsafe() unsafe.Pointer {
+	if len(ch.data) == 0 {
+		return nil
+	}
 	return unsafe.Pointer(&ch.data[0])
 }
 

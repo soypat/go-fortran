@@ -29,12 +29,13 @@ import "unsafe"
 // Column-major layout means the FIRST index varies fastest in memory.
 // For a 2D array A(3,4), memory order is: A(1,1), A(2,1), A(3,1), A(1,2), A(2,2), ...
 type Array[T any] struct {
-	data   []T   // Single contiguous allocation (slab allocation), shared by views
-	base   int   // Offset into data for first element of this array/view
-	shape  []int // Size of each dimension: shape[i] = upper[i] - lower[i] + 1
-	lower  []int // Lower bounds for each dimension (typically 1, but can be negative)
-	upper  []int // Upper bounds for each dimension
-	stride []int // Column-major strides: stride[0]=1, stride[i]=stride[i-1]*shape[i-1]
+	data     []T   // Single contiguous allocation (slab allocation), shared by views
+	allocLen int   // Expected buffer length (used when data is nil for unallocated arrays)
+	base     int   // Offset into data for first element of this array/view
+	shape    []int // Size of each dimension: shape[i] = upper[i] - lower[i] + 1
+	lower    []int // Lower bounds for each dimension (typically 1, but can be negative)
+	upper    []int // Upper bounds for each dimension
+	stride   []int // Column-major strides: stride[0]=1, stride[i]=stride[i-1]*shape[i-1]
 }
 
 func NewArray[T any](data []T, dims ...int) *Array[T] {
@@ -53,29 +54,44 @@ func NewArray[T any](data []T, dims ...int) *Array[T] {
 	return NewArrayWithBounds(data, shape, lower, upper)
 }
 
-func UnallocatedArray[T int](dims ...int) *Array[T] {
+func UnallocatedArray[T any](dims ...int) *Array[T] {
 	if len(dims) > 7 {
 		panic("array dimension too large")
 	} else if len(dims) == 0 {
 		panic("zero dimension array")
 	}
-	parambuf := make([]int, len(dims)*3)
-	shape := parambuf[:len(dims)]
-	lower := parambuf[len(dims) : len(dims)*2]
-	upper := parambuf[len(dims)*2:]
-	for i, d := range dims {
-		shape[i], lower[i], upper[i] = d, 1, d
-	}
+	// Calculate total size and set up bounds
 	totalSize := 1
-	for _, dim := range shape {
+	for _, dim := range dims {
 		if dim < 0 {
 			panic("array: dimension size must be non-negative")
 		}
 		totalSize *= dim
 	}
-	var z *T = nil
-	nonallocData := unsafe.Slice(z, totalSize) // Leave slice data as nil but set size.
-	return newArrayWithBounds(nonallocData, shape, lower, upper)
+	// Calculate column-major strides
+	stride := make([]int, len(dims))
+	if len(dims) > 0 {
+		stride[0] = 1
+		for i := 1; i < len(dims); i++ {
+			stride[i] = stride[i-1] * dims[i-1]
+		}
+	}
+	// Set up bounds arrays
+	shape := make([]int, len(dims))
+	lower := make([]int, len(dims))
+	upper := make([]int, len(dims))
+	for i, d := range dims {
+		shape[i], lower[i], upper[i] = d, 1, d
+	}
+	// Create array with nil data but proper allocLen for DeclareCommon
+	return &Array[T]{
+		data:     nil,
+		allocLen: totalSize,
+		shape:    shape,
+		lower:    lower,
+		upper:    upper,
+		stride:   stride,
+	}
 }
 
 // NewArrayWithBounds creates an array with custom bounds for each dimension.
@@ -123,11 +139,12 @@ func newArrayWithBounds[T any](data []T, shape, lower, upper []int) *Array[T] {
 	}
 
 	return &Array[T]{
-		data:   data,
-		shape:  append([]int(nil), shape...),
-		lower:  append([]int(nil), lower...),
-		upper:  append([]int(nil), upper...),
-		stride: stride,
+		data:     data,
+		allocLen: len(data),
+		shape:    append([]int(nil), shape...),
+		lower:    append([]int(nil), lower...),
+		upper:    append([]int(nil), upper...),
+		stride:   stride,
 	}
 }
 
@@ -324,21 +341,24 @@ func (a *Array[T]) DataUnsafe() unsafe.Pointer {
 	return unsafe.Pointer(&a.data[0])
 }
 
-// DataUnsafe implements [Pointer] interface.
+// SetDataUnsafe implements [PointerSetter] interface.
 //
 // Deprecated: Extremely unsafe.
 func (a *Array[T]) SetDataUnsafe(v unsafe.Pointer) {
-	a.data = unsafe.Slice((*T)(v), len(a.data))
+	a.data = unsafe.Slice((*T)(v), a.allocLen)
 }
 
 // SetLenBufferUnsafe sets the number of elements in the backing data slice.
 func (a *Array[T]) SetLenBufferUnsafe(length int) {
-	a.data = unsafe.Slice(unsafe.SliceData(a.data), length)
+	a.allocLen = length
+	if a.data != nil {
+		a.data = unsafe.Slice(unsafe.SliceData(a.data), length)
+	}
 }
 
-// SizeBuffer implements [Pointer] interface.
+// LenBuffer implements [Pointer] interface.
 func (a *Array[T]) LenBuffer() int {
-	return len(a.data)
+	return a.allocLen
 }
 
 // Range represents a Fortran array range expression: start:end:stride

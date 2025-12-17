@@ -307,7 +307,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	case *f90.SelectCaseStmt:
 		dst, err = tg.transformSelectCaseStmt(dst, s)
 	case *f90.CommonStmt:
-		// COMMON blocks are processed separately, no code generation in function body
+		dst, err = tg.transformCommonStmt(dst, s)
 	case *f90.DimensionStmt:
 		// DIMENSION statements are processed in preScanCommonBlocks, no code generation in function body
 	case *f90.EquivalenceStmt:
@@ -497,6 +497,11 @@ func (tg *ToGo) transformTypeDeclEntity(ent *f90.DeclEntity) (spec *ast.ValueSpe
 		}
 	case ent.Init != nil:
 		// PARAMETER constants or non-array initializers.
+		// Skip direct initialization for COMMON scalars - they use PointerTo[T] and need .Set()
+		if !isArray && vi.flags.HasAny(VFlagCommon) {
+			// COMMON scalar variables are initialized after DeclareCommon
+			break
+		}
 		initExpr, _, err = tg.transformExpression(vi, ent.Init)
 	case isArray && !isAlloc:
 		spec.Type = nil // Cleaner.
@@ -832,11 +837,11 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		}
 	}
 	rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
-	// Handle equivalenced scalar assignment: f = value → f.Set(value, 1)
+	// Handle equivalenced/COMMON scalar assignment: f = value → f.Set(value, 1)
 	// CHARACTER types are excluded as they use SetFromString
 	isArray := targetVinfo.IsArray()
 	isCharacter := targetVinfo.typeToken() == f90token.CHARACTER
-	if !isArray && !isCharacter && targetVinfo.flags.HasAny(VFlagEquivalenced) {
+	if !isArray && !isCharacter && targetVinfo.flags.HasAny(VFlagEquivalenced|VFlagCommon) {
 		dst = append(dst, &ast.ExprStmt{
 			X: tg.astSetCall(lhs, rhs, &ast.BasicLit{Kind: token.INT, Value: "1"}),
 		})
@@ -1944,9 +1949,9 @@ func (tg *ToGo) goType(v *Varinfo) ast.Expr {
 		return nil
 	}
 
-	// Handle equivalenced scalars - they become PointerTo[T] for memory sharing
+	// Handle equivalenced and COMMON scalars - they become PointerTo[T] for memory sharing
 	// CHARACTER types are excluded as they have their own memory management (CharacterArray)
-	if !isArray && tok != f90token.CHARACTER && v.flags.HasAny(VFlagEquivalenced) {
+	if !isArray && tok != f90token.CHARACTER && v.flags.HasAny(VFlagEquivalenced|VFlagCommon) {
 		return goTypePointerTo(baseType)
 	}
 
@@ -2239,11 +2244,11 @@ func sanitizeIdent(name string) string {
 	return name
 }
 
-// AppendCommonDecls appends COMMON block struct declarations to dst.
+// AppendCommonDecls appends COMMON block declarations to dst.
+// Generates: var BLK = intrinsic.NewCommonBlock("BLK", totalSize)
 // Should be called after all program units have been processed.
 func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 	for _, block := range tg.repl.commonblocks {
-		// fmt.Println("DECL", block.Name)
 		if len(block.fields) == 0 {
 			continue
 		}
@@ -2253,63 +2258,25 @@ func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 			blockName = tg.globalCommon
 		}
 		blockIdent := ast.NewIdent(blockName)
-		var compositeLitElts []ast.Expr
-		structType := &ast.StructType{Fields: &ast.FieldList{}}
-		for i := range block.fields {
-			v := &block.fields[i]
-			goType := tg.goType(v)
-			elemType := tg.baseGotype(v.typeToken(), tg.resolveKind(v))
-			fieldIdent := ast.NewIdent(v.Identifier())
 
-			structType.Fields.List = append(structType.Fields.List, &ast.Field{
-				Names: []*ast.Ident{fieldIdent},
-				Type:  goType,
-			})
+		// Calculate total size with alignment
+		totalSize := tg.calculateCommonBlockSize(&block)
 
-			if !v.IsArray() {
-				continue
-			}
-			args := []ast.Expr{ast.NewIdent("nil")} // First argument is array initializer, we always initialize to zeroes.
-			arrspec := v.Dimensions()
-			for _, bound := range arrspec.Bounds {
-				if bound.Upper != nil {
-					size, _, err := tg.transformExpression(_tgtInt, bound.Upper)
-					if err != nil {
-						continue
-					}
-					args = append(args, size)
-				}
-			}
-			compositeLitElts = append(compositeLitElts, &ast.KeyValueExpr{
-				Key: fieldIdent,
-				Value: &ast.CallExpr{
-					Fun: &ast.IndexExpr{
-						X:     _astFnNewArray,
-						Index: elemType,
+		// Generate: var BLK = intrinsic.NewCommonBlock("BLK", totalSize)
+		valueSpec := &ast.ValueSpec{
+			Names: []*ast.Ident{blockIdent},
+			Values: []ast.Expr{
+				&ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent("intrinsic"),
+						Sel: ast.NewIdent("NewCommonBlock"),
 					},
-					Args: args,
-				},
-			})
-		}
-		// Create variable declaration
-		var valueSpec *ast.ValueSpec
-		if len(compositeLitElts) > 0 {
-			// var BLOCKNAME = struct{...}{field: value, ...}
-			valueSpec = &ast.ValueSpec{
-				Names: []*ast.Ident{blockIdent},
-				Values: []ast.Expr{
-					&ast.CompositeLit{
-						Type: structType,
-						Elts: compositeLitElts,
+					Args: []ast.Expr{
+						&ast.BasicLit{Kind: token.STRING, Value: `"` + blockName + `"`},
+						&ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(totalSize)},
 					},
 				},
-			}
-		} else {
-			// var BLOCKNAME struct{...}
-			valueSpec = &ast.ValueSpec{
-				Names: []*ast.Ident{blockIdent},
-				Type:  structType,
-			}
+			},
 		}
 		dst = append(dst, &ast.GenDecl{
 			Tok:   token.VAR,
@@ -2318,6 +2285,170 @@ func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 	}
 
 	return dst
+}
+
+// calculateCommonBlockSize calculates the total size of a COMMON block in bytes.
+// Per Fortran standard, COMMON blocks are packed without padding.
+func (tg *ToGo) calculateCommonBlockSize(block *commonBlockInfo) int {
+	total := 0
+	for i := range block.fields {
+		v := &block.fields[i]
+		elemSize := tg.typeSize(v)
+		numElems := 1
+		if v.IsArray() {
+			numElems = tg.arrayNumElements(v)
+		}
+		total += elemSize * numElems
+	}
+	return total
+}
+
+// arrayNumElements returns the total number of elements in an array.
+func (tg *ToGo) arrayNumElements(v *Varinfo) int {
+	if !v.IsArray() {
+		return 1
+	}
+	arrspec := v.Dimensions()
+	total := 1
+	for _, bound := range arrspec.Bounds {
+		if bound.Upper != nil {
+			var dst Varinfo
+			if err := tg.repl.Eval(&dst, bound.Upper); err == nil {
+				total *= int(dst.val.i64)
+			}
+		}
+	}
+	return total
+}
+
+// transformCommonStmt generates local variable declarations and DeclareCommon calls
+// for COMMON block variables in the current subroutine.
+//
+// For COMMON /BLK/ d1k, d2k, d3k generates:
+//
+//	d1k := intrinsic.UnallocatedPtr[float32](1)
+//	d2k := intrinsic.UnallocatedPtr[float32](1)
+//	d3k := intrinsic.UnallocatedPtr[float32](1)
+//	BLK.Reset()
+//	intrinsic.DeclareCommon(&d1k, &BLK)
+//	intrinsic.DeclareCommon(&d2k, &BLK)
+//	intrinsic.DeclareCommon(&d3k, &BLK)
+func (tg *ToGo) transformCommonStmt(dst []ast.Stmt, stmt *f90.CommonStmt) (_ []ast.Stmt, err error) {
+	// Look up the COMMON block to get the canonical name (case-insensitive match)
+	block := tg.repl.getCommon(stmt.BlockName)
+	blockName := stmt.BlockName
+	if block != nil {
+		blockName = block.Name // Use stored name for consistency with AppendCommonDecls
+	}
+	if blockName == "" {
+		blockName = tg.globalCommon
+	}
+	blockIdent := ast.NewIdent(blockName)
+
+	// Collect variable declarations and DeclareCommon calls
+	var declareStmts []ast.Stmt
+
+	for i, varName := range stmt.Variables {
+		vi := tg.repl.Var(varName)
+		if vi == nil {
+			return dst, tg.makeErr(stmt, "unknown variable in COMMON: "+varName)
+		}
+
+		varIdent := ast.NewIdent(vi.Identifier())
+		elemType := tg.baseGotype(vi.typeToken(), tg.resolveKind(vi))
+
+		var initExpr ast.Expr
+		if vi.IsArray() {
+			// Array: varname := intrinsic.UnallocatedArray[T](dims...)
+			args := []ast.Expr{}
+			arrspec := vi.Dimensions()
+			if arrspec == nil && i < len(stmt.ArraySpecs) {
+				arrspec = stmt.ArraySpecs[i]
+			}
+			if arrspec != nil {
+				for _, bound := range arrspec.Bounds {
+					if bound.Upper != nil {
+						size, _, err := tg.transformExpression(_tgtInt, bound.Upper)
+						if err != nil {
+							return dst, err
+						}
+						args = append(args, size)
+					}
+				}
+			}
+			initExpr = &ast.CallExpr{
+				Fun: &ast.IndexExpr{
+					X: &ast.SelectorExpr{
+						X:   ast.NewIdent("intrinsic"),
+						Sel: ast.NewIdent("UnallocatedArray"),
+					},
+					Index: elemType,
+				},
+				Args: args,
+			}
+		} else {
+			// Scalar: varname := intrinsic.UnallocatedPtr[T](1)
+			initExpr = &ast.CallExpr{
+				Fun: &ast.IndexExpr{
+					X: &ast.SelectorExpr{
+						X:   ast.NewIdent("intrinsic"),
+						Sel: ast.NewIdent("UnallocatedPtr"),
+					},
+					Index: elemType,
+				},
+				Args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "1"}},
+			}
+		}
+
+		// Generate: varname = intrinsic.Unallocated...
+		// Use ASSIGN (=) not DEFINE (:=) since variable is already declared
+		dst = append(dst, &ast.AssignStmt{
+			Lhs: []ast.Expr{varIdent},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{initExpr},
+		})
+
+		// Generate: intrinsic.DeclareCommon(&varname, &BLK) for scalars
+		// or: intrinsic.DeclareCommon(varname, &BLK) for arrays (already pointer)
+		var varArg ast.Expr
+		if vi.IsArray() {
+			varArg = varIdent // *Array[T] already implements PointerSetter
+		} else {
+			varArg = &ast.UnaryExpr{Op: token.AND, X: varIdent}
+		}
+		declareStmts = append(declareStmts, &ast.ExprStmt{
+			X: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   ast.NewIdent("intrinsic"),
+					Sel: ast.NewIdent("DeclareCommon"),
+				},
+				Args: []ast.Expr{
+					varArg,
+					&ast.UnaryExpr{Op: token.AND, X: blockIdent},
+				},
+			},
+		})
+	}
+
+	// Generate: BLK.Reset()
+	dst = append(dst, &ast.ExprStmt{
+		X: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   blockIdent,
+				Sel: ast.NewIdent("Reset"),
+			},
+		},
+	})
+
+	// Append all DeclareCommon calls
+	dst = append(dst, declareStmts...)
+
+	// Note: COMMON block variables should NOT be initialized inline.
+	// In Fortran, COMMON blocks share memory across program units,
+	// so initialization is done via BLOCK DATA subprograms, not inline declarations.
+	// Inline initializers in declarations (e.g., REAL :: x = 1.0) are ignored for COMMON variables.
+
+	return dst, nil
 }
 
 func (tg *ToGo) resolveKind(v *Varinfo) int {

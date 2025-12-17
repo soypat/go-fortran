@@ -591,31 +591,45 @@ func LEVEL19() {
 }
 func SET_COMMON_VALUES() {
 	var (
-		x    int32
-		y    int32
+		x    intrinsic.PointerTo[int32]
+		y    intrinsic.PointerTo[int32]
 		_, _ = x, y
 	)
 	var (
-		z float32
+		z intrinsic.PointerTo[float32]
 		_ = z
 	)
-	shared.x = 42
-	shared.y = 99
-	shared.z = 3.14159
+	x = intrinsic.UnallocatedPtr[int32](1)
+	y = intrinsic.UnallocatedPtr[int32](1)
+	z = intrinsic.UnallocatedPtr[float32](1)
+	shared.Reset()
+	intrinsic.DeclareCommon(&x, &shared)
+	intrinsic.DeclareCommon(&y, &shared)
+	intrinsic.DeclareCommon(&z, &shared)
+	x.Set(42, 1)
+	y.Set(99, 1)
+	z.Set(3.14159, 1)
 }
 func PRINT_COMMON_VALUES() {
 	var (
-		x    int32
-		y    int32
+		x    intrinsic.PointerTo[int32]
+		y    intrinsic.PointerTo[int32]
 		_, _ = x, y
 	)
 	var (
-		z float32
+		z intrinsic.PointerTo[float32]
 		_ = z
 	)
-	intrinsic.Print("LEVEL 19: x =", shared.x)
-	intrinsic.Print("LEVEL 19: y =", shared.y)
-	intrinsic.Print("LEVEL 19: z =", shared.z)
+	x = intrinsic.UnallocatedPtr[int32](1)
+	y = intrinsic.UnallocatedPtr[int32](1)
+	z = intrinsic.UnallocatedPtr[float32](1)
+	shared.Reset()
+	intrinsic.DeclareCommon(&x, &shared)
+	intrinsic.DeclareCommon(&y, &shared)
+	intrinsic.DeclareCommon(&z, &shared)
+	intrinsic.Print("LEVEL 19: x =", x.At(1))
+	intrinsic.Print("LEVEL 19: y =", y.At(1))
+	intrinsic.Print("LEVEL 19: z =", z.At(1))
 }
 func LEVEL20() {
 	var (
@@ -903,17 +917,29 @@ func LEVEL28() {
 		counts = intrinsic.NewArray[int32](nil, 100)
 		_      = counts
 	)
+	yqr = intrinsic.UnallocatedArray[float32](256)
+	sumxrq = intrinsic.UnallocatedArray[float32](512)
+	ymnrt = intrinsic.UnallocatedArray[float32](3)
+	matrix = intrinsic.UnallocatedArray[float32](10, 20)
+	holdrt.Reset()
+	intrinsic.DeclareCommon(yqr, &holdrt)
+	intrinsic.DeclareCommon(sumxrq, &holdrt)
+	intrinsic.DeclareCommon(ymnrt, &holdrt)
+	intrinsic.DeclareCommon(matrix, &holdrt)
+	counts = intrinsic.UnallocatedArray[int32](100)
+	stats.Reset()
+	intrinsic.DeclareCommon(counts, &stats)
 	intrinsic.Print("LEVEL 28: COMMON block arrays initialized")
-	holdrt.yqr.Set(1.5, 1)
-	holdrt.sumxrq.Set(99.90000000000001, 512)
-	holdrt.ymnrt.Set(3.14, 2)
-	holdrt.matrix.Set(42.5, 5, 10)
-	stats.counts.Set(42, 50)
-	intrinsic.Print("LEVEL 28: YQR(1) =", holdrt.yqr.At(1))
-	intrinsic.Print("LEVEL 28: SUMXRQ(512) =", holdrt.sumxrq.At(512))
-	intrinsic.Print("LEVEL 28: YMNRT(2) =", holdrt.ymnrt.At(2))
-	intrinsic.Print("LEVEL 28: MATRIX(5,10) =", holdrt.matrix.At(5, 10))
-	intrinsic.Print("LEVEL 28: COUNTS(50) =", stats.counts.At(50))
+	yqr.Set(1.5, 1)
+	sumxrq.Set(99.90000000000001, 512)
+	ymnrt.Set(3.14, 2)
+	matrix.Set(42.5, 5, 10)
+	counts.Set(42, 50)
+	intrinsic.Print("LEVEL 28: YQR(1) =", yqr.At(1))
+	intrinsic.Print("LEVEL 28: SUMXRQ(512) =", sumxrq.At(512))
+	intrinsic.Print("LEVEL 28: YMNRT(2) =", ymnrt.At(2))
+	intrinsic.Print("LEVEL 28: MATRIX(5,10) =", matrix.At(5, 10))
+	intrinsic.Print("LEVEL 28: COUNTS(50) =", counts.At(50))
 }
 func LEVEL29() {
 	var (
@@ -1125,15 +1151,22 @@ func LEVEL36() {
 	)
 	var (
 		d1k     intrinsic.PointerTo[float32]
-		d2k     float32
-		d3k     float32
+		d2k     intrinsic.PointerTo[float32]
+		d3k     intrinsic.PointerTo[float32]
 		_, _, _ = d1k, d2k, d3k
 	)
-	intrinsic.Equivalence(&blk.d1k, delta)
+	d1k = intrinsic.UnallocatedPtr[float32](1)
+	d2k = intrinsic.UnallocatedPtr[float32](1)
+	d3k = intrinsic.UnallocatedPtr[float32](1)
+	blk.Reset()
+	intrinsic.DeclareCommon(&d1k, &blk)
+	intrinsic.DeclareCommon(&d2k, &blk)
+	intrinsic.DeclareCommon(&d3k, &blk)
+	intrinsic.Equivalence(&d1k, delta)
 	delta.Set(1.0, 1)
 	delta.Set(2.0, 2)
 	delta.Set(3.0, 3)
-	intrinsic.Print("LEVEL 36: Equiv d=", blk.d1k.At(1), blk.d2k, blk.d3k)
+	intrinsic.Print("LEVEL 36: Equiv d=", d1k.At(1), d2k.At(1), d3k.At(1))
 	BLKINVDECL()
 	BLKDECL()
 }
@@ -1198,48 +1231,42 @@ func FIBONACCI(n int32) (fibonacci int32) {
 func BLKINVDECL() {
 	// Implicit declarations.
 	var (
-		d3k     float32
-		d2k     float32
-		d1k     float32
+		d3k     intrinsic.PointerTo[float32]
+		d2k     intrinsic.PointerTo[float32]
+		d1k     intrinsic.PointerTo[float32]
 		_, _, _ = d3k, d2k, d1k
 	)
-	intrinsic.Print("BLKINVDECL: Equiv d1k,d2k,d3k=", blk.d1k, blk.d2k, blk.d3k)
+	d3k = intrinsic.UnallocatedPtr[float32](1)
+	d2k = intrinsic.UnallocatedPtr[float32](1)
+	d1k = intrinsic.UnallocatedPtr[float32](1)
+	blk.Reset()
+	intrinsic.DeclareCommon(&d3k, &blk)
+	intrinsic.DeclareCommon(&d2k, &blk)
+	intrinsic.DeclareCommon(&d1k, &blk)
+	intrinsic.Print("BLKINVDECL: Equiv d1k,d2k,d3k=", d1k.At(1), d2k.At(1), d3k.At(1))
 }
 func BLKDECL() {
 	// Implicit declarations.
 	var (
 		d1k        intrinsic.PointerTo[float32]
-		d2k        float32
-		d3k        float32
+		d2k        intrinsic.PointerTo[float32]
+		d3k        intrinsic.PointerTo[float32]
 		delta      = intrinsic.NewArray[float32](nil, 3)
 		_, _, _, _ = d1k, d2k, d3k, delta
 	)
-	var (
-		dd float64 = 1.0
-		_          = dd
-	)
-	intrinsic.Equivalence(&blk.d1k, delta)
+	d1k = intrinsic.UnallocatedPtr[float32](1)
+	d2k = intrinsic.UnallocatedPtr[float32](1)
+	d3k = intrinsic.UnallocatedPtr[float32](1)
+	blk.Reset()
+	intrinsic.DeclareCommon(&d1k, &blk)
+	intrinsic.DeclareCommon(&d2k, &blk)
+	intrinsic.DeclareCommon(&d3k, &blk)
+	intrinsic.Equivalence(&d1k, delta)
 	intrinsic.Print("BLKDECL: Equiv delta(1..3)=", delta.At(1), delta.At(2), delta.At(3))
-	intrinsic.Print("BLKDECL: Equiv d1k,d2k,d3k=", blk.d1k.At(1), blk.d2k, blk.d3k, blk.dd)
+	intrinsic.Print("BLKDECL: Equiv d1k,d2k,d3k=", d1k.At(1), d2k.At(1), d3k.At(1))
 }
 
-var blk struct {
-	d1k intrinsic.PointerTo[float32]
-	d2k float32
-	d3k float32
-	dd  float64
-}
-var holdrt = struct {
-	yqr    *intrinsic.Array[float32]
-	sumxrq *intrinsic.Array[float32]
-	ymnrt  *intrinsic.Array[float32]
-	matrix *intrinsic.Array[float32]
-}{yqr: intrinsic.NewArray[float32](nil, 256), sumxrq: intrinsic.NewArray[float32](nil, 512), ymnrt: intrinsic.NewArray[float32](nil, 3), matrix: intrinsic.NewArray[float32](nil, 10, 20)}
-var shared struct {
-	x int32
-	y int32
-	z float32
-}
-var stats = struct {
-	counts *intrinsic.Array[int32]
-}{counts: intrinsic.NewArray[int32](nil, 100)}
+var blk = intrinsic.NewCommonBlock("blk", 12)
+var holdrt = intrinsic.NewCommonBlock("holdrt", 3884)
+var shared = intrinsic.NewCommonBlock("shared", 12)
+var stats = intrinsic.NewCommonBlock("stats", 400)

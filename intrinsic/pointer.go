@@ -61,8 +61,11 @@ type PointerSetter interface {
 // For type-punning (viewing memory as a different type), prefer [PointerFrom]
 // which returns a new typed view without modifying the original pointer.
 func Equivalence(toEquiv ...PointerSetter) {
-	largest := toEquiv[0]
-	maxAlloc := sizeUnderlyingAlloc(largest)
+	// Find the largest allocation and also identify variables with existing backing memory.
+	// Variables with non-nil data (e.g., from COMMON blocks) should be preferred as the source
+	// since they have "real" storage that should be shared.
+	var source PointerSetter
+	maxAlloc := 0
 	for _, buf := range toEquiv {
 		alloc := sizeUnderlyingAlloc(buf)
 		if alloc == 0 {
@@ -72,12 +75,25 @@ func Equivalence(toEquiv ...PointerSetter) {
 			}
 		}
 		if alloc > maxAlloc {
-			largest = buf
 			maxAlloc = alloc
+		}
+		// Prefer variables with existing backing memory (non-nil data pointer)
+		// These are typically from COMMON blocks or previous allocations
+		if source == nil && buf.DataUnsafe() != nil {
+			source = buf
+		}
+	}
+	// If no variable has backing memory, use the largest allocation
+	if source == nil {
+		source = toEquiv[0]
+		for _, buf := range toEquiv {
+			if sizeUnderlyingAlloc(buf) > sizeUnderlyingAlloc(source) {
+				source = buf
+			}
 		}
 	}
 
-	baseAddr := largest.DataUnsafe()
+	baseAddr := source.DataUnsafe()
 	for _, equiv := range toEquiv {
 		equiv.SetDataUnsafe(baseAddr)
 		// Set the allocation length based on total bytes / element size
