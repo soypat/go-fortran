@@ -870,23 +870,26 @@
     END SUBROUTINE LEVEL34
 
     SUBROUTINE LEVEL35() ! WRITE statement variants
-        INTEGER :: m, n
-        REAL :: x
+        INTEGER :: m, n,i
+        REAL :: x, wh(6)=(/1.,2.,3.,0.5,1.,1.5/)
         m = 3
         n = 5
         x = 2.5
         ! List-directed with string
-        WRITE(*,*) "Hello from WRITE"
+        WRITE(*,*) "LEVEL 35: Hello from WRITE"
         ! List-directed with multiple values
         WRITE(*,*) m, n, x
         ! List-directed with mixed string and values
-        WRITE(*,*) "Values:", m, n
+        WRITE(*,*) "LEVEL 35: Values:", m, n
         ! Formatted with label (no outputs)
         WRITE(*,220)
         ! Formatted with label (with outputs)
         WRITE(*,230) m, n, x
-220     FORMAT('Formatted output line')
-230     FORMAT('m=',I3,' n=',I3,' x=',F5.2)
+220     FORMAT('LEVEL 35: Formatted output line')
+230     FORMAT('LEVEL35: m=',I3,' n=',I3,' x=',F5.2)
+        WRITE(*,240) (wh(i),i=1,n)
+        ! Slash is a conctrol character, is basically equivalent to inserting a '\n' byte in the format.
+240     FORMAT('LEVEL35: Newline:'/'LEVEL35: WHI/WR =', 6ES12.4)
     END SUBROUTINE LEVEL35
 
     ! ==============================================================================

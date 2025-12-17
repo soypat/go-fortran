@@ -1078,28 +1078,41 @@ func LEVEL34() {
 }
 func LEVEL35() {
 	var (
-		m    int32
-		n    int32
-		_, _ = m, n
+		m       int32
+		n       int32
+		i       int32
+		_, _, _ = m, n, i
 	)
 	var (
-		x float32
-		_ = x
+		x    float32
+		wh   *intrinsic.Array[float32] = intrinsic.NewArray[float32]([]float32{1.0, 2.0, 3.0, 0.5, 1.0, 1.5}, 6)
+		_, _                           = x, wh
 	)
 	m = 3
 	n = 5
 	x = 2.5
-	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), "Hello from WRITE")
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), "LEVEL 35: Hello from WRITE")
 	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), m, n, x)
-	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), "Values:", m, n)
-	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("'Formatted output line'"))
-	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("'m=', I3, ' n=', I3, ' x=', F5.2"), m, n, x)
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), "LEVEL 35: Values:", m, n)
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("'LEVEL 35: Formatted output line'"))
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("'LEVEL35: m=', I3, ' n=', I3, ' x=', F5.2"), m, n, x)
 	goto label220
 label220:
 	{
 	}
 	goto label230
 label230:
+	{
+	}
+	{
+		writeArgs := make([]any, 0)
+		for i := 1; i <= int(n); i += 1 {
+			writeArgs = append(writeArgs, wh.At(int(i)))
+		}
+		intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat("'LEVEL35: Newline:'/ 'LEVEL35: WHI/WR =', 6E S12 .4"), writeArgs...)
+	}
+	goto label240
+label240:
 	{
 	}
 }

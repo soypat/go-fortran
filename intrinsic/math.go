@@ -121,6 +121,12 @@ func SQRT[T float](x T) T {
 	return T(math.Sqrt(float64(x)))
 }
 
+// CSQRT returns the complex square root of z
+// Fortran: CSQRT(z) - returns COMPLEX
+func CSQRT(z complex64) complex64 {
+	return complex64(cmplx.Sqrt(complex128(z)))
+}
+
 // EXP returns e raised to the power x
 // Fortran: EXP(x)
 func EXP[T float](x T) T {

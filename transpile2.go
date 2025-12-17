@@ -20,6 +20,7 @@ type ToGo struct {
 	source         string
 	sourceFile     io.ReaderAt
 	currentNode    f90.Node
+	globalCommon   string
 }
 
 func (tg *ToGo) Reset() {
@@ -65,6 +66,9 @@ func (tg *ToGo) ImportDecl() ast.Decl {
 }
 
 func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl, err error) {
+	if tg.globalCommon == "" {
+		tg.globalCommon = "Global_Common"
+	}
 	origLen := len(tg.containedStack)
 	tg.containedStack = append(tg.containedStack, units...)
 	defer func() {
@@ -118,7 +122,7 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 			}
 			fn.Body.List, err = tg.transformStatements(fn.Body.List, unit.Body)
 			if err != nil {
-				return dst, fmt.Errorf("transforming statements of %s: %w", unit.Name, err)
+				return dst, tg.makeErrAtStmt("transforming statements of unit " + unit.Name + ": " + err.Error())
 			}
 			if results != nil {
 				fn.Body.List = append(fn.Body.List, &ast.ReturnStmt{}) // FUNCTION has return value.
@@ -1408,7 +1412,21 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 		return dst, nil
 	}
 
-	// Build args: unit, format, then output list
+	// Check if any output list item is an implied DO loop
+	hasImpliedDoLoop := false
+	for _, expr := range stmt.OutputList {
+		if _, ok := expr.(*f90.ImpliedDoLoop); ok {
+			hasImpliedDoLoop = true
+			break
+		}
+	}
+
+	if hasImpliedDoLoop {
+		// Generate code that builds args slice at runtime
+		return tg.transformWriteStmtWithImpliedDoLoop(dst, stmt, formatExpr)
+	}
+
+	// Simple case: no implied DO loops
 	args := make([]ast.Expr, 0, 2+len(stmt.OutputList))
 	args = append(args, &ast.CallExpr{Fun: _astFnDefaultIOUnit})
 	args = append(args, formatExpr)
@@ -1431,6 +1449,169 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 	}
 	dst = append(dst, &ast.ExprStmt{X: writeCall})
 	return dst, nil
+}
+
+// transformWriteStmtWithImpliedDoLoop handles WRITE statements containing implied DO loops.
+// Generates: { writeArgs := make([]any, 0); ...; intrinsic.Write(unit, format, writeArgs...) }
+func (tg *ToGo) transformWriteStmtWithImpliedDoLoop(dst []ast.Stmt, stmt *f90.WriteStmt, formatExpr ast.Expr) (_ []ast.Stmt, err error) {
+	writeArgsVar := ast.NewIdent("writeArgs")
+
+	// writeArgs := make([]any, 0)
+	initStmt := &ast.AssignStmt{
+		Lhs: []ast.Expr{writeArgsVar},
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{
+			&ast.CallExpr{
+				Fun: ast.NewIdent("make"),
+				Args: []ast.Expr{
+					&ast.ArrayType{Elt: ast.NewIdent("any")},
+					_astZero,
+				},
+			},
+		},
+	}
+
+	blockStmts := []ast.Stmt{initStmt}
+
+	// Process each output list item
+	for _, expr := range stmt.OutputList {
+		if idl, ok := expr.(*f90.ImpliedDoLoop); ok {
+			// Generate for loop that appends values
+			loopStmts, err := tg.transformImpliedDoLoopAppend(idl, writeArgsVar)
+			if err != nil {
+				return dst, err
+			}
+			blockStmts = append(blockStmts, loopStmts...)
+		} else {
+			// Regular expression: writeArgs = append(writeArgs, expr)
+			var exprType Varinfo
+			if err := tg.repl.InferType(&exprType, expr); err != nil {
+				return dst, err
+			}
+			goExpr, _, err := tg.transformExpression(&exprType, expr)
+			if err != nil {
+				return dst, err
+			}
+			appendStmt := &ast.AssignStmt{
+				Lhs: []ast.Expr{writeArgsVar},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{
+					&ast.CallExpr{
+						Fun:  ast.NewIdent("append"),
+						Args: []ast.Expr{writeArgsVar, goExpr},
+					},
+				},
+			}
+			blockStmts = append(blockStmts, appendStmt)
+		}
+	}
+
+	// intrinsic.Write(unit, format, writeArgs...)
+	writeCall := &ast.CallExpr{
+		Fun: _astFnWrite,
+		Args: []ast.Expr{
+			&ast.CallExpr{Fun: _astFnDefaultIOUnit},
+			formatExpr,
+			writeArgsVar,
+		},
+		Ellipsis: 1, // Enable ... expansion
+	}
+	blockStmts = append(blockStmts, &ast.ExprStmt{X: writeCall})
+
+	// Wrap in a block to scope writeArgs
+	dst = append(dst, &ast.BlockStmt{List: blockStmts})
+	return dst, nil
+}
+
+// transformImpliedDoLoopAppend generates statements that append values from an implied DO loop to argsVar.
+// For (expr, i=start,end,stride) generates:
+//
+//	for i := start; i <= end; i += stride { argsVar = append(argsVar, expr) }
+func (tg *ToGo) transformImpliedDoLoopAppend(idl *f90.ImpliedDoLoop, argsVar *ast.Ident) ([]ast.Stmt, error) {
+	loopVar := ast.NewIdent(idl.LoopVar)
+
+	// Register the loop variable temporarily so it can be resolved in expressions
+	popLoopVar := tg.repl.PushVar(Varinfo{
+		decl:     _tgtInt.decl,
+		_varname: idl.LoopVar,
+	})
+	defer popLoopVar()
+
+	// Transform start expression
+	startExpr, _, err := tg.transformExpression(_tgtInt, idl.Start)
+	if err != nil {
+		return nil, err
+	}
+
+	// Transform end expression
+	endExpr, _, err := tg.transformExpression(_tgtInt, idl.End)
+	if err != nil {
+		return nil, err
+	}
+
+	// Transform stride (default to 1 if not specified)
+	var strideExpr ast.Expr = _astOne
+	if idl.Stride != nil {
+		strideExpr, _, err = tg.transformExpression(_tgtInt, idl.Stride)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Build the body: append each expression in the implied DO loop
+	var bodyStmts []ast.Stmt
+	for _, expr := range idl.Expressions {
+		// Handle nested implied DO loops
+		if nestedIdl, ok := expr.(*f90.ImpliedDoLoop); ok {
+			nestedStmts, err := tg.transformImpliedDoLoopAppend(nestedIdl, argsVar)
+			if err != nil {
+				return nil, err
+			}
+			bodyStmts = append(bodyStmts, nestedStmts...)
+		} else {
+			var exprType Varinfo
+			if err := tg.repl.InferType(&exprType, expr); err != nil {
+				return nil, err
+			}
+			goExpr, _, err := tg.transformExpression(&exprType, expr)
+			if err != nil {
+				return nil, err
+			}
+			appendStmt := &ast.AssignStmt{
+				Lhs: []ast.Expr{argsVar},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{
+					&ast.CallExpr{
+						Fun:  ast.NewIdent("append"),
+						Args: []ast.Expr{argsVar, goExpr},
+					},
+				},
+			}
+			bodyStmts = append(bodyStmts, appendStmt)
+		}
+	}
+
+	// for loopVar := start; loopVar <= end; loopVar += stride { ... }
+	forStmt := &ast.ForStmt{
+		Init: &ast.AssignStmt{
+			Lhs: []ast.Expr{loopVar},
+			Tok: token.DEFINE,
+			Rhs: []ast.Expr{startExpr},
+		},
+		Cond: &ast.BinaryExpr{
+			X:  loopVar,
+			Op: token.LEQ,
+			Y:  endExpr,
+		},
+		Post: &ast.AssignStmt{
+			Lhs: []ast.Expr{loopVar},
+			Tok: token.ADD_ASSIGN,
+			Rhs: []ast.Expr{strideExpr},
+		},
+		Body: &ast.BlockStmt{List: bodyStmts},
+	}
+
+	return []ast.Stmt{forStmt}, nil
 }
 
 func (tg *ToGo) transformArithmeticIfStmt(dst []ast.Stmt, stmt *f90.ArithmeticIfStmt) (_ []ast.Stmt, err error) {
@@ -1961,7 +2142,12 @@ func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
 		if len(block.fields) == 0 {
 			continue
 		}
-		blockIdent := ast.NewIdent(block.Name)
+		// Handle blank COMMON (no name)
+		blockName := block.Name
+		if blockName == "" {
+			blockName = tg.globalCommon
+		}
+		blockIdent := ast.NewIdent(blockName)
 		var compositeLitElts []ast.Expr
 		structType := &ast.StructType{Fields: &ast.FieldList{}}
 		for i := range block.fields {

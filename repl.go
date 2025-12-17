@@ -174,6 +174,17 @@ func (repl *REPL) DefineStmtFunc(name string, params []string, expr f90.Expressi
 	vi.stmtFuncParams = params
 }
 
+// PushLoopVar temporarily adds an implied DO loop variable to the current scope.
+// Returns a function that removes the variable when called.
+// Usage: defer repl.PushLoopVar(name)()
+func (repl *REPL) PushVar(v Varinfo) (remove func()) {
+	repl.scope.vars = append(repl.scope.vars, v)
+	return func() {
+		// Remove the last variable (the one we just added)
+		repl.scope.vars = repl.scope.vars[:len(repl.scope.vars)-1]
+	}
+}
+
 // RegisteredUnit returns a program unit that was previously registered with RegisterUnit.
 func (repl *REPL) RegisteredUnit(name string) *f90.Unit {
 	for i := range repl.registered {

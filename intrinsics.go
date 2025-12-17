@@ -323,7 +323,8 @@ var intrinsicsv2 = []intrinsicFn{
 			makeCall("int32", _tgtInt32, _tgtGenericFloat),
 		},
 	},
-	f90token.IntrinsicIFIX: {redirectTo: uint(f90token.IntrinsicINT)},
+	f90token.IntrinsicIFIX:  {redirectTo: uint(f90token.IntrinsicINT)},
+	f90token.IntrinsicFLOAT: {redirectTo: uint(f90token.IntrinsicREAL)},
 	f90token.IntrinsicMAX: {
 		isVariadic: true,
 		calls: []intrinsicCall{
@@ -346,6 +347,9 @@ var intrinsicsv2 = []intrinsicFn{
 		f1:    math.Sqrt,
 	},
 	f90token.IntrinsicDSQRT: {redirectTo: uint(f90token.IntrinsicSQRT)},
+	f90token.IntrinsicCSQRT: {
+		calls: []intrinsicCall{makeCall("CSQRT", _tgtComplex64, _tgtComplex64)},
+	},
 	f90token.IntrinsicAIMAG: {
 		calls: []intrinsicCall{makeCall("AIMAG", _tgtFloat32, _tgtComplex64)},
 	},

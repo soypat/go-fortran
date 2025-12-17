@@ -754,9 +754,13 @@ func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.CallExpr) (result ast.E
 // astVarExpr returns the AST expression for a variable, handling COMMON block access.
 // It does not handle access patterns.
 func (tg *ToGo) astVarExpr(vi *Varinfo) ast.Expr {
-	if vi.common != "" {
+	if vi.flags.HasAny(VFlagCommon) {
+		blockName := vi.common
+		if blockName == "" {
+			blockName = tg.globalCommon // Blank COMMON block
+		}
 		return &ast.SelectorExpr{
-			X:   ast.NewIdent(vi.common),
+			X:   ast.NewIdent(blockName),
 			Sel: ast.NewIdent(vi.Identifier()),
 		}
 	}
