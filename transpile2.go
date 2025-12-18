@@ -334,7 +334,13 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		dst, err = tg.transformWriteStmt(dst, s)
 	case *f90.FormatStmt:
 		// FORMAT statements are compile-time format definitions, no runtime code
-	case *f90.OpenStmt, *f90.CloseStmt, *f90.ReadStmt, *f90.BackspaceStmt, *f90.RewindStmt, *f90.EndfileStmt, *f90.InquireStmt:
+	case *f90.OpenStmt:
+		dst, err = tg.transformOpenStmt(dst, s)
+	case *f90.CloseStmt:
+		dst, err = tg.transformCloseStmt(dst, s)
+	case *f90.ReadStmt:
+		dst, err = tg.transformReadStmt(dst, s)
+	case *f90.BackspaceStmt, *f90.RewindStmt, *f90.EndfileStmt, *f90.InquireStmt:
 		// File I/O statements - not yet implemented, skip silently
 	case *f90.EntryStmt:
 		// ENTRY statements (multiple entry points) - not supported
@@ -1383,6 +1389,28 @@ func (tg *ToGo) transformParameterStmt(dst []ast.Stmt, stmt *f90.ParameterStmt) 
 	return dst, nil
 }
 
+// transformIOUnitExpr generates an IOUnit expression for a unit specifier.
+// Returns GetIOUnit(n) for file units, or DefaultIOUnit() for stdout (*).
+func (tg *ToGo) transformIOUnitExpr(unit f90.Expression) (ast.Expr, error) {
+	if unit == nil {
+		// Default to stdout
+		return &ast.CallExpr{Fun: _astFnDefaultIOUnit}, nil
+	}
+	if ident, ok := unit.(*f90.Identifier); ok && ident.Value == "*" {
+		// * means stdout
+		return &ast.CallExpr{Fun: _astFnDefaultIOUnit}, nil
+	}
+	// File unit - use GetIOUnit(n)
+	unitExpr, _, err := tg.transformExpression(_tgtInt32, unit)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CallExpr{
+		Fun:  _astFnGetIOUnit,
+		Args: []ast.Expr{unitExpr},
+	}, nil
+}
+
 func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast.Stmt, err error) {
 	// Determine format expression
 	var formatExpr ast.Expr
@@ -1435,8 +1463,12 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 	}
 
 	// Simple case: no implied DO loops
+	unitExpr, err := tg.transformIOUnitExpr(stmt.Unit)
+	if err != nil {
+		return dst, err
+	}
 	args := make([]ast.Expr, 0, 2+len(stmt.OutputList))
-	args = append(args, &ast.CallExpr{Fun: _astFnDefaultIOUnit})
+	args = append(args, unitExpr)
 	args = append(args, formatExpr)
 	for _, expr := range stmt.OutputList {
 		var exprType Varinfo
@@ -1515,10 +1547,14 @@ func (tg *ToGo) transformWriteStmtWithImpliedDoLoop(dst []ast.Stmt, stmt *f90.Wr
 	}
 
 	// intrinsic.Write(unit, format, writeArgs...)
+	unitExpr, err := tg.transformIOUnitExpr(stmt.Unit)
+	if err != nil {
+		return dst, err
+	}
 	writeCall := &ast.CallExpr{
 		Fun: _astFnWrite,
 		Args: []ast.Expr{
-			&ast.CallExpr{Fun: _astFnDefaultIOUnit},
+			unitExpr,
 			formatExpr,
 			writeArgsVar,
 		},
@@ -1528,6 +1564,188 @@ func (tg *ToGo) transformWriteStmtWithImpliedDoLoop(dst []ast.Stmt, stmt *f90.Wr
 
 	// Wrap in a block to scope writeArgs
 	dst = append(dst, &ast.BlockStmt{List: blockStmts})
+	return dst, nil
+}
+
+// transformOpenStmt generates code for OPEN statements.
+// OPEN(UNIT=u, FILE=f, STATUS=s, ACTION=a) => intrinsic.OpenFile(u, f, s, a)
+func (tg *ToGo) transformOpenStmt(dst []ast.Stmt, stmt *f90.OpenStmt) (_ []ast.Stmt, err error) {
+	// Extract UNIT (required)
+	unitExpr, ok := stmt.Specifiers["UNIT"]
+	if !ok {
+		return dst, tg.makeErr(stmt, "OPEN requires UNIT specifier")
+	}
+	unitArg, _, err := tg.transformExpression(_tgtInt32, unitExpr)
+	if err != nil {
+		return dst, err
+	}
+
+	// Extract FILE (required for our implementation)
+	fileExpr, ok := stmt.Specifiers["FILE"]
+	if !ok {
+		return dst, tg.makeErr(stmt, "OPEN requires FILE specifier")
+	}
+	fileArg, _, err := tg.transformExpression(_tgtStringLit, fileExpr)
+	if err != nil {
+		return dst, err
+	}
+
+	// Extract STATUS (default "UNKNOWN")
+	var statusArg ast.Expr = &ast.BasicLit{Kind: token.STRING, Value: `"UNKNOWN"`}
+	if statusExpr, ok := stmt.Specifiers["STATUS"]; ok {
+		statusArg, _, err = tg.transformExpression(_tgtStringLit, statusExpr)
+		if err != nil {
+			return dst, err
+		}
+	}
+
+	// Extract ACTION (default "READWRITE")
+	var actionArg ast.Expr = &ast.BasicLit{Kind: token.STRING, Value: `"READWRITE"`}
+	if actionExpr, ok := stmt.Specifiers["ACTION"]; ok {
+		actionArg, _, err = tg.transformExpression(_tgtStringLit, actionExpr)
+		if err != nil {
+			return dst, err
+		}
+	}
+
+	// Generate: intrinsic.OpenFile(unit, file, status, action)
+	openCall := &ast.CallExpr{
+		Fun:  _astFnOpenFile,
+		Args: []ast.Expr{unitArg, fileArg, statusArg, actionArg},
+	}
+
+	// Check for IOSTAT= specifier
+	if iostatExpr, ok := stmt.Specifiers["IOSTAT"]; ok {
+		// Generate: iostatVar = func() int32 { if err := intrinsic.OpenFile(...); err != nil { return 1 } return 0 }()
+		// Simplified: just call OpenFile (ignore error for now, TODO: proper IOSTAT handling)
+		iostatVar, _, err := tg.transformExpression(_tgtInt32, iostatExpr)
+		if err != nil {
+			return dst, err
+		}
+		// For now, assign 0 to iostat and call OpenFile
+		dst = append(dst, &ast.ExprStmt{X: openCall})
+		dst = append(dst, &ast.AssignStmt{
+			Lhs: []ast.Expr{iostatVar},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "0"}},
+		})
+	} else {
+		dst = append(dst, &ast.ExprStmt{X: openCall})
+	}
+
+	return dst, nil
+}
+
+// transformCloseStmt generates code for CLOSE statements.
+// CLOSE(UNIT=u) => intrinsic.CloseFile(u)
+func (tg *ToGo) transformCloseStmt(dst []ast.Stmt, stmt *f90.CloseStmt) (_ []ast.Stmt, err error) {
+	// Extract UNIT (required)
+	unitExpr, ok := stmt.Specifiers["UNIT"]
+	if !ok {
+		return dst, tg.makeErr(stmt, "CLOSE requires UNIT specifier")
+	}
+	unitArg, _, err := tg.transformExpression(_tgtInt32, unitExpr)
+	if err != nil {
+		return dst, err
+	}
+
+	// Generate: intrinsic.CloseFile(unit)
+	closeCall := &ast.CallExpr{
+		Fun:  _astFnCloseFile,
+		Args: []ast.Expr{unitArg},
+	}
+	dst = append(dst, &ast.ExprStmt{X: closeCall})
+
+	return dst, nil
+}
+
+// transformReadStmt generates code for READ statements.
+// READ(unit, fmt) vars => intrinsic.Read(intrinsic.GetIOUnit(unit), format, &var1, &var2, ...)
+func (tg *ToGo) transformReadStmt(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []ast.Stmt, err error) {
+	// Determine unit expression
+	var unitArg ast.Expr
+	if stmt.Unit != nil {
+		if ident, ok := stmt.Unit.(*f90.Identifier); ok && ident.Value == "*" {
+			// stdin
+			unitArg = &ast.CallExpr{
+				Fun:  _astFnGetIOUnit,
+				Args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "5"}},
+			}
+		} else {
+			unitExpr, _, err := tg.transformExpression(_tgtInt32, stmt.Unit)
+			if err != nil {
+				return dst, err
+			}
+			unitArg = &ast.CallExpr{
+				Fun:  _astFnGetIOUnit,
+				Args: []ast.Expr{unitExpr},
+			}
+		}
+	} else {
+		// Default to stdin
+		unitArg = &ast.CallExpr{
+			Fun:  _astFnGetIOUnit,
+			Args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "5"}},
+		}
+	}
+
+	// Determine format expression
+	var formatExpr ast.Expr
+	switch format := stmt.Format.(type) {
+	case *f90.Identifier:
+		if format.Value == "*" {
+			// List-directed input
+			formatExpr = &ast.CallExpr{Fun: _astFnDefaultFormat}
+		} else {
+			return dst, tg.makeErr(stmt, "unknown read format "+format.Value)
+		}
+	case *f90.IntegerLiteral:
+		// Format label reference
+		label := strconv.FormatInt(format.Value, 10)
+		fmtInfo := tg.repl.getFormat(label)
+		if fmtInfo != nil {
+			formatArgs := formatSpecsToGoAST(fmtInfo.Specs)
+			formatExpr = &ast.CallExpr{
+				Fun:  _astFnNewFormat,
+				Args: formatArgs,
+			}
+		} else {
+			formatExpr = &ast.CallExpr{Fun: _astFnDefaultFormat}
+		}
+	case *f90.StringLiteral:
+		// Inline format string
+		specs := f90.ParseFormatString(format.Value)
+		formatArgs := formatSpecsToGoAST(specs)
+		formatExpr = &ast.CallExpr{
+			Fun:  _astFnNewFormat,
+			Args: formatArgs,
+		}
+	default:
+		formatExpr = &ast.CallExpr{Fun: _astFnDefaultFormat}
+	}
+
+	// Build arguments: unit, format, &var1, &var2, ...
+	args := []ast.Expr{unitArg, formatExpr}
+	for _, expr := range stmt.InputList {
+		var exprType Varinfo
+		if err := tg.repl.InferType(&exprType, expr); err != nil {
+			return dst, err
+		}
+		goExpr, _, err := tg.transformExpression(&exprType, expr)
+		if err != nil {
+			return dst, err
+		}
+		// Take address of variable for READ
+		args = append(args, &ast.UnaryExpr{Op: token.AND, X: goExpr})
+	}
+
+	// Generate: intrinsic.Read(unit, format, &var1, &var2, ...)
+	readCall := &ast.CallExpr{
+		Fun:  _astFnRead,
+		Args: args,
+	}
+	dst = append(dst, &ast.ExprStmt{X: readCall})
+
 	return dst, nil
 }
 

@@ -2713,6 +2713,9 @@ func ParseFormatString(spec string) []FormatSpec {
 				}
 			}
 			fs.Repeat = repeat
+			if fs.Repeat == 0 {
+				fs.Repeat = 1
+			}
 			fs.Group = ParseFormatString(spec[groupStart:i])
 			if i < len(spec) {
 				i++ // skip closing )
@@ -2746,6 +2749,9 @@ func (spec *FormatSpec) SetFromString(lit string) int {
 	for i < n && lit[i] >= '0' && lit[i] <= '9' {
 		spec.Repeat = spec.Repeat*10 + int(lit[i]-'0')
 		i++
+	}
+	if spec.Repeat == 0 {
+		spec.Repeat = 1
 	}
 
 	// Parse descriptor letter(s)

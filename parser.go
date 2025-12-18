@@ -1700,6 +1700,7 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 	if isRead {
 		return &ast.ReadStmt{
 			Unit:      unit,
+			Format:    format,
 			InputList: ioList,
 			Position:  pos,
 		}

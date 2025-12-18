@@ -658,6 +658,22 @@ var (
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("FmtNewline"),
 	}
+	_astFnOpenFile = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("OpenFile"),
+	}
+	_astFnCloseFile = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("CloseFile"),
+	}
+	_astFnGetIOUnit = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("GetIOUnit"),
+	}
+	_astFnRead = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("Read"),
+	}
 	_astTypeCharArray = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("CharacterArray"),

@@ -9,9 +9,145 @@ import (
 	"strconv"
 )
 
-type IOUnit struct {
-	rw io.ReadWriteCloser
+type Environment struct {
+	// First 8 files, units 0..7
+	unitsCache [8]*os.File
+	units      map[int32]*os.File
+	buf        []byte
 }
+
+func NewEnvironment() *Environment {
+	env := &Environment{
+		units: make(map[int32]*os.File),
+	}
+	env.unitsCache[0] = os.Stderr
+	env.unitsCache[5] = os.Stdin
+	env.unitsCache[6] = os.Stdout
+	return env
+}
+
+func (env *Environment) getFile(unit int32) *os.File {
+	if int(unit) < len(env.unitsCache) {
+		return env.unitsCache[unit]
+	}
+	return env.units[unit]
+}
+
+func (env *Environment) CloseFile(unit int32) (err error) {
+	if int(unit) < len(env.unitsCache) {
+		fp := env.unitsCache[unit]
+		if fp == nil {
+			return os.ErrNotExist
+		}
+		env.unitsCache[unit] = nil // Delete?
+		return fp.Close()          // we do not delete lowest ranking units.
+	}
+	fp, ok := env.units[unit]
+	if !ok {
+		return os.ErrNotExist
+	}
+	delete(env.units, unit)
+	return fp.Close()
+}
+
+func (env *Environment) Write(unit int32, f *Format, args ...any) error {
+	fp := env.getFile(unit)
+	if fp == nil {
+		return os.ErrNotExist
+	}
+	buf := env.buf[:0]
+
+	// Check if we have a format specification (either raw spec or pre-parsed)
+	if f.spec != "" || f.parsed {
+		// Formatted output using format descriptors
+		f.ensureParsed()
+		buf = f.writeFormatted(buf, args)
+	} else {
+		// List-directed output (PRINT * behavior)
+		buf = f.writeListDirected(buf, args)
+	}
+
+	buf = append(buf, '\n')
+	_, err := fp.Write(buf)
+	env.buf = buf[:0] // keep buffer if expanded.
+	return err
+}
+
+func (env *Environment) OpenFile(unit int32, filename, status, action string) error {
+	// Close any existing file on this unit
+	env.CloseFile(unit)
+	var flag int
+	switch action {
+	case "READ":
+		flag = os.O_RDONLY
+	case "WRITE":
+		flag = os.O_WRONLY
+	case "READWRITE":
+		flag = os.O_RDWR
+	default:
+		flag = os.O_RDWR
+	}
+
+	switch status {
+	case "OLD":
+		// File must exist
+	case "NEW":
+		flag |= os.O_CREATE | os.O_EXCL
+	case "REPLACE":
+		flag |= os.O_CREATE | os.O_TRUNC
+	case "UNKNOWN":
+		flag |= os.O_CREATE
+	default:
+		flag |= os.O_CREATE
+	}
+
+	f, err := os.OpenFile(filename, flag, 0644)
+	if err != nil {
+		return err
+	}
+	if int(unit) < len(env.unitsCache) {
+		env.unitsCache[unit] = f
+	} else {
+		env.units[unit] = f
+	}
+	return nil
+}
+
+func (env *Environment) Read(unit int32, f *Format, args ...any) error {
+	fp := env.getFile(unit)
+	if fp == nil {
+		return os.ErrNotExist
+	}
+	// Read a line from the unit
+	var buf bytes.Buffer
+	oneByte := make([]byte, 1)
+	for {
+		n, err := fp.Read(oneByte)
+		if n > 0 {
+			if oneByte[0] == '\n' {
+				break
+			}
+			buf.WriteByte(oneByte[0])
+		}
+		if err != nil {
+			if err == io.EOF && buf.Len() > 0 {
+				break
+			}
+			return err
+		}
+	}
+	line := buf.String()
+	// Parse based on format
+	if f.spec == "" && !f.parsed {
+		// List-directed input
+		return readListDirected(line, args)
+	}
+
+	f.ensureParsed()
+	return readFormatted(line, f.descriptors, args)
+}
+
+var defaultEnv = NewEnvironment()
 
 var defaultFormat Format
 
@@ -160,41 +296,24 @@ func parseFormatSpec(spec string) []FormatDescriptor {
 	return descriptors
 }
 
-var defaultIOUnit = IOUnit{
-	rw: os.Stdout,
-}
-
-func DefaultIOUnit() IOUnit {
-	return defaultIOUnit
+func DefaultIOUnit() int32 {
+	return 6
 }
 
 func DefaultFormat() *Format {
 	return &defaultFormat
 }
 
-func PrintUnit(unit IOUnit, v ...any) {
-	Write(defaultIOUnit, &defaultFormat, v...)
+func PrintUnit(unit int32, v ...any) {
+	Write(unit, &defaultFormat, v...)
 }
 
 func Print(v ...any) {
-	Write(defaultIOUnit, &defaultFormat, v...)
+	Write(DefaultIOUnit(), &defaultFormat, v...)
 }
 
-func Write(unit IOUnit, f *Format, args ...any) {
-	var buf []byte
-
-	// Check if we have a format specification (either raw spec or pre-parsed)
-	if f.spec != "" || f.parsed {
-		// Formatted output using format descriptors
-		f.ensureParsed()
-		buf = f.writeFormatted(buf, args)
-	} else {
-		// List-directed output (PRINT * behavior)
-		buf = f.writeListDirected(buf, args)
-	}
-
-	buf = append(buf, '\n')
-	unit.rw.Write(buf)
+func Write(unit int32, f *Format, args ...any) {
+	defaultEnv.Write(unit, f, args...)
 }
 
 // writeFormatted applies format descriptors to arguments.
@@ -345,6 +464,176 @@ func (f *Format) formatString(buf []byte, val any, width int) []byte {
 		buf = append(buf, ' ')
 	}
 	return buf
+}
+
+// =============================================================================
+// File IO Support
+// =============================================================================
+
+// OpenFile opens a file and associates it with a Fortran unit number.
+// status: "OLD" (must exist), "NEW" (must not exist), "REPLACE" (create/overwrite), "UNKNOWN" (implementation-defined)
+// action: "READ", "WRITE", "READWRITE"
+func OpenFile(unit int32, filename, status, action string) error {
+	return defaultEnv.OpenFile(unit, filename, status, action)
+}
+
+// CloseFile closes the file associated with a unit number.
+func CloseFile(unit int32) error {
+	return defaultEnv.CloseFile(unit)
+}
+
+// GetIOUnit returns the IOUnit for a given Fortran unit number.
+// Unit 5 is stdin, unit 6 is stdout, unit 0 is stderr.
+// Other units use files opened via OpenFile.
+func GetIOUnit(unit int32) int32 { return unit }
+
+// Read reads formatted data from an IO unit into variables.
+// args should be pointers to variables that will receive the data.
+func Read(unit int32, f *Format, args ...any) error {
+	return defaultEnv.Read(unit, f, args...)
+}
+
+// readListDirected parses space/comma-separated values.
+func readListDirected(line string, args []any) error {
+	// Simple space-separated parsing
+	fields := splitFields(line)
+	for i, arg := range args {
+		if i >= len(fields) {
+			break
+		}
+		if err := scanValue(fields[i], arg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readFormatted parses data according to format descriptors.
+func readFormatted(line string, descriptors []FormatDescriptor, args []any) error {
+	pos := 0
+	argIdx := 0
+	for _, desc := range descriptors {
+		if argIdx >= len(args) {
+			break
+		}
+		switch desc.Type {
+		case 'I': // Integer
+			width := desc.Width
+			if width == 0 {
+				width = 10 // default
+			}
+			if pos+width > len(line) {
+				width = len(line) - pos
+			}
+			field := trimSpaces(line[pos : pos+width])
+			pos += width
+			if err := scanValue(field, args[argIdx]); err != nil {
+				return err
+			}
+			argIdx++
+		case 'F', 'E', 'G', 'D': // Float formats
+			width := desc.Width
+			if width == 0 {
+				width = 15 // default
+			}
+			if pos+width > len(line) {
+				width = len(line) - pos
+			}
+			field := trimSpaces(line[pos : pos+width])
+			pos += width
+			if err := scanValue(field, args[argIdx]); err != nil {
+				return err
+			}
+			argIdx++
+		case 'A': // Character
+			width := desc.Width
+			if width == 0 {
+				width = len(line) - pos // rest of line
+			}
+			if pos+width > len(line) {
+				width = len(line) - pos
+			}
+			field := line[pos : pos+width]
+			pos += width
+			if err := scanValue(field, args[argIdx]); err != nil {
+				return err
+			}
+			argIdx++
+		case 'X': // Skip
+			pos += desc.Width
+		case 'S', '/':
+			// Literals and newlines don't consume args
+		}
+	}
+	return nil
+}
+
+// splitFields splits a line into whitespace/comma-separated fields.
+func splitFields(s string) []string {
+	var fields []string
+	var current bytes.Buffer
+	for _, r := range s {
+		if r == ' ' || r == ',' || r == '\t' {
+			if current.Len() > 0 {
+				fields = append(fields, current.String())
+				current.Reset()
+			}
+		} else {
+			current.WriteRune(r)
+		}
+	}
+	if current.Len() > 0 {
+		fields = append(fields, current.String())
+	}
+	return fields
+}
+
+// trimSpaces removes leading and trailing spaces.
+func trimSpaces(s string) string {
+	start := 0
+	for start < len(s) && s[start] == ' ' {
+		start++
+	}
+	end := len(s)
+	for end > start && s[end-1] == ' ' {
+		end--
+	}
+	return s[start:end]
+}
+
+// scanValue parses a string into a pointer variable.
+func scanValue(field string, arg any) error {
+	switch p := arg.(type) {
+	case *int32:
+		n, err := strconv.ParseInt(field, 10, 32)
+		if err != nil {
+			return err
+		}
+		*p = int32(n)
+	case *int64:
+		n, err := strconv.ParseInt(field, 10, 64)
+		if err != nil {
+			return err
+		}
+		*p = n
+	case *float32:
+		f, err := strconv.ParseFloat(field, 32)
+		if err != nil {
+			return err
+		}
+		*p = float32(f)
+	case *float64:
+		f, err := strconv.ParseFloat(field, 64)
+		if err != nil {
+			return err
+		}
+		*p = f
+	case *string:
+		*p = field
+	case *CharacterArray:
+		p.SetFromString(field)
+	}
+	return nil
 }
 
 func (f Format) formatValue(dst []byte, value any) []byte {

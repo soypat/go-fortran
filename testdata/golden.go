@@ -41,6 +41,7 @@ func GOLDEN() {
 	LEVEL34()
 	LEVEL35()
 	LEVEL36()
+	LEVEL37()
 	intrinsic.Stop(0)
 }
 func LEVEL01() {
@@ -1090,7 +1091,7 @@ func LEVEL35() {
 	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), m, n, x)
 	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.DefaultFormat(), "LEVEL 35: Values:", m, n)
 	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat(intrinsic.FormatDescriptor{Type: 'S', Literal: "LEVEL 35: Formatted output line"}))
-	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat(intrinsic.FormatDescriptor{Type: 'S', Literal: "LEVEL35: m="}, intrinsic.FormatDescriptor{Type: 'I', Width: 3}, intrinsic.FormatDescriptor{Type: 'S', Literal: " n="}, intrinsic.FormatDescriptor{Type: 'I', Width: 3}, intrinsic.FormatDescriptor{Type: 'S', Literal: " x="}, intrinsic.FormatDescriptor{Type: 'F', Width: 5, Precision: 2}), m, n, x)
+	intrinsic.Write(intrinsic.DefaultIOUnit(), intrinsic.NewFormat(intrinsic.FormatDescriptor{Type: 'S', Literal: "LEVEL35: m="}, intrinsic.FormatDescriptor{Type: 'I', Width: 3, Repeat: 1}, intrinsic.FormatDescriptor{Type: 'S', Literal: " n="}, intrinsic.FormatDescriptor{Type: 'I', Width: 3, Repeat: 1}, intrinsic.FormatDescriptor{Type: 'S', Literal: " x="}, intrinsic.FormatDescriptor{Type: 'F', Width: 5, Precision: 2, Repeat: 1}), m, n, x)
 	goto label220
 label220:
 	{
@@ -1129,6 +1130,33 @@ func LEVEL36() {
 	intrinsic.Print("LEVEL 36: Equiv d=", d1k.At(1), d2k.At(1), d3k.At(1))
 	BLKINVDECL()
 	BLKDECL()
+}
+func LEVEL37() {
+	var (
+		iounit  int32
+		x       int32
+		y       int32
+		_, _, _ = iounit, x, y
+	)
+	var (
+		msg intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		_                            = msg
+	)
+	iounit = 10
+	x = 42
+	y = 99
+	msg.SetFromString("Hello File IO")
+	intrinsic.OpenFile(iounit, "test_io.txt", "REPLACE", "WRITE")
+	intrinsic.Write(intrinsic.GetIOUnit(iounit), intrinsic.NewFormat(intrinsic.FormatDescriptor{Type: 'A', Repeat: 1}), msg)
+	intrinsic.Write(intrinsic.GetIOUnit(iounit), intrinsic.NewFormat(intrinsic.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, intrinsic.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), x, y)
+	intrinsic.CloseFile(iounit)
+	x = 0
+	y = 0
+	intrinsic.OpenFile(iounit, "test_io.txt", "OLD", "READ")
+	intrinsic.Read(intrinsic.GetIOUnit(iounit), intrinsic.NewFormat(intrinsic.FormatDescriptor{Type: 'A', Repeat: 1}), &msg)
+	intrinsic.Read(intrinsic.GetIOUnit(iounit), intrinsic.NewFormat(intrinsic.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, intrinsic.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), &x, &y)
+	intrinsic.CloseFile(iounit)
+	intrinsic.Print("LEVEL 37: READ BACK", msg, x, y)
 }
 func SIMPLE_SUB() {
 	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")

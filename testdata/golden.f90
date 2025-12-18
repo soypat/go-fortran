@@ -39,6 +39,7 @@
       CALL LEVEL34()
       CALL LEVEL35()
       CALL LEVEL36()
+      CALL LEVEL37()
       STOP 0
       CONTAINS
 
@@ -906,7 +907,33 @@
         CALL BLKINVDECL()
         CALL BLKDECL()
     END SUBROUTINE LEVEL36
-    
+
+    SUBROUTINE LEVEL37() ! File IO: OPEN, WRITE, CLOSE, READ
+        INTEGER :: iounit, x, y
+        CHARACTER(LEN=20) :: msg
+        iounit = 10
+        x = 42
+        y = 99
+        msg = 'Hello File IO'
+
+        ! Create and write to file
+        OPEN(UNIT=iounit, FILE='test_io.txt', STATUS='REPLACE', ACTION='WRITE')
+        WRITE(iounit, '(A)') msg
+        WRITE(iounit, '(I5,I5)') x, y
+        CLOSE(UNIT=iounit)
+
+        ! Reopen and read
+        x = 0
+        y = 0
+        OPEN(UNIT=iounit, FILE='test_io.txt', STATUS='OLD', ACTION='READ')
+        READ(iounit, '(A)') msg
+        READ(iounit, '(I5,I5)') x, y
+        CLOSE(UNIT=iounit)
+
+        ! Print results
+        PRINT *, 'LEVEL 37: READ BACK', msg, x, y
+    END SUBROUTINE LEVEL37
+
     ! ==============================================================================
 ! Helper Subroutines and Functions
 ! ==============================================================================

@@ -23,6 +23,7 @@ _old*
 testdata/golden
 testdata/golden.out
 /golden*
+/test_io.txt
 *_exe
 # test transpile files.
 *.f90.go 
