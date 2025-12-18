@@ -1,155 +1,13 @@
-package intrinsic
+package fortio
 
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"math"
-	"os"
 	"strconv"
+
+	"github.com/soypat/go-fortran/intrinsic"
 )
-
-type Environment struct {
-	// First 8 files, units 0..7
-	unitsCache [8]*os.File
-	units      map[int32]*os.File
-	buf        []byte
-}
-
-func NewEnvironment() *Environment {
-	env := &Environment{
-		units: make(map[int32]*os.File),
-	}
-	env.unitsCache[0] = os.Stderr
-	env.unitsCache[5] = os.Stdin
-	env.unitsCache[6] = os.Stdout
-	return env
-}
-
-func (env *Environment) getFile(unit int32) *os.File {
-	if int(unit) < len(env.unitsCache) {
-		return env.unitsCache[unit]
-	}
-	return env.units[unit]
-}
-
-func (env *Environment) CloseFile(unit int32) (err error) {
-	if int(unit) < len(env.unitsCache) {
-		fp := env.unitsCache[unit]
-		if fp == nil {
-			return os.ErrNotExist
-		}
-		env.unitsCache[unit] = nil // Delete?
-		return fp.Close()          // we do not delete lowest ranking units.
-	}
-	fp, ok := env.units[unit]
-	if !ok {
-		return os.ErrNotExist
-	}
-	delete(env.units, unit)
-	return fp.Close()
-}
-
-func (env *Environment) Write(unit int32, f *Format, args ...any) error {
-	fp := env.getFile(unit)
-	if fp == nil {
-		return os.ErrNotExist
-	}
-	buf := env.buf[:0]
-
-	// Check if we have a format specification (either raw spec or pre-parsed)
-	if f.spec != "" || f.parsed {
-		// Formatted output using format descriptors
-		f.ensureParsed()
-		buf = f.writeFormatted(buf, args)
-	} else {
-		// List-directed output (PRINT * behavior)
-		buf = f.writeListDirected(buf, args)
-	}
-
-	buf = append(buf, '\n')
-	_, err := fp.Write(buf)
-	env.buf = buf[:0] // keep buffer if expanded.
-	return err
-}
-
-func (env *Environment) OpenFile(unit int32, filename, status, action string) error {
-	// Close any existing file on this unit
-	env.CloseFile(unit)
-	var flag int
-	switch action {
-	case "READ":
-		flag = os.O_RDONLY
-	case "WRITE":
-		flag = os.O_WRONLY
-	case "READWRITE":
-		flag = os.O_RDWR
-	default:
-		flag = os.O_RDWR
-	}
-
-	switch status {
-	case "OLD":
-		// File must exist
-	case "NEW":
-		flag |= os.O_CREATE | os.O_EXCL
-	case "REPLACE":
-		flag |= os.O_CREATE | os.O_TRUNC
-	case "UNKNOWN":
-		flag |= os.O_CREATE
-	default:
-		flag |= os.O_CREATE
-	}
-
-	f, err := os.OpenFile(filename, flag, 0644)
-	if err != nil {
-		return err
-	}
-	if int(unit) < len(env.unitsCache) {
-		env.unitsCache[unit] = f
-	} else {
-		env.units[unit] = f
-	}
-	return nil
-}
-
-func (env *Environment) Read(unit int32, f *Format, args ...any) error {
-	fp := env.getFile(unit)
-	if fp == nil {
-		return os.ErrNotExist
-	}
-	// Read a line from the unit
-	var buf bytes.Buffer
-	oneByte := make([]byte, 1)
-	for {
-		n, err := fp.Read(oneByte)
-		if n > 0 {
-			if oneByte[0] == '\n' {
-				break
-			}
-			buf.WriteByte(oneByte[0])
-		}
-		if err != nil {
-			if err == io.EOF && buf.Len() > 0 {
-				break
-			}
-			return err
-		}
-	}
-	line := buf.String()
-	// Parse based on format
-	if f.spec == "" && !f.parsed {
-		// List-directed input
-		return readListDirected(line, args)
-	}
-
-	f.ensureParsed()
-	return readFormatted(line, f.descriptors, args)
-}
-
-var defaultEnv = NewEnvironment()
-
-var defaultFormat Format
 
 // Format control characters for compile-time tokenized formats
 const (
@@ -166,6 +24,7 @@ type FormatDescriptor struct {
 	Repeat    int    // Repeat count (e.g., 6 in 6ES12.4), 0 means 1
 }
 
+// Format holds format specification for I/O operations.
 type Format struct {
 	spec        string             // Raw format specification
 	descriptors []FormatDescriptor // Parsed descriptors (lazily populated)
@@ -214,6 +73,13 @@ func NewFormat(args ...any) *Format {
 	}
 	return f
 }
+
+// DefaultFormat returns a default (list-directed) format.
+func DefaultFormat() *Format {
+	return &defaultFormat
+}
+
+var defaultFormat Format
 
 // ensureParsed parses the format spec if not already parsed.
 func (f *Format) ensureParsed() {
@@ -296,26 +162,6 @@ func parseFormatSpec(spec string) []FormatDescriptor {
 	return descriptors
 }
 
-func DefaultIOUnit() int32 {
-	return 6
-}
-
-func DefaultFormat() *Format {
-	return &defaultFormat
-}
-
-func PrintUnit(unit int32, v ...any) {
-	Write(unit, &defaultFormat, v...)
-}
-
-func Print(v ...any) {
-	Write(DefaultIOUnit(), &defaultFormat, v...)
-}
-
-func Write(unit int32, f *Format, args ...any) {
-	defaultEnv.Write(unit, f, args...)
-}
-
 // writeFormatted applies format descriptors to arguments.
 func (f *Format) writeFormatted(buf []byte, args []any) []byte {
 	argIdx := 0
@@ -325,17 +171,17 @@ func (f *Format) writeFormatted(buf []byte, args []any) []byte {
 			buf = append(buf, desc.Literal...)
 		case 'I': // Integer
 			if argIdx < len(args) {
-				buf = f.formatInt(buf, args[argIdx], desc.Width)
+				buf = formatInt(buf, args[argIdx], desc.Width)
 				argIdx++
 			}
 		case 'F': // Float (fixed-point)
 			if argIdx < len(args) {
-				buf = f.formatFloat(buf, args[argIdx], desc.Width, desc.Precision)
+				buf = formatFloat(buf, args[argIdx], desc.Width, desc.Precision)
 				argIdx++
 			}
 		case 'A': // Character/string
 			if argIdx < len(args) {
-				buf = f.formatString(buf, args[argIdx], desc.Width)
+				buf = formatString(buf, args[argIdx], desc.Width)
 				argIdx++
 			}
 		case 'X': // Skip spaces
@@ -346,7 +192,7 @@ func (f *Format) writeFormatted(buf []byte, args []any) []byte {
 			buf = append(buf, '\n')
 		case 'E': // Exponential format (scientific notation)
 			if argIdx < len(args) {
-				buf = f.formatExponential(buf, args[argIdx], desc.Width, desc.Precision)
+				buf = formatExponential(buf, args[argIdx], desc.Width, desc.Precision)
 				argIdx++
 			}
 		}
@@ -363,20 +209,19 @@ func (f *Format) writeListDirected(buf []byte, args []any) []byte {
 	prevWasString := false
 	for i, val := range args {
 		_, thisIsString := val.(string)
-		_, thisIsCharArray := val.(CharacterArray)
-		isStringType := thisIsString || thisIsCharArray
+		isStringType := thisIsString || isCharacterArray(val)
 		dontSpace := prevWasString && isStringType
 		if !dontSpace && i > 0 {
 			buf = append(buf, ' ')
 		}
-		buf = f.formatValue(buf, val)
+		buf = formatValue(buf, val)
 		prevWasString = isStringType
 	}
 	return buf
 }
 
 // formatInt formats an integer with specified width (right-aligned).
-func (f *Format) formatInt(buf []byte, val any, width int) []byte {
+func formatInt(buf []byte, val any, width int) []byte {
 	var n int64
 	switch v := val.(type) {
 	case int:
@@ -392,17 +237,18 @@ func (f *Format) formatInt(buf []byte, val any, width int) []byte {
 	default:
 		return buf
 	}
-	s := strconv.FormatInt(n, 10)
+	startLen := len(buf)
+	buf = strconv.AppendInt(buf, n, 10)
+	numLen := len(buf) - startLen
 	// Right-align with spaces
-	for i := len(s); i < width; i++ {
-		buf = append(buf, ' ')
+	if pad := width - numLen; pad > 0 {
+		buf = padLeft(buf, startLen, pad)
 	}
-	buf = append(buf, s...)
 	return buf
 }
 
 // formatFloat formats a float with specified width and precision.
-func (f *Format) formatFloat(buf []byte, val any, width int, precision int) []byte {
+func formatFloat(buf []byte, val any, width int, precision int) []byte {
 	var x float64
 	switch v := val.(type) {
 	case float32:
@@ -415,17 +261,18 @@ func (f *Format) formatFloat(buf []byte, val any, width int, precision int) []by
 	if precision < 0 {
 		precision = 2 // default
 	}
-	s := strconv.FormatFloat(x, 'f', precision, 64)
+	startLen := len(buf)
+	buf = strconv.AppendFloat(buf, x, 'f', precision, 64)
+	numLen := len(buf) - startLen
 	// Right-align with spaces
-	for i := len(s); i < width; i++ {
-		buf = append(buf, ' ')
+	if pad := width - numLen; pad > 0 {
+		buf = padLeft(buf, startLen, pad)
 	}
-	buf = append(buf, s...)
 	return buf
 }
 
 // formatExponential formats a float in exponential/scientific notation (E format).
-func (f *Format) formatExponential(buf []byte, val any, width int, precision int) []byte {
+func formatExponential(buf []byte, val any, width int, precision int) []byte {
 	var x float64
 	switch v := val.(type) {
 	case float32:
@@ -438,23 +285,24 @@ func (f *Format) formatExponential(buf []byte, val any, width int, precision int
 	if precision < 0 {
 		precision = 4 // default for E format
 	}
-	s := strconv.FormatFloat(x, 'E', precision, 64)
+	startLen := len(buf)
+	buf = strconv.AppendFloat(buf, x, 'E', precision, 64)
+	numLen := len(buf) - startLen
 	// Right-align with spaces
-	for i := len(s); i < width; i++ {
-		buf = append(buf, ' ')
+	if pad := width - numLen; pad > 0 {
+		buf = padLeft(buf, startLen, pad)
 	}
-	buf = append(buf, s...)
 	return buf
 }
 
 // formatString formats a string with specified width.
-func (f *Format) formatString(buf []byte, val any, width int) []byte {
+func formatString(buf []byte, val any, width int) []byte {
 	var s string
 	switch v := val.(type) {
 	case string:
 		s = v
-	case CharacterArray:
-		s = string(v.data[:cap(v.data)])
+	case fmt.Stringer:
+		s = v.String()
 	default:
 		return buf
 	}
@@ -464,108 +312,6 @@ func (f *Format) formatString(buf []byte, val any, width int) []byte {
 		buf = append(buf, ' ')
 	}
 	return buf
-}
-
-// =============================================================================
-// File IO Support
-// =============================================================================
-
-// OpenFile opens a file and associates it with a Fortran unit number.
-// status: "OLD" (must exist), "NEW" (must not exist), "REPLACE" (create/overwrite), "UNKNOWN" (implementation-defined)
-// action: "READ", "WRITE", "READWRITE"
-func OpenFile(unit int32, filename, status, action string) error {
-	return defaultEnv.OpenFile(unit, filename, status, action)
-}
-
-// CloseFile closes the file associated with a unit number.
-func CloseFile(unit int32) error {
-	return defaultEnv.CloseFile(unit)
-}
-
-// GetIOUnit returns the IOUnit for a given Fortran unit number.
-// Unit 5 is stdin, unit 6 is stdout, unit 0 is stderr.
-// Other units use files opened via OpenFile.
-func GetIOUnit(unit int32) int32 { return unit }
-
-// Read reads formatted data from an IO unit into variables.
-// args should be pointers to variables that will receive the data.
-func Read(unit int32, f *Format, args ...any) error {
-	return defaultEnv.Read(unit, f, args...)
-}
-
-// readListDirected parses space/comma-separated values.
-func readListDirected(line string, args []any) error {
-	// Simple space-separated parsing
-	fields := splitFields(line)
-	for i, arg := range args {
-		if i >= len(fields) {
-			break
-		}
-		if err := scanValue(fields[i], arg); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// readFormatted parses data according to format descriptors.
-func readFormatted(line string, descriptors []FormatDescriptor, args []any) error {
-	pos := 0
-	argIdx := 0
-	for _, desc := range descriptors {
-		if argIdx >= len(args) {
-			break
-		}
-		switch desc.Type {
-		case 'I': // Integer
-			width := desc.Width
-			if width == 0 {
-				width = 10 // default
-			}
-			if pos+width > len(line) {
-				width = len(line) - pos
-			}
-			field := trimSpaces(line[pos : pos+width])
-			pos += width
-			if err := scanValue(field, args[argIdx]); err != nil {
-				return err
-			}
-			argIdx++
-		case 'F', 'E', 'G', 'D': // Float formats
-			width := desc.Width
-			if width == 0 {
-				width = 15 // default
-			}
-			if pos+width > len(line) {
-				width = len(line) - pos
-			}
-			field := trimSpaces(line[pos : pos+width])
-			pos += width
-			if err := scanValue(field, args[argIdx]); err != nil {
-				return err
-			}
-			argIdx++
-		case 'A': // Character
-			width := desc.Width
-			if width == 0 {
-				width = len(line) - pos // rest of line
-			}
-			if pos+width > len(line) {
-				width = len(line) - pos
-			}
-			field := line[pos : pos+width]
-			pos += width
-			if err := scanValue(field, args[argIdx]); err != nil {
-				return err
-			}
-			argIdx++
-		case 'X': // Skip
-			pos += desc.Width
-		case 'S', '/':
-			// Literals and newlines don't consume args
-		}
-	}
-	return nil
 }
 
 // splitFields splits a line into whitespace/comma-separated fields.
@@ -601,43 +347,50 @@ func trimSpaces(s string) string {
 	return s[start:end]
 }
 
-// scanValue parses a string into a pointer variable.
-func scanValue(field string, arg any) error {
-	switch p := arg.(type) {
-	case *int32:
-		n, err := strconv.ParseInt(field, 10, 32)
-		if err != nil {
-			return err
-		}
-		*p = int32(n)
-	case *int64:
-		n, err := strconv.ParseInt(field, 10, 64)
-		if err != nil {
-			return err
-		}
-		*p = n
-	case *float32:
-		f, err := strconv.ParseFloat(field, 32)
-		if err != nil {
-			return err
-		}
-		*p = float32(f)
-	case *float64:
-		f, err := strconv.ParseFloat(field, 64)
-		if err != nil {
-			return err
-		}
-		*p = f
-	case *string:
-		*p = field
-	case *CharacterArray:
-		p.SetFromString(field)
-	}
-	return nil
+// padLeft inserts padding spaces before the value at startOff.
+func padLeft(dst []byte, startOff, leftPad int) []byte {
+	const space = "                                         "
+	strLen := len(dst) - startOff
+	// First grow slice if needed
+	dst = append(dst, space[:leftPad]...)
+	// Now copy value bytes to end (achieves right-alignment)
+	copy(dst[len(dst)-strLen:], dst[startOff:startOff+strLen])
+	// Now set left pad of bytes to space
+	copy(dst[startOff:startOff+leftPad], space)
+	return dst
 }
 
-func (f Format) formatValue(dst []byte, value any) []byte {
+// fixExponent pads exponent to 3 digits minimum per F95 spec (E-005 not E-05)
+func fixExponent(dst []byte, start int) []byte {
+	if i := bytes.IndexByte(dst[start:], 'E'); i >= 0 {
+		i += start
+		if i+2 < len(dst) && (dst[i+1] == '+' || dst[i+1] == '-') {
+			// Find where exponent digits start
+			expStart := i + 2
+			expDigits := dst[expStart:]
+			// Pad to 3 digits
+			for len(expDigits) < 3 {
+				dst = append(dst[:expStart], append([]byte{'0'}, dst[expStart:]...)...)
+				expDigits = dst[expStart:]
+			}
+		}
+	}
+	return dst
+}
 
+// isCharacterArray checks if val is an intrinsic.CharacterArray.
+func isCharacterArray(val any) bool {
+	_, ok := val.(intrinsic.CharacterArray)
+	return ok
+}
+
+func isString(val any) bool {
+	_, ok := val.(string)
+	return ok
+}
+
+// formatValue formats a value for list-directed output (PRINT * behavior).
+func formatValue(dst []byte, value any) []byte {
 	prevLen := len(dst)
 
 	// Control variables: leftPad and rightPad calculated per type
@@ -645,8 +398,9 @@ func (f Format) formatValue(dst []byte, value any) []byte {
 
 	// Format value and determine padding (from gfortran libgfortran/io/write.c)
 	switch v := value.(type) {
-	case CharacterArray:
-		dst = append(dst, v.data[:cap(v.data)]...)
+	case intrinsic.CharacterArray:
+		dst = append(dst, v.String()...)
+		return dst
 	case string:
 		dst = append(dst, v...)
 		return dst
@@ -748,56 +502,111 @@ func (f Format) formatValue(dst []byte, value any) []byte {
 	return dst
 }
 
-// appendFloat formats floating-point per F95 list-directed output (10.8.2):
-// Uses F format if magnitude in range, else E format with 2-digit exponent minimum
-func appendFloat[T float](dst []byte, x T, fmt byte, prec int) []byte {
-	s := strconv.AppendFloat(dst, float64(x), fmt, prec, 64)
-	// F95 requires min 2-digit exponent (E-005 not E-05)
-	if i := bytes.IndexByte(s[len(dst):], 'E'); i >= 0 {
-		i += len(dst)
-		// Find exponent sign
-		if i+1 < len(s) && (s[i+1] == '+' || s[i+1] == '-') {
-			exp := s[i+2:]
-			// Pad to 3 digits if needed (Fortran E format minimum)
-			if len(exp) < 3 {
-				s = append(s[:i+2], '0')
-				s = append(s, exp...)
-			}
-			if len(exp) < 2 {
-				s = append(s[:i+2], '0')
-				s = append(s, s[i+2:]...)
-			}
+// scanValue parses a string into a pointer variable.
+func scanValue(field string, arg any) error {
+	switch p := arg.(type) {
+	case *int32:
+		n, err := strconv.ParseInt(field, 10, 32)
+		if err != nil {
+			return err
 		}
+		*p = int32(n)
+	case *int64:
+		n, err := strconv.ParseInt(field, 10, 64)
+		if err != nil {
+			return err
+		}
+		*p = n
+	case *float32:
+		f, err := strconv.ParseFloat(field, 32)
+		if err != nil {
+			return err
+		}
+		*p = float32(f)
+	case *float64:
+		f, err := strconv.ParseFloat(field, 64)
+		if err != nil {
+			return err
+		}
+		*p = f
+	case *string:
+		*p = field
+	case *intrinsic.CharacterArray:
+		p.SetFromString(field)
 	}
-	return s
+	return nil
 }
 
-func padLeft(dst []byte, startOff, leftPad int) []byte {
-	const space = "                                         "
-	strLen := len(dst) - startOff
-	// First grow slice if needed
-	dst = append(dst, space[:leftPad]...)
-	// Now copy value bytes to end (achieves right-alignment)
-	copy(dst[len(dst)-strLen:], dst[startOff:startOff+strLen])
-	// Now set left pad of bytes to space
-	copy(dst[startOff:startOff+leftPad], space)
-	return dst
-}
-
-// fixExponent pads exponent to 3 digits minimum per F95 spec (E-005 not E-05)
-func fixExponent(dst []byte, start int) []byte {
-	if i := bytes.IndexByte(dst[start:], 'E'); i >= 0 {
-		i += start
-		if i+2 < len(dst) && (dst[i+1] == '+' || dst[i+1] == '-') {
-			// Find where exponent digits start
-			expStart := i + 2
-			expDigits := dst[expStart:]
-			// Pad to 3 digits
-			for len(expDigits) < 3 {
-				dst = append(dst[:expStart], append([]byte{'0'}, dst[expStart:]...)...)
-				expDigits = dst[expStart:]
-			}
+// readListDirected parses space/comma-separated values.
+func readListDirected(line string, args []any) error {
+	fields := splitFields(line)
+	for i, arg := range args {
+		if i >= len(fields) {
+			break
+		}
+		if err := scanValue(fields[i], arg); err != nil {
+			return err
 		}
 	}
-	return dst
+	return nil
+}
+
+// readFormatted parses data according to format descriptors.
+func readFormatted(line string, descriptors []FormatDescriptor, args []any) error {
+	pos := 0
+	argIdx := 0
+	for _, desc := range descriptors {
+		if argIdx >= len(args) {
+			break
+		}
+		switch desc.Type {
+		case 'I': // Integer
+			width := desc.Width
+			if width == 0 {
+				width = 10 // default
+			}
+			if pos+width > len(line) {
+				width = len(line) - pos
+			}
+			field := trimSpaces(line[pos : pos+width])
+			pos += width
+			if err := scanValue(field, args[argIdx]); err != nil {
+				return err
+			}
+			argIdx++
+		case 'F', 'E', 'G', 'D': // Float formats
+			width := desc.Width
+			if width == 0 {
+				width = 15 // default
+			}
+			if pos+width > len(line) {
+				width = len(line) - pos
+			}
+			field := trimSpaces(line[pos : pos+width])
+			pos += width
+			if err := scanValue(field, args[argIdx]); err != nil {
+				return err
+			}
+			argIdx++
+		case 'A': // Character
+			width := desc.Width
+			if width == 0 {
+				width = len(line) - pos // rest of line
+			}
+			if pos+width > len(line) {
+				width = len(line) - pos
+			}
+			field := line[pos : pos+width]
+			pos += width
+			if err := scanValue(field, args[argIdx]); err != nil {
+				return err
+			}
+			argIdx++
+		case 'X': // Skip
+			pos += desc.Width
+		case 'S', '/':
+			// Literals and newlines don't consume args
+		}
+	}
+	return nil
 }

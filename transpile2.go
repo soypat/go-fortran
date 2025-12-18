@@ -59,9 +59,14 @@ func (tg *ToGo) ContainedOrUsed(name string) *ParserUnitData {
 func (tg *ToGo) ImportDecl() ast.Decl {
 	return &ast.GenDecl{
 		Tok: token.IMPORT,
-		Specs: []ast.Spec{&ast.ImportSpec{
-			Path: &ast.BasicLit{Value: fmt.Sprintf("%q", "github.com/soypat/go-fortran/intrinsic")},
-		}},
+		Specs: []ast.Spec{
+			&ast.ImportSpec{
+				Path: &ast.BasicLit{Value: fmt.Sprintf("%q", "github.com/soypat/go-fortran/intrinsic")},
+			},
+			&ast.ImportSpec{
+				Path: &ast.BasicLit{Value: fmt.Sprintf("%q", "github.com/soypat/go-fortran/intrinsic/fortio")},
+			},
+		},
 	}
 }
 
@@ -327,7 +332,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		} else {
 			code = _astZero
 		}
-		dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{Fun: _astIntrinsicStop, Args: []ast.Expr{code}}})
+		dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{Fun: _astFenvStop, Args: []ast.Expr{code}}})
 	case *f90.ParameterStmt:
 		dst, err = tg.transformParameterStmt(dst, s)
 	case *f90.WriteStmt:
@@ -906,9 +911,9 @@ func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast
 		}
 		args = append(args, goExpr)
 	}
-	// Generate: intrinsic.Print(args...)
+	// Generate: fenv.Print(args...)
 	callExpr := &ast.CallExpr{
-		Fun:  _astFnPrint,
+		Fun:  _astFenvPrint,
 		Args: args,
 	}
 	dst = append(dst, &ast.ExprStmt{X: callExpr})
@@ -1389,26 +1394,23 @@ func (tg *ToGo) transformParameterStmt(dst []ast.Stmt, stmt *f90.ParameterStmt) 
 	return dst, nil
 }
 
-// transformIOUnitExpr generates an IOUnit expression for a unit specifier.
-// Returns GetIOUnit(n) for file units, or DefaultIOUnit() for stdout (*).
+// transformIOUnitExpr generates a unit number expression for IO operations.
+// Returns int32 literal 6 for stdout (*), or the evaluated unit expression.
 func (tg *ToGo) transformIOUnitExpr(unit f90.Expression) (ast.Expr, error) {
 	if unit == nil {
-		// Default to stdout
-		return &ast.CallExpr{Fun: _astFnDefaultIOUnit}, nil
+		// Default to stdout (unit 6)
+		return &ast.BasicLit{Kind: token.INT, Value: "6"}, nil
 	}
 	if ident, ok := unit.(*f90.Identifier); ok && ident.Value == "*" {
-		// * means stdout
-		return &ast.CallExpr{Fun: _astFnDefaultIOUnit}, nil
+		// * means stdout (unit 6)
+		return &ast.BasicLit{Kind: token.INT, Value: "6"}, nil
 	}
-	// File unit - use GetIOUnit(n)
+	// File unit - just return the unit number expression
 	unitExpr, _, err := tg.transformExpression(_tgtInt32, unit)
 	if err != nil {
 		return nil, err
 	}
-	return &ast.CallExpr{
-		Fun:  _astFnGetIOUnit,
-		Args: []ast.Expr{unitExpr},
-	}, nil
+	return unitExpr, nil
 }
 
 func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast.Stmt, err error) {
@@ -1418,7 +1420,7 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 	case *f90.Identifier:
 		if format.Value == "*" {
 			// List-directed output
-			formatExpr = &ast.CallExpr{Fun: _astFnDefaultFormat}
+			formatExpr = &ast.CallExpr{Fun: _astFortioDefaultFormat}
 		} else {
 			return dst, tg.makeErr(stmt, "unknown write unit "+format.Value)
 		}
@@ -1427,10 +1429,10 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 		label := strconv.FormatInt(format.Value, 10)
 		fmtInfo := tg.repl.getFormat(label)
 		if fmtInfo != nil {
-			// Generate: intrinsic.NewFormat(parsed components...)
+			// Generate: fortio.NewFormat(parsed components...)
 			formatArgs := formatSpecsToGoAST(fmtInfo.Specs)
 			formatExpr = &ast.CallExpr{
-				Fun:  _astFnNewFormat,
+				Fun:  _astFortioNewFormat,
 				Args: formatArgs,
 			}
 		}
@@ -1439,7 +1441,7 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 		specs := f90.ParseFormatString(format.Value)
 		formatArgs := formatSpecsToGoAST(specs)
 		formatExpr = &ast.CallExpr{
-			Fun:  _astFnNewFormat,
+			Fun:  _astFortioNewFormat,
 			Args: formatArgs,
 		}
 	}
@@ -1482,9 +1484,9 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 		args = append(args, goExpr)
 	}
 
-	// Generate: intrinsic.Write(unit, format, args...)
+	// Generate: fenv.Write(unit, format, args...)
 	writeCall := &ast.CallExpr{
-		Fun:  _astFnWrite,
+		Fun:  _astFenvWrite,
 		Args: args,
 	}
 	dst = append(dst, &ast.ExprStmt{X: writeCall})
@@ -1492,7 +1494,7 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 }
 
 // transformWriteStmtWithImpliedDoLoop handles WRITE statements containing implied DO loops.
-// Generates: { writeArgs := make([]any, 0); ...; intrinsic.Write(unit, format, writeArgs...) }
+// Generates: { writeArgs := make([]any, 0); ...; fenv.Write(unit, format, writeArgs...) }
 func (tg *ToGo) transformWriteStmtWithImpliedDoLoop(dst []ast.Stmt, stmt *f90.WriteStmt, formatExpr ast.Expr) (_ []ast.Stmt, err error) {
 	writeArgsVar := ast.NewIdent("writeArgs")
 
@@ -1546,13 +1548,13 @@ func (tg *ToGo) transformWriteStmtWithImpliedDoLoop(dst []ast.Stmt, stmt *f90.Wr
 		}
 	}
 
-	// intrinsic.Write(unit, format, writeArgs...)
+	// fenv.Write(unit, format, writeArgs...)
 	unitExpr, err := tg.transformIOUnitExpr(stmt.Unit)
 	if err != nil {
 		return dst, err
 	}
 	writeCall := &ast.CallExpr{
-		Fun: _astFnWrite,
+		Fun: _astFenvWrite,
 		Args: []ast.Expr{
 			unitExpr,
 			formatExpr,
@@ -1568,8 +1570,11 @@ func (tg *ToGo) transformWriteStmtWithImpliedDoLoop(dst []ast.Stmt, stmt *f90.Wr
 }
 
 // transformOpenStmt generates code for OPEN statements.
-// OPEN(UNIT=u, FILE=f, STATUS=s, ACTION=a) => intrinsic.OpenFile(u, f, s, a)
+// OPEN(UNIT=u, FILE=f, STATUS=s, ACTION=a) => fenv.Open(fortio.OpenSpec{UNIT: u, FILE: f, STATUS: s, ACTION: a})
 func (tg *ToGo) transformOpenStmt(dst []ast.Stmt, stmt *f90.OpenStmt) (_ []ast.Stmt, err error) {
+	// Build OpenSpec composite literal fields
+	var specFields []ast.Expr
+
 	// Extract UNIT (required)
 	unitExpr, ok := stmt.Specifiers["UNIT"]
 	if !ok {
@@ -1579,6 +1584,10 @@ func (tg *ToGo) transformOpenStmt(dst []ast.Stmt, stmt *f90.OpenStmt) (_ []ast.S
 	if err != nil {
 		return dst, err
 	}
+	specFields = append(specFields, &ast.KeyValueExpr{
+		Key:   ast.NewIdent("UNIT"),
+		Value: unitArg,
+	})
 
 	// Extract FILE (required for our implementation)
 	fileExpr, ok := stmt.Specifiers["FILE"]
@@ -1589,45 +1598,68 @@ func (tg *ToGo) transformOpenStmt(dst []ast.Stmt, stmt *f90.OpenStmt) (_ []ast.S
 	if err != nil {
 		return dst, err
 	}
+	specFields = append(specFields, &ast.KeyValueExpr{
+		Key:   ast.NewIdent("FILE"),
+		Value: fileArg,
+	})
 
-	// Extract STATUS (default "UNKNOWN")
-	var statusArg ast.Expr = &ast.BasicLit{Kind: token.STRING, Value: `"UNKNOWN"`}
+	// Extract STATUS (default UNKNOWN)
+	var statusAst ast.Expr = _astFortioStatusUNKNOWN
 	if statusExpr, ok := stmt.Specifiers["STATUS"]; ok {
-		statusArg, _, err = tg.transformExpression(_tgtStringLit, statusExpr)
-		if err != nil {
-			return dst, err
+		if strLit, ok := statusExpr.(*f90.StringLiteral); ok {
+			statusAst = fortioStatusFromString(strLit.Value)
 		}
 	}
+	specFields = append(specFields, &ast.KeyValueExpr{
+		Key:   ast.NewIdent("STATUS"),
+		Value: statusAst,
+	})
 
-	// Extract ACTION (default "READWRITE")
-	var actionArg ast.Expr = &ast.BasicLit{Kind: token.STRING, Value: `"READWRITE"`}
+	// Extract ACTION (default READWRITE)
+	var actionAst ast.Expr = _astFortioActionREADWRITE
 	if actionExpr, ok := stmt.Specifiers["ACTION"]; ok {
-		actionArg, _, err = tg.transformExpression(_tgtStringLit, actionExpr)
-		if err != nil {
-			return dst, err
+		if strLit, ok := actionExpr.(*f90.StringLiteral); ok {
+			actionAst = fortioActionFromString(strLit.Value)
 		}
 	}
-
-	// Generate: intrinsic.OpenFile(unit, file, status, action)
-	openCall := &ast.CallExpr{
-		Fun:  _astFnOpenFile,
-		Args: []ast.Expr{unitArg, fileArg, statusArg, actionArg},
-	}
+	specFields = append(specFields, &ast.KeyValueExpr{
+		Key:   ast.NewIdent("ACTION"),
+		Value: actionAst,
+	})
 
 	// Check for IOSTAT= specifier
+	var iostatVar ast.Expr
 	if iostatExpr, ok := stmt.Specifiers["IOSTAT"]; ok {
-		// Generate: iostatVar = func() int32 { if err := intrinsic.OpenFile(...); err != nil { return 1 } return 0 }()
-		// Simplified: just call OpenFile (ignore error for now, TODO: proper IOSTAT handling)
-		iostatVar, _, err := tg.transformExpression(_tgtInt32, iostatExpr)
+		iostatVar, _, err = tg.transformExpression(_tgtInt32, iostatExpr)
 		if err != nil {
 			return dst, err
 		}
-		// For now, assign 0 to iostat and call OpenFile
-		dst = append(dst, &ast.ExprStmt{X: openCall})
+		specFields = append(specFields, &ast.KeyValueExpr{
+			Key:   ast.NewIdent("IOSTAT"),
+			Value: &ast.UnaryExpr{Op: token.AND, X: iostatVar},
+		})
+	}
+
+	// Generate: fenv.Open(fortio.OpenSpec{...})
+	openCall := &ast.CallExpr{
+		Fun: _astFenvOpen,
+		Args: []ast.Expr{
+			&ast.CompositeLit{
+				Type: _astFortioOpenSpec,
+				Elts: specFields,
+			},
+		},
+	}
+
+	if iostatVar != nil {
+		// Generate: iostatVar = int32(fenv.Open(...))
 		dst = append(dst, &ast.AssignStmt{
 			Lhs: []ast.Expr{iostatVar},
 			Tok: token.ASSIGN,
-			Rhs: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "0"}},
+			Rhs: []ast.Expr{&ast.CallExpr{
+				Fun:  ast.NewIdent("int32"),
+				Args: []ast.Expr{openCall},
+			}},
 		})
 	} else {
 		dst = append(dst, &ast.ExprStmt{X: openCall})
@@ -1636,9 +1668,40 @@ func (tg *ToGo) transformOpenStmt(dst []ast.Stmt, stmt *f90.OpenStmt) (_ []ast.S
 	return dst, nil
 }
 
+// fortioStatusFromString converts a Fortran STATUS string to a fortio enum AST.
+func fortioStatusFromString(s string) ast.Expr {
+	switch strings.ToUpper(s) {
+	case "OLD":
+		return _astFortioStatusOLD
+	case "NEW":
+		return _astFortioStatusNEW
+	case "REPLACE":
+		return _astFortioStatusREPLACE
+	case "SCRATCH":
+		return _astFortioStatusSCRATCH
+	default:
+		return _astFortioStatusUNKNOWN
+	}
+}
+
+// fortioActionFromString converts a Fortran ACTION string to a fortio enum AST.
+func fortioActionFromString(s string) ast.Expr {
+	switch strings.ToUpper(s) {
+	case "READ":
+		return _astFortioActionREAD
+	case "WRITE":
+		return _astFortioActionWRITE
+	default:
+		return _astFortioActionREADWRITE
+	}
+}
+
 // transformCloseStmt generates code for CLOSE statements.
-// CLOSE(UNIT=u) => intrinsic.CloseFile(u)
+// CLOSE(UNIT=u) => fenv.Close(fortio.CloseSpec{UNIT: u})
 func (tg *ToGo) transformCloseStmt(dst []ast.Stmt, stmt *f90.CloseStmt) (_ []ast.Stmt, err error) {
+	// Build CloseSpec composite literal fields
+	var specFields []ast.Expr
+
 	// Extract UNIT (required)
 	unitExpr, ok := stmt.Specifiers["UNIT"]
 	if !ok {
@@ -1648,11 +1711,20 @@ func (tg *ToGo) transformCloseStmt(dst []ast.Stmt, stmt *f90.CloseStmt) (_ []ast
 	if err != nil {
 		return dst, err
 	}
+	specFields = append(specFields, &ast.KeyValueExpr{
+		Key:   ast.NewIdent("UNIT"),
+		Value: unitArg,
+	})
 
-	// Generate: intrinsic.CloseFile(unit)
+	// Generate: fenv.Close(fortio.CloseSpec{UNIT: u})
 	closeCall := &ast.CallExpr{
-		Fun:  _astFnCloseFile,
-		Args: []ast.Expr{unitArg},
+		Fun: _astFenvClose,
+		Args: []ast.Expr{
+			&ast.CompositeLit{
+				Type: _astFortioCloseSpec,
+				Elts: specFields,
+			},
+		},
 	}
 	dst = append(dst, &ast.ExprStmt{X: closeCall})
 
@@ -1660,33 +1732,23 @@ func (tg *ToGo) transformCloseStmt(dst []ast.Stmt, stmt *f90.CloseStmt) (_ []ast
 }
 
 // transformReadStmt generates code for READ statements.
-// READ(unit, fmt) vars => intrinsic.Read(intrinsic.GetIOUnit(unit), format, &var1, &var2, ...)
+// READ(unit, fmt) vars => fenv.Read(unit, format, &var1, &var2, ...)
 func (tg *ToGo) transformReadStmt(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []ast.Stmt, err error) {
 	// Determine unit expression
 	var unitArg ast.Expr
 	if stmt.Unit != nil {
 		if ident, ok := stmt.Unit.(*f90.Identifier); ok && ident.Value == "*" {
-			// stdin
-			unitArg = &ast.CallExpr{
-				Fun:  _astFnGetIOUnit,
-				Args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "5"}},
-			}
+			// stdin (unit 5)
+			unitArg = &ast.BasicLit{Kind: token.INT, Value: "5"}
 		} else {
-			unitExpr, _, err := tg.transformExpression(_tgtInt32, stmt.Unit)
+			unitArg, _, err = tg.transformExpression(_tgtInt32, stmt.Unit)
 			if err != nil {
 				return dst, err
 			}
-			unitArg = &ast.CallExpr{
-				Fun:  _astFnGetIOUnit,
-				Args: []ast.Expr{unitExpr},
-			}
 		}
 	} else {
-		// Default to stdin
-		unitArg = &ast.CallExpr{
-			Fun:  _astFnGetIOUnit,
-			Args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "5"}},
-		}
+		// Default to stdin (unit 5)
+		unitArg = &ast.BasicLit{Kind: token.INT, Value: "5"}
 	}
 
 	// Determine format expression
@@ -1695,7 +1757,7 @@ func (tg *ToGo) transformReadStmt(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []ast.S
 	case *f90.Identifier:
 		if format.Value == "*" {
 			// List-directed input
-			formatExpr = &ast.CallExpr{Fun: _astFnDefaultFormat}
+			formatExpr = &ast.CallExpr{Fun: _astFortioDefaultFormat}
 		} else {
 			return dst, tg.makeErr(stmt, "unknown read format "+format.Value)
 		}
@@ -1706,22 +1768,22 @@ func (tg *ToGo) transformReadStmt(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []ast.S
 		if fmtInfo != nil {
 			formatArgs := formatSpecsToGoAST(fmtInfo.Specs)
 			formatExpr = &ast.CallExpr{
-				Fun:  _astFnNewFormat,
+				Fun:  _astFortioNewFormat,
 				Args: formatArgs,
 			}
 		} else {
-			formatExpr = &ast.CallExpr{Fun: _astFnDefaultFormat}
+			formatExpr = &ast.CallExpr{Fun: _astFortioDefaultFormat}
 		}
 	case *f90.StringLiteral:
 		// Inline format string
 		specs := f90.ParseFormatString(format.Value)
 		formatArgs := formatSpecsToGoAST(specs)
 		formatExpr = &ast.CallExpr{
-			Fun:  _astFnNewFormat,
+			Fun:  _astFortioNewFormat,
 			Args: formatArgs,
 		}
 	default:
-		formatExpr = &ast.CallExpr{Fun: _astFnDefaultFormat}
+		formatExpr = &ast.CallExpr{Fun: _astFortioDefaultFormat}
 	}
 
 	// Build arguments: unit, format, &var1, &var2, ...
@@ -1739,9 +1801,9 @@ func (tg *ToGo) transformReadStmt(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []ast.S
 		args = append(args, &ast.UnaryExpr{Op: token.AND, X: goExpr})
 	}
 
-	// Generate: intrinsic.Read(unit, format, &var1, &var2, ...)
+	// Generate: fenv.Read(unit, format, &var1, &var2, ...)
 	readCall := &ast.CallExpr{
-		Fun:  _astFnRead,
+		Fun:  _astFenvRead,
 		Args: args,
 	}
 	dst = append(dst, &ast.ExprStmt{X: readCall})
@@ -2299,7 +2361,7 @@ func appendFormatSpecToGoAST(exprs []ast.Expr, spec *f90.FormatSpec) []ast.Expr 
 	// Handle string literal
 	if spec.StringLit != "" {
 		exprs = append(exprs, &ast.CompositeLit{
-			Type: _astTypeFormatDescriptor,
+			Type: _astFortioFormatDescriptor,
 			Elts: []ast.Expr{
 				&ast.KeyValueExpr{
 					Key:   ast.NewIdent("Type"),
@@ -2331,7 +2393,7 @@ func appendFormatSpecToGoAST(exprs []ast.Expr, spec *f90.FormatSpec) []ast.Expr 
 			repeat = 1
 		}
 		for range repeat {
-			exprs = append(exprs, _astFmtNewline)
+			exprs = append(exprs, _astFortioFmtNewline)
 		}
 		return exprs
 	}
@@ -2375,7 +2437,7 @@ func appendFormatSpecToGoAST(exprs []ast.Expr, spec *f90.FormatSpec) []ast.Expr 
 		}
 
 		exprs = append(exprs, &ast.CompositeLit{
-			Type: _astTypeFormatDescriptor,
+			Type: _astFortioFormatDescriptor,
 			Elts: elts,
 		})
 	}
@@ -2400,10 +2462,23 @@ func sanitizeIdent(name string) string {
 	return name
 }
 
-// AppendCommonDecls appends COMMON block declarations to dst.
+// AppendCommonDecls appends COMMON block declarations and fenv to dst.
+// Generates: var fenv = fortio.NewEnvironment()
 // Generates: var BLK = intrinsic.NewCommonBlock("BLK", totalSize)
 // Should be called after all program units have been processed.
 func (tg *ToGo) AppendCommonDecls(dst []ast.Decl) []ast.Decl {
+	// Generate: var fenv = fortio.NewEnvironment()
+	fenvSpec := &ast.ValueSpec{
+		Names: []*ast.Ident{ast.NewIdent("fenv")},
+		Values: []ast.Expr{
+			&ast.CallExpr{Fun: _astFortioNewEnvironment},
+		},
+	}
+	dst = append(dst, &ast.GenDecl{
+		Tok:   token.VAR,
+		Specs: []ast.Spec{fenvSpec},
+	})
+
 	for _, block := range tg.repl.commonblocks {
 		if len(block.fields) == 0 {
 			continue

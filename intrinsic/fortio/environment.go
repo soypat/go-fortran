@@ -3,6 +3,7 @@ package fortio
 import (
 	"io"
 	"os"
+	"strconv"
 )
 
 // unitState tracks connection info for each open unit.
@@ -355,9 +356,118 @@ func (env *Environment) Flush(unit int32) IOStat {
 	return IOStatOK
 }
 
+// Write performs formatted output to a unit.
+func (env *Environment) Write(unit int32, f *Format, args ...any) IOStat {
+	state := env.getUnit(unit)
+	if state == nil {
+		return IOStatErrNotConnected
+	}
+	if state.file == nil {
+		return IOStatErrNotConnected
+	}
+
+	buf := env.buf[:0]
+
+	// Check if we have a format specification (either raw spec or pre-parsed)
+	if f.spec != "" || f.parsed {
+		// Formatted output using format descriptors
+		f.ensureParsed()
+		buf = f.writeFormatted(buf, args)
+	} else {
+		// List-directed output (PRINT * behavior)
+		buf = f.writeListDirected(buf, args)
+	}
+
+	buf = append(buf, '\n')
+	_, err := state.file.Write(buf)
+	env.buf = buf[:0] // keep buffer if expanded
+
+	if err != nil {
+		stat := env.mapError(err)
+		env.lastStat = stat
+		env.lastMsg = err.Error()
+		return stat
+	}
+	return IOStatOK
+}
+
+// Read performs formatted input from a unit.
+func (env *Environment) Read(unit int32, f *Format, args ...any) IOStat {
+	state := env.getUnit(unit)
+	if state == nil {
+		return IOStatErrNotConnected
+	}
+	if state.file == nil {
+		return IOStatErrNotConnected
+	}
+
+	// Read a line from the unit
+	var line []byte
+	oneByte := make([]byte, 1)
+	for {
+		n, err := state.file.Read(oneByte)
+		if n > 0 {
+			if oneByte[0] == '\n' {
+				break
+			}
+			line = append(line, oneByte[0])
+		}
+		if err != nil {
+			if err == io.EOF && len(line) > 0 {
+				break
+			}
+			stat := env.mapError(err)
+			env.lastStat = stat
+			env.lastMsg = err.Error()
+			return stat
+		}
+	}
+
+	lineStr := string(line)
+
+	// Parse based on format
+	var parseErr error
+	if f.spec == "" && !f.parsed {
+		// List-directed input
+		parseErr = readListDirected(lineStr, args)
+	} else {
+		f.ensureParsed()
+		parseErr = readFormatted(lineStr, f.descriptors, args)
+	}
+
+	if parseErr != nil {
+		env.lastStat = IOStatErrConversion
+		env.lastMsg = parseErr.Error()
+		return IOStatErrConversion
+	}
+	return IOStatOK
+}
+
+// Print performs list-directed output to stdout (unit 6).
+func (env *Environment) Print(args ...any) IOStat {
+	return env.Write(6, DefaultFormat(), args...)
+}
+
+// PrintFmt performs formatted output to stdout (unit 6).
+func (env *Environment) PrintFmt(f *Format, args ...any) IOStat {
+	return env.Write(6, f, args...)
+}
+
 // LastError returns the last error status and message.
 func (env *Environment) LastError() (IOStat, string) {
 	return env.lastStat, env.lastMsg
+}
+
+// Stop terminates the program with a STOP statement.
+// Writes "STOP <code>" to stdout and exits with the given code.
+func (env *Environment) Stop(code int) {
+	msg := "STOP " + strconv.Itoa(code)
+	state := env.getUnit(6) // stdout
+	if state != nil && state.file != nil {
+		state.file.WriteString(msg)
+		state.file.Sync()
+	}
+	os.Exit(code)
 }
 
 // mapError converts a Go error to an IOStat value.

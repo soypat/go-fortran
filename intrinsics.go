@@ -622,57 +622,106 @@ var (
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("NewCharacterArrayFromStrings"),
 	}
-	_astFnNewArrayFromValues = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("NewArrayFromValues"),
-	}
 	_astFnNewArray = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("NewArray"),
 	}
-	_astFnPrint = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("Print"),
-	}
-	_astFnWrite = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
+
+	// fortio Environment-based IO (fenv is declared as global var)
+	_astFenv      = ast.NewIdent("fenv")
+	_astFenvWrite = &ast.SelectorExpr{
+		X:   _astFenv,
 		Sel: ast.NewIdent("Write"),
 	}
-	_astFnDefaultIOUnit = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("DefaultIOUnit"),
+	_astFenvRead = &ast.SelectorExpr{
+		X:   _astFenv,
+		Sel: ast.NewIdent("Read"),
 	}
-	_astFnDefaultFormat = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("DefaultFormat"),
+	_astFenvOpen = &ast.SelectorExpr{
+		X:   _astFenv,
+		Sel: ast.NewIdent("Open"),
 	}
-	_astFnNewFormat = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
+	_astFenvClose = &ast.SelectorExpr{
+		X:   _astFenv,
+		Sel: ast.NewIdent("Close"),
+	}
+	_astFenvPrint = &ast.SelectorExpr{
+		X:   _astFenv,
+		Sel: ast.NewIdent("Print"),
+	}
+	_astFenvPrintFmt = &ast.SelectorExpr{
+		X:   _astFenv,
+		Sel: ast.NewIdent("PrintFmt"),
+	}
+	_astFenvStop = &ast.SelectorExpr{
+		X:   _astFenv,
+		Sel: ast.NewIdent("Stop"),
+	}
+
+	// fortio package types and functions
+	_astFortioNewEnvironment = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("NewEnvironment"),
+	}
+	_astFortioNewFormat = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
 		Sel: ast.NewIdent("NewFormat"),
 	}
-	_astTypeFormatDescriptor = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
+	_astFortioDefaultFormat = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("DefaultFormat"),
+	}
+	_astFortioFormatDescriptor = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
 		Sel: ast.NewIdent("FormatDescriptor"),
 	}
-	_astFmtNewline = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
+	_astFortioFmtNewline = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
 		Sel: ast.NewIdent("FmtNewline"),
 	}
-	_astFnOpenFile = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("OpenFile"),
+	_astFortioOpenSpec = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("OpenSpec"),
 	}
-	_astFnCloseFile = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("CloseFile"),
+	_astFortioCloseSpec = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("CloseSpec"),
 	}
-	_astFnGetIOUnit = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("GetIOUnit"),
+
+	// fortio FileStatus enums
+	_astFortioStatusUNKNOWN = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("StatusUNKNOWN"),
 	}
-	_astFnRead = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("Read"),
+	_astFortioStatusOLD = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("StatusOLD"),
+	}
+	_astFortioStatusNEW = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("StatusNEW"),
+	}
+	_astFortioStatusREPLACE = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("StatusREPLACE"),
+	}
+	_astFortioStatusSCRATCH = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("StatusSCRATCH"),
+	}
+
+	// fortio ActionMode enums
+	_astFortioActionREADWRITE = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("ActionREADWRITE"),
+	}
+	_astFortioActionREAD = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("ActionREAD"),
+	}
+	_astFortioActionWRITE = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("ActionWRITE"),
 	}
 	_astTypeCharArray = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
