@@ -610,6 +610,70 @@ var (
 	_tgtComplex128   = defaultVarinfo(f90token.DOUBLECOMPLEX)
 	_tgtArrayGeneric = _tgtArray(f90token.DIMENSION)
 	_tgtSpecDeferred = &f90.ArraySpec{Kind: f90.ArraySpecDeferred}
+
+	// Common intrinsic identifiers.
+	_astIntrinsicStop  = &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("Stop")}
+	_astIntrinsic      = ast.NewIdent("intrinsic")
+	_astFnNewCharArray = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewCharacterArray"),
+	}
+	_astFnNewCharacterArrayFromStrings = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewCharacterArrayFromStrings"),
+	}
+	_astFnNewArrayFromValues = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewArrayFromValues"),
+	}
+	_astFnNewArray = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewArray"),
+	}
+	_astFnPrint = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("Print"),
+	}
+	_astFnWrite = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("Write"),
+	}
+	_astFnDefaultIOUnit = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("DefaultIOUnit"),
+	}
+	_astFnDefaultFormat = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("DefaultFormat"),
+	}
+	_astFnNewFormat = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("NewFormat"),
+	}
+	_astTypeFormatDescriptor = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("FormatDescriptor"),
+	}
+	_astFmtNewline = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("FmtNewline"),
+	}
+	_astTypeCharArray = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("CharacterArray"),
+	}
+	_astTypeArray = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("Array"),
+	}
+	_astTypePointer = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("Pointer"),
+	}
+	_astTypePointerTo = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("PointerTo"),
+	}
 )
 
 func _tgtArray(elem f90token.Token) *Varinfo {

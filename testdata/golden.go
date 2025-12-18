@@ -590,18 +590,9 @@ func LEVEL19() {
 	PRINT_COMMON_VALUES()
 }
 func SET_COMMON_VALUES() {
-	var (
-		x    intrinsic.PointerTo[int32]
-		y    intrinsic.PointerTo[int32]
-		_, _ = x, y
-	)
-	var (
-		z intrinsic.PointerTo[float32]
-		_ = z
-	)
-	x = intrinsic.UnallocatedPtr[int32](1)
-	y = intrinsic.UnallocatedPtr[int32](1)
-	z = intrinsic.UnallocatedPtr[float32](1)
+	x := intrinsic.UnallocatedPtr[int32](1)
+	y := intrinsic.UnallocatedPtr[int32](1)
+	z := intrinsic.UnallocatedPtr[float32](1)
 	shared.Reset()
 	intrinsic.DeclareCommon(&x, &shared)
 	intrinsic.DeclareCommon(&y, &shared)
@@ -611,18 +602,9 @@ func SET_COMMON_VALUES() {
 	z.Set(3.14159, 1)
 }
 func PRINT_COMMON_VALUES() {
-	var (
-		x    intrinsic.PointerTo[int32]
-		y    intrinsic.PointerTo[int32]
-		_, _ = x, y
-	)
-	var (
-		z intrinsic.PointerTo[float32]
-		_ = z
-	)
-	x = intrinsic.UnallocatedPtr[int32](1)
-	y = intrinsic.UnallocatedPtr[int32](1)
-	z = intrinsic.UnallocatedPtr[float32](1)
+	x := intrinsic.UnallocatedPtr[int32](1)
+	y := intrinsic.UnallocatedPtr[int32](1)
+	z := intrinsic.UnallocatedPtr[float32](1)
 	shared.Reset()
 	intrinsic.DeclareCommon(&x, &shared)
 	intrinsic.DeclareCommon(&y, &shared)
@@ -903,30 +885,16 @@ func LEVEL27() {
 	intrinsic.Print("LEVEL 27: result =", result)
 }
 func LEVEL28() {
-	var (
-		yqr     = intrinsic.NewArray[float32](nil, 256)
-		sumxrq  = intrinsic.NewArray[float32](nil, 512)
-		ymnrt   = intrinsic.NewArray[float32](nil, 3)
-		_, _, _ = yqr, sumxrq, ymnrt
-	)
-	var (
-		matrix = intrinsic.NewArray[float32](nil, 10, 20)
-		_      = matrix
-	)
-	var (
-		counts = intrinsic.NewArray[int32](nil, 100)
-		_      = counts
-	)
-	yqr = intrinsic.UnallocatedArray[float32](256)
-	sumxrq = intrinsic.UnallocatedArray[float32](512)
-	ymnrt = intrinsic.UnallocatedArray[float32](3)
-	matrix = intrinsic.UnallocatedArray[float32](10, 20)
+	yqr := intrinsic.UnallocatedArray[float32](256)
+	sumxrq := intrinsic.UnallocatedArray[float32](512)
+	ymnrt := intrinsic.UnallocatedArray[float32](3)
+	matrix := intrinsic.UnallocatedArray[float32](10, 20)
 	holdrt.Reset()
 	intrinsic.DeclareCommon(yqr, &holdrt)
 	intrinsic.DeclareCommon(sumxrq, &holdrt)
 	intrinsic.DeclareCommon(ymnrt, &holdrt)
 	intrinsic.DeclareCommon(matrix, &holdrt)
-	counts = intrinsic.UnallocatedArray[int32](100)
+	counts := intrinsic.UnallocatedArray[int32](100)
 	stats.Reset()
 	intrinsic.DeclareCommon(counts, &stats)
 	intrinsic.Print("LEVEL 28: COMMON block arrays initialized")
@@ -1145,19 +1113,11 @@ label240:
 }
 func LEVEL36() {
 	// Implicit declarations.
-	var (
-		delta = intrinsic.NewArray[float32](nil, 3)
-		_     = delta
-	)
-	var (
-		d1k     intrinsic.PointerTo[float32]
-		d2k     intrinsic.PointerTo[float32]
-		d3k     intrinsic.PointerTo[float32]
-		_, _, _ = d1k, d2k, d3k
-	)
-	d1k = intrinsic.UnallocatedPtr[float32](1)
-	d2k = intrinsic.UnallocatedPtr[float32](1)
-	d3k = intrinsic.UnallocatedPtr[float32](1)
+	var delta = intrinsic.NewArray[float32](nil, 3)
+	var _ = delta
+	d1k := intrinsic.UnallocatedPtr[float32](1)
+	d2k := intrinsic.UnallocatedPtr[float32](1)
+	d3k := intrinsic.UnallocatedPtr[float32](1)
 	blk.Reset()
 	intrinsic.DeclareCommon(&d1k, &blk)
 	intrinsic.DeclareCommon(&d2k, &blk)
@@ -1231,11 +1191,11 @@ func FIBONACCI(n int32) (fibonacci int32) {
 func BLKINVDECL() {
 	// Implicit declarations.
 	var (
-		d3k     intrinsic.PointerTo[float32]
-		d2k     intrinsic.PointerTo[float32]
-		d1k     intrinsic.PointerTo[float32]
-		_, _, _ = d3k, d2k, d1k
+		d3k intrinsic.PointerTo[float32]
+		d2k intrinsic.PointerTo[float32]
+		d1k intrinsic.PointerTo[float32]
 	)
+	var _, _, _ = d3k, d2k, d1k
 	d3k = intrinsic.UnallocatedPtr[float32](1)
 	d2k = intrinsic.UnallocatedPtr[float32](1)
 	d1k = intrinsic.UnallocatedPtr[float32](1)
@@ -1248,12 +1208,12 @@ func BLKINVDECL() {
 func BLKDECL() {
 	// Implicit declarations.
 	var (
-		d1k        intrinsic.PointerTo[float32]
-		d2k        intrinsic.PointerTo[float32]
-		d3k        intrinsic.PointerTo[float32]
-		delta      = intrinsic.NewArray[float32](nil, 3)
-		_, _, _, _ = d1k, d2k, d3k, delta
+		d1k   intrinsic.PointerTo[float32]
+		d2k   intrinsic.PointerTo[float32]
+		d3k   intrinsic.PointerTo[float32]
+		delta = intrinsic.NewArray[float32](nil, 3)
 	)
+	var _, _, _, _ = d1k, d2k, d3k, delta
 	d1k = intrinsic.UnallocatedPtr[float32](1)
 	d2k = intrinsic.UnallocatedPtr[float32](1)
 	d3k = intrinsic.UnallocatedPtr[float32](1)

@@ -432,8 +432,12 @@ func (tg *ToGo) transformImplicitTypeDeclarations(dst []ast.Stmt) (_ []ast.Stmt,
 		useSpecs.Values = append(useSpecs.Values, spec.Names[0])
 	}
 	if len(implicitDecl.Specs) != 0 {
-		implicitDecl.Specs = append(implicitDecl.Specs, &useSpecs)
+		// implicitDecl.Specs = append(implicitDecl.Specs, &)
 		dst = append(dst, &ast.DeclStmt{Decl: implicitDecl})
+		dst = append(dst, &ast.DeclStmt{Decl: &ast.GenDecl{
+			Tok:   token.VAR,
+			Specs: []ast.Spec{&useSpecs},
+		}})
 	}
 	return dst, nil
 }
@@ -448,8 +452,8 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	for i := range stmt.Entities {
 		ent := &stmt.Entities[i]
 		vi := tg.repl.Var(ent.Name)
-		if vi.flags.HasAny(VFlagParameter | VFlagImplicit) {
-			continue // Function arguments have already been declared in function signature in Go.
+		if vi.flags.HasAny(VFlagParameter | VFlagImplicit | VFlagCommon) {
+			continue // VFlagParameter: function arguments declared in signature. VFlagImplicit: declared in implicit section. VFlagCommon: declared in COMMON handling.
 		}
 		spec, err := tg.transformTypeDeclEntity(ent)
 		if err != nil {
@@ -2063,72 +2067,6 @@ func (tg *ToGo) astMethodCall(receiver, methodName string, args ...ast.Expr) *as
 	}
 }
 
-// Common intrinsic identifiers.
-var (
-	_astIntrinsicStop  = &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("Stop")}
-	_astIntrinsic      = ast.NewIdent("intrinsic")
-	_astFnNewCharArray = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("NewCharacterArray"),
-	}
-	_astFnNewCharacterArrayFromStrings = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("NewCharacterArrayFromStrings"),
-	}
-	_astFnNewArrayFromValues = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("NewArrayFromValues"),
-	}
-	_astFnNewArray = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("NewArray"),
-	}
-	_astFnPrint = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("Print"),
-	}
-	_astFnWrite = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("Write"),
-	}
-	_astFnDefaultIOUnit = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("DefaultIOUnit"),
-	}
-	_astFnDefaultFormat = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("DefaultFormat"),
-	}
-	_astFnNewFormat = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("NewFormat"),
-	}
-	_astTypeFormatDescriptor = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("FormatDescriptor"),
-	}
-	_astFmtNewline = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("FmtNewline"),
-	}
-	_astTypeCharArray = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("CharacterArray"),
-	}
-	_astTypeArray = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("Array"),
-	}
-	_astTypePointer = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("Pointer"),
-	}
-	_astTypePointerTo = &ast.SelectorExpr{
-		X:   ast.NewIdent("intrinsic"),
-		Sel: ast.NewIdent("PointerTo"),
-	}
-)
-
 // formatSpecsToGoAST converts parsed FormatSpec slice to Go AST expressions.
 func formatSpecsToGoAST(specs []f90.FormatSpec) []ast.Expr {
 	var exprs []ast.Expr
@@ -2400,11 +2338,16 @@ func (tg *ToGo) transformCommonStmt(dst []ast.Stmt, stmt *f90.CommonStmt) (_ []a
 			}
 		}
 
-		// Generate: varname = intrinsic.Unallocated...
-		// Use ASSIGN (=) not DEFINE (:=) since variable is already declared
+		// Generate: varname = intrinsic.Unallocated... or varname := intrinsic.Unallocated...
+		// Use ASSIGN (=) for VFlagImplicit vars (already declared in implicit section)
+		// Use DEFINE (:=) for vars with explicit type declarations (not yet declared)
+		assignTok := token.ASSIGN
+		if !vi.flags.HasAny(VFlagImplicit) {
+			assignTok = token.DEFINE
+		}
 		dst = append(dst, &ast.AssignStmt{
 			Lhs: []ast.Expr{varIdent},
-			Tok: token.ASSIGN,
+			Tok: assignTok,
 			Rhs: []ast.Expr{initExpr},
 		})
 

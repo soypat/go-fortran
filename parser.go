@@ -344,6 +344,11 @@ func (pud *ParserUnitData) resolveImplicitTypes() {
 			} else {
 				implicitType = _implicitReal.Type
 			}
+			// Mark as implicit so transformImplicitTypeDeclarations generates var declaration.
+			// Skip VFlagPointer (Cray pointers) - they have special handling in transformTypeDeclEntity.
+			if !vi.flags.HasAny(VFlagPointer) {
+				vi.flags |= VFlagImplicit
+			}
 		}
 		// TODO: From cray pointer we now have special case where decl is non-nil but type is nil. Can we just consolidate both cases?
 		// Assign type, preserving any existing ArraySpec from partial decl
