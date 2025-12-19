@@ -138,7 +138,7 @@ func (env *Environment) Open(spec OpenSpec) IOStat {
 	if err != nil {
 		stat := env.mapError(err)
 		if spec.IOSTAT != nil {
-			*spec.IOSTAT = stat
+			*spec.IOSTAT = int32(stat)
 		}
 		if spec.IOMSG != nil {
 			*spec.IOMSG = err.Error()
@@ -173,7 +173,7 @@ func (env *Environment) Open(spec OpenSpec) IOStat {
 		scratch:  spec.STATUS == StatusSCRATCH,
 	}
 	if spec.IOSTAT != nil {
-		*spec.IOSTAT = IOStatOK
+		*spec.IOSTAT = int32(IOStatOK)
 	}
 	env.setUnit(spec.UNIT, state)
 	return IOStatOK
@@ -185,7 +185,7 @@ func (env *Environment) Close(spec CloseSpec) IOStat {
 	if state == nil {
 		// Not connected - not an error
 		if spec.IOSTAT != nil {
-			*spec.IOSTAT = IOStatOK
+			*spec.IOSTAT = int32(IOStatOK)
 		}
 		return IOStatOK
 	}
@@ -207,7 +207,7 @@ func (env *Environment) Close(spec CloseSpec) IOStat {
 	if err != nil {
 		stat := env.mapError(err)
 		if spec.IOSTAT != nil {
-			*spec.IOSTAT = stat
+			*spec.IOSTAT = int32(stat)
 		}
 		if spec.IOMSG != nil {
 			*spec.IOMSG = err.Error()
@@ -216,7 +216,7 @@ func (env *Environment) Close(spec CloseSpec) IOStat {
 	}
 
 	if spec.IOSTAT != nil {
-		*spec.IOSTAT = IOStatOK
+		*spec.IOSTAT = int32(IOStatOK)
 	}
 	return IOStatOK
 }

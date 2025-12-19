@@ -40,7 +40,7 @@ type OpenSpec struct {
 	NEWUNIT *int32
 	// IOSTAT receives the I/O status code.
 	// 0=success, <0=end condition, >0=error.
-	IOSTAT *IOStat
+	IOSTAT *int32
 	// IOMSG receives the error message string.
 	IOMSG *string
 }
@@ -52,7 +52,7 @@ type CloseSpec struct {
 	// STATUS specifies file disposition after close.
 	STATUS CloseStatus
 	// IOSTAT receives the I/O status code.
-	IOSTAT *IOStat
+	IOSTAT *int32
 	// IOMSG receives the error message string.
 	IOMSG *string
 }
@@ -85,7 +85,7 @@ type IOSpec struct {
 	// SIZE receives characters read/written (non-advancing).
 	SIZE *int32
 	// IOSTAT receives the I/O status code.
-	IOSTAT *IOStat
+	IOSTAT *int32
 	// IOMSG receives the error message string.
 	IOMSG *string
 }

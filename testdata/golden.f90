@@ -757,11 +757,12 @@
 
       SUBROUTINE LEVEL28()
           ! Test COMMON block arrays with initialization
+          IMPLICIT REAL (A-Z)
           REAL :: YQR(256), SUMXRQ(512), YMNRT(3)
           REAL :: MATRIX(10,20)
           INTEGER :: COUNTS(100)
           COMMON/HOLDRT/YQR,SUMXRQ,YMNRT,MATRIX
-          COMMON/STATS/COUNTS
+          COMMON/STATS/COUNTS,ALPHC(2,2)
 
           PRINT *, 'LEVEL 28: COMMON block arrays initialized'
           YQR(1) = 1.5
@@ -769,11 +770,16 @@
           YMNRT(2) = 3.14
           MATRIX(5,10) = 42.5
           COUNTS(50) = 42
+          ALPHC(1,1)=1.
+          ALPHC(1,2)=2.
+          ALPHC(2,1)=3.
+          ALPHC(2,2)=4.
           PRINT *, 'LEVEL 28: YQR(1) =', YQR(1)
           PRINT *, 'LEVEL 28: SUMXRQ(512) =', SUMXRQ(512)
           PRINT *, 'LEVEL 28: YMNRT(2) =', YMNRT(2)
           PRINT *, 'LEVEL 28: MATRIX(5,10) =', MATRIX(5,10)
           PRINT *, 'LEVEL 28: COUNTS(50) =', COUNTS(50)
+          PRINT *, 'LEVEL 28: IMPLICIT ALPHC=', ALPHC(1,1), ALPHC(1,2), ALPHC(2,1), ALPHC(2,2)
       END SUBROUTINE LEVEL28
 
     SUBROUTINE LEVEL29()
@@ -910,7 +916,7 @@
     END SUBROUTINE LEVEL36
 
     SUBROUTINE LEVEL37() ! File IO: OPEN, WRITE, CLOSE, READ
-        INTEGER :: iounit, x, y
+        INTEGER :: iounit, x, y,  rstat1=-1, rstat2=-1, wstat1=-1, wstat2=-1
         CHARACTER(LEN=20) :: msg
         iounit = 10
         x = 42
@@ -919,20 +925,21 @@
 
         ! Create and write to file
         OPEN(UNIT=iounit, FILE='test_io.txt', STATUS='REPLACE', ACTION='WRITE')
-        WRITE(iounit, '(A)') msg
-        WRITE(iounit, '(I5,I5)') x, y
+        WRITE(iounit, '(A)', IOSTAT=wstat1) msg
+        WRITE(iounit, '(I5,I5)', IOSTAT=wstat2) x, y
         CLOSE(UNIT=iounit)
 
         ! Reopen and read
         x = 0
         y = 0
         OPEN(UNIT=iounit, FILE='test_io.txt', STATUS='OLD', ACTION='READ')
-        READ(iounit, '(A)') msg
-        READ(iounit, '(I5,I5)') x, y
+        READ(iounit, '(A)', IOSTAT=rstat1) msg
+        READ(iounit, '(I5,I5)',IOSTAT=rstat2) x, y
         CLOSE(UNIT=iounit)
 
         ! Print results
         PRINT *, 'LEVEL 37: READ BACK', msg, x, y
+        PRINT *, 'LEVEL 37: IOSTAT', rstat1, rstat2, wstat1, wstat2
     END SUBROUTINE LEVEL37
 
 ! ==============================================================================

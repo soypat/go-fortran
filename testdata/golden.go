@@ -890,6 +890,9 @@ func LEVEL27() {
 	fenv.Print("LEVEL 27: result =", result)
 }
 func LEVEL28() {
+	// Implicit declarations.
+	var alphc = intrinsic.NewArray[float32](nil, 2, 2)
+	var _ = alphc
 	yqr := intrinsic.UnallocatedArray[float32](256)
 	sumxrq := intrinsic.UnallocatedArray[float32](512)
 	ymnrt := intrinsic.UnallocatedArray[float32](3)
@@ -900,19 +903,26 @@ func LEVEL28() {
 	intrinsic.DeclareCommon(ymnrt, &holdrt)
 	intrinsic.DeclareCommon(matrix, &holdrt)
 	counts := intrinsic.UnallocatedArray[int32](100)
+	alphc = intrinsic.UnallocatedArray[float32](2, 2)
 	stats.Reset()
 	intrinsic.DeclareCommon(counts, &stats)
+	intrinsic.DeclareCommon(alphc, &stats)
 	fenv.Print("LEVEL 28: COMMON block arrays initialized")
 	yqr.Set(1.5, 1)
 	sumxrq.Set(99.90000000000001, 512)
 	ymnrt.Set(3.14, 2)
 	matrix.Set(42.5, 5, 10)
 	counts.Set(42, 50)
+	alphc.Set(1.0, 1, 1)
+	alphc.Set(2.0, 1, 2)
+	alphc.Set(3.0, 2, 1)
+	alphc.Set(4.0, 2, 2)
 	fenv.Print("LEVEL 28: YQR(1) =", yqr.At(1))
 	fenv.Print("LEVEL 28: SUMXRQ(512) =", sumxrq.At(512))
 	fenv.Print("LEVEL 28: YMNRT(2) =", ymnrt.At(2))
 	fenv.Print("LEVEL 28: MATRIX(5,10) =", matrix.At(5, 10))
 	fenv.Print("LEVEL 28: COUNTS(50) =", counts.At(50))
+	fenv.Print("LEVEL 28: IMPLICIT ALPHC=", alphc.At(1, 1), alphc.At(1, 2), alphc.At(2, 1), alphc.At(2, 2))
 }
 func LEVEL29() {
 	var (
@@ -1137,10 +1147,14 @@ func LEVEL36() {
 }
 func LEVEL37() {
 	var (
-		iounit  int32
-		x       int32
-		y       int32
-		_, _, _ = iounit, x, y
+		iounit              int32
+		x                   int32
+		y                   int32
+		rstat1              int32 = -1
+		rstat2              int32 = -1
+		wstat1              int32 = -1
+		wstat2              int32 = -1
+		_, _, _, _, _, _, _       = iounit, x, y, rstat1, rstat2, wstat1, wstat2
 	)
 	var (
 		msg intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
@@ -1161,6 +1175,7 @@ func LEVEL37() {
 	fenv.Read(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), &x, &y)
 	fenv.Close(fortio.CloseSpec{UNIT: iounit})
 	fenv.Print("LEVEL 37: READ BACK", msg, x, y)
+	fenv.Print("LEVEL 37: IOSTAT", rstat1, rstat2, wstat1, wstat2)
 }
 func LEVEL38() {
 	var (
@@ -1301,4 +1316,4 @@ var fenv = fortio.NewEnvironment()
 var blk = intrinsic.NewCommonBlock("blk", 12)
 var holdrt = intrinsic.NewCommonBlock("holdrt", 3884)
 var shared = intrinsic.NewCommonBlock("shared", 12)
-var stats = intrinsic.NewCommonBlock("stats", 400)
+var stats = intrinsic.NewCommonBlock("stats", 416)

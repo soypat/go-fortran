@@ -4536,13 +4536,15 @@ func (p *Parser90) parseCommonStmt() ast.Statement {
 
 		// Initialize variable with array spec if present
 		var decl *ast.DeclEntity
+		flags := VFlagCommon
 		if arraySpec != nil {
 			decl = &ast.DeclEntity{
 				Name:      commonVar,
 				ArraySpec: arraySpec,
 			}
+			flags |= VFlagDimension
 		}
-		p.varInit(commonVar, decl, VFlagCommon, stmt.BlockName)
+		p.varInit(commonVar, decl, flags, stmt.BlockName)
 
 		// Check for comma (more variables) or end of statement
 		if !p.consumeIf(token.Comma) {
