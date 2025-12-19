@@ -40,6 +40,7 @@
       CALL LEVEL35()
       CALL LEVEL36()
       CALL LEVEL37()
+      CALL LEVEL38()
       STOP 0
       CONTAINS
 
@@ -933,6 +934,40 @@
         ! Print results
         PRINT *, 'LEVEL 37: READ BACK', msg, x, y
     END SUBROUTINE LEVEL37
+
+! ==============================================================================
+! LEVEL 38: Namelist READ test
+! ==============================================================================
+    SUBROUTINE LEVEL38()
+        INTEGER :: iounit = 99
+        INTEGER :: errCode
+        INTEGER :: x, y, z
+        REAL :: a, b
+        NAMELIST /TESTDATA/ x, y, z, a, b
+
+        ! Initialize
+        x = 0
+        y = 0
+        z = 0
+        a = 0.0
+        b = 0.0
+
+        ! Write namelist file
+        OPEN(UNIT=iounit, FILE='test_namelist.txt', STATUS='REPLACE', ACTION='WRITE')
+        WRITE(iounit, '(A)') '&TESTDATA'
+        WRITE(iounit, '(A)') ' x=10, y=20, z=30,'
+        WRITE(iounit, '(A)') ' a=1.5, b=2.5'
+        WRITE(iounit, '(A)') '/'
+        CLOSE(UNIT=iounit)
+
+        ! Read it back using namelist (same syntax as flutter)
+        OPEN(UNIT=iounit, FILE='test_namelist.txt', STATUS='OLD', ACTION='READ')
+        READ(iounit, TESTDATA, IOSTAT=errCode)
+        CLOSE(UNIT=iounit)
+
+        PRINT *, 'LEVEL 38: NAMELIST x,y,z=', x, y, z
+        PRINT *, 'LEVEL 38: NAMELIST a,b=', a, b
+    END SUBROUTINE LEVEL38
 
     ! ==============================================================================
 ! Helper Subroutines and Functions

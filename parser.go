@@ -280,6 +280,7 @@ func (pud *ParserUnitData) copyFrom(src *ParserUnitData) {
 		vars:       append(pud.vars[:0], src.vars...),
 		returnType: src.returnType,
 		implicits:  append(pud.implicits[:0], src.implicits...),
+		namelists:  append(pud.namelists[:0], src.namelists...),
 	}
 	for i := range pud.vars {
 		if pud.vars[i].flags.HasAny(VFlagReturned) {

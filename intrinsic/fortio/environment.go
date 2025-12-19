@@ -403,40 +403,13 @@ func (env *Environment) Read(unit int32, f *Format, args ...any) IOStat {
 		return IOStatErrNotConnected
 	}
 
-	// Use last line length as hint, or default chunk size
-	readLen := max(state.lastLineLen+1, 512) // +1 for newline
-	if cap(env.buf) < readLen {
-		env.buf = make([]byte, readLen)
+	line, err := env.appendLine(nil, state)
+	if err != nil {
+		stat := env.mapError(err)
+		env.lastStat = stat
+		env.lastMsg = err.Error()
+		return stat
 	}
-
-	var line []byte
-	for {
-		n, err := state.file.Read(env.buf[:readLen])
-		if n > 0 {
-			idx := bytes.IndexByte(env.buf[:n], '\n')
-			if idx >= 0 {
-				// Found newline, seek back the extra bytes we read past it
-				if extra := n - idx - 1; extra > 0 {
-					state.file.Seek(int64(-extra), io.SeekCurrent)
-				}
-				line = append(line, env.buf[:idx]...)
-				state.lastLineLen = len(line)
-				break
-			}
-			line = append(line, env.buf[:n]...)
-		}
-		if err != nil {
-			if err == io.EOF && len(line) > 0 {
-				state.lastLineLen = len(line)
-				break
-			}
-			stat := env.mapError(err)
-			env.lastStat = stat
-			env.lastMsg = err.Error()
-			return stat
-		}
-	}
-
 	lineStr := string(line)
 
 	// Parse based on format
@@ -455,6 +428,34 @@ func (env *Environment) Read(unit int32, f *Format, args ...any) IOStat {
 		return IOStatErrConversion
 	}
 	return IOStatOK
+}
+
+// appendLine reads a line from state and appends it to dst.
+func (env *Environment) appendLine(dst []byte, state *unitState) ([]byte, error) {
+	readLen := max(state.lastLineLen+1, 512)
+	buf := make([]byte, readLen)
+	for {
+		n, err := state.file.Read(buf[:readLen])
+		if n > 0 {
+			idx := bytes.IndexByte(buf[:n], '\n')
+			if idx >= 0 {
+				if extra := n - idx - 1; extra > 0 {
+					state.file.Seek(int64(-extra), io.SeekCurrent)
+				}
+				dst = append(dst, buf[:idx]...)
+				state.lastLineLen = len(dst)
+				return dst, nil
+			}
+			dst = append(dst, buf[:n]...)
+		}
+		if err != nil {
+			if err == io.EOF && len(dst) > 0 {
+				state.lastLineLen = len(dst)
+				return dst, nil
+			}
+			return dst, err
+		}
+	}
 }
 
 // Print performs list-directed output to stdout (unit 6).

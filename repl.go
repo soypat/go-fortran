@@ -138,6 +138,11 @@ func (repl *REPL) getFormat(label string) *ast.FormatStmt {
 	return nil
 }
 
+// Namelist returns the NAMELIST group with the given name, or nil if not found.
+func (repl *REPL) Namelist(name string) *ast.NamelistGroup {
+	return repl.scope.Namelist(name)
+}
+
 func (repl *REPL) Var(name string) *Varinfo {
 	if repl._varCache != nil && repl._varCache._varname == name {
 		return repl._varCache

@@ -657,6 +657,14 @@ var (
 		X:   _astFenv,
 		Sel: ast.NewIdent("Stop"),
 	}
+	_astFenvReadNamelist = &ast.SelectorExpr{
+		X:   _astFenv,
+		Sel: ast.NewIdent("ReadNamelist"),
+	}
+	_astFenvWriteNamelist = &ast.SelectorExpr{
+		X:   _astFenv,
+		Sel: ast.NewIdent("WriteNamelist"),
+	}
 
 	// fortio package types and functions
 	_astFortioNewEnvironment = &ast.SelectorExpr{
@@ -686,6 +694,10 @@ var (
 	_astFortioCloseSpec = &ast.SelectorExpr{
 		X:   ast.NewIdent("fortio"),
 		Sel: ast.NewIdent("CloseSpec"),
+	}
+	_astFortioNamelistVar = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("NamelistVar"),
 	}
 
 	// fortio FileStatus enums

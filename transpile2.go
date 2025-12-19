@@ -1431,8 +1431,10 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 		if format.Value == "*" {
 			// List-directed output
 			formatExpr = &ast.CallExpr{Fun: _astFortioDefaultFormat}
+		} else if tg.repl.Namelist(format.Value) != nil {
+			return dst, tg.makeErr(stmt, "namelist-directed WRITE not implemented: "+format.Value)
 		} else {
-			return dst, tg.makeErr(stmt, "unknown write unit "+format.Value)
+			return dst, tg.makeErr(stmt, "unknown write format "+format.Value)
 		}
 	case *f90.IntegerLiteral:
 		// Format label reference - look up FORMAT statement
@@ -1768,6 +1770,9 @@ func (tg *ToGo) transformReadStmt(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []ast.S
 		if format.Value == "*" {
 			// List-directed input
 			formatExpr = &ast.CallExpr{Fun: _astFortioDefaultFormat}
+		} else if nml := tg.repl.Namelist(format.Value); nml != nil {
+			// Namelist-directed input
+			return tg.transformReadNamelist(dst, stmt, nml)
 		} else {
 			return dst, tg.makeErr(stmt, "unknown read format "+format.Value)
 		}
@@ -1818,6 +1823,59 @@ func (tg *ToGo) transformReadStmt(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []ast.S
 	}
 	dst = append(dst, &ast.ExprStmt{X: readCall})
 
+	return dst, nil
+}
+
+// transformReadNamelist generates code for namelist-directed READ.
+// READ(unit, NML) => fenv.ReadNamelist(unit, "NML", []fortio.NamelistVar{{Name: "A", Ptr: &a}, ...})
+func (tg *ToGo) transformReadNamelist(dst []ast.Stmt, stmt *f90.ReadStmt, nml *f90.NamelistGroup) ([]ast.Stmt, error) {
+	// Get unit expression
+	var unitArg ast.Expr
+	if stmt.Unit != nil {
+		if ident, ok := stmt.Unit.(*f90.Identifier); ok && ident.Value == "*" {
+			unitArg = &ast.BasicLit{Kind: token.INT, Value: "5"}
+		} else {
+			var err error
+			unitArg, _, err = tg.transformExpression(_tgtInt32, stmt.Unit)
+			if err != nil {
+				return dst, err
+			}
+		}
+	} else {
+		unitArg = &ast.BasicLit{Kind: token.INT, Value: "5"}
+	}
+
+	// Build []fortio.NamelistVar slice literal
+	var elts []ast.Expr
+	for _, varName := range nml.Variables {
+		vi := tg.repl.Var(varName)
+		if vi == nil {
+			return dst, tg.makeErr(stmt, "undefined variable in namelist: "+varName)
+		}
+		goName := tg.astIdent(varName)
+		elts = append(elts, &ast.CompositeLit{
+			Elts: []ast.Expr{
+				&ast.KeyValueExpr{Key: ast.NewIdent("Name"), Value: &ast.BasicLit{Kind: token.STRING, Value: `"` + varName + `"`}},
+				&ast.KeyValueExpr{Key: ast.NewIdent("Ptr"), Value: &ast.UnaryExpr{Op: token.AND, X: goName}},
+			},
+		})
+	}
+
+	varsSlice := &ast.CompositeLit{
+		Type: &ast.ArrayType{Elt: _astFortioNamelistVar},
+		Elts: elts,
+	}
+
+	// fenv.ReadNamelist(unit, "GROUPNAME", vars)
+	readCall := &ast.CallExpr{
+		Fun: _astFenvReadNamelist,
+		Args: []ast.Expr{
+			unitArg,
+			&ast.BasicLit{Kind: token.STRING, Value: `"` + nml.Name + `"`},
+			varsSlice,
+		},
+	}
+	dst = append(dst, &ast.ExprStmt{X: readCall})
 	return dst, nil
 }
 

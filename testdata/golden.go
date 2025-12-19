@@ -45,6 +45,7 @@ func GOLDEN() {
 	LEVEL35()
 	LEVEL36()
 	LEVEL37()
+	LEVEL38()
 	fenv.Stop(0)
 }
 func LEVEL01() {
@@ -1160,6 +1161,43 @@ func LEVEL37() {
 	fenv.Read(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), &x, &y)
 	fenv.Close(fortio.CloseSpec{UNIT: iounit})
 	fenv.Print("LEVEL 37: READ BACK", msg, x, y)
+}
+func LEVEL38() {
+	var (
+		iounit int32 = 99
+		_            = iounit
+	)
+	var (
+		errcode int32
+		_       = errcode
+	)
+	var (
+		x       int32
+		y       int32
+		z       int32
+		_, _, _ = x, y, z
+	)
+	var (
+		a    float32
+		b    float32
+		_, _ = a, b
+	)
+	x = 0
+	y = 0
+	z = 0
+	a = 0.0
+	b = 0.0
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_namelist.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
+	fenv.Write(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), "&TESTDATA")
+	fenv.Write(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), " x=10, y=20, z=30,")
+	fenv.Write(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), " a=1.5, b=2.5")
+	fenv.Write(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), "/")
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_namelist.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
+	fenv.ReadNamelist(iounit, "TESTDATA", []fortio.NamelistVar{{Name: "x", Ptr: &x}, {Name: "y", Ptr: &y}, {Name: "z", Ptr: &z}, {Name: "a", Ptr: &a}, {Name: "b", Ptr: &b}})
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	fenv.Print("LEVEL 38: NAMELIST x,y,z=", x, y, z)
+	fenv.Print("LEVEL 38: NAMELIST a,b=", a, b)
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")
