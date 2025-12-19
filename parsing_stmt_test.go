@@ -10,6 +10,26 @@ import (
 	"github.com/soypat/go-fortran/token"
 )
 
+// hasIOSpecifier checks if a specifier with the given name exists in the slice.
+func hasIOSpecifier(specs []ast.IOSpecifier, name string) bool {
+	for _, spec := range specs {
+		if strings.EqualFold(spec.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// getIOSpecifier returns the value for a specifier with the given name, or nil if not found.
+func getIOSpecifier(specs []ast.IOSpecifier, name string) ast.Expression {
+	for _, spec := range specs {
+		if strings.EqualFold(spec.Name, name) {
+			return spec.Value
+		}
+	}
+	return nil
+}
+
 // TestStatementParsing verifies that the statement parser correctly constructs
 // statement AST nodes for various Fortran statement types.
 func TestStatementParsing(t *testing.T) {
@@ -645,11 +665,11 @@ func TestStatementParsing(t *testing.T) {
 					t.Error("Expected non-empty Specifiers map")
 				}
 
-				if openStmt.Specifiers["UNIT"] == nil {
+				if !hasIOSpecifier(openStmt.Specifiers, "UNIT") {
 					t.Error("Expected UNIT specifier")
 				}
 
-				if openStmt.Specifiers["FILE"] == nil {
+				if !hasIOSpecifier(openStmt.Specifiers, "FILE") {
 					t.Error("Expected FILE specifier")
 				}
 			},
@@ -662,7 +682,7 @@ func TestStatementParsing(t *testing.T) {
 
 				requiredSpecs := []string{"UNIT", "FILE", "STATUS", "FORM"}
 				for _, spec := range requiredSpecs {
-					if openStmt.Specifiers[spec] == nil {
+					if !hasIOSpecifier(openStmt.Specifiers, spec) {
 						t.Errorf("Expected %s specifier", spec)
 					}
 				}
@@ -674,19 +694,19 @@ func TestStatementParsing(t *testing.T) {
 			validate: func(t *testing.T, stmt ast.Statement) {
 				openStmt := helperWantNode[*ast.OpenStmt](t, stmt, "")
 
-				if openStmt.Specifiers["UNIT"] == nil {
+				if !hasIOSpecifier(openStmt.Specifiers, "UNIT") {
 					t.Error("Expected UNIT specifier")
 				}
 
-				if openStmt.Specifiers["FILE"] == nil {
+				if !hasIOSpecifier(openStmt.Specifiers, "FILE") {
 					t.Error("Expected FILE specifier")
 				}
 
-				if openStmt.Specifiers["IOSTAT"] == nil {
+				if !hasIOSpecifier(openStmt.Specifiers, "IOSTAT") {
 					t.Error("Expected IOSTAT specifier")
 				}
 
-				if openStmt.Specifiers["ERR"] == nil {
+				if !hasIOSpecifier(openStmt.Specifiers, "ERR") {
 					t.Error("Expected ERR specifier")
 				}
 			},
@@ -697,11 +717,11 @@ func TestStatementParsing(t *testing.T) {
 			validate: func(t *testing.T, stmt ast.Statement) {
 				openStmt := helperWantNode[*ast.OpenStmt](t, stmt, "")
 
-				if openStmt.Specifiers["ACCESS"] == nil {
+				if !hasIOSpecifier(openStmt.Specifiers, "ACCESS") {
 					t.Error("Expected ACCESS specifier")
 				}
 
-				if openStmt.Specifiers["RECL"] == nil {
+				if !hasIOSpecifier(openStmt.Specifiers, "RECL") {
 					t.Error("Expected RECL specifier")
 				}
 			},
@@ -713,7 +733,7 @@ func TestStatementParsing(t *testing.T) {
 			src:  "CLOSE(10)",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				closeStmt := helperWantNode[*ast.CloseStmt](t, stmt, "")
-				if closeStmt.Specifiers["UNIT"] == nil {
+				if !hasIOSpecifier(closeStmt.Specifiers, "UNIT") {
 					t.Error("Expected UNIT specifier")
 				}
 			},
@@ -723,10 +743,10 @@ func TestStatementParsing(t *testing.T) {
 			src:  "CLOSE(UNIT=20, STATUS='KEEP')",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				closeStmt := helperWantNode[*ast.CloseStmt](t, stmt, "")
-				if closeStmt.Specifiers["UNIT"] == nil {
+				if !hasIOSpecifier(closeStmt.Specifiers, "UNIT") {
 					t.Error("Expected UNIT specifier")
 				}
-				if closeStmt.Specifiers["STATUS"] == nil {
+				if !hasIOSpecifier(closeStmt.Specifiers, "STATUS") {
 					t.Error("Expected STATUS specifier")
 				}
 			},
@@ -738,7 +758,7 @@ func TestStatementParsing(t *testing.T) {
 			src:  "BACKSPACE(15)",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				backspaceStmt := helperWantNode[*ast.BackspaceStmt](t, stmt, "")
-				if backspaceStmt.Specifiers["UNIT"] == nil {
+				if !hasIOSpecifier(backspaceStmt.Specifiers, "UNIT") {
 					t.Error("Expected UNIT specifier")
 				}
 			},
@@ -748,13 +768,13 @@ func TestStatementParsing(t *testing.T) {
 			src:  "BACKSPACE(UNIT=10, IOSTAT=ios, ERR=99)",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				backspaceStmt := helperWantNode[*ast.BackspaceStmt](t, stmt, "")
-				if backspaceStmt.Specifiers["UNIT"] == nil {
+				if !hasIOSpecifier(backspaceStmt.Specifiers, "UNIT") {
 					t.Error("Expected UNIT specifier")
 				}
-				if backspaceStmt.Specifiers["IOSTAT"] == nil {
+				if !hasIOSpecifier(backspaceStmt.Specifiers, "IOSTAT") {
 					t.Error("Expected IOSTAT specifier")
 				}
-				if backspaceStmt.Specifiers["ERR"] == nil {
+				if !hasIOSpecifier(backspaceStmt.Specifiers, "ERR") {
 					t.Error("Expected ERR specifier")
 				}
 			},
@@ -766,7 +786,7 @@ func TestStatementParsing(t *testing.T) {
 			src:  "REWIND(25)",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				rewindStmt := helperWantNode[*ast.RewindStmt](t, stmt, "")
-				if rewindStmt.Specifiers["UNIT"] == nil {
+				if !hasIOSpecifier(rewindStmt.Specifiers, "UNIT") {
 					t.Error("Expected UNIT specifier")
 				}
 			},
@@ -776,10 +796,10 @@ func TestStatementParsing(t *testing.T) {
 			src:  "REWIND(UNIT=30, IOSTAT=ierr)",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				rewindStmt := helperWantNode[*ast.RewindStmt](t, stmt, "")
-				if rewindStmt.Specifiers["UNIT"] == nil {
+				if !hasIOSpecifier(rewindStmt.Specifiers, "UNIT") {
 					t.Error("Expected UNIT specifier")
 				}
-				if rewindStmt.Specifiers["IOSTAT"] == nil {
+				if !hasIOSpecifier(rewindStmt.Specifiers, "IOSTAT") {
 					t.Error("Expected IOSTAT specifier")
 				}
 			},
@@ -1009,10 +1029,10 @@ func TestStatementParsing(t *testing.T) {
 			src:  "INQUIRE(FILE='data.txt', EXIST=lexist)",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				inquireStmt := helperWantNode[*ast.InquireStmt](t, stmt, "")
-				if inquireStmt.Specifiers["FILE"] == nil {
+				if !hasIOSpecifier(inquireStmt.Specifiers, "FILE") {
 					t.Error("Expected FILE specifier")
 				}
-				if inquireStmt.Specifiers["EXIST"] == nil {
+				if !hasIOSpecifier(inquireStmt.Specifiers, "EXIST") {
 					t.Error("Expected EXIST specifier")
 				}
 			},
@@ -1022,7 +1042,7 @@ func TestStatementParsing(t *testing.T) {
 			src:  "INQUIRE(UNIT=10, OPENED=lopen, NAME=fname)",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				inquireStmt := helperWantNode[*ast.InquireStmt](t, stmt, "")
-				if inquireStmt.Specifiers["UNIT"] == nil {
+				if !hasIOSpecifier(inquireStmt.Specifiers, "UNIT") {
 					t.Error("Expected UNIT specifier")
 				}
 			},
@@ -1032,10 +1052,10 @@ func TestStatementParsing(t *testing.T) {
 			src:  "INQUIRE(10, OPENED=lopen)",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				inquireStmt := helperWantNode[*ast.InquireStmt](t, stmt, "")
-				if inquireStmt.Specifiers["UNIT"] == nil {
+				if !hasIOSpecifier(inquireStmt.Specifiers, "UNIT") {
 					t.Error("Expected UNIT specifier from positional argument")
 				}
-				if inquireStmt.Specifiers["OPENED"] == nil {
+				if !hasIOSpecifier(inquireStmt.Specifiers, "OPENED") {
 					t.Error("Expected OPENED specifier")
 				}
 			},
@@ -1045,7 +1065,7 @@ func TestStatementParsing(t *testing.T) {
 			src:  "inquire( iolength = len ) date_plus_hour, vmf_array",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				inquireStmt := helperWantNode[*ast.InquireStmt](t, stmt, "")
-				if inquireStmt.Specifiers["IOLENGTH"] == nil {
+				if !hasIOSpecifier(inquireStmt.Specifiers, "IOLENGTH") {
 					t.Error("Expected IOLENGTH specifier")
 				}
 				if len(inquireStmt.OutputList) != 2 {
@@ -1067,7 +1087,7 @@ func TestStatementParsing(t *testing.T) {
 			src:  "INQUIRE(IOLENGTH=reclen) buffer",
 			validate: func(t *testing.T, stmt ast.Statement) {
 				inquireStmt := helperWantNode[*ast.InquireStmt](t, stmt, "")
-				if inquireStmt.Specifiers["IOLENGTH"] == nil {
+				if !hasIOSpecifier(inquireStmt.Specifiers, "IOLENGTH") {
 					t.Error("Expected IOLENGTH specifier")
 				}
 				if len(inquireStmt.OutputList) != 1 {
@@ -1082,7 +1102,7 @@ func TestStatementParsing(t *testing.T) {
 				inquireStmt := helperWantNode[*ast.InquireStmt](t, stmt, "")
 				expectedSpecs := []string{"FILE", "EXIST", "OPENED", "NUMBER"}
 				for _, spec := range expectedSpecs {
-					if inquireStmt.Specifiers[spec] == nil {
+					if !hasIOSpecifier(inquireStmt.Specifiers, spec) {
 						t.Errorf("Expected %s specifier", spec)
 					}
 				}
@@ -1764,12 +1784,9 @@ END SELECT`,
 					t.Errorf("Expected 1 specifier, got %d", len(endfile.Specifiers))
 				}
 
-				unit, ok := endfile.Specifiers["UNIT"]
-				if !ok {
-					t.Error("Expected UNIT specifier")
-				}
+				unit := getIOSpecifier(endfile.Specifiers, "UNIT")
 				if unit == nil {
-					t.Error("UNIT specifier is nil")
+					t.Error("Expected UNIT specifier")
 				}
 			},
 		},
@@ -1784,11 +1801,11 @@ END SELECT`,
 					t.Errorf("Expected 2 specifiers, got %d", len(endfile.Specifiers))
 				}
 
-				if _, ok := endfile.Specifiers["UNIT"]; !ok {
+				if !hasIOSpecifier(endfile.Specifiers, "UNIT") {
 					t.Error("Expected UNIT specifier")
 				}
 
-				if _, ok := endfile.Specifiers["IOSTAT"]; !ok {
+				if !hasIOSpecifier(endfile.Specifiers, "IOSTAT") {
 					t.Error("Expected IOSTAT specifier")
 				}
 			},

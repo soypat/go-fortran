@@ -195,6 +195,7 @@ func (p *Parser90) makeUnitData(name string, token token.Token) *ParserUnitData 
 		vars:                     slices.Clone(p.vars.vars),
 		implicits:                slices.Clone(p.vars.implicits),
 		usesKeywordAsIdentifiers: slices.Clone(p.vars.usesKeywordAsIdentifiers),
+		namelists:                slices.Clone(p.vars.namelists),
 		returnType:               p.vars.returnType,
 		source:                   p.l.Source(),
 	}
@@ -207,7 +208,8 @@ type ParserUnitData struct {
 	returnType               *Varinfo
 	implicits                []*ast.ImplicitStatement
 	usesKeywordAsIdentifiers []token.Token
-	source                   string // Source path.
+	namelists                []ast.NamelistGroup // NAMELIST groups declared in this unit
+	source                   string              // Source path.
 }
 
 func (p *ParserUnitData) AppendVarinfo(dst []Varinfo) []Varinfo {
@@ -251,11 +253,23 @@ func (p *ParserUnitData) Var(name string) (vi *Varinfo) {
 	}
 	return nil
 }
+
+// Namelist returns the NAMELIST group with the given name, or nil if not found.
+func (p *ParserUnitData) Namelist(name string) *ast.NamelistGroup {
+	for i := range p.namelists {
+		if strings.EqualFold(p.namelists[i].Name, name) {
+			return &p.namelists[i]
+		}
+	}
+	return nil
+}
+
 func (pud *ParserUnitData) reset() {
 	*pud = ParserUnitData{
 		vars:                     pud.vars[:0],
 		implicits:                pud.implicits[:0],
 		usesKeywordAsIdentifiers: pud.usesKeywordAsIdentifiers[:0],
+		namelists:                pud.namelists[:0],
 	}
 }
 
@@ -1311,6 +1325,8 @@ func (p *Parser90) parseStatement(inExec bool) ast.Statement {
 		stmt = p.parseExternalStmt()
 	case token.INTRINSIC:
 		stmt = p.parseIntrinsicStmt()
+	case token.NAMELIST:
+		stmt = p.parseNamelistStmt()
 	case token.PARAMETER:
 		stmt = p.parseParameterStmt()
 
@@ -1668,46 +1684,74 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 	pos := ast.Pos(start, p.current.start)
 
 	if isInquire {
-		// For INQUIRE, convert specs to map
-		specMap := make(map[string]ast.Expression)
+		// For INQUIRE, convert specs to []IOSpecifier
+		var specList []ast.IOSpecifier
 		isFirstSpec := true
 		for _, spec := range specs {
 			if binExpr, ok := spec.(*ast.BinaryExpr); ok && binExpr.Op == token.Equals {
 				// keyword=value form
 				if ident, ok := binExpr.Left.(*ast.Identifier); ok {
-					specMap[strings.ToUpper(ident.Value)] = binExpr.Right
+					specList = append(specList, ast.IOSpecifier{
+						Name:  strings.ToUpper(ident.Value),
+						Value: binExpr.Right,
+					})
 				}
 			} else if isFirstSpec {
 				// First positional argument is UNIT
-				specMap["UNIT"] = spec
+				specList = append(specList, ast.IOSpecifier{Name: "UNIT", Value: spec})
 			}
 			isFirstSpec = false
 		}
 		return &ast.InquireStmt{
-			Specifiers: specMap,
+			Specifiers: specList,
 			OutputList: ioList,
 			Position:   pos,
 		}
 	}
 
+	// Extract unit, format, and specifiers from specs for READ/WRITE
 	var unit, format ast.Expression
-	if len(specs) > 0 {
-		unit = specs[0]
+	var specList []ast.IOSpecifier
+	posIdx := 0 // track positional argument position
+
+	for _, spec := range specs {
+		if binExpr, ok := spec.(*ast.BinaryExpr); ok && binExpr.Op == token.Equals {
+			// keyword=value form
+			if ident, ok := binExpr.Left.(*ast.Identifier); ok {
+				key := strings.ToUpper(ident.Value)
+				switch key {
+				case "UNIT":
+					unit = binExpr.Right
+				case "FMT":
+					format = binExpr.Right
+				default:
+					specList = append(specList, ast.IOSpecifier{Name: key, Value: binExpr.Right})
+				}
+			}
+		} else {
+			// Positional argument: first is unit, second is format
+			if posIdx == 0 {
+				unit = spec
+			} else if posIdx == 1 {
+				format = spec
+			}
+			posIdx++
+		}
 	}
-	if len(specs) > 1 {
-		format = specs[1]
-	}
+
 	if isRead {
 		return &ast.ReadStmt{
-			Unit:      unit,
-			Format:    format,
-			InputList: ioList,
-			Position:  pos,
+			Unit:       unit,
+			Format:     format,
+			Specifiers: specList,
+			InputList:  ioList,
+			Position:   pos,
 		}
 	} else {
 		return &ast.WriteStmt{
 			Unit:       unit,
 			Format:     format,
+			Specifiers: specList,
 			OutputList: ioList,
 			Position:   pos,
 		}
@@ -1777,10 +1821,7 @@ func (p *Parser90) parseOpenStmt() ast.Statement {
 		return nil
 	}
 
-	stmt := &ast.OpenStmt{
-		Specifiers: make(map[string]ast.Expression),
-		Position:   ast.Pos(start, p.current.start),
-	}
+	var specList []ast.IOSpecifier
 
 	// Track if we've seen the first positional argument (which would be UNIT)
 	isFirstArg := true
@@ -1810,12 +1851,12 @@ func (p *Parser90) parseOpenStmt() ast.Statement {
 			p.nextToken() // consume =
 			value := p.parseExpression(0)
 			if value != nil {
-				stmt.Specifiers[keyword] = value
+				specList = append(specList, ast.IOSpecifier{Name: keyword, Value: value})
 			}
 			isFirstArg = false
 		} else if isFirstArg {
 			// First positional argument is UNIT
-			stmt.Specifiers["UNIT"] = spec
+			specList = append(specList, ast.IOSpecifier{Name: "UNIT", Value: spec})
 			isFirstArg = false
 		} else {
 			p.addError("unexpected expression in OPEN statement (expected keyword=value)")
@@ -1832,8 +1873,10 @@ func (p *Parser90) parseOpenStmt() ast.Statement {
 		return nil
 	}
 
-	stmt.Position = ast.Pos(start, p.current.start)
-	return stmt
+	return &ast.OpenStmt{
+		Specifiers: specList,
+		Position:   ast.Pos(start, p.current.start),
+	}
 }
 
 // parseCloseStmt parses a CLOSE statement
@@ -1844,19 +1887,18 @@ func (p *Parser90) parseCloseStmt() ast.Statement {
 	start := p.current.start
 	p.expect(token.CLOSE, "")
 
-	stmt := &ast.CloseStmt{
-		Specifiers: make(map[string]ast.Expression),
-		Position:   ast.Pos(start, p.current.start),
-	}
+	var specList []ast.IOSpecifier
 
 	// Handle simple form: CLOSE unit (without parentheses)
 	if !p.currentTokenIs(token.LParen) {
 		unit := p.parseExpression(0)
 		if unit != nil {
-			stmt.Specifiers["UNIT"] = unit
+			specList = append(specList, ast.IOSpecifier{Name: "UNIT", Value: unit})
 		}
-		stmt.Position = ast.Pos(start, p.current.start)
-		return stmt
+		return &ast.CloseStmt{
+			Specifiers: specList,
+			Position:   ast.Pos(start, p.current.start),
+		}
 	}
 
 	// Handle full form with parentheses
@@ -1892,12 +1934,12 @@ func (p *Parser90) parseCloseStmt() ast.Statement {
 			p.nextToken() // consume =
 			value := p.parseExpression(0)
 			if value != nil {
-				stmt.Specifiers[keyword] = value
+				specList = append(specList, ast.IOSpecifier{Name: keyword, Value: value})
 			}
 			isFirstArg = false
 		} else if isFirstArg {
 			// First positional argument is UNIT
-			stmt.Specifiers["UNIT"] = spec
+			specList = append(specList, ast.IOSpecifier{Name: "UNIT", Value: spec})
 			isFirstArg = false
 		} else {
 			p.addError("unexpected expression in CLOSE statement (expected keyword=value)")
@@ -1914,8 +1956,10 @@ func (p *Parser90) parseCloseStmt() ast.Statement {
 		return nil
 	}
 
-	stmt.Position = ast.Pos(start, p.current.start)
-	return stmt
+	return &ast.CloseStmt{
+		Specifiers: specList,
+		Position:   ast.Pos(start, p.current.start),
+	}
 }
 
 // parseBackspaceStmt parses a BACKSPACE statement
@@ -1926,19 +1970,18 @@ func (p *Parser90) parseBackspaceStmt() ast.Statement {
 	start := p.current.start
 	p.expect(token.BACKSPACE, "")
 
-	stmt := &ast.BackspaceStmt{
-		Specifiers: make(map[string]ast.Expression),
-		Position:   ast.Pos(start, p.current.start),
-	}
+	var specList []ast.IOSpecifier
 
 	// Handle simple form: BACKSPACE unit (without parentheses)
 	if !p.currentTokenIs(token.LParen) {
 		unit := p.parseExpression(0)
 		if unit != nil {
-			stmt.Specifiers["UNIT"] = unit
+			specList = append(specList, ast.IOSpecifier{Name: "UNIT", Value: unit})
 		}
-		stmt.Position = ast.Pos(start, p.current.start)
-		return stmt
+		return &ast.BackspaceStmt{
+			Specifiers: specList,
+			Position:   ast.Pos(start, p.current.start),
+		}
 	}
 
 	// Handle full form with parentheses
@@ -1974,12 +2017,12 @@ func (p *Parser90) parseBackspaceStmt() ast.Statement {
 			p.nextToken() // consume =
 			value := p.parseExpression(0)
 			if value != nil {
-				stmt.Specifiers[keyword] = value
+				specList = append(specList, ast.IOSpecifier{Name: keyword, Value: value})
 			}
 			isFirstArg = false
 		} else if isFirstArg {
 			// First positional argument is UNIT
-			stmt.Specifiers["UNIT"] = spec
+			specList = append(specList, ast.IOSpecifier{Name: "UNIT", Value: spec})
 			isFirstArg = false
 		} else {
 			p.addError("unexpected expression in BACKSPACE statement (expected keyword=value)")
@@ -1996,8 +2039,10 @@ func (p *Parser90) parseBackspaceStmt() ast.Statement {
 		return nil
 	}
 
-	stmt.Position = ast.Pos(start, p.current.start)
-	return stmt
+	return &ast.BackspaceStmt{
+		Specifiers: specList,
+		Position:   ast.Pos(start, p.current.start),
+	}
 }
 
 // parseRewindStmt parses a REWIND statement
@@ -2008,19 +2053,18 @@ func (p *Parser90) parseRewindStmt() ast.Statement {
 	start := p.current.start
 	p.expect(token.REWIND, "")
 
-	stmt := &ast.RewindStmt{
-		Specifiers: make(map[string]ast.Expression),
-		Position:   ast.Pos(start, p.current.start),
-	}
+	var specList []ast.IOSpecifier
 
 	// Handle simple form: REWIND unit (without parentheses)
 	if !p.currentTokenIs(token.LParen) {
 		unit := p.parseExpression(0)
 		if unit != nil {
-			stmt.Specifiers["UNIT"] = unit
+			specList = append(specList, ast.IOSpecifier{Name: "UNIT", Value: unit})
 		}
-		stmt.Position = ast.Pos(start, p.current.start)
-		return stmt
+		return &ast.RewindStmt{
+			Specifiers: specList,
+			Position:   ast.Pos(start, p.current.start),
+		}
 	}
 
 	// Handle full form with parentheses
@@ -2056,12 +2100,12 @@ func (p *Parser90) parseRewindStmt() ast.Statement {
 			p.nextToken() // consume =
 			value := p.parseExpression(0)
 			if value != nil {
-				stmt.Specifiers[keyword] = value
+				specList = append(specList, ast.IOSpecifier{Name: keyword, Value: value})
 			}
 			isFirstArg = false
 		} else if isFirstArg {
 			// First positional argument is UNIT
-			stmt.Specifiers["UNIT"] = spec
+			specList = append(specList, ast.IOSpecifier{Name: "UNIT", Value: spec})
 			isFirstArg = false
 		} else {
 			p.addError("unexpected expression in REWIND statement (expected keyword=value)")
@@ -2078,8 +2122,10 @@ func (p *Parser90) parseRewindStmt() ast.Statement {
 		return nil
 	}
 
-	stmt.Position = ast.Pos(start, p.current.start)
-	return stmt
+	return &ast.RewindStmt{
+		Specifiers: specList,
+		Position:   ast.Pos(start, p.current.start),
+	}
 }
 
 // parseEndfileStmt parses an ENDFILE statement
@@ -2090,19 +2136,18 @@ func (p *Parser90) parseEndfileStmt() ast.Statement {
 		return nil
 	}
 
-	stmt := &ast.EndfileStmt{
-		Specifiers: make(map[string]ast.Expression),
-		Position:   ast.Pos(start, p.current.start),
-	}
+	var specList []ast.IOSpecifier
 
 	// Handle simple form: ENDFILE unit (without parentheses)
 	if !p.currentTokenIs(token.LParen) {
 		unit := p.parseExpression(0)
 		if unit != nil {
-			stmt.Specifiers["UNIT"] = unit
+			specList = append(specList, ast.IOSpecifier{Name: "UNIT", Value: unit})
 		}
-		stmt.Position = ast.Pos(start, p.current.start)
-		return stmt
+		return &ast.EndfileStmt{
+			Specifiers: specList,
+			Position:   ast.Pos(start, p.current.start),
+		}
 	}
 
 	// Handle full form with parentheses
@@ -2138,12 +2183,12 @@ func (p *Parser90) parseEndfileStmt() ast.Statement {
 			p.nextToken() // consume =
 			value := p.parseExpression(0)
 			if value != nil {
-				stmt.Specifiers[keyword] = value
+				specList = append(specList, ast.IOSpecifier{Name: keyword, Value: value})
 			}
 			isFirstArg = false
 		} else if isFirstArg {
 			// First positional argument is UNIT
-			stmt.Specifiers["UNIT"] = spec
+			specList = append(specList, ast.IOSpecifier{Name: "UNIT", Value: spec})
 			isFirstArg = false
 		} else {
 			p.addError("unexpected expression in ENDFILE statement (expected keyword=value)")
@@ -2160,8 +2205,10 @@ func (p *Parser90) parseEndfileStmt() ast.Statement {
 		return nil
 	}
 
-	stmt.Position = ast.Pos(start, p.current.start)
-	return stmt
+	return &ast.EndfileStmt{
+		Specifiers: specList,
+		Position:   ast.Pos(start, p.current.start),
+	}
 }
 
 // parseStopStmt parses a STOP statement
@@ -4499,6 +4546,58 @@ func (p *Parser90) parseCommonStmt() ast.Statement {
 		// Check for comma (more variables) or end of statement
 		if !p.consumeIf(token.Comma) {
 			break
+		}
+	}
+
+	stmt.Position = ast.Pos(startPos, p.current.start)
+	return stmt
+}
+
+// parseNamelistStmt parses a NAMELIST statement
+// Precondition: current token is NAMELIST
+// Examples:
+//
+//	NAMELIST /NLIST/ A, B, C
+//	NAMELIST /INPUT/ x, y, /OUTPUT/ result
+func (p *Parser90) parseNamelistStmt() ast.Statement {
+	startPos := p.current.start
+	p.expect(token.NAMELIST, "")
+
+	stmt := &ast.NamelistStmt{}
+
+	// Parse one or more namelist groups: /name/ var-list
+	for p.currentTokenIs(token.Slash) {
+		p.nextToken() // consume opening /
+
+		var grp ast.NamelistGroup
+		if !p.expectIdentifier(&grp.Name, "namelist group name") {
+			return nil
+		}
+		if !p.expect(token.Slash, "closing / after namelist group name") {
+			return nil
+		}
+
+		// Parse comma-separated variable list until next / or end of statement
+		var varName string
+		for p.consumeIdentifier(&varName) {
+			grp.Variables = append(grp.Variables, varName)
+			// Check for comma (more variables) or end of group
+			if !p.consumeIf(token.Comma) {
+				break
+			}
+			// If next token is /, we're starting a new group
+			if p.currentTokenIs(token.Slash) {
+				break
+			}
+		}
+
+		stmt.Groups = append(stmt.Groups, grp)
+
+		// Register group in parser state (append to existing if same name)
+		if existing := p.vars.Namelist(grp.Name); existing != nil {
+			existing.Variables = append(existing.Variables, grp.Variables...)
+		} else {
+			p.vars.namelists = append(p.vars.namelists, grp)
 		}
 	}
 

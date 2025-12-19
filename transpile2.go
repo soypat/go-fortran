@@ -23,6 +23,16 @@ type ToGo struct {
 	globalCommon   string
 }
 
+// findIOSpecifier finds a specifier by name in a []f90.IOSpecifier slice (case-insensitive).
+func findIOSpecifier(specs []f90.IOSpecifier, name string) f90.Expression {
+	for _, spec := range specs {
+		if strings.EqualFold(spec.Name, name) {
+			return spec.Value
+		}
+	}
+	return nil
+}
+
 func (tg *ToGo) Reset() {
 	*tg = ToGo{
 		repl: tg.repl,
@@ -359,7 +369,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		if err != nil {
 			err = tg.makeErr(stmt, err.Error())
 		}
-	case *f90.ImplicitStatement, *f90.ExternalStmt, *f90.IntrinsicStmt:
+	case *f90.ImplicitStatement, *f90.ExternalStmt, *f90.IntrinsicStmt, *f90.NamelistStmt:
 		// Specification statement - no code generation
 	default:
 		// For now, unsupported statements are skipped
@@ -1576,8 +1586,8 @@ func (tg *ToGo) transformOpenStmt(dst []ast.Stmt, stmt *f90.OpenStmt) (_ []ast.S
 	var specFields []ast.Expr
 
 	// Extract UNIT (required)
-	unitExpr, ok := stmt.Specifiers["UNIT"]
-	if !ok {
+	unitExpr := findIOSpecifier(stmt.Specifiers, "UNIT")
+	if unitExpr == nil {
 		return dst, tg.makeErr(stmt, "OPEN requires UNIT specifier")
 	}
 	unitArg, _, err := tg.transformExpression(_tgtInt32, unitExpr)
@@ -1590,8 +1600,8 @@ func (tg *ToGo) transformOpenStmt(dst []ast.Stmt, stmt *f90.OpenStmt) (_ []ast.S
 	})
 
 	// Extract FILE (required for our implementation)
-	fileExpr, ok := stmt.Specifiers["FILE"]
-	if !ok {
+	fileExpr := findIOSpecifier(stmt.Specifiers, "FILE")
+	if fileExpr == nil {
 		return dst, tg.makeErr(stmt, "OPEN requires FILE specifier")
 	}
 	fileArg, _, err := tg.transformExpression(_tgtStringLit, fileExpr)
@@ -1605,7 +1615,7 @@ func (tg *ToGo) transformOpenStmt(dst []ast.Stmt, stmt *f90.OpenStmt) (_ []ast.S
 
 	// Extract STATUS (default UNKNOWN)
 	var statusAst ast.Expr = _astFortioStatusUNKNOWN
-	if statusExpr, ok := stmt.Specifiers["STATUS"]; ok {
+	if statusExpr := findIOSpecifier(stmt.Specifiers, "STATUS"); statusExpr != nil {
 		if strLit, ok := statusExpr.(*f90.StringLiteral); ok {
 			statusAst = fortioStatusFromString(strLit.Value)
 		}
@@ -1617,7 +1627,7 @@ func (tg *ToGo) transformOpenStmt(dst []ast.Stmt, stmt *f90.OpenStmt) (_ []ast.S
 
 	// Extract ACTION (default READWRITE)
 	var actionAst ast.Expr = _astFortioActionREADWRITE
-	if actionExpr, ok := stmt.Specifiers["ACTION"]; ok {
+	if actionExpr := findIOSpecifier(stmt.Specifiers, "ACTION"); actionExpr != nil {
 		if strLit, ok := actionExpr.(*f90.StringLiteral); ok {
 			actionAst = fortioActionFromString(strLit.Value)
 		}
@@ -1629,7 +1639,7 @@ func (tg *ToGo) transformOpenStmt(dst []ast.Stmt, stmt *f90.OpenStmt) (_ []ast.S
 
 	// Check for IOSTAT= specifier
 	var iostatVar ast.Expr
-	if iostatExpr, ok := stmt.Specifiers["IOSTAT"]; ok {
+	if iostatExpr := findIOSpecifier(stmt.Specifiers, "IOSTAT"); iostatExpr != nil {
 		iostatVar, _, err = tg.transformExpression(_tgtInt32, iostatExpr)
 		if err != nil {
 			return dst, err
@@ -1703,8 +1713,8 @@ func (tg *ToGo) transformCloseStmt(dst []ast.Stmt, stmt *f90.CloseStmt) (_ []ast
 	var specFields []ast.Expr
 
 	// Extract UNIT (required)
-	unitExpr, ok := stmt.Specifiers["UNIT"]
-	if !ok {
+	unitExpr := findIOSpecifier(stmt.Specifiers, "UNIT")
+	if unitExpr == nil {
 		return dst, tg.makeErr(stmt, "CLOSE requires UNIT specifier")
 	}
 	unitArg, _, err := tg.transformExpression(_tgtInt32, unitExpr)

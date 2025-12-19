@@ -542,6 +542,51 @@ func (is *IntrinsicStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// NamelistGroup represents one namelist group definition: /name/ var-list
+type NamelistGroup struct {
+	Name      string   // Group name (between slashes)
+	Variables []string // Variable names in this group
+}
+
+// NamelistStmt declares named groups of variables for namelist I/O.
+// A namelist group can be referenced by name in READ/WRITE statements
+// using the NML= specifier instead of FMT=.
+//
+// Example:
+//
+//	NAMELIST /NLIST/ A, B, C
+//	NAMELIST /INPUT/ x, y, /OUTPUT/ result
+type NamelistStmt struct {
+	Groups []NamelistGroup // One or more namelist groups
+	Label  string
+	Position
+}
+
+var _ Statement = (*NamelistStmt)(nil)
+
+func (ns *NamelistStmt) GetLabel() *string { return &ns.Label }
+
+func (ns *NamelistStmt) statementNode()     {}
+func (ns *NamelistStmt) IsExecutable() bool { return false }
+func (ns *NamelistStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "NAMELIST"...)
+}
+func (ns *NamelistStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "NAMELIST"...)
+	for _, grp := range ns.Groups {
+		dst = append(dst, " /"...)
+		dst = append(dst, grp.Name...)
+		dst = append(dst, "/ "...)
+		for i, v := range grp.Variables {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = append(dst, v...)
+		}
+	}
+	return dst
+}
+
 // ParameterStmt declares named constants using F77 PARAMETER statement syntax.
 //
 // Example:
@@ -2108,6 +2153,12 @@ func (ags *AssignedGotoStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// IOSpecifier represents a single I/O control specifier (keyword=value pair).
+type IOSpecifier struct {
+	Name  string     // Keyword name (e.g., "IOSTAT", "ERR", "END", "NML")
+	Value Expression // Value expression
+}
+
 // InquireStmt queries properties of files or I/O units, such as whether a file
 // exists, is open, its name, access method, and other attributes. Results are
 // returned through variables specified in the inquiry specifiers.
@@ -2119,7 +2170,7 @@ func (ags *AssignedGotoStmt) AppendString(dst []byte) []byte {
 //	INQUIRE(UNIT=10, OPENED=lopen, NAME=fname)
 //	INQUIRE(FILE='output.dat', EXIST=fexist, OPENED=fopen, NUMBER=inum)
 type InquireStmt struct {
-	Specifiers map[string]Expression // INQUIRE specifiers: UNIT, FILE, EXIST, OPENED, etc.
+	Specifiers []IOSpecifier // INQUIRE specifiers: UNIT, FILE, EXIST, OPENED, etc.
 	OutputList []Expression          // Output items for IOLENGTH form: INQUIRE(IOLENGTH=var) output-list
 	Label      string                // Optional statement label
 	Position
@@ -2135,15 +2186,13 @@ func (is *InquireStmt) AppendTokenLiteral(dst []byte) []byte {
 }
 func (is *InquireStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "INQUIRE("...)
-	first := true
-	for key, value := range is.Specifiers {
-		if !first {
+	for i, spec := range is.Specifiers {
+		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		first = false
-		dst = append(dst, key...)
+		dst = append(dst, spec.Name...)
 		dst = append(dst, '=')
-		dst = value.AppendString(dst)
+		dst = spec.Value.AppendString(dst)
 	}
 	dst = append(dst, ')')
 	return dst
@@ -2159,7 +2208,7 @@ func (is *InquireStmt) AppendString(dst []byte) []byte {
 //	OPEN([UNIT=]<unit>, FILE=<filename> [, STATUS=<status>] [, IOSTAT=<var>])
 //	OPEN(10, FILE='data.txt', STATUS='OLD')
 type OpenStmt struct {
-	Specifiers map[string]Expression // OPEN specifiers: UNIT, FILE, STATUS, etc.
+	Specifiers []IOSpecifier // OPEN specifiers: UNIT, FILE, STATUS, etc.
 	Label      string                // Optional statement label
 	Position
 }
@@ -2177,15 +2226,13 @@ func (os *OpenStmt) AppendTokenLiteral(dst []byte) []byte {
 
 func (os *OpenStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "OPEN("...)
-	first := true
-	for key, value := range os.Specifiers {
-		if !first {
+	for i, spec := range os.Specifiers {
+		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		first = false
-		dst = append(dst, key...)
+		dst = append(dst, spec.Name...)
 		dst = append(dst, '=')
-		dst = value.AppendString(dst)
+		dst = spec.Value.AppendString(dst)
 	}
 	dst = append(dst, ')')
 	return dst
@@ -2201,7 +2248,7 @@ func (os *OpenStmt) AppendString(dst []byte) []byte {
 //	CLOSE(10)
 //	CLOSE(UNIT=20, STATUS='KEEP')
 type CloseStmt struct {
-	Specifiers map[string]Expression // CLOSE specifiers: UNIT, STATUS, IOSTAT, ERR
+	Specifiers []IOSpecifier // CLOSE specifiers: UNIT, STATUS, IOSTAT, ERR
 	Label      string                // Optional statement label
 	Position
 }
@@ -2216,15 +2263,13 @@ func (cs *CloseStmt) AppendTokenLiteral(dst []byte) []byte {
 }
 func (cs *CloseStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "CLOSE("...)
-	first := true
-	for key, value := range cs.Specifiers {
-		if !first {
+	for i, spec := range cs.Specifiers {
+		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		first = false
-		dst = append(dst, key...)
+		dst = append(dst, spec.Name...)
 		dst = append(dst, '=')
-		dst = value.AppendString(dst)
+		dst = spec.Value.AppendString(dst)
 	}
 	dst = append(dst, ')')
 	return dst
@@ -2241,9 +2286,9 @@ func (cs *CloseStmt) AppendString(dst []byte) []byte {
 //	WRITE(10, 100) x, y, z
 //	WRITE(UNIT=20, FMT='(I5, F10.2)') num, val
 type WriteStmt struct {
-	Unit       Expression            // Unit specifier (e.g., 91, *, variable)
-	Format     Expression            // Format specifier
-	Specifiers map[string]Expression // I/O specifiers: END, ERR, IOSTAT, etc.
+	Unit       Expression    // Unit specifier (e.g., 91, *, variable)
+	Format     Expression    // Format specifier
+	Specifiers []IOSpecifier // I/O specifiers: END, ERR, IOSTAT, NML, etc.
 	OutputList []Expression          // List of expressions to write
 	Label      string                // Optional statement label
 	Position
@@ -2266,9 +2311,9 @@ func (ws *WriteStmt) IsExecutable() bool { return true }
 //	READ(10, 100) name, age
 //	READ(UNIT=15, FMT='(I5)', IOSTAT=ios, END=999) num
 type ReadStmt struct {
-	Unit       Expression            // Unit specifier (e.g., 91, *, variable)
-	Format     Expression            // Format specifier
-	Specifiers map[string]Expression // I/O specifiers: END, ERR, IOSTAT, etc.
+	Unit       Expression    // Unit specifier (e.g., 91, *, variable)
+	Format     Expression    // Format specifier
+	Specifiers []IOSpecifier // I/O specifiers: END, ERR, IOSTAT, NML, etc.
 	InputList  []Expression          // List of variables to read into
 	Label      string                // Optional statement label
 	Position
@@ -2364,7 +2409,7 @@ func (ps *PrintStmt) AppendString(dst []byte) []byte {
 //	BACKSPACE 10
 //	BACKSPACE(UNIT=15, IOSTAT=ierr)
 type BackspaceStmt struct {
-	Specifiers map[string]Expression // BACKSPACE specifiers: UNIT, IOSTAT, ERR
+	Specifiers []IOSpecifier // BACKSPACE specifiers: UNIT, IOSTAT, ERR
 	Label      string                // Optional statement label
 	Position
 }
@@ -2379,15 +2424,13 @@ func (bs *BackspaceStmt) AppendTokenLiteral(dst []byte) []byte {
 }
 func (bs *BackspaceStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "BACKSPACE("...)
-	first := true
-	for key, value := range bs.Specifiers {
-		if !first {
+	for i, spec := range bs.Specifiers {
+		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		first = false
-		dst = append(dst, key...)
+		dst = append(dst, spec.Name...)
 		dst = append(dst, '=')
-		dst = value.AppendString(dst)
+		dst = spec.Value.AppendString(dst)
 	}
 	dst = append(dst, ')')
 	return dst
@@ -2403,7 +2446,7 @@ func (bs *BackspaceStmt) AppendString(dst []byte) []byte {
 //	REWIND 25
 //	REWIND(UNIT=30, IOSTAT=ierr)
 type RewindStmt struct {
-	Specifiers map[string]Expression // REWIND specifiers: UNIT, IOSTAT, ERR
+	Specifiers []IOSpecifier // REWIND specifiers: UNIT, IOSTAT, ERR
 	Label      string                // Optional statement label
 	Position
 }
@@ -2418,15 +2461,13 @@ func (rs *RewindStmt) AppendTokenLiteral(dst []byte) []byte {
 }
 func (rs *RewindStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "REWIND("...)
-	first := true
-	for key, value := range rs.Specifiers {
-		if !first {
+	for i, spec := range rs.Specifiers {
+		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		first = false
-		dst = append(dst, key...)
+		dst = append(dst, spec.Name...)
 		dst = append(dst, '=')
-		dst = value.AppendString(dst)
+		dst = spec.Value.AppendString(dst)
 	}
 	dst = append(dst, ')')
 	return dst
@@ -2442,7 +2483,7 @@ func (rs *RewindStmt) AppendString(dst []byte) []byte {
 //	ENDFILE 10
 //	ENDFILE(UNIT=15, IOSTAT=ierr)
 type EndfileStmt struct {
-	Specifiers map[string]Expression // ENDFILE specifiers: UNIT, IOSTAT, ERR
+	Specifiers []IOSpecifier // ENDFILE specifiers: UNIT, IOSTAT, ERR
 	Label      string                // Optional statement label
 	Position
 }
@@ -2457,15 +2498,13 @@ func (es *EndfileStmt) AppendTokenLiteral(dst []byte) []byte {
 }
 func (es *EndfileStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "ENDFILE("...)
-	first := true
-	for key, value := range es.Specifiers {
-		if !first {
+	for i, spec := range es.Specifiers {
+		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		first = false
-		dst = append(dst, key...)
+		dst = append(dst, spec.Name...)
 		dst = append(dst, '=')
-		dst = value.AppendString(dst)
+		dst = spec.Value.AppendString(dst)
 	}
 	dst = append(dst, ')')
 	return dst

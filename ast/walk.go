@@ -198,7 +198,7 @@ func Walk(v Visitor, node Node) {
 	// I/O statements
 	case *InquireStmt:
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 		for _, item := range n.OutputList {
 			Walk(v, item)
@@ -206,12 +206,12 @@ func Walk(v Visitor, node Node) {
 
 	case *OpenStmt:
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 
 	case *CloseStmt:
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 
 	case *WriteStmt:
@@ -222,7 +222,7 @@ func Walk(v Visitor, node Node) {
 			Walk(v, n.Format)
 		}
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 		for _, item := range n.OutputList {
 			Walk(v, item)
@@ -236,7 +236,7 @@ func Walk(v Visitor, node Node) {
 			Walk(v, n.Format)
 		}
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 		for _, item := range n.InputList {
 			Walk(v, item)
@@ -252,17 +252,17 @@ func Walk(v Visitor, node Node) {
 
 	case *BackspaceStmt:
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 
 	case *RewindStmt:
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 
 	case *EndfileStmt:
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 
 	case *StopStmt:

@@ -1,6 +1,7 @@
 package fortio
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"strconv"
@@ -8,24 +9,25 @@ import (
 
 // unitState tracks connection info for each open unit.
 type unitState struct {
-	file     *os.File
-	name     string
-	access   AccessMode
-	form     FormMode
-	action   ActionMode
-	position PositionMode
-	recl     int32
-	blank    BlankMode
-	delim    DelimMode
-	pad      PadMode
-	decimal  DecimalMode
-	round    RoundMode
-	sign     SignMode
-	encoding EncodingMode
-	async    AsyncMode
-	scratch  bool  // is scratch file
-	pos      int64 // current byte position (stream)
-	rec      int32 // current record number (direct)
+	file        *os.File
+	name        string
+	access      AccessMode
+	form        FormMode
+	action      ActionMode
+	position    PositionMode
+	recl        int32
+	blank       BlankMode
+	delim       DelimMode
+	pad         PadMode
+	decimal     DecimalMode
+	round       RoundMode
+	sign        SignMode
+	encoding    EncodingMode
+	async       AsyncMode
+	scratch     bool  // is scratch file
+	pos         int64 // current byte position (stream)
+	rec         int32 // current record number (direct)
+	lastLineLen int   // last read line length (optimization for fixed-width files)
 }
 
 // Environment manages Fortran runtime state including I/O units.
@@ -401,19 +403,31 @@ func (env *Environment) Read(unit int32, f *Format, args ...any) IOStat {
 		return IOStatErrNotConnected
 	}
 
-	// Read a line from the unit
+	// Use last line length as hint, or default chunk size
+	readLen := max(state.lastLineLen+1, 512) // +1 for newline
+	if cap(env.buf) < readLen {
+		env.buf = make([]byte, readLen)
+	}
+
 	var line []byte
-	oneByte := make([]byte, 1)
 	for {
-		n, err := state.file.Read(oneByte)
+		n, err := state.file.Read(env.buf[:readLen])
 		if n > 0 {
-			if oneByte[0] == '\n' {
+			idx := bytes.IndexByte(env.buf[:n], '\n')
+			if idx >= 0 {
+				// Found newline, seek back the extra bytes we read past it
+				if extra := n - idx - 1; extra > 0 {
+					state.file.Seek(int64(-extra), io.SeekCurrent)
+				}
+				line = append(line, env.buf[:idx]...)
+				state.lastLineLen = len(line)
 				break
 			}
-			line = append(line, oneByte[0])
+			line = append(line, env.buf[:n]...)
 		}
 		if err != nil {
 			if err == io.EOF && len(line) > 0 {
+				state.lastLineLen = len(line)
 				break
 			}
 			stat := env.mapError(err)
