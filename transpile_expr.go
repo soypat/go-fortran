@@ -1066,17 +1066,6 @@ func (tg *ToGo) transformRangedOperand(expr f90.Expression) (ast.Expr, error) {
 	return nil, tg.makeErr(expr, "expected ranged array access")
 }
 
-func (tg *ToGo) transformExprSlice(vitgt *Varinfo, dst []ast.Expr, src []f90.Expression) (_ []ast.Expr, err error) {
-	for i := range src {
-		expr, _, err := tg.transformExpression(vitgt, src[i])
-		if err != nil {
-			return dst, err
-		}
-		dst = append(dst, expr)
-	}
-	return dst, nil
-}
-
 // wrapConversion wraps expr with a type conversion if target type differs from sourceType.
 func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Expr) ast.Expr {
 	ptrDerefFirst := sourceType.IsPointer()

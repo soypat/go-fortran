@@ -1,5 +1,7 @@
 package fortio
 
+import "github.com/soypat/go-fortran/intrinsic"
+
 // OpenSpec holds all OPEN statement specifiers.
 type OpenSpec struct {
 	// UNIT number to connect. Required.
@@ -42,7 +44,7 @@ type OpenSpec struct {
 	// 0=success, <0=end condition, >0=error.
 	IOSTAT *int32
 	// IOMSG receives the error message string.
-	IOMSG *string
+	IOMSG *intrinsic.CharacterArray
 }
 
 // CloseSpec holds all CLOSE statement specifiers.
@@ -54,7 +56,7 @@ type CloseSpec struct {
 	// IOSTAT receives the I/O status code.
 	IOSTAT *int32
 	// IOMSG receives the error message string.
-	IOMSG *string
+	IOMSG *intrinsic.CharacterArray
 }
 
 // IOSpec holds common READ/WRITE statement specifiers.
@@ -91,7 +93,7 @@ type IOSpec struct {
 	// IOSTAT receives the I/O status code.
 	IOSTAT *int32
 	// IOMSG receives the error message string.
-	IOMSG *string
+	IOMSG *intrinsic.CharacterArray
 }
 
 // InquireSpec holds INQUIRE statement input specifiers.

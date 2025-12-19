@@ -141,7 +141,7 @@ func (env *Environment) Open(spec OpenSpec) IOStat {
 			*spec.IOSTAT = int32(stat)
 		}
 		if spec.IOMSG != nil {
-			*spec.IOMSG = err.Error()
+			spec.IOMSG.SetFromString(err.Error())
 		}
 		return stat
 	}
@@ -210,7 +210,7 @@ func (env *Environment) Close(spec CloseSpec) IOStat {
 			*spec.IOSTAT = int32(stat)
 		}
 		if spec.IOMSG != nil {
-			*spec.IOMSG = err.Error()
+			spec.IOMSG.SetFromString(err.Error())
 		}
 		return stat
 	}

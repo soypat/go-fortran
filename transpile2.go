@@ -2378,7 +2378,7 @@ var ioSpecifierConfig = map[string]ioSpecField{
 	}},
 
 	"IOSTAT": {target: _tgtInt32, needsAddr: true},
-	"IOMSG":  {target: _tgtStringLit, needsAddr: true},
+	"IOMSG":  {target: _tgtChar, needsAddr: true}, // CharacterArray.SetString sets IO message.
 
 	// OPEN/CLOSE specific
 	"FILE": {target: _tgtStringLit},
