@@ -111,7 +111,8 @@ func (env *Environment) readNamelistContent(state *unitState, groupName string) 
 	return content.String(), IOStatOK
 }
 
-// parseNamelistContent parses "name=value, name=value" and assigns to vars.
+// parseNamelistContent parses "name=value name=value" and assigns to vars.
+// Values can be separated by commas, spaces, or newlines.
 func parseNamelistContent(content string, vars []NamelistVar) error {
 	// Build lookup for O(1) access by uppercase name
 	lookup := make(map[string]any, len(vars))
@@ -133,17 +134,11 @@ func parseNamelistContent(content string, vars []NamelistVar) error {
 		name := toUpper(trimSpaces(content[:eqIdx]))
 		content = content[eqIdx+1:]
 
-		// Find value end (comma or end)
-		valEnd := strings.Index(content, ",")
-		if valEnd < 0 {
-			valEnd = len(content)
-		}
+		// Find value end: next '=' preceded by identifier means new assignment
+		// Look for pattern: comma, or identifier followed by '='
+		valEnd := findValueEnd(content)
 		value := trimSpaces(content[:valEnd])
-		if valEnd < len(content) {
-			content = content[valEnd+1:]
-		} else {
-			content = ""
-		}
+		content = strings.TrimLeft(content[valEnd:], ", \t")
 
 		if ptr, ok := lookup[name]; ok {
 			if err := scanValue(value, ptr); err != nil {
@@ -152,6 +147,39 @@ func parseNamelistContent(content string, vars []NamelistVar) error {
 		}
 	}
 	return nil
+}
+
+// findValueEnd finds where the current value ends in namelist content.
+// Returns index of the end of value (before next var= or end of string).
+func findValueEnd(s string) int {
+	// Look for next "identifier=" pattern
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' {
+			return i
+		}
+		if s[i] == '=' && i > 0 {
+			// Found '=', backtrack to find start of identifier
+			j := i - 1
+			for j > 0 && (s[j] == ' ' || s[j] == '\t') {
+				j--
+			}
+			// Check if we found an identifier char
+			if !isIdentChar(s[j]) {
+				continue
+			}
+			// Find start of identifier
+			start := j
+			for start > 0 && isIdentChar(s[start-1]) {
+				start--
+			}
+			return start
+		}
+	}
+	return len(s)
+}
+
+func isIdentChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
 }
 
 // derefPtr dereferences a pointer for formatting.

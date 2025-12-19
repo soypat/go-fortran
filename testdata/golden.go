@@ -1182,17 +1182,19 @@ func LEVEL38() {
 		b    float32
 		_, _ = a, b
 	)
+	x = 10
+	y = 20
+	z = 30
+	a = 1.5
+	b = 2.5
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_namelist.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
+	fenv.WriteNamelist(iounit, "TESTDATA", []fortio.NamelistVar{{Name: "x", Ptr: &x}, {Name: "y", Ptr: &y}, {Name: "z", Ptr: &z}, {Name: "a", Ptr: &a}, {Name: "b", Ptr: &b}})
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
 	x = 0
 	y = 0
 	z = 0
 	a = 0.0
 	b = 0.0
-	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_namelist.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
-	fenv.Write(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), "&TESTDATA")
-	fenv.Write(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), " x=10, y=20, z=30,")
-	fenv.Write(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), " a=1.5, b=2.5")
-	fenv.Write(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), "/")
-	fenv.Close(fortio.CloseSpec{UNIT: iounit})
 	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_namelist.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
 	fenv.ReadNamelist(iounit, "TESTDATA", []fortio.NamelistVar{{Name: "x", Ptr: &x}, {Name: "y", Ptr: &y}, {Name: "z", Ptr: &z}, {Name: "a", Ptr: &a}, {Name: "b", Ptr: &b}})
 	fenv.Close(fortio.CloseSpec{UNIT: iounit})

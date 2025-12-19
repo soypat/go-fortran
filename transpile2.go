@@ -1431,8 +1431,9 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 		if format.Value == "*" {
 			// List-directed output
 			formatExpr = &ast.CallExpr{Fun: _astFortioDefaultFormat}
-		} else if tg.repl.Namelist(format.Value) != nil {
-			return dst, tg.makeErr(stmt, "namelist-directed WRITE not implemented: "+format.Value)
+		} else if nml := tg.repl.Namelist(format.Value); nml != nil {
+			// Namelist-directed output
+			return tg.transformWriteNamelist(dst, stmt, nml)
 		} else {
 			return dst, tg.makeErr(stmt, "unknown write format "+format.Value)
 		}
@@ -1876,6 +1877,49 @@ func (tg *ToGo) transformReadNamelist(dst []ast.Stmt, stmt *f90.ReadStmt, nml *f
 		},
 	}
 	dst = append(dst, &ast.ExprStmt{X: readCall})
+	return dst, nil
+}
+
+// transformWriteNamelist generates code for namelist-directed WRITE.
+// WRITE(unit, NML) => fenv.WriteNamelist(unit, "NML", []fortio.NamelistVar{{Name: "A", Ptr: &a}, ...})
+func (tg *ToGo) transformWriteNamelist(dst []ast.Stmt, stmt *f90.WriteStmt, nml *f90.NamelistGroup) ([]ast.Stmt, error) {
+	// Get unit expression
+	unitArg, err := tg.transformIOUnitExpr(stmt.Unit)
+	if err != nil {
+		return dst, err
+	}
+
+	// Build []fortio.NamelistVar slice literal
+	var elts []ast.Expr
+	for _, varName := range nml.Variables {
+		vi := tg.repl.Var(varName)
+		if vi == nil {
+			return dst, tg.makeErr(stmt, "undefined variable in namelist: "+varName)
+		}
+		goName := tg.astIdent(varName)
+		elts = append(elts, &ast.CompositeLit{
+			Elts: []ast.Expr{
+				&ast.KeyValueExpr{Key: ast.NewIdent("Name"), Value: &ast.BasicLit{Kind: token.STRING, Value: `"` + varName + `"`}},
+				&ast.KeyValueExpr{Key: ast.NewIdent("Ptr"), Value: &ast.UnaryExpr{Op: token.AND, X: goName}},
+			},
+		})
+	}
+
+	varsSlice := &ast.CompositeLit{
+		Type: &ast.ArrayType{Elt: _astFortioNamelistVar},
+		Elts: elts,
+	}
+
+	// fenv.WriteNamelist(unit, "GROUPNAME", vars)
+	writeCall := &ast.CallExpr{
+		Fun: _astFenvWriteNamelist,
+		Args: []ast.Expr{
+			unitArg,
+			&ast.BasicLit{Kind: token.STRING, Value: `"` + nml.Name + `"`},
+			varsSlice,
+		},
+	}
+	dst = append(dst, &ast.ExprStmt{X: writeCall})
 	return dst, nil
 }
 

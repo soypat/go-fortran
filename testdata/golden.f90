@@ -936,7 +936,7 @@
     END SUBROUTINE LEVEL37
 
 ! ==============================================================================
-! LEVEL 38: Namelist READ test
+! LEVEL 38: Namelist READ/WRITE loopback test
 ! ==============================================================================
     SUBROUTINE LEVEL38()
         INTEGER :: iounit = 99
@@ -945,22 +945,26 @@
         REAL :: a, b
         NAMELIST /TESTDATA/ x, y, z, a, b
 
-        ! Initialize
+        ! Set values to write
+        x = 10
+        y = 20
+        z = 30
+        a = 1.5
+        b = 2.5
+
+        ! Write namelist to file
+        OPEN(UNIT=iounit, FILE='test_namelist.txt', STATUS='REPLACE', ACTION='WRITE')
+        WRITE(iounit, TESTDATA)
+        CLOSE(UNIT=iounit)
+
+        ! Reset values
         x = 0
         y = 0
         z = 0
         a = 0.0
         b = 0.0
 
-        ! Write namelist file
-        OPEN(UNIT=iounit, FILE='test_namelist.txt', STATUS='REPLACE', ACTION='WRITE')
-        WRITE(iounit, '(A)') '&TESTDATA'
-        WRITE(iounit, '(A)') ' x=10, y=20, z=30,'
-        WRITE(iounit, '(A)') ' a=1.5, b=2.5'
-        WRITE(iounit, '(A)') '/'
-        CLOSE(UNIT=iounit)
-
-        ! Read it back using namelist (same syntax as flutter)
+        ! Read it back using namelist
         OPEN(UNIT=iounit, FILE='test_namelist.txt', STATUS='OLD', ACTION='READ')
         READ(iounit, TESTDATA, IOSTAT=errCode)
         CLOSE(UNIT=iounit)
