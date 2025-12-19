@@ -115,7 +115,8 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 	if err != nil {
 		return nil, nil, err
 	}
-	doWrap := vitgt == _tgtInt || resultType.IsPointer() != vitgt.IsPointer()
+	doWrap := vitgt == _tgtInt || resultType.IsPointer() != vitgt.IsPointer() ||
+		vitgt == _tgtStringLit && resultType.IsChar()
 	if doWrap {
 		result = tg.wrapConversion(vitgt, resultType, result)
 	}
@@ -1086,6 +1087,18 @@ func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Ex
 			expr = &ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{expr}}
 		}
 		return expr
+	case target == _tgtStringLit:
+		if sourceType != _tgtStringLit && sourceType.IsChar() {
+			// Something that receives a string is receiving a character array,
+			// so call String method on it.
+			expr = &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   expr,
+					Sel: ast.NewIdent("String"),
+				},
+			}
+			return expr
+		}
 	}
 	srcType := sourceType.typeToken()
 	targetType := target.typeToken()
