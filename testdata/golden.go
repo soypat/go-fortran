@@ -1101,11 +1101,11 @@ func LEVEL35() {
 	m = 3
 	n = 5
 	x = 2.5
-	fenv.Write(6, fortio.DefaultFormat(), "LEVEL 35: Hello from WRITE")
-	fenv.Write(6, fortio.DefaultFormat(), m, n, x)
-	fenv.Write(6, fortio.DefaultFormat(), "LEVEL 35: Values:", m, n)
-	fenv.Write(6, fortio.NewFormat(fortio.FormatDescriptor{Type: 'S', Literal: "LEVEL 35: Formatted output line"}))
-	fenv.Write(6, fortio.NewFormat(fortio.FormatDescriptor{Type: 'S', Literal: "LEVEL35: m="}, fortio.FormatDescriptor{Type: 'I', Width: 3, Repeat: 1}, fortio.FormatDescriptor{Type: 'S', Literal: " n="}, fortio.FormatDescriptor{Type: 'I', Width: 3, Repeat: 1}, fortio.FormatDescriptor{Type: 'S', Literal: " x="}, fortio.FormatDescriptor{Type: 'F', Width: 5, Precision: 2, Repeat: 1}), m, n, x)
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.DefaultFormat()}, "LEVEL 35: Hello from WRITE")
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.DefaultFormat()}, m, n, x)
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.DefaultFormat()}, "LEVEL 35: Values:", m, n)
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'S', Literal: "LEVEL 35: Formatted output line"})})
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'S', Literal: "LEVEL35: m="}, fortio.FormatDescriptor{Type: 'I', Width: 3, Repeat: 1}, fortio.FormatDescriptor{Type: 'S', Literal: " n="}, fortio.FormatDescriptor{Type: 'I', Width: 3, Repeat: 1}, fortio.FormatDescriptor{Type: 'S', Literal: " x="}, fortio.FormatDescriptor{Type: 'F', Width: 5, Precision: 2, Repeat: 1})}, m, n, x)
 	goto label220
 label220:
 	{
@@ -1165,8 +1165,8 @@ func LEVEL37() {
 	y = 99
 	msg.SetFromString("Hello File IO")
 	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_io.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
-	wstat1 = int32(fenv.WriteWithSpec(fortio.IOSpec{UNIT: iounit, IOSTAT: &wstat1}, fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), msg))
-	wstat2 = int32(fenv.WriteWithSpec(fortio.IOSpec{UNIT: iounit, IOSTAT: &wstat2}, fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), x, y))
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), IOSTAT: &wstat1}, msg)
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), IOSTAT: &wstat2}, x, y)
 	fenv.Close(fortio.CloseSpec{UNIT: iounit})
 	x = 0
 	y = 0
@@ -1211,7 +1211,7 @@ func LEVEL38() {
 	a = 0.0
 	b = 0.0
 	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_namelist.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
-	fenv.ReadWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.DefaultFormat(), IOSTAT: &errcode})
+	fenv.ReadNamelist(iounit, "TESTDATA", []fortio.NamelistVar{{Name: "x", Ptr: &x}, {Name: "y", Ptr: &y}, {Name: "z", Ptr: &z}, {Name: "a", Ptr: &a}, {Name: "b", Ptr: &b}})
 	fenv.Close(fortio.CloseSpec{UNIT: iounit})
 	fenv.Print("LEVEL 38: NAMELIST x,y,z=", x, y, z)
 	fenv.Print("LEVEL 38: NAMELIST a,b=", a, b)
