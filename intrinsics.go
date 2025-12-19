@@ -665,6 +665,14 @@ var (
 		X:   _astFenv,
 		Sel: ast.NewIdent("WriteNamelist"),
 	}
+	_astFenvReadWithSpec = &ast.SelectorExpr{
+		X:   _astFenv,
+		Sel: ast.NewIdent("ReadWithSpec"),
+	}
+	_astFenvWriteWithSpec = &ast.SelectorExpr{
+		X:   _astFenv,
+		Sel: ast.NewIdent("WriteWithSpec"),
+	}
 
 	// fortio package types and functions
 	_astFortioNewEnvironment = &ast.SelectorExpr{
@@ -694,6 +702,10 @@ var (
 	_astFortioCloseSpec = &ast.SelectorExpr{
 		X:   ast.NewIdent("fortio"),
 		Sel: ast.NewIdent("CloseSpec"),
+	}
+	_astFortioIOSpec = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("IOSpec"),
 	}
 	_astFortioNamelistVar = &ast.SelectorExpr{
 		X:   ast.NewIdent("fortio"),

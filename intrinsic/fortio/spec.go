@@ -61,6 +61,8 @@ type CloseSpec struct {
 type IOSpec struct {
 	// UNIT number for I/O operation.
 	UNIT int32
+	// FMT is the format specifier.
+	FMT *Format
 	// REC specifies record number for direct access.
 	REC int32
 	// ADVANCE specifies record advancement mode.
@@ -75,6 +77,8 @@ type IOSpec struct {
 	BLANK BlankMode
 	// PAD specifies padding for READ (overrides OPEN setting).
 	PAD PadMode
+	// DELIM specifies character delimiter for list-directed WRITE (overrides OPEN setting).
+	DELIM DelimMode
 	// ASYNCHRONOUS specifies asynchronous operation mode.
 	ASYNCHRONOUS AsyncMode
 	// POS specifies stream position for stream access.

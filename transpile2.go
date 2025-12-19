@@ -354,7 +354,8 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	case *f90.CloseStmt:
 		dst, err = tg.transformCloseStmt(dst, s)
 	case *f90.ReadStmt:
-		dst, err = tg.transformReadStmt(dst, s)
+		dst, err = tg.transformReadStmt2(dst, s)
+		// dst, err = tg.transformReadStmt(dst, s)
 	case *f90.BackspaceStmt, *f90.RewindStmt, *f90.EndfileStmt, *f90.InquireStmt:
 		// File I/O statements - not yet implemented, skip silently
 	case *f90.EntryStmt:
@@ -1482,9 +1483,18 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 	if err != nil {
 		return dst, err
 	}
-	args := make([]ast.Expr, 0, 2+len(stmt.OutputList))
-	args = append(args, unitExpr)
-	args = append(args, formatExpr)
+
+	// Check for I/O specifiers
+	var iostatVar ast.Expr
+	if iostatExpr := findIOSpecifier(stmt.Specifiers, "IOSTAT"); iostatExpr != nil {
+		iostatVar, _, err = tg.transformExpression(_tgtInt32, iostatExpr)
+		if err != nil {
+			return dst, err
+		}
+	}
+
+	// Build output arguments
+	outputArgs := make([]ast.Expr, 0, len(stmt.OutputList))
 	for _, expr := range stmt.OutputList {
 		var exprType Varinfo
 		if err := tg.repl.InferType(&exprType, expr); err != nil {
@@ -1494,15 +1504,32 @@ func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []ast
 		if err != nil {
 			return dst, err
 		}
-		args = append(args, goExpr)
+		outputArgs = append(outputArgs, goExpr)
 	}
 
-	// Generate: fenv.Write(unit, format, args...)
-	writeCall := &ast.CallExpr{
-		Fun:  _astFenvWrite,
-		Args: args,
+	// Generate call based on whether specifiers are present
+	if iostatVar != nil {
+		// Build IOSpec with IOSTAT pointer
+		specFields := []ast.Expr{
+			&ast.KeyValueExpr{Key: ast.NewIdent("UNIT"), Value: unitExpr},
+			&ast.KeyValueExpr{Key: ast.NewIdent("IOSTAT"), Value: &ast.UnaryExpr{Op: token.AND, X: iostatVar}},
+		}
+		ioSpec := &ast.CompositeLit{Type: _astFortioIOSpec, Elts: specFields}
+
+		// Generate: iostatVar = int32(fenv.WriteWithSpec(fortio.IOSpec{...}, format, args...))
+		args := append([]ast.Expr{ioSpec, formatExpr}, outputArgs...)
+		writeCall := &ast.CallExpr{Fun: _astFenvWriteWithSpec, Args: args}
+		dst = append(dst, &ast.AssignStmt{
+			Lhs: []ast.Expr{iostatVar},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("int32"), Args: []ast.Expr{writeCall}}},
+		})
+	} else {
+		// Simple case: fenv.Write(unit, format, args...)
+		args := append([]ast.Expr{unitExpr, formatExpr}, outputArgs...)
+		writeCall := &ast.CallExpr{Fun: _astFenvWrite, Args: args}
+		dst = append(dst, &ast.ExprStmt{X: writeCall})
 	}
-	dst = append(dst, &ast.ExprStmt{X: writeCall})
 	return dst, nil
 }
 
@@ -1802,8 +1829,17 @@ func (tg *ToGo) transformReadStmt(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []ast.S
 		formatExpr = &ast.CallExpr{Fun: _astFortioDefaultFormat}
 	}
 
-	// Build arguments: unit, format, &var1, &var2, ...
-	args := []ast.Expr{unitArg, formatExpr}
+	// Check for I/O specifiers
+	var iostatVar ast.Expr
+	if iostatExpr := findIOSpecifier(stmt.Specifiers, "IOSTAT"); iostatExpr != nil {
+		iostatVar, _, err = tg.transformExpression(_tgtInt32, iostatExpr)
+		if err != nil {
+			return dst, err
+		}
+	}
+
+	// Build input arguments: &var1, &var2, ...
+	inputArgs := make([]ast.Expr, 0, len(stmt.InputList))
 	for _, expr := range stmt.InputList {
 		var exprType Varinfo
 		if err := tg.repl.InferType(&exprType, expr); err != nil {
@@ -1814,15 +1850,32 @@ func (tg *ToGo) transformReadStmt(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []ast.S
 			return dst, err
 		}
 		// Take address of variable for READ
-		args = append(args, &ast.UnaryExpr{Op: token.AND, X: goExpr})
+		inputArgs = append(inputArgs, &ast.UnaryExpr{Op: token.AND, X: goExpr})
 	}
 
-	// Generate: fenv.Read(unit, format, &var1, &var2, ...)
-	readCall := &ast.CallExpr{
-		Fun:  _astFenvRead,
-		Args: args,
+	// Generate call based on whether specifiers are present
+	if iostatVar != nil {
+		// Build IOSpec with IOSTAT pointer
+		specFields := []ast.Expr{
+			&ast.KeyValueExpr{Key: ast.NewIdent("UNIT"), Value: unitArg},
+			&ast.KeyValueExpr{Key: ast.NewIdent("IOSTAT"), Value: &ast.UnaryExpr{Op: token.AND, X: iostatVar}},
+		}
+		ioSpec := &ast.CompositeLit{Type: _astFortioIOSpec, Elts: specFields}
+
+		// Generate: iostatVar = int32(fenv.ReadWithSpec(fortio.IOSpec{...}, format, &var1, ...))
+		args := append([]ast.Expr{ioSpec, formatExpr}, inputArgs...)
+		readCall := &ast.CallExpr{Fun: _astFenvReadWithSpec, Args: args}
+		dst = append(dst, &ast.AssignStmt{
+			Lhs: []ast.Expr{iostatVar},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("int32"), Args: []ast.Expr{readCall}}},
+		})
+	} else {
+		// Simple case: fenv.Read(unit, format, &var1, &var2, ...)
+		args := append([]ast.Expr{unitArg, formatExpr}, inputArgs...)
+		readCall := &ast.CallExpr{Fun: _astFenvRead, Args: args}
+		dst = append(dst, &ast.ExprStmt{X: readCall})
 	}
-	dst = append(dst, &ast.ExprStmt{X: readCall})
 
 	return dst, nil
 }
@@ -2819,4 +2872,138 @@ func (tg *ToGo) resolveKindFromDecl(decl *f90.DeclEntity) int {
 		return 0
 	}
 	return int(dst.val.i64)
+}
+
+func (tg *ToGo) transformWriteStmt2(dst []ast.Stmt, stmt *f90.WriteStmt) ([]ast.Stmt, error) {
+	specs := append([]f90.IOSpecifier{
+		{Name: "UNIT", Value: stmt.Unit},
+		{Name: "FMT", Value: stmt.Format},
+	}, stmt.Specifiers...)
+	return tg.transformIO(dst, _astFenvWriteWithSpec, specs, stmt.OutputList, false)
+}
+
+func (tg *ToGo) transformReadStmt2(dst []ast.Stmt, stmt *f90.ReadStmt) ([]ast.Stmt, error) {
+	specs := append([]f90.IOSpecifier{
+		{Name: "UNIT", Value: stmt.Unit},
+		{Name: "FMT", Value: stmt.Format},
+	}, stmt.Specifiers...)
+	return tg.transformIO(dst, _astFenvReadWithSpec, specs, stmt.InputList, true)
+}
+
+// transformReadStmt2 generates: fenv.ReadWithSpec(fortio.IOSpec{UNIT:..., FMT:..., ...}, &x, &y)
+func (tg *ToGo) transformIO(dst []ast.Stmt, fenvSel *ast.SelectorExpr, specs []f90.IOSpecifier, inputs []f90.Expression, refInputs bool) ([]ast.Stmt, error) {
+	specFields, err := tg.specifiersToFields(specs)
+	if err != nil {
+		return nil, err
+	}
+	spec := &ast.CompositeLit{Type: _astFortioIOSpec, Elts: specFields}
+	var args []ast.Expr = []ast.Expr{spec}
+	var vitgt Varinfo
+	for _, input := range inputs {
+		err = tg.repl.InferType(&vitgt, input)
+		if err != nil {
+			return nil, tg.makeErrAtStmt("inferring type of IO statement input")
+		}
+		arg, _, err := tg.transformExpression(&vitgt, input)
+		if err != nil {
+			return nil, err
+		}
+		if refInputs {
+			arg = &ast.UnaryExpr{Op: token.AND, X: arg}
+		}
+		args = append(args, arg)
+	}
+	call := &ast.CallExpr{Fun: _astFenvReadWithSpec, Args: args}
+	dst = append(dst, &ast.ExprStmt{X: call})
+	return dst, nil
+}
+
+// specifiersToFields transforms Fortran IOSpecifiers to Go composite literal fields.
+func (tg *ToGo) specifiersToFields(specs []f90.IOSpecifier) ([]ast.Expr, error) {
+	var fields []ast.Expr
+	for _, spec := range specs {
+		name := strings.ToUpper(spec.Name)
+		cfg, ok := ioSpecifierConfig[name]
+		if !ok {
+			return fields, errors.New("unknown specifier: " + spec.Name)
+		}
+		var valueExpr ast.Expr
+		var err error
+		if cfg.enumMap != nil {
+			// Handle enum: ACTION='READ' -> fortio.ActionREAD
+			if strLit, ok := spec.Value.(*f90.StringLiteral); ok {
+				valueExpr = cfg.enumMap[strings.ToUpper(strLit.Value)]
+				if valueExpr == nil {
+					return fields, errors.New("unknown specifier value: " + spec.Name + ":" + strLit.Value)
+				}
+			} else {
+				return fields, errors.New("can't map specifier value: " + spec.Name + ":" + string(spec.Value.AppendString(nil)))
+			}
+		} else {
+			if cfg.specialConv != nil {
+				valueExpr, err = cfg.specialConv(tg, spec.Value)
+				if err != nil {
+					return fields, err
+				}
+			} else {
+				// Transform expression with target type
+				valueExpr, _, err = tg.transformExpression(cfg.target, spec.Value)
+				if err != nil {
+					return fields, err
+				}
+			}
+		}
+		if cfg.needsAddr {
+			valueExpr = &ast.UnaryExpr{Op: token.AND, X: valueExpr}
+		}
+		fields = append(fields, &ast.KeyValueExpr{
+			Key:   ast.NewIdent(name),
+			Value: valueExpr,
+		})
+	}
+	return fields, nil
+}
+
+// ioSpecField describes how to transform a Fortran I/O specifier to a Go struct field.
+type ioSpecField struct {
+	target      *Varinfo            // Type for expression transformation (nil for enums)
+	needsAddr   bool                // Take address (&var) for pointer fields
+	enumMap     map[string]ast.Expr // For enum values like ACTION='READ'
+	specialConv func(*ToGo, f90.Expression) (ast.Expr, error)
+}
+
+// ioSpecifierConfig defines transformation rules for each I/O specifier.
+var ioSpecifierConfig = map[string]ioSpecField{
+	// Common to all statements
+	"UNIT":   {target: _tgtInt32},
+	"IOSTAT": {target: _tgtInt32, needsAddr: true},
+	"IOMSG":  {target: _tgtStringLit, needsAddr: true},
+
+	// OPEN/CLOSE specific
+	"FILE": {target: _tgtStringLit},
+	"RECL": {target: _tgtInt32},
+	"ACTION": {enumMap: map[string]ast.Expr{
+		"READ": _astFortioActionREAD, "WRITE": _astFortioActionWRITE, "READWRITE": _astFortioActionREADWRITE,
+	}},
+
+	// READ/WRITE specific
+	"REC":  {target: _tgtInt32},
+	"SIZE": {target: _tgtInt32, needsAddr: true},
+	"FMT": {target: _tgtStringLit, specialConv: func(tg *ToGo, format f90.Expression) (ast.Expr, error) {
+		switch format := format.(type) {
+		case *f90.Identifier:
+			if format.Value == "*" {
+				return &ast.CallExpr{Fun: _astFortioDefaultFormat}, nil
+			}
+		case *f90.IntegerLiteral:
+			label := strconv.FormatInt(format.Value, 10)
+			if fmtInfo := tg.repl.getFormat(label); fmtInfo != nil {
+				return &ast.CallExpr{Fun: _astFortioNewFormat, Args: formatSpecsToGoAST(fmtInfo.Specs)}, nil
+			}
+		case *f90.StringLiteral:
+			specs := f90.ParseFormatString(format.Value)
+			return &ast.CallExpr{Fun: _astFortioNewFormat, Args: formatSpecsToGoAST(specs)}, nil
+		}
+		return &ast.CallExpr{Fun: _astFortioDefaultFormat}, nil
+	}},
 }

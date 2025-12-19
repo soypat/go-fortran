@@ -393,6 +393,15 @@ func (env *Environment) Write(unit int32, f *Format, args ...any) IOStat {
 	return IOStatOK
 }
 
+// WriteWithSpec performs formatted output with full I/O specifier support.
+func (env *Environment) WriteWithSpec(spec IOSpec, f *Format, args ...any) IOStat {
+	stat := env.Write(spec.UNIT, f, args...)
+	if spec.IOSTAT != nil {
+		*spec.IOSTAT = int32(stat)
+	}
+	return stat
+}
+
 // Read performs formatted input from a unit.
 func (env *Environment) Read(unit int32, f *Format, args ...any) IOStat {
 	state := env.getUnit(unit)
@@ -428,6 +437,15 @@ func (env *Environment) Read(unit int32, f *Format, args ...any) IOStat {
 		return IOStatErrConversion
 	}
 	return IOStatOK
+}
+
+// ReadWithSpec performs formatted input with full I/O specifier support.
+func (env *Environment) ReadWithSpec(spec IOSpec, args ...any) IOStat {
+	stat := env.Read(spec.UNIT, spec.FMT, args...)
+	if spec.IOSTAT != nil {
+		*spec.IOSTAT = int32(stat)
+	}
+	return stat
 }
 
 // appendLine reads a line from state and appends it to dst.

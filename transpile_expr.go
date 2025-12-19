@@ -16,7 +16,7 @@ import (
 func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result ast.Expr, resultType *Varinfo, err error) {
 	if expr == nil {
 		return nil, nil, tg.makeErrAtStmt("nil expression")
-	} else if vitgt == nil {
+	} else if vitgt == nil || vitgt.typeToken() == 0 {
 		panic("vitgt cannot be nil")
 	}
 	switch e := expr.(type) {

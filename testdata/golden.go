@@ -1165,14 +1165,14 @@ func LEVEL37() {
 	y = 99
 	msg.SetFromString("Hello File IO")
 	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_io.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
-	fenv.Write(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), msg)
-	fenv.Write(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), x, y)
+	wstat1 = int32(fenv.WriteWithSpec(fortio.IOSpec{UNIT: iounit, IOSTAT: &wstat1}, fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), msg))
+	wstat2 = int32(fenv.WriteWithSpec(fortio.IOSpec{UNIT: iounit, IOSTAT: &wstat2}, fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), x, y))
 	fenv.Close(fortio.CloseSpec{UNIT: iounit})
 	x = 0
 	y = 0
 	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_io.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
-	fenv.Read(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), &msg)
-	fenv.Read(iounit, fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), &x, &y)
+	fenv.ReadWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), IOSTAT: &rstat1}, &msg)
+	fenv.ReadWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), IOSTAT: &rstat2}, &x, &y)
 	fenv.Close(fortio.CloseSpec{UNIT: iounit})
 	fenv.Print("LEVEL 37: READ BACK", msg, x, y)
 	fenv.Print("LEVEL 37: IOSTAT", rstat1, rstat2, wstat1, wstat2)
@@ -1211,7 +1211,7 @@ func LEVEL38() {
 	a = 0.0
 	b = 0.0
 	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_namelist.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
-	fenv.ReadNamelist(iounit, "TESTDATA", []fortio.NamelistVar{{Name: "x", Ptr: &x}, {Name: "y", Ptr: &y}, {Name: "z", Ptr: &z}, {Name: "a", Ptr: &a}, {Name: "b", Ptr: &b}})
+	fenv.ReadWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.DefaultFormat(), IOSTAT: &errcode})
 	fenv.Close(fortio.CloseSpec{UNIT: iounit})
 	fenv.Print("LEVEL 38: NAMELIST x,y,z=", x, y, z)
 	fenv.Print("LEVEL 38: NAMELIST a,b=", a, b)
