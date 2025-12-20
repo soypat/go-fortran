@@ -698,12 +698,12 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 		if err != nil {
 			return dst, err
 		}
-		// For INTENT(OUT/INOUT) non-array scalar parameters, pass address
+		// For INTENT(OUT/INOUT) non-array scalar parameters, pass address.
+		// Convert .At() to .AtPtr() for array element access.
 		if info != nil && info.decl != nil {
 			intent := info.decl.Type.Intent()
-			isArray := info.IsArray()
-			if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
-				goexpr = &ast.UnaryExpr{Op: token.AND, X: goexpr}
+			if !info.IsArray() && (intent == f90.IntentOut || intent == f90.IntentInOut) {
+				goexpr = wrapPointer(goexpr)
 			}
 		}
 		gstmt.Args = append(gstmt.Args, goexpr)
@@ -712,6 +712,17 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 		X: gstmt,
 	})
 	return dst, nil
+}
+
+// wrapPointer converts .At() to .AtPtr() or adds & prefix for pointer passing.
+func wrapPointer(expr ast.Expr) ast.Expr {
+	if callExpr, ok := expr.(*ast.CallExpr); ok {
+		if sel, ok := callExpr.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "At" {
+			sel.Sel = ast.NewIdent("AtPtr")
+			return expr
+		}
+	}
+	return &ast.UnaryExpr{Op: token.AND, X: expr}
 }
 
 // allIdentifierArgs returns true if all args are simple Identifier nodes.

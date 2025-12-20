@@ -123,6 +123,60 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 	return result, resultType, err
 }
 
+// wrapConversion wraps expr with a type conversion if target type differs from sourceType.
+func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Expr) ast.Expr {
+	ptrDerefFirst := sourceType.IsPointer()
+	// isArray := tg.varIsArray(sourceType)
+	switch {
+	case ptrDerefFirst:
+		expr = &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   expr,
+				Sel: ast.NewIdent("At"),
+			},
+			Args: []ast.Expr{_astOne},
+		}
+	case target == nil:
+		panic(tg.makeErrAtStmt("nil target variable: " + sourceType._varname))
+	case target == _tgtInt:
+		if sourceType != _tgtInt && sourceType != _tgtGenericInt {
+			expr = &ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{expr}}
+		}
+		return expr
+	case target == _tgtStringLit:
+		if sourceType != _tgtStringLit && sourceType.IsChar() {
+			// Something that receives a string is receiving a character array,
+			// so call String method on it.
+			expr = &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   expr,
+					Sel: ast.NewIdent("String"),
+				},
+			}
+			return expr
+		}
+	}
+	srcType := sourceType.typeToken()
+	targetType := target.typeToken()
+	if srcType == targetType || targetType == f90token.FloatLit {
+		return expr
+	}
+	// Special case: converting real to complex requires complex(real, 0)
+	if (targetType == f90token.COMPLEX || targetType == f90token.DOUBLECOMPLEX) &&
+		(srcType == f90token.REAL || srcType == f90token.DOUBLEPRECISION ||
+			srcType == f90token.INTEGER || srcType == f90token.FloatLit || srcType == f90token.IntLit) {
+		return &ast.CallExpr{
+			Fun:  ast.NewIdent("complex"),
+			Args: []ast.Expr{expr, _astZero},
+		}
+	}
+	conv := tg.baseGotype(targetType, tg.resolveKind(target))
+	return &ast.CallExpr{
+		Fun:  conv,
+		Args: []ast.Expr{expr},
+	}
+}
+
 func (tg *ToGo) transformExprIdentifer(vitgt *Varinfo, e *f90.Identifier) (result ast.Expr, resultType *Varinfo, err error) {
 	resultType = tg.repl.Var(e.Value)
 	if resultType == nil {
@@ -1065,60 +1119,6 @@ func (tg *ToGo) transformRangedOperand(expr f90.Expression) (ast.Expr, error) {
 	}
 	// Not ranged - fall back to normal expression transformation
 	return nil, tg.makeErr(expr, "expected ranged array access")
-}
-
-// wrapConversion wraps expr with a type conversion if target type differs from sourceType.
-func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Expr) ast.Expr {
-	ptrDerefFirst := sourceType.IsPointer()
-	// isArray := tg.varIsArray(sourceType)
-	switch {
-	case ptrDerefFirst:
-		expr = &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X:   expr,
-				Sel: ast.NewIdent("At"),
-			},
-			Args: []ast.Expr{_astOne},
-		}
-	case target == nil:
-		panic(tg.makeErrAtStmt("nil target variable: " + sourceType._varname))
-	case target == _tgtInt:
-		if sourceType != _tgtInt && sourceType != _tgtGenericInt {
-			expr = &ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{expr}}
-		}
-		return expr
-	case target == _tgtStringLit:
-		if sourceType != _tgtStringLit && sourceType.IsChar() {
-			// Something that receives a string is receiving a character array,
-			// so call String method on it.
-			expr = &ast.CallExpr{
-				Fun: &ast.SelectorExpr{
-					X:   expr,
-					Sel: ast.NewIdent("String"),
-				},
-			}
-			return expr
-		}
-	}
-	srcType := sourceType.typeToken()
-	targetType := target.typeToken()
-	if srcType == targetType || targetType == f90token.FloatLit {
-		return expr
-	}
-	// Special case: converting real to complex requires complex(real, 0)
-	if (targetType == f90token.COMPLEX || targetType == f90token.DOUBLECOMPLEX) &&
-		(srcType == f90token.REAL || srcType == f90token.DOUBLEPRECISION ||
-			srcType == f90token.INTEGER || srcType == f90token.FloatLit || srcType == f90token.IntLit) {
-		return &ast.CallExpr{
-			Fun:  ast.NewIdent("complex"),
-			Args: []ast.Expr{expr, _astZero},
-		}
-	}
-	conv := tg.baseGotype(targetType, tg.resolveKind(target))
-	return &ast.CallExpr{
-		Fun:  conv,
-		Args: []ast.Expr{expr},
-	}
 }
 
 // goTypeBasic supports primitive type transformation from fortran to Go. Anything more complex requires being a method on [ToGo].

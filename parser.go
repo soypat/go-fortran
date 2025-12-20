@@ -41,9 +41,6 @@ const (
 	// VFlagParameter: Is a dummy argument (parameter) of a function/subroutine.
 	// Set when: Variable appears in procedure's parameter list.
 	VFlagParameter
-	// VFlagPointerParam: OUT/INOUT scalar parameter that needs dereferencing.
-	// Set when: Scalar parameter with INTENT(OUT) or INTENT(INOUT).
-	VFlagPointerParam
 	// VFlagAllocatable: Variable has ALLOCATABLE attribute.
 	// Set when: "INTEGER, ALLOCATABLE :: arr(:)" - dynamic allocation via ALLOCATE.
 	VFlagAllocatable
@@ -447,14 +444,15 @@ type Varinfo struct {
 	stmtFuncParams []string       // parameter names
 }
 
-func (p *Varinfo) Flags() VarFlags              { return p.flags }
-func (p *Varinfo) Value() Value                 { return p.val }
-func (p *Varinfo) Charlen() ast.Expression      { return p.decl.Charlen() }
-func (p *Varinfo) Kind() ast.Expression         { return p.decl.Kind() }
-func (p *Varinfo) Dimensions() *ast.ArraySpec   { return p.decl.Dimension() }
-func (p *Varinfo) Identifier() string           { return p._varname }
-func (p *Varinfo) IsParameter() bool            { return p.flags.HasAny(VFlagParameter) }
-func (p *Varinfo) IsAllocatable() bool          { return p.flags.HasAny(VFlagAllocatable) }
+func (p *Varinfo) Flags() VarFlags            { return p.flags }
+func (p *Varinfo) Value() Value               { return p.val }
+func (p *Varinfo) Charlen() ast.Expression    { return p.decl.Charlen() }
+func (p *Varinfo) Kind() ast.Expression       { return p.decl.Kind() }
+func (p *Varinfo) Dimensions() *ast.ArraySpec { return p.decl.Dimension() }
+func (p *Varinfo) Identifier() string         { return p._varname }
+func (p *Varinfo) IsParameter() bool          { return p.flags.HasAny(VFlagParameter) }
+func (p *Varinfo) IsAllocatable() bool        { return p.flags.HasAny(VFlagAllocatable) }
+
 func (p *Varinfo) IsStmtFunc() bool             { return p.flags.HasAny(VFlagStmtFunc) }
 func (p *Varinfo) StmtFuncExpr() ast.Expression { return p.stmtFuncExpr }
 func (p *Varinfo) StmtFuncParams() []string     { return p.stmtFuncParams }
@@ -496,6 +494,8 @@ func (p *Varinfo) IsChar() bool {
 // Returns false for VFlagPointer because you want the address, not what it points to.
 // Returns false for arrays (VFlagDimension) which have their own access patterns.
 // Returns false for CHARACTER types which use intrinsic.CharacterArray.
+//
+// Note: VFlagIntentOut is handled separately via wrapPointer() in function call transpilation.
 func (p *Varinfo) IsPointer() bool {
 	if p.flags.HasAny(VFlagPointer | VFlagDimension) {
 		return false
