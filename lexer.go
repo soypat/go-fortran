@@ -192,6 +192,13 @@ func (l *Lexer90) NextToken() (tok token.Token, startPos int, literal []byte) {
 		return token.LineComment, startPos, data
 	}
 	switch ch {
+	case '\r':
+		if l.peekChar() != '\n' {
+			l.idbuf[0] = '\r'
+			return token.Illegal, startPos, l.idbuf[:1]
+		}
+		l.readChar()
+		fallthrough
 	case '\n':
 		tok = token.NewLine
 		l.readChar()
@@ -710,7 +717,7 @@ func (l *Lexer90) readChar() {
 		l.advance()
 
 		// Skip trailing whitespace after '&'
-		for l.err == nil && (l.ch == ' ' || l.ch == '\t') {
+		for l.err == nil && (l.ch == ' ' || l.ch == '\t' || l.ch == '\r') {
 			l.advance()
 		}
 
@@ -721,7 +728,10 @@ func (l *Lexer90) readChar() {
 			}
 		}
 
-		// Now we should be at newline - consume it
+		// Now we should be at newline - consume it (handle CRLF)
+		if l.ch == '\r' {
+			l.advance()
+		}
 		if l.ch == '\n' {
 			l.advance()
 		}
@@ -768,7 +778,7 @@ func (l *Lexer90) isContinuationChar() bool {
 		if ch == '\n' {
 			return true // Found newline after whitespace/comment
 		}
-		if ch == ' ' || ch == '\t' {
+		if ch == ' ' || ch == '\t' || ch == '\r' {
 			i++
 			continue // Skip whitespace
 		}
