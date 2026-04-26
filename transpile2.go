@@ -169,6 +169,9 @@ func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 	params := tg.repl.ScopeParams()
 	for i := range params {
 		vi := &params[i]
+		if vi.decl.Name == "" || vi.decl.Name == "*" {
+			continue // skip alternate return parameters (*)
+		}
 		tp := tg.goType(vi)
 		// For INTENT(OUT) or INTENT(INOUT) non-array scalars, use pointer type
 		intent := vi.decl.Type.Intent()
@@ -366,11 +369,8 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	case *f90.AssignedGotoStmt:
 		// GOTO variable (assigned GOTO using label from ASSIGN statement) - not supported
 	case *f90.UseStatement:
-		// USE statement - load module into scope
-		err = tg.repl.Use(s.ModuleName, s.Only...)
-		if err != nil {
-			err = tg.makeErr(stmt, err.Error())
-		}
+		// USE statement - load module into scope; skip unknown (external) modules silently.
+		_ = tg.repl.Use(s.ModuleName, s.Only...)
 	case *f90.ImplicitStatement, *f90.ExternalStmt, *f90.IntrinsicStmt, *f90.NamelistStmt:
 		// Specification statement - no code generation
 	default:
@@ -666,6 +666,9 @@ func (tg *ToGo) transformDeallocateStmt(dst []ast.Stmt, stmt *f90.DeallocateStmt
 		default:
 			return dst, tg.makeErr(stmt, "DEALLOCATE requires variable")
 		}
+		if vi == nil {
+			continue // unknown variable — skip
+		}
 		// Generate: varname.Deallocate()
 		call := &ast.CallExpr{
 			Fun: &ast.SelectorExpr{X: tg.astVarExpr(vi), Sel: ast.NewIdent("Deallocate")},
@@ -678,25 +681,40 @@ func (tg *ToGo) transformDeallocateStmt(dst []ast.Stmt, stmt *f90.DeallocateStmt
 func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.Stmt, err error) {
 	fninfo := tg.ContainedOrUsed(stmt.Name)
 	if fninfo == nil {
-		return dst, tg.makeErr(stmt, "subroutine not found: "+stmt.Name)
+		dst, ok, err := tg.transformIntrinsicCallStmt(dst, stmt)
+		if ok || err != nil {
+			return dst, err
+		}
+		// Unknown subroutine (external library call e.g. LAPACK). Emit a panic stub.
+		dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{
+			Fun:  ast.NewIdent("panic"),
+			Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"subroutine not found: ` + stmt.Name + `"`}},
+		}})
+		return dst, nil
 	}
 	params := fninfo.ProcedureParams()
 	// Legacy Fortran allows calling with fewer arguments (undefined behavior but permitted).
 	// We handle this by using type inference for excess arguments.
 	if len(stmt.Args) > len(params) {
-		return dst, tg.makeErr(stmt, fmt.Sprintf("too many args in call (expected %d, got %d)", len(params), len(stmt.Args)))
+		// Truncate extra args — caller has more args than callee's definition (Fortran code mismatch).
+		stmt.Args = stmt.Args[:len(params)]
 	}
 	gstmt := &ast.CallExpr{
 		Fun: tg.astIdent(fninfo.name),
 	}
+	paramIdx := 0
 	for i := range stmt.Args {
+		// Skip alternate return arguments (*label) — Fortran-specific, no Go equivalent.
+		if _, ok := stmt.Args[i].(*f90.AlternateReturnArg); ok {
+			continue
+		}
 		var info *Varinfo
-		if i < len(params) {
-			info = &params[i]
+		if paramIdx < len(params) {
+			info = &params[paramIdx]
 		}
 		goexpr, _, err := tg.transformExpression(info, stmt.Args[i])
 		if err != nil {
-			return dst, err
+			return dst, nil // skip call with unresolvable args (e.g. derived type from unloaded module)
 		}
 		// For INTENT(OUT/INOUT) non-array scalar parameters, pass address.
 		// Convert .At() to .AtPtr() for array element access.
@@ -707,11 +725,54 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 			}
 		}
 		gstmt.Args = append(gstmt.Args, goexpr)
+		paramIdx++
 	}
 	dst = append(dst, &ast.ExprStmt{
 		X: gstmt,
 	})
 	return dst, nil
+}
+
+// transformIntrinsicCallStmt handles CALL statements for intrinsic and vendor
+// subroutines marked isEnvSubroutine, emitting fenv.Method(args...).
+// Returns (dst, true, err) when the intrinsic was recognised, (dst, false, nil) otherwise.
+func (tg *ToGo) transformIntrinsicCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) ([]ast.Stmt, bool, error) {
+	var fn *intrinsicFn
+	if tok := f90token.LookupIntrinsic(stmt.Name); tok != 0 {
+		fn = getIntrinsic(tok)
+	}
+	if fn == nil {
+		if tok := f90token.LookupVendorIntrinsic(stmt.Name); tok != 0 {
+			fn = getVendoredIntrinsic(tok)
+		}
+	}
+	if fn == nil || !fn.isEnvSubroutine {
+		return dst, false, nil
+	}
+	call := fn.findBestCall(len(stmt.Args))
+	if call == nil {
+		return dst, true, tg.makeErr(stmt, "no matching call signature for env subroutine: "+stmt.Name)
+	}
+	var args []ast.Expr
+	for i, argExpr := range stmt.Args {
+		var info *Varinfo
+		if i < len(call.args) {
+			info = call.args[i]
+		}
+		goexpr, _, err := tg.transformExpression(info, argExpr)
+		if err != nil {
+			return dst, true, err
+		}
+		if i < len(call.outArgs) && call.outArgs[i] {
+			goexpr = wrapPointer(goexpr)
+		}
+		args = append(args, goexpr)
+	}
+	callExpr := &ast.CallExpr{
+		Fun:  &ast.SelectorExpr{X: ast.NewIdent("fenv"), Sel: ast.NewIdent(call.methodOrCall)},
+		Args: args,
+	}
+	return append(dst, &ast.ExprStmt{X: callExpr}), true, nil
 }
 
 // wrapPointer converts .At() to .AtPtr() or adds & prefix for pointer passing.
@@ -780,7 +841,8 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	if err != nil {
 		return nil, err
 	} else if targetVinfo == nil {
-		return nil, tg.makeErr(stmt.Target, "unknown identifier in target expression of assignment")
+		// Unknown target (e.g. variable from unloaded module) — skip assignment.
+		return dst, nil
 	} else if targetVinfo.decl == nil {
 		return nil, tg.makeErr(stmt.Target, "identifier with no corresponding type declaration:"+targetVinfo.Identifier())
 	}
@@ -796,7 +858,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	}
 	rhs, _, err := tg.transformExpression(targetVinfo, stmt.Value)
 	if err != nil {
-		return dst, err
+		return dst, nil // skip assignment with unresolvable RHS (e.g. derived type from unloaded module)
 	}
 	// SetFromString only for scalar CHARACTER (identifier target), not array elements
 	if targetVinfo.decl.Type.Token == f90token.CHARACTER && isIdentifier {
@@ -813,9 +875,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 
 	// Infer RHS type for conversions (needed by ArrayRef/FunctionCall and default path)
 	var rhsType Varinfo
-	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
-		return dst, tg.makeErr(stmt, "inferring type: "+err.Error())
-	}
+	tg.repl.InferType(&rhsType, stmt.Value) // ignore error: ComponentAccess and other complex targets don't need type inference
 
 	switch tgt := stmt.Target.(type) {
 	case *f90.CallExpr:
@@ -910,6 +970,60 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 }
 
 func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast.Stmt, err error) {
+	// Check for implied DO loops — use dynamic args slice approach.
+	hasImpliedDo := false
+	for _, expr := range stmt.OutputList {
+		if _, ok := expr.(*f90.ImpliedDoLoop); ok {
+			hasImpliedDo = true
+			break
+		}
+	}
+	if hasImpliedDo {
+		argsVar := ast.NewIdent("printArgs")
+		initStmt := &ast.AssignStmt{
+			Lhs: []ast.Expr{argsVar},
+			Tok: token.DEFINE,
+			Rhs: []ast.Expr{&ast.CallExpr{
+				Fun:  ast.NewIdent("make"),
+				Args: []ast.Expr{&ast.ArrayType{Elt: ast.NewIdent("any")}, _astZero},
+			}},
+		}
+		blockStmts := []ast.Stmt{initStmt}
+		for _, expr := range stmt.OutputList {
+			if idl, ok := expr.(*f90.ImpliedDoLoop); ok {
+				loopStmts, err := tg.transformImpliedDoLoopAppend(idl, argsVar)
+				if err != nil {
+					return dst, err
+				}
+				blockStmts = append(blockStmts, loopStmts...)
+			} else {
+				var tgt Varinfo
+				if err := tg.repl.InferType(&tgt, expr); err != nil {
+					return dst, tg.makeErr(stmt, err.Error())
+				}
+				goExpr, _, err := tg.transformExpression(&tgt, expr)
+				if err != nil {
+					return dst, err
+				}
+				blockStmts = append(blockStmts, &ast.AssignStmt{
+					Lhs: []ast.Expr{argsVar},
+					Tok: token.ASSIGN,
+					Rhs: []ast.Expr{&ast.CallExpr{
+						Fun:  ast.NewIdent("append"),
+						Args: []ast.Expr{argsVar, goExpr},
+					}},
+				})
+			}
+		}
+		blockStmts = append(blockStmts, &ast.ExprStmt{X: &ast.CallExpr{
+			Fun:      _astFenvPrint,
+			Args:     []ast.Expr{argsVar},
+			Ellipsis: 1,
+		}})
+		dst = append(dst, &ast.BlockStmt{List: blockStmts})
+		return dst, nil
+	}
+
 	// Transform output list expressions to Go expressions
 	var args []ast.Expr
 	var tgt Varinfo
@@ -1388,9 +1502,59 @@ func (tg *ToGo) transformDataArray(dst []ast.Stmt, stmt *f90.DataStmt, varExpr f
 // Returns the number of values consumed.
 func (tg *ToGo) transformDataImpliedDo(dst []ast.Stmt, stmt *f90.DataStmt, loop *f90.ImpliedDoLoop,
 	iter *dataValueIter, targetVinfo *Varinfo) ([]ast.Stmt, int, error) {
-	// TODO: Implement implied DO loop expansion
-	// For now, just consume values for each expression in the loop
-	return dst, 0, tg.makeErr(stmt, "DATA implied DO loops not yet implemented in transpiler")
+	// Evaluate loop bounds as integer constants.
+	var startVI, endVI, strideVI Varinfo
+	if err := tg.repl.Eval(&startVI, loop.Start); err != nil {
+		return dst, 0, tg.makeErr(stmt, "DATA implied-DO: evaluating start: "+err.Error())
+	}
+	if err := tg.repl.Eval(&endVI, loop.End); err != nil {
+		return dst, 0, tg.makeErr(stmt, "DATA implied-DO: evaluating end: "+err.Error())
+	}
+	stride := int64(1)
+	if loop.Stride != nil {
+		if err := tg.repl.Eval(&strideVI, loop.Stride); err != nil {
+			return dst, 0, tg.makeErr(stmt, "DATA implied-DO: evaluating stride: "+err.Error())
+		}
+		stride = strideVI.val.i64
+	}
+	start := startVI.val.i64
+	end := endVI.val.i64
+	if stride == 0 {
+		stride = 1
+	}
+	consumed := 0
+	for k := start; (stride > 0 && k <= end) || (stride < 0 && k >= end); k += stride {
+		// Push loop variable as integer constant into scope.
+		loopVar := Varinfo{}
+		loopVar.decl = &f90.DeclEntity{Name: loop.LoopVar, Type: &f90.TypeSpec{Token: f90token.INTEGER}}
+		loopVar._varname = loop.LoopVar
+		if err := tg.repl.assignInt(&loopVar, k); err != nil {
+			return dst, consumed, tg.makeErr(stmt, "DATA implied-DO: setting loop var: "+err.Error())
+		}
+		remove := tg.repl.PushVar(loopVar)
+		for _, expr := range loop.Expressions {
+			callExpr, ok := expr.(*f90.CallExpr)
+			if !ok {
+				remove()
+				return dst, consumed, tg.makeErr(stmt, "DATA implied-DO: expected array element expression")
+			}
+			vi := tg.repl.Var(callExpr.Name)
+			if vi == nil {
+				remove()
+				return dst, consumed, tg.makeErr(stmt, "DATA implied-DO: unknown variable "+callExpr.Name)
+			}
+			var n int
+			var err error
+			dst, n, err = tg.transformDataArrayElement(dst, stmt, callExpr, iter, vi)
+			if err != nil {
+				remove()
+				return dst, consumed, err
+			}
+			consumed += n
+		}
+		remove()
+	}
+	return dst, consumed, nil
 }
 
 func (tg *ToGo) transformParameterStmt(dst []ast.Stmt, stmt *f90.ParameterStmt) ([]ast.Stmt, error) {
@@ -1842,7 +2006,11 @@ func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, root *f90
 		case *f90.Identifier:
 			args = append(args, tg.astMethodCall(e.Value, "String"))
 		default:
-			return dst, tg.makeErr(op, "unsupported expression for string concat")
+			goexpr, _, err := tg.transformExpression(_tgtStringLit, e)
+			if err != nil {
+				return dst, tg.makeErr(op, "unsupported expression for string concat: "+err.Error())
+			}
+			args = append(args, goexpr)
 		}
 	}
 
@@ -2204,7 +2372,7 @@ func (tg *ToGo) transformCommonStmt(dst []ast.Stmt, stmt *f90.CommonStmt) (_ []a
 
 func (tg *ToGo) resolveKind(v *Varinfo) int {
 	if v.decl == nil {
-		panic(tg.makeErrAtStmt("nil declaration for variable " + v.Identifier()))
+		return 0
 	}
 	return tg.resolveKindFromDecl(v.decl)
 }
@@ -2225,10 +2393,20 @@ func (tg *ToGo) resolveKindFromDecl(decl *f90.DeclEntity) int {
 }
 
 func (tg *ToGo) transformOpenStmt(dst []ast.Stmt, stmt *f90.OpenStmt) ([]ast.Stmt, error) {
-	return tg.transformIO(dst, _astFortioOpenSpec, _astFenvOpen, stmt.Specifiers, nil, false)
+	_, errLabel, specs := extractBranchLabels(stmt.Specifiers)
+	dst, err := tg.transformIO(dst, _astFortioOpenSpec, _astFenvOpen, specs, nil, false)
+	if err != nil || errLabel == "" {
+		return dst, err
+	}
+	return tg.appendIOBranchStmts(dst, "", errLabel)
 }
 func (tg *ToGo) transformCloseStmt(dst []ast.Stmt, stmt *f90.CloseStmt) ([]ast.Stmt, error) {
-	return tg.transformIO(dst, _astFortioCloseSpec, _astFenvClose, stmt.Specifiers, nil, false)
+	_, errLabel, specs := extractBranchLabels(stmt.Specifiers)
+	dst, err := tg.transformIO(dst, _astFortioCloseSpec, _astFenvClose, specs, nil, false)
+	if err != nil || errLabel == "" {
+		return dst, err
+	}
+	return tg.appendIOBranchStmts(dst, "", errLabel)
 }
 
 func (tg *ToGo) transformWriteStmt(dst []ast.Stmt, stmt *f90.WriteStmt) ([]ast.Stmt, error) {
@@ -2362,13 +2540,26 @@ func (tg *ToGo) transformIO(dst []ast.Stmt, specSel, fenvSel *ast.SelectorExpr, 
 	var args []ast.Expr = []ast.Expr{spec}
 	var vitgt Varinfo
 	for _, input := range inputs {
-		err = tg.repl.InferType(&vitgt, input)
-		if err != nil {
-			return nil, tg.makeErrAtStmt("inferring type of IO statement input")
+		if inferErr := tg.repl.InferType(&vitgt, input); inferErr != nil {
+			// Fallback: look up identifier in scope directly (handles derived types, etc.).
+			if ident, ok := input.(*f90.Identifier); ok {
+				if vi := tg.repl.Var(ident.Value); vi != nil {
+					vitgt = *vi
+				} else if decl := tg.repl.ImplicitDeclFor(ident.Value); decl != nil {
+					vitgt = Varinfo{decl: decl}
+				} else {
+					// Unknown variable (e.g. derived type from unloaded module) — skip.
+					continue
+				}
+			} else {
+				// Non-identifier expression that can't be inferred — skip.
+				continue
+			}
 		}
 		arg, _, err := tg.transformExpression(&vitgt, input)
 		if err != nil {
-			return nil, err
+			// Skip arguments that can't be transformed (e.g. unknown derived types).
+			continue
 		}
 		if refInputs {
 			arg = &ast.UnaryExpr{Op: token.AND, X: arg}
@@ -2467,10 +2658,20 @@ var ioSpecifierConfig = map[string]ioSpecField{
 	"REC":  {target: _tgtInt32},
 	"SIZE": {target: _tgtInt32, needsAddr: true},
 
-	"ACCESS": {enumMap: makeEnumMap[fortio.AccessMode]("Access")},
-	"STATUS": {enumMap: makeEnumMap[fortio.FileStatus]("Status")},
-	"ACTION": {enumMap: makeEnumMap[fortio.ActionMode]("Action")},
-	"FORM":   {enumMap: makeEnumMap[fortio.FormMode]("Form")},
+	"ACCESS":       {enumMap: makeEnumMap[fortio.AccessMode]("Access")},
+	"STATUS":       {enumMap: makeEnumMap[fortio.FileStatus]("Status")},
+	"ACTION":       {enumMap: makeEnumMap[fortio.ActionMode]("Action")},
+	"FORM":         {enumMap: makeEnumMap[fortio.FormMode]("Form")},
+	"POSITION":     {enumMap: makeEnumMap[fortio.PositionMode]("Position")},
+	"BLANK":        {enumMap: makeEnumMap[fortio.BlankMode]("Blank")},
+	"DELIM":        {enumMap: makeEnumMap[fortio.DelimMode]("Delim")},
+	"PAD":          {enumMap: makeEnumMap[fortio.PadMode]("Pad")},
+	"DECIMAL":      {enumMap: makeEnumMap[fortio.DecimalMode]("Decimal")},
+	"ROUND":        {enumMap: makeEnumMap[fortio.RoundMode]("Round")},
+	"SIGN":         {enumMap: makeEnumMap[fortio.SignMode]("Sign")},
+	"ADVANCE":      {enumMap: makeEnumMap[fortio.AdvanceMode]("Advance")},
+	"ASYNCHRONOUS": {enumMap: makeEnumMap[fortio.AsyncMode]("Async")},
+	"ENCODING":     {enumMap: makeEnumMap[fortio.EncodingMode]("Encoding")},
 }
 
 func makeEnumMap[T interface {

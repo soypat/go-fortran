@@ -201,13 +201,18 @@ const (
 	IntrinsicFLOOR   // FLOOR
 	IntrinsicMODULO  // MODULO
 	IntrinsicNULL    // NULL
+	// Environment/OS subroutines (Fortran 90)
+	IntrinsicDATE_AND_TIME // DATE_AND_TIME
+	IntrinsicRANDOM_SEED   // RANDOM_SEED
+	IntrinsicRANDOM_NUMBER // RANDOM_NUMBER
 	fortran90End
 )
 
 // Fortran 95 Intrinsics
 const (
-	fortran95Start    Intrinsic = iota + fortran90End
-	IntrinsicCPU_TIME           // CPU_TIME
+	fortran95Start        Intrinsic = iota + fortran90End
+	IntrinsicCPU_TIME               // CPU_TIME
+	IntrinsicSYSTEM_CLOCK           // SYSTEM_CLOCK
 	fortran95End
 )
 
@@ -282,9 +287,14 @@ func LookupIntrinsic(s string) Intrinsic {
 	if intr != 0 && strings.EqualFold(s, intr.String()) {
 		return intr
 	}
-	// Handle aliases: COMPLEX → CMPLX
-	if strings.EqualFold(s, "COMPLEX") {
+	// Handle aliases and post-F95 intrinsics not in hash table.
+	switch {
+	case strings.EqualFold(s, "COMPLEX"):
 		return IntrinsicCMPLX
+	case strings.EqualFold(s, "CPUTIME"):
+		return IntrinsicCPU_TIME
+	case strings.EqualFold(s, "NORM2"):
+		return IntrinsicNORM2
 	}
 	return 0
 }

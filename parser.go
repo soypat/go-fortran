@@ -384,6 +384,121 @@ var (
 	}
 )
 
+// collectImplicitVarsFromStmts walks all statements and registers any referenced
+// identifiers as implicit variables so they get declared in generated Go code.
+// Must be called before resolveImplicitTypes.
+func (pud *ParserUnitData) collectImplicitVarsFromStmts(stmts []ast.Statement) {
+	if pud.isImplicitNone() {
+		return
+	}
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.DoLoop:
+			pud.collectImplicitVarsFromStmts(s.Body)
+		case *ast.IfStmt:
+			pud.collectImplicitVarsFromExpr(s.Condition)
+			pud.collectImplicitVarsFromStmts(s.ThenPart)
+			pud.collectImplicitVarsFromStmts(s.ElsePart)
+			for _, ei := range s.ElseIfParts {
+				pud.collectImplicitVarsFromExpr(ei.Condition)
+				pud.collectImplicitVarsFromStmts(ei.ThenPart)
+			}
+		case *ast.AssignmentStmt:
+			pud.collectImplicitVarsFromExpr(s.Target)
+			pud.collectImplicitVarsFromExpr(s.Value)
+		case *ast.ReadStmt:
+			for _, spec := range s.Specifiers {
+				pud.collectImplicitVarsFromExpr(spec.Value)
+			}
+			for _, e := range s.InputList {
+				pud.collectImplicitVarsFromExpr(e)
+			}
+		case *ast.WriteStmt:
+			for _, spec := range s.Specifiers {
+				pud.collectImplicitVarsFromExpr(spec.Value)
+			}
+			for _, e := range s.OutputList {
+				pud.collectImplicitVarsFromExpr(e)
+			}
+		case *ast.OpenStmt:
+			for _, spec := range s.Specifiers {
+				pud.collectImplicitVarsFromExpr(spec.Value)
+			}
+		case *ast.CloseStmt:
+			for _, spec := range s.Specifiers {
+				pud.collectImplicitVarsFromExpr(spec.Value)
+			}
+		case *ast.InquireStmt:
+			for _, spec := range s.Specifiers {
+				ident, ok := spec.Value.(*ast.Identifier)
+				if !ok || ident.Value == "*" || pud.Var(ident.Value) != nil {
+					continue
+				}
+				var decl *ast.DeclEntity
+				switch strings.ToUpper(spec.Name) {
+				case "EXIST", "OPENED", "NAMED":
+					decl = &ast.DeclEntity{Name: ident.Value, Type: &ast.TypeSpec{Token: token.LOGICAL}}
+				}
+				if decl != nil {
+					pud.vars = append(pud.vars, Varinfo{_varname: ident.Value, decl: decl})
+				} else {
+					pud.collectImplicitVarsFromExpr(spec.Value)
+				}
+			}
+		case *ast.CallStmt:
+			for _, e := range s.Args {
+				pud.collectImplicitVarsFromExpr(e)
+			}
+		case *ast.PrintStmt:
+			for _, e := range s.OutputList {
+				pud.collectImplicitVarsFromExpr(e)
+			}
+		}
+	}
+}
+
+// collectImplicitVarsFromExpr recursively walks an expression and registers
+// any unresolved identifiers as implicit variables.
+func (pud *ParserUnitData) collectImplicitVarsFromExpr(expr ast.Expression) {
+	if expr == nil {
+		return
+	}
+	switch e := expr.(type) {
+	case *ast.Identifier:
+		if e.Value != "*" && pud.Var(e.Value) == nil {
+			pud.vars = append(pud.vars, Varinfo{_varname: e.Value})
+		}
+	case *ast.BinaryExpr:
+		if e.Op != token.Equals { // skip keyword arg left-side (KIND=, LEN=, etc.)
+			pud.collectImplicitVarsFromExpr(e.Left)
+		}
+		pud.collectImplicitVarsFromExpr(e.Right)
+	case *ast.UnaryExpr:
+		pud.collectImplicitVarsFromExpr(e.Operand)
+	case *ast.CallExpr:
+		// Don't register the function name itself; walk its args.
+		for _, arg := range e.Args {
+			pud.collectImplicitVarsFromExpr(arg)
+		}
+	case *ast.ParenExpr:
+		pud.collectImplicitVarsFromExpr(e.Expr)
+	case *ast.RangeExpr:
+		pud.collectImplicitVarsFromExpr(e.Start)
+		pud.collectImplicitVarsFromExpr(e.End)
+	case *ast.ImpliedDoLoop:
+		pud.collectImplicitVarsFromExpr(e.Start)
+		pud.collectImplicitVarsFromExpr(e.End)
+		pud.collectImplicitVarsFromExpr(e.Stride)
+		for _, v := range e.Expressions {
+			pud.collectImplicitVarsFromExpr(v)
+		}
+	case *ast.ArrayConstructor:
+		for _, v := range e.Values {
+			pud.collectImplicitVarsFromExpr(v)
+		}
+	}
+}
+
 func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEntity, initFlags VarFlags, namespace string) (vi *Varinfo, err error) {
 	if decl != nil && name != decl.Name {
 		panic("bad varInit name argument mismatch with decl")
@@ -446,9 +561,24 @@ type Varinfo struct {
 
 func (p *Varinfo) Flags() VarFlags            { return p.flags }
 func (p *Varinfo) Value() Value               { return p.val }
-func (p *Varinfo) Charlen() ast.Expression    { return p.decl.Charlen() }
-func (p *Varinfo) Kind() ast.Expression       { return p.decl.Kind() }
-func (p *Varinfo) Dimensions() *ast.ArraySpec { return p.decl.Dimension() }
+func (p *Varinfo) Charlen() ast.Expression {
+	if p.decl == nil {
+		return nil
+	}
+	return p.decl.Charlen()
+}
+func (p *Varinfo) Kind() ast.Expression {
+	if p.decl == nil {
+		return nil
+	}
+	return p.decl.Kind()
+}
+func (p *Varinfo) Dimensions() *ast.ArraySpec {
+	if p.decl == nil {
+		return nil
+	}
+	return p.decl.Dimension()
+}
 func (p *Varinfo) Identifier() string         { return p._varname }
 func (p *Varinfo) IsParameter() bool          { return p.flags.HasAny(VFlagParameter) }
 func (p *Varinfo) IsAllocatable() bool        { return p.flags.HasAny(VFlagAllocatable) }
@@ -725,6 +855,7 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 		p.expectEndProgramUnit(unit.Token, unit.Token.EndConstructComposite(), start, unit.Name)
 		unit.Position = ast.Pos(start.Pos, p.current.start)
 	}
+	pud.collectImplicitVarsFromStmts(unit.Body)
 	pud.resolveImplicitTypes()
 	unit.Data = pud
 	return unit

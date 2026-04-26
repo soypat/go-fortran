@@ -1,6 +1,9 @@
 package intrinsic
 
-import "unsafe"
+import (
+	"math"
+	"unsafe"
+)
 
 // Array represents a multi-dimensional Fortran array with column-major layout.
 // It uses a single contiguous memory allocation (slab allocation) for efficiency.
@@ -574,6 +577,16 @@ func ALL(a *Array[bool]) bool {
 	return true
 }
 
+// ANY returns true if any element of the logical array is true. Corresponds to Fortran ANY(mask).
+func ANY(a *Array[bool]) bool {
+	for i := 0; i < len(a.data); i++ {
+		if a.data[i] {
+			return true
+		}
+	}
+	return false
+}
+
 // ArraySetEqual performs element-wise equality comparison: dst[i] = (a[i] == b[i])
 // If dst is nil, a new array with the same shape as a is allocated.
 // All arrays must have compatible shapes.
@@ -609,4 +622,101 @@ func ArraySetEqual[T comparable](dst *Array[bool], a, b *Array[T]) *Array[bool] 
 		}
 	}
 	return dst
+}
+
+// arrNumeric is the constraint for array reduction intrinsics.
+type arrNumeric interface {
+	~int32 | ~int64 | ~float32 | ~float64
+}
+
+// SUM returns the sum of all array elements. Corresponds to Fortran SUM(array).
+func SUM[T arrNumeric](a *Array[T]) T {
+	var result T
+	for _, v := range a.data {
+		result += v
+	}
+	return result
+}
+
+// MAXVAL returns the maximum element. Corresponds to Fortran MAXVAL(array).
+func MAXVAL[T arrNumeric](a *Array[T]) T {
+	if len(a.data) == 0 {
+		var zero T
+		return zero
+	}
+	m := a.data[0]
+	for _, v := range a.data[1:] {
+		if v > m {
+			m = v
+		}
+	}
+	return m
+}
+
+// MINVAL returns the minimum element. Corresponds to Fortran MINVAL(array).
+func MINVAL[T arrNumeric](a *Array[T]) T {
+	if len(a.data) == 0 {
+		var zero T
+		return zero
+	}
+	m := a.data[0]
+	for _, v := range a.data[1:] {
+		if v < m {
+			m = v
+		}
+	}
+	return m
+}
+
+// PRODUCT returns the product of all elements. Corresponds to Fortran PRODUCT(array).
+func PRODUCT[T arrNumeric](a *Array[T]) T {
+	if len(a.data) == 0 {
+		var zero T
+		return zero
+	}
+	result := a.data[0]
+	for _, v := range a.data[1:] {
+		result *= v
+	}
+	return result
+}
+
+// MAXLOC returns the 1-based index of the maximum element. Corresponds to Fortran MAXLOC(array).
+func MAXLOC[T arrNumeric](a *Array[T]) int32 {
+	if len(a.data) == 0 {
+		return 0
+	}
+	idx, m := 0, a.data[0]
+	for i, v := range a.data[1:] {
+		if v > m {
+			m = v
+			idx = i + 1
+		}
+	}
+	return int32(idx + 1)
+}
+
+// MINLOC returns the 1-based index of the minimum element. Corresponds to Fortran MINLOC(array).
+func MINLOC[T arrNumeric](a *Array[T]) int32 {
+	if len(a.data) == 0 {
+		return 0
+	}
+	idx, m := 0, a.data[0]
+	for i, v := range a.data[1:] {
+		if v < m {
+			m = v
+			idx = i + 1
+		}
+	}
+	return int32(idx + 1)
+}
+
+// NORM2 returns the Euclidean norm of all elements. Corresponds to Fortran NORM2(array).
+func NORM2[T arrNumeric](a *Array[T]) T {
+	var sum float64
+	for _, v := range a.data {
+		f := float64(v)
+		sum += f * f
+	}
+	return T(math.Sqrt(sum))
 }
