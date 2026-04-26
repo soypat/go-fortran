@@ -46,6 +46,7 @@ func GOLDEN() {
 	LEVEL36()
 	LEVEL37()
 	LEVEL38()
+	LEVEL39()
 	fenv.Stop(0)
 }
 func LEVEL01() {
@@ -1174,11 +1175,6 @@ func LEVEL37() {
 	fenv.ReadWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), IOSTAT: &rstat1}, &msg)
 	fenv.ReadWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), IOSTAT: &rstat2}, &x, &y)
 	fenv.Close(fortio.CloseSpec{UNIT: iounit})
-	fenv.Print("LEVEL 37: SKIPPED")
-	goto label100
-label100:
-	{
-	}
 	fenv.Print("LEVEL 37: READ BACK", msg, x, y)
 	fenv.Print("LEVEL 37: IOSTAT", rstat1, rstat2, wstat1, wstat2)
 }
@@ -1220,6 +1216,34 @@ func LEVEL38() {
 	fenv.Close(fortio.CloseSpec{UNIT: iounit})
 	fenv.Print("LEVEL 38: NAMELIST x,y,z=", x, y, z)
 	fenv.Print("LEVEL 38: NAMELIST a,b=", a, b)
+}
+func LEVEL39() {
+	var (
+		n int32
+		_ = n
+	)
+	var (
+		card intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		_                             = card
+	)
+	n = 0
+	fenv.Open(fortio.OpenSpec{UNIT: 39, FILE: "test_io.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
+	goto label10
+label10:
+	{
+		_iostat := fenv.ReadWithSpec(fortio.IOSpec{UNIT: 39, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1})}, &card)
+		if _iostat == fortio.IOStatEOF {
+			goto label20
+		}
+	}
+	n = n + 1
+	goto label10
+	goto label20
+label20:
+	{
+		fenv.Close(fortio.CloseSpec{UNIT: 39})
+	}
+	fenv.Print("LEVEL 39:", n)
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")

@@ -2266,11 +2266,79 @@ func (tg *ToGo) transformReadStmt(dst []ast.Stmt, stmt *f90.ReadStmt) ([]ast.Stm
 		}
 	}
 	unit := ioUnitOrDefault(stmt.Unit, 5) // stdin
+	endLabel, errLabel, filtered := extractBranchLabels(stmt.Specifiers)
 	specs := append([]f90.IOSpecifier{
 		{Name: "UNIT", Value: unit},
 		{Name: "FMT", Value: stmt.Format},
-	}, stmt.Specifiers...)
-	return tg.transformIO(dst, _astFortioIOSpec, _astFenvReadWithSpec, specs, stmt.InputList, true)
+	}, filtered...)
+	var err error
+	dst, err = tg.transformIO(dst, _astFortioIOSpec, _astFenvReadWithSpec, specs, stmt.InputList, true)
+	if err != nil || (endLabel == "" && errLabel == "") {
+		return dst, err
+	}
+	return tg.appendIOBranchStmts(dst, endLabel, errLabel)
+}
+
+// extractBranchLabels splits END= and ERR= out of a specifier list.
+// Returns the label strings (empty if absent) and the remaining specifiers.
+func extractBranchLabels(specs []f90.IOSpecifier) (endLabel, errLabel string, rest []f90.IOSpecifier) {
+	for _, s := range specs {
+		switch strings.ToUpper(s.Name) {
+		case "END":
+			if lit, ok := s.Value.(*f90.IntegerLiteral); ok {
+				endLabel = strconv.FormatInt(lit.Value, 10)
+			}
+		case "ERR":
+			if lit, ok := s.Value.(*f90.IntegerLiteral); ok {
+				errLabel = strconv.FormatInt(lit.Value, 10)
+			}
+		default:
+			rest = append(rest, s)
+		}
+	}
+	return
+}
+
+// appendIOBranchStmts replaces the last ExprStmt (an IO call) with an
+// assignment capturing the IOStat return value, followed by conditional
+// gotos for END= (EOF) and ERR= (error).
+func (tg *ToGo) appendIOBranchStmts(dst []ast.Stmt, endLabel, errLabel string) ([]ast.Stmt, error) {
+	last, ok := dst[len(dst)-1].(*ast.ExprStmt)
+	if !ok {
+		return dst, errors.New("appendIOBranchStmts: last statement is not an ExprStmt")
+	}
+	dst = dst[:len(dst)-1]
+	tmp := ast.NewIdent("_iostat")
+	dst = append(dst, &ast.AssignStmt{
+		Lhs: []ast.Expr{tmp},
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{last.X},
+	})
+	var elseStmt ast.Stmt
+	if errLabel != "" {
+		elseStmt = &ast.IfStmt{
+			Cond: &ast.CallExpr{Fun: &ast.SelectorExpr{X: tmp, Sel: ast.NewIdent("IsError")}},
+			Body: &ast.BlockStmt{List: []ast.Stmt{
+				&ast.BranchStmt{Tok: token.GOTO, Label: tg.astLabel(errLabel)},
+			}},
+		}
+	}
+	if endLabel != "" {
+		dst = append(dst, &ast.IfStmt{
+			Cond: &ast.BinaryExpr{
+				X:  tmp,
+				Op: token.EQL,
+				Y:  &ast.SelectorExpr{X: ast.NewIdent("fortio"), Sel: ast.NewIdent("IOStatEOF")},
+			},
+			Body: &ast.BlockStmt{List: []ast.Stmt{
+				&ast.BranchStmt{Tok: token.GOTO, Label: tg.astLabel(endLabel)},
+			}},
+			Else: elseStmt,
+		})
+	} else if elseStmt != nil {
+		dst = append(dst, elseStmt)
+	}
+	return dst, nil
 }
 
 // ioUnitOrDefault returns the unit expression, or an integer literal with defaultUnit if unit is nil or *.
