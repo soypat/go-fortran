@@ -780,9 +780,6 @@ func (tg *ToGo) transformMALLOC(vitgt *Varinfo, e *f90.CallExpr) (result ast.Exp
 }
 
 func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.CallExpr) (result ast.Expr, err error) {
-	if e.SecondaryAccess != nil {
-		return nil, tg.makeErr(e, "chained CallExpr expression not yet implemented")
-	}
 	vi := tg.repl.Var(e.Name)
 	isRanged := f90.IsRanged(e.Args...)
 	if isRanged {
@@ -798,20 +795,35 @@ func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.CallExpr) (result ast.E
 		// Multi-dimensional range access: arr(1:N, 2:M) → arr.View(R(...), R(...))
 		return tg.transformArrayView(e, vi)
 	}
-	// Regular element access: arr(i) → arr.At(int(indices)...)
+	// Regular element access: arr(i,j) → arr.At(i, j)
 	var args []ast.Expr
 	for _, expr := range e.Args {
 		arg, _, err := tg.transformExpression(_tgtInt, expr)
 		if err != nil {
 			return nil, err
 		}
-		// Wrap in int() conversion for Go's array methods
 		args = append(args, arg)
 	}
 	receiver := tg.astVarExpr(vi)
-	return &ast.CallExpr{
+	atCall := &ast.CallExpr{
 		Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("At")},
 		Args: args,
+	}
+	if e.SecondaryAccess == nil {
+		return atCall, nil
+	}
+	// arr(i,j)(s:e) → arr.At(i,j).Substring(s, e)
+	rangeExpr, ok := e.SecondaryAccess.(*f90.RangeExpr)
+	if !ok {
+		return nil, tg.makeErr(e, "chained CallExpr with non-range secondary access not yet implemented")
+	}
+	subArgs, err := tg.transformRangeExprToArgs(rangeExpr, vi)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CallExpr{
+		Fun:  &ast.SelectorExpr{X: atCall, Sel: ast.NewIdent("Substring")},
+		Args: subArgs,
 	}, nil
 }
 

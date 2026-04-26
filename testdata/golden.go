@@ -1046,11 +1046,12 @@ func LEVEL32() {
 		_                                            = b
 	)
 	a.AtPtr(1, 1).SetFromString("ABC")
-	a.AtPtr(1, 2).SetFromString("DEF")
+	a.AtPtr(1, 2).SetFromString("DEFGH")
 	a.AtPtr(2, 1).SetFromString("GHI")
 	a.AtPtr(2, 2).SetFromString("JKL")
 	fenv.Print("LEVEL 32:", a.At(1, 1), a.At(1, 2), a.At(2, 1), a.At(2, 2))
 	fenv.Print("LEVEL 32:", b.At(1), b.At(2))
+	fenv.Print("LEVEL 32: substr", a.At(1, 2).Substring(1, 3))
 }
 func LEVEL33() {
 	var (
