@@ -1174,6 +1174,11 @@ func LEVEL37() {
 	fenv.ReadWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), IOSTAT: &rstat1}, &msg)
 	fenv.ReadWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), IOSTAT: &rstat2}, &x, &y)
 	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	fenv.Print("LEVEL 37: SKIPPED")
+	goto label100
+label100:
+	{
+	}
 	fenv.Print("LEVEL 37: READ BACK", msg, x, y)
 	fenv.Print("LEVEL 37: IOSTAT", rstat1, rstat2, wstat1, wstat2)
 }

@@ -2402,6 +2402,7 @@ var ioSpecifierConfig = map[string]ioSpecField{
 	"ACCESS": {enumMap: makeEnumMap[fortio.AccessMode]("Access")},
 	"STATUS": {enumMap: makeEnumMap[fortio.FileStatus]("Status")},
 	"ACTION": {enumMap: makeEnumMap[fortio.ActionMode]("Action")},
+	"FORM":   {enumMap: makeEnumMap[fortio.FormMode]("Form")},
 }
 
 func makeEnumMap[T interface {

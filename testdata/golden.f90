@@ -41,6 +41,7 @@
       CALL LEVEL36()
       CALL LEVEL37()
       CALL LEVEL38()
+      CALL LEVEL39()
       STOP 0
       CONTAINS
 
@@ -979,6 +980,21 @@
         PRINT *, 'LEVEL 38: NAMELIST x,y,z=', x, y, z
         PRINT *, 'LEVEL 38: NAMELIST a,b=', a, b
     END SUBROUTINE LEVEL38
+
+! ==============================================================================
+! LEVEL39: READ with END= branch label (EOF handling)
+! ==============================================================================
+    SUBROUTINE LEVEL39()
+        INTEGER :: N
+        CHARACTER(LEN=20) :: CARD
+        N = 0
+        OPEN(39, FILE='test_io.txt', STATUS='OLD', ACTION='READ')
+10      READ(39, '(A)', END=20) CARD
+        N = N + 1
+        GO TO 10
+20      CLOSE(39)
+        PRINT *, 'LEVEL 39:', N
+    END SUBROUTINE LEVEL39
 
     ! ==============================================================================
 ! Helper Subroutines and Functions
