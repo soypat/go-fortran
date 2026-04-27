@@ -620,20 +620,12 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 
 	fi := tg.ContainedOrUsed(e.Name)
 	if fi == nil {
-		// Strip keyword arguments (KIND=, LEN=, etc.) — not used in intrinsic dispatch.
-		positionalArgs := e.Args[:0:0]
-		for _, arg := range e.Args {
-			if bin, ok := arg.(*f90.BinaryExpr); ok && bin.Op == f90token.Equals {
-				continue
-			}
-			positionalArgs = append(positionalArgs, arg)
-		}
 		// Try standard intrinsic first
 		lookup := f90token.LookupIntrinsic(e.Name)
 		if fnV2 := getIntrinsic(lookup); fnV2 != nil {
 			// Infer argument types for better matching
-			argTypes := make([]*Varinfo, len(positionalArgs))
-			for i, arg := range positionalArgs {
+			argTypes := make([]*Varinfo, len(e.Args))
+			for i, arg := range e.Args {
 				var vi Varinfo
 				if err := tg.repl.InferType(&vi, arg); err == nil {
 					argTypes[i] = &vi
@@ -642,10 +634,10 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 			// Try type-aware matching first, fall back to arg count matching
 			call := fnV2.findBestCallWithTypes(argTypes)
 			if call == nil {
-				call = fnV2.findBestCall(len(positionalArgs))
+				call = fnV2.findBestCall(len(e.Args))
 			}
 			if call != nil {
-				return tg.intrinsicExprV2(vitgt, fnV2, call, positionalArgs...)
+				return tg.intrinsicExprV2(vitgt, fnV2, call, e.Args...)
 			}
 		}
 
@@ -658,8 +650,8 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 			}
 			// Generic vendor intrinsic handling
 			if fnV2 := getVendoredIntrinsic(vendorTok); fnV2 != nil {
-				argTypes := make([]*Varinfo, len(positionalArgs))
-				for i, arg := range positionalArgs {
+				argTypes := make([]*Varinfo, len(e.Args))
+				for i, arg := range e.Args {
 					var vi Varinfo
 					if err := tg.repl.InferType(&vi, arg); err == nil {
 						argTypes[i] = &vi
@@ -667,10 +659,10 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 				}
 				call := fnV2.findBestCallWithTypes(argTypes)
 				if call == nil {
-					call = fnV2.findBestCall(len(positionalArgs))
+					call = fnV2.findBestCall(len(e.Args))
 				}
 				if call != nil {
-					return tg.intrinsicExprV2(vitgt, fnV2, call, positionalArgs...)
+					return tg.intrinsicExprV2(vitgt, fnV2, call, e.Args...)
 				}
 			}
 			return nil, nil, tg.makeErr(e, "vendor intrinsic "+e.Name+" not implemented")
