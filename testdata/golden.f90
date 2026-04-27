@@ -42,6 +42,7 @@
       CALL LEVEL37()
       CALL LEVEL38()
       CALL LEVEL39()
+      CALL LEVEL40()
       STOP 0
       CONTAINS
 
@@ -997,7 +998,16 @@
         PRINT *, 'LEVEL 39:', N
     END SUBROUTINE LEVEL39
 
-    ! ==============================================================================
+! ==============================================================================
+! LEVEL40: Environment intrinsics.
+! ==============================================================================
+    SUBROUTINE LEVEL40()
+        REAL :: t
+        CALL SYSTEM("echo 'LEVEL 40: echo from shell'")
+        CALL CPU_TIME(t)
+    END SUBROUTINE LEVEL40
+
+! ==============================================================================
 ! Helper Subroutines and Functions
 ! ==============================================================================
 

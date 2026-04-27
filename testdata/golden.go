@@ -47,6 +47,7 @@ func GOLDEN() {
 	LEVEL37()
 	LEVEL38()
 	LEVEL39()
+	LEVEL40()
 	fenv.Stop(0)
 }
 func LEVEL01() {
@@ -1245,6 +1246,14 @@ label20:
 		fenv.Close(fortio.CloseSpec{UNIT: 39})
 	}
 	fenv.Print("LEVEL 39:", n)
+}
+func LEVEL40() {
+	var (
+		t float32
+		_ = t
+	)
+	fenv.System("echo 'LEVEL 40: echo from shell'")
+	fenv.CpuTime(&t)
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")

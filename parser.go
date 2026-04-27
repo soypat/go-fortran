@@ -444,6 +444,8 @@ type Varinfo struct {
 	stmtFuncParams []string       // parameter names
 }
 
+// Varinfo methods should be called correctly.
+
 func (p *Varinfo) Flags() VarFlags            { return p.flags }
 func (p *Varinfo) Value() Value               { return p.val }
 func (p *Varinfo) Charlen() ast.Expression    { return p.decl.Charlen() }

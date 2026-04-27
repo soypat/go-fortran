@@ -3,8 +3,13 @@ package fortio
 import (
 	"bytes"
 	"io"
+	"math/rand"
 	"os"
+	"os/exec"
 	"strconv"
+	"time"
+
+	"github.com/soypat/go-fortran/intrinsic"
 )
 
 // unitState tracks connection info for each open unit.
@@ -41,13 +46,16 @@ type Environment struct {
 	lastMsg  string
 	// Scratch buffer for I/O operations.
 	buf []byte
+	// startTime is used by CpuTime to compute elapsed processor time.
+	startTime time.Time
 }
 
 // NewEnvironment creates a new Fortran runtime environment
 // with standard units pre-connected.
 func NewEnvironment() *Environment {
 	env := &Environment{
-		units: make(map[int32]*unitState),
+		units:     make(map[int32]*unitState),
+		startTime: time.Now(),
 	}
 	// Unit 0: stderr
 	env.unitsCache[0] = &unitState{
@@ -521,4 +529,95 @@ func (env *Environment) mapError(err error) IOStat {
 		return IOStatErrFileExists
 	}
 	return IOStatErrInternal
+}
+
+// System executes a shell command via "sh -c". Returns the exit code.
+func (env *Environment) System(cmd string) int32 {
+	c := exec.Command("sh", "-c", cmd)
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	if err := c.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return int32(exitErr.ExitCode())
+		}
+		return 1
+	}
+	return 0
+}
+
+// CpuTime sets t to an approximation of processor time used in seconds.
+func (env *Environment) CpuTime(t ...*float32) {
+	if len(t) > 0 && t[0] != nil {
+		*t[0] = float32(time.Since(env.startTime).Seconds())
+	}
+}
+
+// SystemClock returns system clock data. Nil pointers are ignored.
+// COUNT is the tick count, COUNT_RATE is ticks per second, COUNT_MAX is the max tick value.
+func (env *Environment) SystemClock(count, countRate, countMax *int32) {
+	if count != nil {
+		*count = int32(time.Now().UnixMilli())
+	}
+	if countRate != nil {
+		*countRate = 1000
+	}
+	if countMax != nil {
+		*countMax = int32(^uint32(0) >> 1)
+	}
+}
+
+// DateAndTime fills date ("YYYYMMDD"), time_ ("hhmmss.sss"), zone ("+hhmm") strings.
+// Nil pointers are ignored.
+func (env *Environment) DateAndTime(date, time_, zone *intrinsic.CharacterArray) {
+	now := time.Now()
+	if date != nil {
+		date.SetFromString(now.Format("20060102"))
+	}
+	if time_ != nil {
+		time_.SetFromString(now.Format("150405.000"))
+	}
+	if zone != nil {
+		_, offset := now.Zone()
+		h, m := offset/3600, (offset%3600)/60
+		if m < 0 {
+			m = -m
+		}
+		sign := "+"
+		if offset < 0 {
+			sign = "-"
+			h = -h
+		}
+		zone.SetFromString(sign + strconv.Itoa(h/10) + strconv.Itoa(h%10) +
+			strconv.Itoa(m/10) + strconv.Itoa(m%10))
+	}
+}
+
+// DateAndTimeValues fills date/time/zone strings and an 8-element integer values array.
+// values: (year, month, day, utc_offset_minutes, hour, minute, second, millisecond)
+func (env *Environment) DateAndTimeValues(date, time_, zone *intrinsic.CharacterArray, values *intrinsic.Array[int32]) {
+	env.DateAndTime(date, time_, zone)
+	if values != nil {
+		now := time.Now()
+		_, offset := now.Zone()
+		values.Set(int32(now.Year()), 1)
+		values.Set(int32(now.Month()), 2)
+		values.Set(int32(now.Day()), 3)
+		values.Set(int32(offset/60), 4)
+		values.Set(int32(now.Hour()), 5)
+		values.Set(int32(now.Minute()), 6)
+		values.Set(int32(now.Second()), 7)
+		values.Set(int32(now.Nanosecond()/1e6), 8)
+	}
+}
+
+// RandomNumber sets harvest to a uniform pseudo-random number in [0,1).
+func (env *Environment) RandomNumber(harvest *float32) {
+	if harvest != nil {
+		*harvest = rand.Float32()
+	}
+}
+
+// RandomSeed reseeds the global PRNG with a random seed.
+func (env *Environment) RandomSeed() {
+	rand.Seed(time.Now().UnixNano()) //nolint:staticcheck
 }

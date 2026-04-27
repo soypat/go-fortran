@@ -489,6 +489,14 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 		op = token.LOR
 		needsPromotion = false
 		resultType = _tgtBool
+	case f90token.EQV:
+		op = token.EQL
+		needsPromotion = false
+		resultType = _tgtBool
+	case f90token.NEQV:
+		op = token.NEQ
+		needsPromotion = false
+		resultType = _tgtBool
 	case f90token.StringConcat:
 		return nil, nil, tg.makeErr(e, "string concat handled in transformExpression")
 	default:
@@ -612,12 +620,20 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 
 	fi := tg.ContainedOrUsed(e.Name)
 	if fi == nil {
+		// Strip keyword arguments (KIND=, LEN=, etc.) — not used in intrinsic dispatch.
+		positionalArgs := e.Args[:0:0]
+		for _, arg := range e.Args {
+			if bin, ok := arg.(*f90.BinaryExpr); ok && bin.Op == f90token.Equals {
+				continue
+			}
+			positionalArgs = append(positionalArgs, arg)
+		}
 		// Try standard intrinsic first
 		lookup := f90token.LookupIntrinsic(e.Name)
 		if fnV2 := getIntrinsic(lookup); fnV2 != nil {
 			// Infer argument types for better matching
-			argTypes := make([]*Varinfo, len(e.Args))
-			for i, arg := range e.Args {
+			argTypes := make([]*Varinfo, len(positionalArgs))
+			for i, arg := range positionalArgs {
 				var vi Varinfo
 				if err := tg.repl.InferType(&vi, arg); err == nil {
 					argTypes[i] = &vi
@@ -626,10 +642,10 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 			// Try type-aware matching first, fall back to arg count matching
 			call := fnV2.findBestCallWithTypes(argTypes)
 			if call == nil {
-				call = fnV2.findBestCall(len(e.Args))
+				call = fnV2.findBestCall(len(positionalArgs))
 			}
 			if call != nil {
-				return tg.intrinsicExprV2(vitgt, fnV2, call, e.Args...)
+				return tg.intrinsicExprV2(vitgt, fnV2, call, positionalArgs...)
 			}
 		}
 
@@ -642,8 +658,8 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 			}
 			// Generic vendor intrinsic handling
 			if fnV2 := getVendoredIntrinsic(vendorTok); fnV2 != nil {
-				argTypes := make([]*Varinfo, len(e.Args))
-				for i, arg := range e.Args {
+				argTypes := make([]*Varinfo, len(positionalArgs))
+				for i, arg := range positionalArgs {
 					var vi Varinfo
 					if err := tg.repl.InferType(&vi, arg); err == nil {
 						argTypes[i] = &vi
@@ -651,10 +667,10 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 				}
 				call := fnV2.findBestCallWithTypes(argTypes)
 				if call == nil {
-					call = fnV2.findBestCall(len(e.Args))
+					call = fnV2.findBestCall(len(positionalArgs))
 				}
 				if call != nil {
-					return tg.intrinsicExprV2(vitgt, fnV2, call, e.Args...)
+					return tg.intrinsicExprV2(vitgt, fnV2, call, positionalArgs...)
 				}
 			}
 			return nil, nil, tg.makeErr(e, "vendor intrinsic "+e.Name+" not implemented")
@@ -936,6 +952,21 @@ func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.CallExpr, 
 		return dst, nil
 	}
 
+	// CHARACTER array with a single range subscript: ctmp(1:2) = arr → ctmp.View(R(1,2)).SetFrom(arr)
+	if vi.IsArray() && isRanged && len(fexpr.Args) == 1 && fexpr.SecondaryAccess == nil {
+		warn("character array with single range subscript")
+		viewExpr, err := tg.transformArrayView(fexpr, vi)
+		if err != nil {
+			return dst, err
+		}
+		dst = append(dst, &ast.ExprStmt{
+			X: &ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: viewExpr, Sel: ast.NewIdent("SetFrom")},
+				Args: []ast.Expr{rhs},
+			},
+		})
+		return dst, nil
+	}
 	if vi.IsArray() || isRanged && len(fexpr.Args) > 1 || fexpr.SecondaryAccess != nil {
 		return dst, tg.makeErrWithPos(fexpr.Position, "unsupported character type attributes for range set")
 	}
@@ -1000,12 +1031,19 @@ func (tg *ToGo) transformRangeToViewArg(rng *f90.RangeExpr, vi *Varinfo, dim int
 
 	// End: nil → use variable's upper bound for this dimension, else transform
 	if rng.End == nil {
-		// Get upper bound from variable's dimension
+		// Get upper bound from variable's dimension declaration
 		dims := vi.decl.Dimension()
 		if dims != nil && dim < len(dims.Bounds) && dims.Bounds[dim].Upper != nil {
 			end, _, err = tg.transformExpression(_tgtInt, dims.Bounds[dim].Upper)
 		} else {
-			return nil, tg.makeErrWithPos(rng.Position, "cannot determine upper bound for dimension")
+			warn("Allocatable/assumed-shape array: use runtime length vi.Len()")
+			// Allocatable/assumed-shape array: use runtime length vi.Len()
+			end = &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   tg.astVarExpr(vi),
+					Sel: ast.NewIdent("Len"),
+				},
+			}
 		}
 	} else {
 		end, _, err = tg.transformExpression(_tgtInt, rng.End)
@@ -1187,4 +1225,9 @@ func typeCompatible(paramType, argType *Varinfo) bool {
 	}
 	// Exact type match
 	return paramType.typeToken() == argType.typeToken()
+}
+
+// warn used to signal a very claudish poorly designed branch/function was hit and used.
+func warn(msg string) {
+	fmt.Printf("\033[33m%s\033[0m\n", msg)
 }

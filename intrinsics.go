@@ -12,11 +12,12 @@ import (
 )
 
 type intrinsicFn struct {
-	redirectTo uint // signal this intrinsic is effectively replaced by another.
-	calls      []intrinsicCall
-	isVariadic bool
-	f1         func(float64) float64
-	f2         func(float64, float64) float64
+	redirectTo      uint // signal this intrinsic is effectively replaced by another.
+	calls           []intrinsicCall
+	isVariadic      bool
+	isEnvSubroutine bool // emit fenv.Method(args...) in CALL statement context
+	f1              func(float64) float64
+	f2              func(float64, float64) float64
 }
 
 type intrinsicCall struct {
@@ -28,6 +29,8 @@ type intrinsicCall struct {
 	//  - If first letter is upper case then is function in intrinsic package.
 	//  - Else is a built in in Go.
 	methodOrCall string
+	// outArgs[i] true means arg i is INTENT(OUT) and must be passed by pointer.
+	outArgs []bool
 }
 
 func makeCall(methodOrGoCall string, returnType *Varinfo, args ...*Varinfo) intrinsicCall {
@@ -230,7 +233,8 @@ func getVendoredIntrinsic(lookup f90token.VendorIntrinsic) *intrinsicFn {
 var vendoredIntrinsics = []intrinsicFn{
 	// Memory management
 	f90token.VendorSYSTEM: {
-		calls: []intrinsicCall{makeCall("SYSTEM", _tgtInt32, _tgtChar)},
+		isEnvSubroutine: true,
+		calls:           []intrinsicCall{{methodOrCall: "System", args: []*Varinfo{_tgtStringLit}, outArgs: []bool{false}}},
 	},
 	f90token.VendorMALLOC: {
 		calls: []intrinsicCall{makeCall("MALLOC", _tgtInt32, _tgtInt32)}, // Returns INTEGER for type compatibility (transpiler handles actual PointerTo[T] type)
@@ -539,6 +543,12 @@ var intrinsicsv2 = []intrinsicFn{
 	f90token.IntrinsicDMIN1: {redirectTo: uint(f90token.IntrinsicMIN)},
 
 	// Character methods
+	f90token.IntrinsicCHAR: {
+		calls: []intrinsicCall{makeCall("CHAR", _tgtStringLit, _tgtInt32)},
+	},
+	f90token.IntrinsicICHAR: {
+		calls: []intrinsicCall{makeCall("ICHAR", _tgtInt32, _tgtChar)},
+	},
 	f90token.IntrinsicLEN: {
 		calls: []intrinsicCall{makeCall("Len", _tgtInt32, _tgtChar)},
 	},
@@ -576,11 +586,77 @@ var intrinsicsv2 = []intrinsicFn{
 	},
 
 	// Array reduction intrinsics
+	f90token.IntrinsicSUM: {
+		calls: []intrinsicCall{
+			makeCall("SUM", nil, _tgtArrayGeneric),
+		},
+	},
+	f90token.IntrinsicMAXVAL: {
+		calls: []intrinsicCall{makeCall("MAXVAL", nil, _tgtArrayGeneric)},
+	},
+	f90token.IntrinsicMINVAL: {
+		calls: []intrinsicCall{makeCall("MINVAL", nil, _tgtArrayGeneric)},
+	},
+	f90token.IntrinsicPRODUCT: {
+		calls: []intrinsicCall{makeCall("PRODUCT", nil, _tgtArrayGeneric)},
+	},
+	f90token.IntrinsicALLOCATED: {
+		calls: []intrinsicCall{makeCall("Allocated", _tgtBool, _tgtArrayGeneric)},
+	},
+	f90token.IntrinsicMAXLOC: {
+		calls: []intrinsicCall{makeCall("MAXLOC", _tgtInt32, _tgtArrayGeneric)},
+	},
+	f90token.IntrinsicMINLOC: {
+		calls: []intrinsicCall{makeCall("MINLOC", _tgtInt32, _tgtArrayGeneric)},
+	},
+	f90token.IntrinsicNORM2: {
+		calls: []intrinsicCall{makeCall("NORM2", nil, _tgtArrayGeneric)},
+	},
 	f90token.IntrinsicDOT_PRODUCT: {
 		calls: []intrinsicCall{makeCall("DOT_PRODUCT", nil, _tgtArray(f90token.FloatLit), _tgtArray(f90token.FloatLit))},
 	},
 	f90token.IntrinsicALL: {
 		calls: []intrinsicCall{makeCall("ALL", _tgtBool, _tgtArray(f90token.LOGICAL))},
+	},
+	f90token.IntrinsicANY: {
+		calls: []intrinsicCall{makeCall("ANY", _tgtBool, _tgtArray(f90token.LOGICAL))},
+	},
+
+	// Environment subroutines — emit fenv.Method(args...) in CALL context.
+	f90token.IntrinsicDATE_AND_TIME: {
+		isEnvSubroutine: true,
+		calls: []intrinsicCall{
+			{methodOrCall: "DateAndTime", args: []*Varinfo{_tgtChar, _tgtChar, _tgtChar}, outArgs: []bool{true, true, true}},
+			{methodOrCall: "DateAndTimeValues", args: []*Varinfo{_tgtChar, _tgtChar, _tgtChar, _tgtArrayGeneric}, outArgs: []bool{true, true, true, false}},
+		},
+	},
+	f90token.IntrinsicRANDOM_SEED: {
+		isEnvSubroutine: true,
+		calls: []intrinsicCall{
+			{methodOrCall: "RandomSeed", args: []*Varinfo{}},
+		},
+	},
+	f90token.IntrinsicRANDOM_NUMBER: {
+		isEnvSubroutine: true,
+		calls: []intrinsicCall{
+			{methodOrCall: "RandomNumber", args: []*Varinfo{_tgtFloat32}, outArgs: []bool{true}},
+		},
+	},
+	f90token.IntrinsicCPU_TIME: {
+		isEnvSubroutine: true,
+		calls: []intrinsicCall{
+			{methodOrCall: "CpuTime", args: []*Varinfo{}},
+			{methodOrCall: "CpuTime", args: []*Varinfo{_tgtFloat32}, outArgs: []bool{true}},
+		},
+	},
+	f90token.IntrinsicSYSTEM_CLOCK: {
+		isEnvSubroutine: true,
+		calls: []intrinsicCall{
+			{methodOrCall: "SystemClock", args: []*Varinfo{}},
+			{methodOrCall: "SystemClock", args: []*Varinfo{_tgtInt32}, outArgs: []bool{true}},
+			{methodOrCall: "SystemClock", args: []*Varinfo{_tgtInt32, _tgtInt32}, outArgs: []bool{true, true}},
+			{methodOrCall: "SystemClock", args: []*Varinfo{_tgtInt32, _tgtInt32, _tgtInt32}, outArgs: []bool{true, true, true}},
+		},
 	},
 }
 

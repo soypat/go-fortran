@@ -261,6 +261,17 @@ func (ch CharacterArray) Substring(start, end int) string {
 	return ch.View(start, end).String()
 }
 
+// CHAR returns a 1-character string for the given ASCII code (Fortran CHAR intrinsic).
+func CHAR(i int32) string { return string([]byte{byte(i)}) }
+
+// ICHAR returns the ASCII value of the first character (Fortran ICHAR intrinsic).
+func ICHAR(ch CharacterArray) int32 {
+	if cap(ch.data) == 0 {
+		return 0
+	}
+	return int32(ch.data[0])
+}
+
 // View returns a view into the substring from start to end (1-based, inclusive)
 func (ch CharacterArray) View(start, end int) CharacterArray {
 	if end > cap(ch.data) {
