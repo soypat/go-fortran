@@ -147,5 +147,5 @@ LEVEL35: WHI/WR =  1.0000E+00  2.0000E+00  3.0000E+00  5.0000E-01  1.0000E+00
  LEVEL 38: NAMELIST x,y,z=          10          20          30
  LEVEL 38: NAMELIST a,b=   1.50000000       2.50000000    
  LEVEL 39:           2
-hey
+LEVEL 40: echo from shell
 STOP 0

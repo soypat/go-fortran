@@ -1252,7 +1252,7 @@ func LEVEL40() {
 		t float32
 		_ = t
 	)
-	fenv.System("echo hey")
+	fenv.System("echo 'LEVEL 40: echo from shell'")
 	fenv.CpuTime(&t)
 }
 func SIMPLE_SUB() {

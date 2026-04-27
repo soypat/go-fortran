@@ -256,6 +256,8 @@ func fortioActionFromString(s string) ast.Expr {
 
 // transformReadStmtWithImpliedDoLoop handles READ statements containing implied DO loops.
 func (tg *ToGo) transformReadStmtWithImpliedDoLoop(dst []ast.Stmt, stmt *f90.ReadStmt, unitArg, formatExpr ast.Expr) (_ []ast.Stmt, err error) {
+	// TODO: claude maybe was a little trigger happy when adding this method.
+	// Check with other implied-do-loop methods to see if it can be simplified and logic reused.
 	readArgsVar := ast.NewIdent("readArgs")
 	initStmt := &ast.AssignStmt{
 		Lhs: []ast.Expr{readArgsVar},
@@ -582,9 +584,6 @@ func (tg *ToGo) transformImpliedDoLoopAppendMode(idl *f90.ImpliedDoLoop, argsVar
 			goExpr, _, err := tg.transformExpression(&exprType, expr)
 			if err != nil {
 				return nil, err
-			}
-			if asRef {
-				goExpr = wrapPointer(goExpr)
 			}
 			appendStmt := &ast.AssignStmt{
 				Lhs: []ast.Expr{argsVar},

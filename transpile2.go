@@ -370,7 +370,10 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 		// GOTO variable (assigned GOTO using label from ASSIGN statement) - not supported
 	case *f90.UseStatement:
 		// USE statement - load module into scope; skip unknown (external) modules silently.
-		_ = tg.repl.Use(s.ModuleName, s.Only...)
+		err = tg.repl.Use(s.ModuleName, s.Only...)
+		if err != nil {
+			err = tg.makeErr(stmt, err.Error())
+		}
 	case *f90.ImplicitStatement, *f90.ExternalStmt, *f90.IntrinsicStmt, *f90.NamelistStmt:
 		// Specification statement - no code generation
 	default:
@@ -657,17 +660,18 @@ func (tg *ToGo) transformAllocateStmt(dst []ast.Stmt, stmt *f90.AllocateStmt) (_
 
 func (tg *ToGo) transformDeallocateStmt(dst []ast.Stmt, stmt *f90.DeallocateStmt) (_ []ast.Stmt, err error) {
 	for _, obj := range stmt.Objects {
-		var vi *Varinfo
+		var varname string
 		switch e := obj.(type) {
 		case *f90.Identifier:
-			vi = tg.repl.Var(e.Value)
+			varname = e.Value
 		case *f90.CallExpr:
-			vi = tg.repl.Var(e.Name)
+			varname = e.Name
 		default:
 			return dst, tg.makeErr(stmt, "DEALLOCATE requires variable")
 		}
+		vi := tg.repl.Var(varname)
 		if vi == nil {
-			continue // unknown variable — skip
+			return dst, tg.makeErr(stmt, "DEALLOCATE identifier not found: "+varname)
 		}
 		// Generate: varname.Deallocate()
 		call := &ast.CallExpr{
@@ -685,36 +689,25 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 		if ok || err != nil {
 			return dst, err
 		}
-		// Unknown subroutine (external library call e.g. LAPACK). Emit a panic stub.
-		dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{
-			Fun:  ast.NewIdent("panic"),
-			Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"subroutine not found: ` + stmt.Name + `"`}},
-		}})
-		return dst, nil
+		return dst, tg.makeErr(stmt, "subroutine not found: "+stmt.Name)
 	}
 	params := fninfo.ProcedureParams()
 	// Legacy Fortran allows calling with fewer arguments (undefined behavior but permitted).
 	// We handle this by using type inference for excess arguments.
 	if len(stmt.Args) > len(params) {
-		// Truncate extra args — caller has more args than callee's definition (Fortran code mismatch).
-		stmt.Args = stmt.Args[:len(params)]
+		return dst, tg.makeErr(stmt, fmt.Sprintf("too many args in call (expected %d, got %d)", len(params), len(stmt.Args)))
 	}
 	gstmt := &ast.CallExpr{
 		Fun: tg.astIdent(fninfo.name),
 	}
-	paramIdx := 0
 	for i := range stmt.Args {
-		// Skip alternate return arguments (*label) — Fortran-specific, no Go equivalent.
-		if _, ok := stmt.Args[i].(*f90.AlternateReturnArg); ok {
-			continue
-		}
 		var info *Varinfo
-		if paramIdx < len(params) {
-			info = &params[paramIdx]
+		if i < len(params) {
+			info = &params[i]
 		}
 		goexpr, _, err := tg.transformExpression(info, stmt.Args[i])
 		if err != nil {
-			return dst, nil // skip call with unresolvable args (e.g. derived type from unloaded module)
+			return dst, err
 		}
 		// For INTENT(OUT/INOUT) non-array scalar parameters, pass address.
 		// Convert .At() to .AtPtr() for array element access.
@@ -725,7 +718,6 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 			}
 		}
 		gstmt.Args = append(gstmt.Args, goexpr)
-		paramIdx++
 	}
 	dst = append(dst, &ast.ExprStmt{
 		X: gstmt,

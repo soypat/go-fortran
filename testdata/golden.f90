@@ -42,7 +42,7 @@
       CALL LEVEL37()
       CALL LEVEL38()
       CALL LEVEL39()
-    !   CALL LEVEL40()
+      CALL LEVEL40()
       STOP 0
       CONTAINS
 
@@ -1003,8 +1003,8 @@
 ! ==============================================================================
     SUBROUTINE LEVEL40()
         REAL :: t
-        ! CALL SYSTEM("echo hey")
-        ! CALL CPU_TIME(t)
+        CALL SYSTEM("echo 'LEVEL 40: echo from shell'")
+        CALL CPU_TIME(t)
     END SUBROUTINE LEVEL40
 
 ! ==============================================================================

@@ -23,3 +23,17 @@ You will not fix code that does not have an associated failing test. Test Driven
 
 After observing failing test make fix as simple and direct as possible.
 
+# Correctness
+Do not make parsing less correct. Examples that make parsing less correct:
+- Truncating arguments of a fortran function because our code models it with less arguments.
+- Ignoring a identifier in a list of parameters because we were unable to find it declared
+- Ignoring errors returned by functions to make operation more silent
+- Autodeclaring implicitly declared variables
+- Emitting a panic in transpiled code instead of returning an error when subroutine/intrinsic not found
+- Omitting parts of source code in transpile like alternate return types. We either implement this functionality or return an error when encountered
+- Replacing error returns with nil to get code to transpile albeit incorrectly.
+
+All these operations are prohibited. We require our implementation to be the most correct implementation out there. We allow temporarily using these operations to debug but they should immediately be removed once debugging is done. Errors indicating place found shall be returned over omitting transpiling source code always.
+
+We go as far as to not follow the Fortran specification when it comes to implicitly declared variables- we consider implicit declarations to occur on assignment. If a declaration happens on use of a variable then we consider it incorrect code. We ask our users to fix their fortran code before using go-fortran by declaring their implicit variables explicitly.
+
