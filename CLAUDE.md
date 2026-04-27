@@ -32,6 +32,7 @@ Do not make parsing less correct. Examples that make parsing less correct:
 - Emitting a panic in transpiled code instead of returning an error when subroutine/intrinsic not found
 - Omitting parts of source code in transpile like alternate return types. We either implement this functionality or return an error when encountered
 - Replacing error returns with nil to get code to transpile albeit incorrectly.
+- Adding nil checks to methods just because some random file crashes- we need to understand data flow. If something is nil maybe there is a wrong assumption in out code.
 
 All these operations are prohibited. We require our implementation to be the most correct implementation out there. We allow temporarily using these operations to debug but they should immediately be removed once debugging is done. Errors indicating place found shall be returned over omitting transpiling source code always.
 

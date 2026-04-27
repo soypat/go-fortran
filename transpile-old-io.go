@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	f90 "github.com/soypat/go-fortran/ast"
-	f90token "github.com/soypat/go-fortran/token"
 )
 
 // This file stores first iteration of IO routine transformation.
@@ -24,15 +23,6 @@ func (tg *ToGo) transformWriteStmtOld(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []
 		} else if nml := tg.repl.Namelist(format.Value); nml != nil {
 			// Namelist-directed output
 			return tg.transformWriteNamelist(dst, stmt, nml)
-		} else if v := tg.repl.Var(format.Value); v != nil && v.TypeToken() == f90token.CHARACTER {
-			// Character variable used as runtime format string.
-			varExpr := ast.NewIdent(strings.ToLower(format.Value))
-			formatExpr = &ast.CallExpr{
-				Fun: _astFortioNewFormat,
-				Args: []ast.Expr{&ast.CallExpr{
-					Fun: &ast.SelectorExpr{X: varExpr, Sel: ast.NewIdent("String")},
-				}},
-			}
 		} else {
 			return dst, tg.makeErr(stmt, "unknown write format "+format.Value)
 		}
@@ -284,15 +274,6 @@ func (tg *ToGo) transformReadStmtOld(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []as
 		} else if nml := tg.repl.Namelist(format.Value); nml != nil {
 			// Namelist-directed input
 			return tg.transformReadNamelist(dst, stmt, nml)
-		} else if v := tg.repl.Var(format.Value); v != nil && v.TypeToken() == f90token.CHARACTER {
-			// CHARACTER variable holding runtime format string
-			varExpr := ast.NewIdent(strings.ToLower(format.Value))
-			formatExpr = &ast.CallExpr{
-				Fun: _astFortioNewFormat,
-				Args: []ast.Expr{&ast.CallExpr{
-					Fun: &ast.SelectorExpr{X: varExpr, Sel: ast.NewIdent("String")},
-				}},
-			}
 		} else {
 			return dst, tg.makeErr(stmt, "unknown read format "+format.Value)
 		}

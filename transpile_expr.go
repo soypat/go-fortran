@@ -954,6 +954,7 @@ func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.CallExpr, 
 
 	// CHARACTER array with a single range subscript: ctmp(1:2) = arr → ctmp.View(R(1,2)).SetFrom(arr)
 	if vi.IsArray() && isRanged && len(fexpr.Args) == 1 && fexpr.SecondaryAccess == nil {
+		warn("character array with single range subscript")
 		viewExpr, err := tg.transformArrayView(fexpr, vi)
 		if err != nil {
 			return dst, err
@@ -1035,6 +1036,7 @@ func (tg *ToGo) transformRangeToViewArg(rng *f90.RangeExpr, vi *Varinfo, dim int
 		if dims != nil && dim < len(dims.Bounds) && dims.Bounds[dim].Upper != nil {
 			end, _, err = tg.transformExpression(_tgtInt, dims.Bounds[dim].Upper)
 		} else {
+			warn("Allocatable/assumed-shape array: use runtime length vi.Len()")
 			// Allocatable/assumed-shape array: use runtime length vi.Len()
 			end = &ast.CallExpr{
 				Fun: &ast.SelectorExpr{
@@ -1223,4 +1225,9 @@ func typeCompatible(paramType, argType *Varinfo) bool {
 	}
 	// Exact type match
 	return paramType.typeToken() == argType.typeToken()
+}
+
+// warn used to signal a very claudish poorly designed branch/function was hit and used.
+func warn(msg string) {
+	fmt.Printf("\033[33m%s\033[0m\n", msg)
 }

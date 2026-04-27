@@ -444,26 +444,13 @@ type Varinfo struct {
 	stmtFuncParams []string       // parameter names
 }
 
+// Varinfo methods should be called correctly.
+
 func (p *Varinfo) Flags() VarFlags            { return p.flags }
 func (p *Varinfo) Value() Value               { return p.val }
-func (p *Varinfo) Charlen() ast.Expression {
-	if p.decl == nil {
-		return nil
-	}
-	return p.decl.Charlen()
-}
-func (p *Varinfo) Kind() ast.Expression {
-	if p.decl == nil {
-		return nil
-	}
-	return p.decl.Kind()
-}
-func (p *Varinfo) Dimensions() *ast.ArraySpec {
-	if p.decl == nil {
-		return nil
-	}
-	return p.decl.Dimension()
-}
+func (p *Varinfo) Charlen() ast.Expression    { return p.decl.Charlen() }
+func (p *Varinfo) Kind() ast.Expression       { return p.decl.Kind() }
+func (p *Varinfo) Dimensions() *ast.ArraySpec { return p.decl.Dimension() }
 func (p *Varinfo) Identifier() string         { return p._varname }
 func (p *Varinfo) IsParameter() bool          { return p.flags.HasAny(VFlagParameter) }
 func (p *Varinfo) IsAllocatable() bool        { return p.flags.HasAny(VFlagAllocatable) }

@@ -170,6 +170,7 @@ func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 	for i := range params {
 		vi := &params[i]
 		if vi.decl.Name == "" || vi.decl.Name == "*" {
+			warn("skip alternate parameters")
 			continue // skip alternate return parameters (*)
 		}
 		tp := tg.goType(vi)
@@ -369,7 +370,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	case *f90.AssignedGotoStmt:
 		// GOTO variable (assigned GOTO using label from ASSIGN statement) - not supported
 	case *f90.UseStatement:
-		// USE statement - load module into scope; skip unknown (external) modules silently.
+		// USE statement - load module into scope.
 		err = tg.repl.Use(s.ModuleName, s.Only...)
 		if err != nil {
 			err = tg.makeErr(stmt, err.Error())
@@ -1441,6 +1442,7 @@ func (tg *ToGo) transformDataArray(dst []ast.Stmt, stmt *f90.DataStmt, varExpr f
 // Returns the number of values consumed.
 func (tg *ToGo) transformDataImpliedDo(dst []ast.Stmt, stmt *f90.DataStmt, loop *f90.ImpliedDoLoop,
 	iter *dataValueIter, targetVinfo *Varinfo) ([]ast.Stmt, int, error) {
+	warn("claudish transformDataImpliedDo, review code")
 	// Evaluate loop bounds as integer constants.
 	var startVI, endVI, strideVI Varinfo
 	if err := tg.repl.Eval(&startVI, loop.Start); err != nil {
@@ -1945,6 +1947,7 @@ func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, root *f90
 		case *f90.Identifier:
 			args = append(args, tg.astMethodCall(e.Value, "String"))
 		default:
+			warn("potential unsupported expression for string concat")
 			goexpr, _, err := tg.transformExpression(_tgtStringLit, e)
 			if err != nil {
 				return dst, tg.makeErr(op, "unsupported expression for string concat: "+err.Error())
