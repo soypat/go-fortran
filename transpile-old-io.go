@@ -254,56 +254,6 @@ func fortioActionFromString(s string) ast.Expr {
 	}
 }
 
-// transformReadStmtWithImpliedDoLoop handles READ statements containing implied DO loops.
-func (tg *ToGo) transformReadStmtWithImpliedDoLoop(dst []ast.Stmt, stmt *f90.ReadStmt, unitArg, formatExpr ast.Expr) (_ []ast.Stmt, err error) {
-	// TODO: claude maybe was a little trigger happy when adding this method.
-	// Check with other implied-do-loop methods to see if it can be simplified and logic reused.
-	readArgsVar := ast.NewIdent("readArgs")
-	initStmt := &ast.AssignStmt{
-		Lhs: []ast.Expr{readArgsVar},
-		Tok: token.DEFINE,
-		Rhs: []ast.Expr{&ast.CallExpr{
-			Fun:  ast.NewIdent("make"),
-			Args: []ast.Expr{&ast.ArrayType{Elt: ast.NewIdent("any")}, _astZero},
-		}},
-	}
-	blockStmts := []ast.Stmt{initStmt}
-	for _, expr := range stmt.InputList {
-		if idl, ok := expr.(*f90.ImpliedDoLoop); ok {
-			loopStmts, err := tg.transformImpliedDoLoopAppendMode(idl, readArgsVar, true)
-			if err != nil {
-				return dst, err
-			}
-			blockStmts = append(blockStmts, loopStmts...)
-		} else {
-			var exprType Varinfo
-			if err := tg.repl.InferType(&exprType, expr); err != nil {
-				return dst, err
-			}
-			goExpr, _, err := tg.transformExpression(&exprType, expr)
-			if err != nil {
-				return dst, err
-			}
-			blockStmts = append(blockStmts, &ast.AssignStmt{
-				Lhs: []ast.Expr{readArgsVar},
-				Tok: token.ASSIGN,
-				Rhs: []ast.Expr{&ast.CallExpr{
-					Fun:  ast.NewIdent("append"),
-					Args: []ast.Expr{readArgsVar, wrapPointer(goExpr)},
-				}},
-			})
-		}
-	}
-	readCall := &ast.CallExpr{
-		Fun:      _astFenvRead,
-		Args:     []ast.Expr{unitArg, formatExpr, readArgsVar},
-		Ellipsis: 1,
-	}
-	blockStmts = append(blockStmts, &ast.ExprStmt{X: readCall})
-	dst = append(dst, &ast.BlockStmt{List: blockStmts})
-	return dst, nil
-}
-
 // transformReadStmtOld generates code for READ statements.
 // READ(unit, fmt) vars => fenv.Read(unit, format, &var1, &var2, ...)
 func (tg *ToGo) transformReadStmtOld(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []ast.Stmt, err error) {
@@ -377,13 +327,6 @@ func (tg *ToGo) transformReadStmtOld(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []as
 		iostatVar, _, err = tg.transformExpression(_tgtInt32, iostatExpr)
 		if err != nil {
 			return dst, err
-		}
-	}
-
-	// Dispatch implied DO loop case
-	for _, expr := range stmt.InputList {
-		if _, ok := expr.(*f90.ImpliedDoLoop); ok {
-			return tg.transformReadStmtWithImpliedDoLoop(dst, stmt, unitArg, formatExpr)
 		}
 	}
 
@@ -529,13 +472,7 @@ func (tg *ToGo) transformWriteNamelist(dst []ast.Stmt, stmt *f90.WriteStmt, nml 
 // For (expr, i=start,end,stride) generates:
 //
 //	for i := start; i <= end; i += stride { argsVar = append(argsVar, expr) }
-//
-// When asRef is true, each expr is wrapped with wrapPointer (for READ targets).
 func (tg *ToGo) transformImpliedDoLoopAppend(idl *f90.ImpliedDoLoop, argsVar *ast.Ident) ([]ast.Stmt, error) {
-	return tg.transformImpliedDoLoopAppendMode(idl, argsVar, false)
-}
-
-func (tg *ToGo) transformImpliedDoLoopAppendMode(idl *f90.ImpliedDoLoop, argsVar *ast.Ident, asRef bool) ([]ast.Stmt, error) {
 	loopVar := ast.NewIdent(idl.LoopVar)
 
 	// Register the loop variable temporarily so it can be resolved in expressions
@@ -571,7 +508,7 @@ func (tg *ToGo) transformImpliedDoLoopAppendMode(idl *f90.ImpliedDoLoop, argsVar
 	for _, expr := range idl.Expressions {
 		// Handle nested implied DO loops
 		if nestedIdl, ok := expr.(*f90.ImpliedDoLoop); ok {
-			nestedStmts, err := tg.transformImpliedDoLoopAppendMode(nestedIdl, argsVar, asRef)
+			nestedStmts, err := tg.transformImpliedDoLoopAppend(nestedIdl, argsVar)
 			if err != nil {
 				return nil, err
 			}

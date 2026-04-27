@@ -833,8 +833,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	if err != nil {
 		return nil, err
 	} else if targetVinfo == nil {
-		// Unknown target (e.g. variable from unloaded module) — skip assignment.
-		return dst, nil
+		return nil, tg.makeErr(stmt.Target, "unknown identifier in target expression of assignment")
 	} else if targetVinfo.decl == nil {
 		return nil, tg.makeErr(stmt.Target, "identifier with no corresponding type declaration:"+targetVinfo.Identifier())
 	}
@@ -850,7 +849,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	}
 	rhs, _, err := tg.transformExpression(targetVinfo, stmt.Value)
 	if err != nil {
-		return dst, nil // skip assignment with unresolvable RHS (e.g. derived type from unloaded module)
+		return dst, err
 	}
 	// SetFromString only for scalar CHARACTER (identifier target), not array elements
 	if targetVinfo.decl.Type.Token == f90token.CHARACTER && isIdentifier {
@@ -867,7 +866,9 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 
 	// Infer RHS type for conversions (needed by ArrayRef/FunctionCall and default path)
 	var rhsType Varinfo
-	tg.repl.InferType(&rhsType, stmt.Value) // ignore error: ComponentAccess and other complex targets don't need type inference
+	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
+		return dst, tg.makeErr(stmt, "inferring type: "+err.Error())
+	}
 
 	switch tgt := stmt.Target.(type) {
 	case *f90.CallExpr:
@@ -962,60 +963,6 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 }
 
 func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast.Stmt, err error) {
-	// Check for implied DO loops — use dynamic args slice approach.
-	hasImpliedDo := false
-	for _, expr := range stmt.OutputList {
-		if _, ok := expr.(*f90.ImpliedDoLoop); ok {
-			hasImpliedDo = true
-			break
-		}
-	}
-	if hasImpliedDo {
-		argsVar := ast.NewIdent("printArgs")
-		initStmt := &ast.AssignStmt{
-			Lhs: []ast.Expr{argsVar},
-			Tok: token.DEFINE,
-			Rhs: []ast.Expr{&ast.CallExpr{
-				Fun:  ast.NewIdent("make"),
-				Args: []ast.Expr{&ast.ArrayType{Elt: ast.NewIdent("any")}, _astZero},
-			}},
-		}
-		blockStmts := []ast.Stmt{initStmt}
-		for _, expr := range stmt.OutputList {
-			if idl, ok := expr.(*f90.ImpliedDoLoop); ok {
-				loopStmts, err := tg.transformImpliedDoLoopAppend(idl, argsVar)
-				if err != nil {
-					return dst, err
-				}
-				blockStmts = append(blockStmts, loopStmts...)
-			} else {
-				var tgt Varinfo
-				if err := tg.repl.InferType(&tgt, expr); err != nil {
-					return dst, tg.makeErr(stmt, err.Error())
-				}
-				goExpr, _, err := tg.transformExpression(&tgt, expr)
-				if err != nil {
-					return dst, err
-				}
-				blockStmts = append(blockStmts, &ast.AssignStmt{
-					Lhs: []ast.Expr{argsVar},
-					Tok: token.ASSIGN,
-					Rhs: []ast.Expr{&ast.CallExpr{
-						Fun:  ast.NewIdent("append"),
-						Args: []ast.Expr{argsVar, goExpr},
-					}},
-				})
-			}
-		}
-		blockStmts = append(blockStmts, &ast.ExprStmt{X: &ast.CallExpr{
-			Fun:      _astFenvPrint,
-			Args:     []ast.Expr{argsVar},
-			Ellipsis: 1,
-		}})
-		dst = append(dst, &ast.BlockStmt{List: blockStmts})
-		return dst, nil
-	}
-
 	// Transform output list expressions to Go expressions
 	var args []ast.Expr
 	var tgt Varinfo
@@ -2364,7 +2311,7 @@ func (tg *ToGo) transformCommonStmt(dst []ast.Stmt, stmt *f90.CommonStmt) (_ []a
 
 func (tg *ToGo) resolveKind(v *Varinfo) int {
 	if v.decl == nil {
-		return 0
+		panic(tg.makeErrAtStmt("nil declaration for variable " + v.Identifier()))
 	}
 	return tg.resolveKindFromDecl(v.decl)
 }
@@ -2532,26 +2479,13 @@ func (tg *ToGo) transformIO(dst []ast.Stmt, specSel, fenvSel *ast.SelectorExpr, 
 	var args []ast.Expr = []ast.Expr{spec}
 	var vitgt Varinfo
 	for _, input := range inputs {
-		if inferErr := tg.repl.InferType(&vitgt, input); inferErr != nil {
-			// Fallback: look up identifier in scope directly (handles derived types, etc.).
-			if ident, ok := input.(*f90.Identifier); ok {
-				if vi := tg.repl.Var(ident.Value); vi != nil {
-					vitgt = *vi
-				} else if decl := tg.repl.ImplicitDeclFor(ident.Value); decl != nil {
-					vitgt = Varinfo{decl: decl}
-				} else {
-					// Unknown variable (e.g. derived type from unloaded module) — skip.
-					continue
-				}
-			} else {
-				// Non-identifier expression that can't be inferred — skip.
-				continue
-			}
+		err = tg.repl.InferType(&vitgt, input)
+		if err != nil {
+			return nil, tg.makeErrAtStmt("inferring type of IO statement input")
 		}
 		arg, _, err := tg.transformExpression(&vitgt, input)
 		if err != nil {
-			// Skip arguments that can't be transformed (e.g. unknown derived types).
-			continue
+			return nil, err
 		}
 		if refInputs {
 			arg = &ast.UnaryExpr{Op: token.AND, X: arg}

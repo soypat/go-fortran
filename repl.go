@@ -143,12 +143,6 @@ func (repl *REPL) Namelist(name string) *ast.NamelistGroup {
 	return repl.scope.Namelist(name)
 }
 
-// ImplicitDeclFor returns the implicit-typing declaration for name,
-// or nil if the current scope has IMPLICIT NONE.
-func (repl *REPL) ImplicitDeclFor(name string) *ast.DeclEntity {
-	return repl.scope.implicitDeclFor(name)
-}
-
 func (repl *REPL) Var(name string) *Varinfo {
 	if repl._varCache != nil && repl._varCache._varname == name {
 		return repl._varCache
@@ -325,11 +319,6 @@ func (repl *REPL) SetScope(pu f90.Unit) (err error) {
 		v := &repl.scope.vars[i]
 		if v.decl == nil {
 			return fmt.Errorf("unresolved declaration for variable %s in %s", v.Identifier(), pu.UnitName())
-		}
-		if v.decl.Type == nil {
-			// Common block var in IMPLICIT NONE unit with no explicit type declaration.
-			// Fortran requires an explicit type; fall back to REAL to avoid a panic.
-			v.decl.Type = &ast.TypeSpec{Token: f90token.REAL}
 		}
 		v.val.tok = v.decl.Type.Token // Initialize repl value type.
 		v._varname = sanitizeIdent(v._varname)

@@ -286,9 +286,6 @@ func (tg *ToGo) transformComponentAccess(vitgt *Varinfo, e *f90.ComponentAccess)
 		baseVinfo = tg.repl.Var(ident.Value)
 	}
 
-	if baseVinfo == nil {
-		baseVinfo = _tgtGenericFloat // unknown derived type base; use placeholder
-	}
 	// Transform the base expression using the base variable info
 	base, _, err := tg.transformExpression(baseVinfo, e.Base)
 	if err != nil {
@@ -389,9 +386,11 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 	if vitgt == _tgtBool && e.Op.IsNumericalOperator() {
 		// We are targeting boolean but likely have numerical values, infer type.
 		var leftType Varinfo
-		if tg.repl.InferType(&leftType, e.Left) == nil {
-			exprTarget = &leftType
+		err = tg.repl.InferType(&leftType, e.Left)
+		if err != nil {
+			return nil, nil, tg.makeErr(e.Left, err.Error())
 		}
+		exprTarget = &leftType
 	}
 	left, leftType, err := tg.transformExpression(exprTarget, e.Left)
 	if err != nil {
