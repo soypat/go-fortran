@@ -1221,5 +1221,6 @@ func typeCompatible(paramType, argType *Varinfo) bool {
 
 // warn used to signal a very claudish poorly designed branch/function was hit and used.
 func warn(msg string) {
-	fmt.Printf("\033[33m%s\033[0m\n", msg)
+	cs := debugGetCallStack(1)
+	fmt.Printf("\033[33m%s\n%s\033[0m\n", msg, cs)
 }

@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -1112,7 +1110,7 @@ func (p *Parser90) addErrorFatal(msg string, callstackSkip int) {
 	if p.died {
 		p.addError(msg)
 	} else {
-		callstack := getCallStack(callstackSkip)
+		callstack := debugGetCallStack(callstackSkip)
 		p.addError("token state: " + p.strToks() + "\n" + callstack + "\nfatal error encountered, terminating run early: " + msg) // Only one unrecoverable message
 	}
 	p.died = true
@@ -4425,63 +4423,6 @@ func parseCommaSeparatedList[T any](p *Parser90, terminator token.Token, parser 
 		}
 	}
 	return items, nil
-}
-
-// getCallStack returns a formatted string of the current call stack
-// Format: "filename:line in TypeName.FunctionName"
-// Example: "parser.go:592 in Parser90.parseExecutableStatement"
-func getCallStack(skipAdditional int) string {
-	var result strings.Builder
-
-	// Get program counters for up to 32 frames
-	pcs := make([]uintptr, 32)
-	n := runtime.Callers(2+skipAdditional, pcs) // Skip getCallStack and its caller
-
-	if n == 0 {
-		return ""
-	}
-
-	pcs = pcs[:n]
-	frames := runtime.CallersFrames(pcs)
-
-	first := true
-	for {
-		frame, more := frames.Next()
-
-		// Extract just the filename from the full path
-		filename := filepath.Base(frame.File)
-
-		// Extract function name and type if present
-		// Format: "package.Type.Method" or "package.Function"
-		funcName := frame.Function
-		parts := strings.Split(funcName, ".")
-		if len(parts) > 0 {
-			funcName = parts[len(parts)-1]
-		}
-		if len(parts) > 1 {
-			// Include type name if present
-			typeName := parts[len(parts)-2]
-			// Remove package prefix if it starts with (*Type)
-			if strings.HasPrefix(typeName, "(*") && strings.HasSuffix(typeName, ")") {
-				typeName = strings.TrimPrefix(typeName, "(*")
-				typeName = strings.TrimSuffix(typeName, ")")
-			}
-			funcName = typeName + "." + funcName
-		}
-
-		if !first {
-			result.WriteString("\n")
-		}
-		first = false
-
-		fmt.Fprintf(&result, "%s:%d @%s", filename, frame.Line, funcName)
-
-		if !more {
-			break
-		}
-	}
-
-	return result.String()
 }
 
 // parseInt64 parses a Fortran integer literal string to int64

@@ -234,7 +234,7 @@ func (tg *ToGo) makeErrWithPos(pos f90.Position, msg string) error {
 				defer fp.Close()
 			}
 		}
-		callStr := getCallStack(2)
+		callStr := debugGetCallStack(2)
 		var err error
 		var line, col int
 		if src != nil {
