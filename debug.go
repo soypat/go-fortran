@@ -2,10 +2,52 @@ package fortran
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	f90 "github.com/soypat/go-fortran/ast"
 )
+
+func (tg *ToGo) makeErrAtStmt(msg string) error {
+	if tg.currentNode == nil {
+		return tg.makeErrWithPos(f90.Position{}, msg)
+	}
+	return tg.makeErr(tg.currentNode, msg)
+}
+
+func (tg *ToGo) makeErr(node f90.Node, msg string) error {
+	tok := node.AppendTokenLiteral(nil)
+	pos := node.SourcePos()
+	return tg.makeErrWithPos(pos, fmt.Sprintf("%T %s: %s", node, tok, msg))
+}
+
+func (tg *ToGo) makeErrWithPos(pos f90.Position, msg string) error {
+	// If source is available, compute line:column
+	src := tg.sourceFile
+	if tg.source != "" {
+		if src == nil {
+			fp, err := os.Open(tg.source)
+			if err == nil {
+				src = fp
+				defer fp.Close()
+			}
+		}
+		callStr := debugGetCallStack(2)
+		var err error
+		var line, col int
+		if src != nil {
+			var buf [1024]byte
+			line, col, _, err = pos.ToLineCol(src, buf[:])
+		}
+		if err == nil && line > 0 {
+			return fmt.Errorf("%s:%d:%d: %s\n%s", tg.source, line, col, msg, callStr)
+		}
+	}
+
+	return fmt.Errorf("%s @ %d", msg, pos.Start())
+}
 
 // debugGetCallStack returns a formatted string of the current call stack
 // Format: "filename:line in TypeName.FunctionName"

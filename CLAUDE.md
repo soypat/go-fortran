@@ -1,4 +1,4 @@
-We are trying to get a transpiler that converts a Fortran 77/90 program to a Go program. It consists of the following Fortran modules
+We are trying to get a transpiler that converts a Fortran 77/90 program to a Go program with maximum correctness. It consists of the following Go codebase structure:
 
 - lexer.go has Lexer
 - parser.go has Parser
@@ -16,12 +16,16 @@ go test . -tags=gdyn
 And examine errors. When we find bugs we add a minimal working example to our tests depending on what causes the issue:
 
 - Simple single line parser bugs in test corpus
-- More complex parser bugs shall first be reproduced in testdata/valid_temp.f90. use cmd/fortrangrep to copy parts of a program without comments.
-- transpiler bugs are fixed by examining errors and editing transpilation code
+- More complex parser bugs shall first be reproduced in testdata/valid_temp.f90. use ./cmd/fortrangrep to copy parts of a program without comments.
+- Missing transpiler features are added in minimal fashion to ./testdata/golden.f90, if possible in an existing LEVEL subroutine which are numbered subroutines (LEVEL01, LEVEL02 ...) called from main fortran program which when transpiled put transpiler to the test. If no existing LEVEL subroutine fits the new feature a new LEVEL is created and called from the PROGRAM. 
 
-You will not fix code that does not have an associated failing test. This excludes tests in build tag guarded files. Test Driven Development is the name of the game. Use fortrangrep with -c flag to extract fortran code without extraneous comments.
+# Implementation Policy
+We will not fix code that does not have an associated failing test. Test Driven Development is the name of the game. 
 
-After observing failing test make fix as simple and direct as possible.
+After observing failing test make fix as direct as possible with minimal code change footprint. We make atomic changes, minimizing code change to pass the test while considering room for future transpile feature additions. We always return errors on encountering unimplemented features using the makeErr* set of methods which document position of error in source can be found in debug.go.
+
+
+Use fortrangrep with -c flag to extract fortran code without extraneous comments.
 
 # Correctness
 Do not make parsing less correct. Examples that make parsing less correct:
@@ -34,7 +38,7 @@ Do not make parsing less correct. Examples that make parsing less correct:
 - Replacing error returns with nil to get code to transpile albeit incorrectly.
 - Adding nil checks to methods just because some random file crashes- we need to understand data flow. If something is nil maybe there is a wrong assumption in out code.
 
-All these operations are prohibited. We require our implementation to be the most correct implementation out there. We allow temporarily using these operations to debug but they should immediately be removed once debugging is done. Errors indicating place found shall be returned over omitting transpiling source code always.
+All these operations are prohibited. We require our implementation to be the most correct implementation out there. We allow temporarily using these operations to debug but they should immediately be removed once debugging is done. Errors indicating where the issue was found shall be returned and we shall not omit transpiling nor parsing Fortran Code.
 
-We go as far as to not follow the Fortran specification when it comes to implicitly declared variables- we consider implicit declarations to occur on assignment. If a declaration happens on use of a variable then we consider it incorrect code. We ask our users to fix their fortran code before using go-fortran by declaring their implicit variables explicitly.
+We go as far as to not follow the Fortran specification: We treat implicit declarations as valid only on assignment, not on first use. We ask our users to fix their fortran code by declaring these variables beforehand. 
 
