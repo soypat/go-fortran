@@ -1096,37 +1096,8 @@ func (p *Parser90) skipNewlinesAndComments() {
 	}
 }
 
-func (p *Parser90) addErrorWithPos(pos sourcePos, msg string) {
-	if p.died {
-		msg = "got error with terminated parser: " + msg
-	}
-	p.errors = append(p.errors, ParserError{
-		sp:  pos,
-		msg: msg,
-	})
-}
-
-func (p *Parser90) addErrorFatal(msg string, callstackSkip int) {
-	if p.died {
-		p.addError(msg)
-	} else {
-		callstack := debugGetCallStack(callstackSkip)
-		p.addError("token state: " + p.strToks() + "\n" + callstack + "\nfatal error encountered, terminating run early: " + msg) // Only one unrecoverable message
-	}
-	p.died = true
-}
-
-func (p *Parser90) addError(msg string) {
-	p.addErrorWithPos(p.sourcePos(), msg)
-}
-
 func (p *Parser90) Errors() []ParserError {
 	return p.errors
-}
-
-func (p *Parser90) strToks() string {
-	return fmt.Sprintf("%q %s %q %s %q %s", p.current.lit, p.current.tok,
-		p.peek.lit, p.peek.tok, p.uberpeek.lit, p.uberpeek.tok)
 }
 
 func (p *Parser90) consumeIdentifier(dst *string, allowTokens ...token.Token) bool {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/soypat/go-fortran/intrinsic"
 )
@@ -77,6 +78,25 @@ func NewFormat(args ...any) *Format {
 // DefaultFormat returns a default (list-directed) format.
 func DefaultFormat() *Format {
 	return &defaultFormat
+}
+
+// FormatFromCharVar creates a Format from a Fortran CHARACTER variable or array.
+// Accepts intrinsic.CharacterArray (scalar) or *intrinsic.Array[intrinsic.CharacterArray] (array).
+func FormatFromCharVar(v any) *Format {
+	switch fv := v.(type) {
+	case intrinsic.CharacterArray:
+		return NewFormat(fv.String())
+	case *intrinsic.Array[intrinsic.CharacterArray]:
+		lo := fv.LowerDim(1)
+		hi := fv.UpperDim(1)
+		var sb strings.Builder
+		sb.Grow(hi - lo + 1)
+		for i := lo; i <= hi; i++ {
+			sb.WriteString(fv.At(i).String())
+		}
+		return NewFormat(sb.String())
+	}
+	return DefaultFormat()
 }
 
 var defaultFormat Format

@@ -1218,9 +1218,3 @@ func typeCompatible(paramType, argType *Varinfo) bool {
 	// Exact type match
 	return paramType.typeToken() == argType.typeToken()
 }
-
-// warn used to signal a very claudish poorly designed branch/function was hit and used.
-func warn(msg string) {
-	cs := debugGetCallStack(1)
-	fmt.Printf("\033[33m%s\n%s\033[0m\n", msg, cs)
-}

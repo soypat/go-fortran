@@ -763,6 +763,10 @@ var (
 		X:   ast.NewIdent("fortio"),
 		Sel: ast.NewIdent("DefaultFormat"),
 	}
+	_astFortioFormatFromCharVar = &ast.SelectorExpr{
+		X:   ast.NewIdent("fortio"),
+		Sel: ast.NewIdent("FormatFromCharVar"),
+	}
 	_astFortioFormatDescriptor = &ast.SelectorExpr{
 		X:   ast.NewIdent("fortio"),
 		Sel: ast.NewIdent("FormatDescriptor"),

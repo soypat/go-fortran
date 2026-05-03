@@ -48,6 +48,7 @@ func GOLDEN() {
 	LEVEL38()
 	LEVEL39()
 	LEVEL40()
+	LEVEL41()
 	fenv.Stop(0)
 }
 func LEVEL01() {
@@ -1254,6 +1255,19 @@ func LEVEL40() {
 	)
 	fenv.System("echo 'LEVEL 40: echo from shell'")
 	fenv.CpuTime(&t)
+}
+func LEVEL41() {
+	var (
+		fmt_str intrinsic.CharacterArray = intrinsic.NewCharacterArray(30)
+		_                                = fmt_str
+	)
+	var (
+		x int32
+		_ = x
+	)
+	x = 41
+	fmt_str.SetFromString("(A,I2,A)")
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.NewFormat(fmt_str.String())}, "LEVEL ", x, ": SUCCESS")
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")

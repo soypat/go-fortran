@@ -43,6 +43,7 @@
       CALL LEVEL38()
       CALL LEVEL39()
       CALL LEVEL40()
+      CALL LEVEL41()
       STOP 0
       CONTAINS
 
@@ -1006,6 +1007,14 @@
         CALL SYSTEM("echo 'LEVEL 40: echo from shell'")
         CALL CPU_TIME(t)
     END SUBROUTINE LEVEL40
+
+    SUBROUTINE LEVEL41() ! Variable format WRITE
+        CHARACTER(LEN=30) :: fmt_str
+        INTEGER :: x
+        x = 41
+        fmt_str = '(A,I2,A)'
+        WRITE(*, fmt_str) 'LEVEL ', x, ': SUCCESS'
+    END SUBROUTINE LEVEL41
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

@@ -23,6 +23,17 @@ func (tg *ToGo) transformWriteStmtOld(dst []ast.Stmt, stmt *f90.WriteStmt) (_ []
 		} else if nml := tg.repl.Namelist(format.Value); nml != nil {
 			// Namelist-directed output
 			return tg.transformWriteNamelist(dst, stmt, nml)
+		} else if vi := tg.repl.Var(format.Value); vi != nil && vi.IsChar() {
+			varExpr, _, err := tg.transformExpression(_tgtChar, format)
+			if err != nil {
+				return dst, err
+			}
+			formatExpr = &ast.CallExpr{
+				Fun: _astFortioNewFormat,
+				Args: []ast.Expr{
+					&ast.CallExpr{Fun: &ast.SelectorExpr{X: varExpr, Sel: ast.NewIdent("String")}},
+				},
+			}
 		} else {
 			return dst, tg.makeErr(stmt, "unknown write format "+format.Value)
 		}
@@ -274,6 +285,17 @@ func (tg *ToGo) transformReadStmtOld(dst []ast.Stmt, stmt *f90.ReadStmt) (_ []as
 		} else if nml := tg.repl.Namelist(format.Value); nml != nil {
 			// Namelist-directed input
 			return tg.transformReadNamelist(dst, stmt, nml)
+		} else if vi := tg.repl.Var(format.Value); vi != nil && vi.IsChar() {
+			varExpr, _, err := tg.transformExpression(_tgtChar, format)
+			if err != nil {
+				return dst, err
+			}
+			formatExpr = &ast.CallExpr{
+				Fun: _astFortioNewFormat,
+				Args: []ast.Expr{
+					&ast.CallExpr{Fun: &ast.SelectorExpr{X: varExpr, Sel: ast.NewIdent("String")}},
+				},
+			}
 		} else {
 			return dst, tg.makeErr(stmt, "unknown read format "+format.Value)
 		}

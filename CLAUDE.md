@@ -16,7 +16,7 @@ go test . -tags=gdyn
 And examine errors. When we find bugs we add a minimal working example to our tests depending on what causes the issue:
 
 - Simple single line parser bugs in test corpus
-- More complex parser bugs shall first be reproduced in testdata/valid_temp.f90. use ./cmd/fortrangrep to copy parts of a program without comments.
+- More complex parser bugs shall first be reproduced in testdata/valid_temp.f90. use `go run ./cmd/fortrangrep -c` to copy parts of a program without comments.
 - Missing transpiler features are added in minimal fashion to ./testdata/golden.f90, if possible in an existing LEVEL subroutine which are numbered subroutines (LEVEL01, LEVEL02 ...) called from main fortran program which when transpiled put transpiler to the test. If no existing LEVEL subroutine fits the new feature a new LEVEL is created and called from the PROGRAM. 
 
 # Implementation Policy

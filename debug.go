@@ -49,6 +49,35 @@ func (tg *ToGo) makeErrWithPos(pos f90.Position, msg string) error {
 	return fmt.Errorf("%s @ %d", msg, pos.Start())
 }
 
+func (p *Parser90) addErrorWithPos(pos sourcePos, msg string) {
+	if p.died {
+		msg = "got error with terminated parser: " + msg
+	}
+	p.errors = append(p.errors, ParserError{
+		sp:  pos,
+		msg: msg,
+	})
+}
+
+func (p *Parser90) strToks() string {
+	return fmt.Sprintf("%q %s %q %s %q %s", p.current.lit, p.current.tok,
+		p.peek.lit, p.peek.tok, p.uberpeek.lit, p.uberpeek.tok)
+}
+
+func (p *Parser90) addError(msg string) {
+	p.addErrorWithPos(p.sourcePos(), msg)
+}
+
+func (p *Parser90) addErrorFatal(msg string, callstackSkip int) {
+	if p.died {
+		p.addError(msg)
+	} else {
+		callstack := debugGetCallStack(callstackSkip)
+		p.addError("token state: " + p.strToks() + "\n" + callstack + "\nfatal error encountered, terminating run early: " + msg) // Only one unrecoverable message
+	}
+	p.died = true
+}
+
 // debugGetCallStack returns a formatted string of the current call stack
 // Format: "filename:line in TypeName.FunctionName"
 // Example: "parser.go:592 in Parser90.parseExecutableStatement"
@@ -113,4 +142,10 @@ func stringsꞏCutLast(s, sep string) (before, after string, found bool) {
 		return s[:i], s[i+len(sep):], true
 	}
 	return s, "", false
+}
+
+// warn used to signal a very claudish poorly designed branch/function was hit and used.
+func warn(msg string) {
+	cs := debugGetCallStack(1)
+	fmt.Printf("\033[33m%s\n%s\033[0m\n", msg, cs)
 }
