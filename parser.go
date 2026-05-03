@@ -481,6 +481,12 @@ func (p *Varinfo) IsChar() bool {
 	return tok == token.CHARACTER || tok == token.StringLit
 }
 
+// IsCharArray returns true if this is an array of character type.
+func (p *Varinfo) IsCharArray() bool {
+	tok := p.TypeToken()
+	return p.flags.HasAny(VFlagDimension) && (tok == token.CHARACTER || tok == token.StringLit)
+}
+
 // IsPointer returns true if accessing this variable requires automatic pointer dereferencing.
 //
 // Fortran pointer semantics:

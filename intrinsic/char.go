@@ -272,6 +272,23 @@ func ICHAR(ch CharacterArray) int32 {
 	return int32(ch.data[0])
 }
 
+// CharacterArrayJoin concatenates all elements of a CHARACTER array into a single Go string.
+// Used when a CHARACTER array is passed as a format specifier to WRITE/READ.
+func CharacterArrayJoin(arr *Array[CharacterArray]) string {
+	if arr == nil || arr.Size() == 0 {
+		return ""
+	}
+	var b bytes.Buffer
+	lo, hi := arr.LowerDim(1), arr.UpperDim(1)
+	for i := lo; i <= hi; i++ {
+		elem := arr.At(i)
+		for _, c := range elem.data[:cap(elem.data)] {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
 // View returns a view into the substring from start to end (1-based, inclusive)
 func (ch CharacterArray) View(start, end int) CharacterArray {
 	if end > cap(ch.data) {

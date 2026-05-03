@@ -694,6 +694,10 @@ var (
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("NewCharacterArray"),
 	}
+	_astFnCharacterArrayJoin = &ast.SelectorExpr{
+		X:   ast.NewIdent("intrinsic"),
+		Sel: ast.NewIdent("CharacterArrayJoin"),
+	}
 	_astFnNewCharacterArrayFromStrings = &ast.SelectorExpr{
 		X:   ast.NewIdent("intrinsic"),
 		Sel: ast.NewIdent("NewCharacterArrayFromStrings"),

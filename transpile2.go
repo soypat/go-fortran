@@ -2524,17 +2524,17 @@ var ioSpecifierConfig = map[string]ioSpecField{
 			if format.Value == "*" {
 				return &ast.CallExpr{Fun: _astFortioDefaultFormat}, nil
 			}
-			if vi := tg.repl.Var(format.Value); vi != nil && vi.IsChar() {
-				varExpr, _, err := tg.transformExpression(_tgtChar, format)
-				if err != nil {
-					return nil, err
+			if vi := tg.repl.Var(format.Value); vi != nil {
+				varExpr := tg.astVarExpr(vi)
+				var fmtStrExpr ast.Expr
+				if vi.IsCharArray() {
+					fmtStrExpr = &ast.CallExpr{Fun: _astFnCharacterArrayJoin, Args: []ast.Expr{varExpr}}
+				} else if vi.IsChar() {
+					fmtStrExpr = &ast.CallExpr{Fun: &ast.SelectorExpr{X: varExpr, Sel: ast.NewIdent("String")}}
+				} else {
+					return nil, fmt.Errorf("unknown FMT identifier %q", format.Value)
 				}
-				return &ast.CallExpr{
-					Fun: _astFortioNewFormat,
-					Args: []ast.Expr{
-						&ast.CallExpr{Fun: &ast.SelectorExpr{X: varExpr, Sel: ast.NewIdent("String")}},
-					},
-				}, nil
+				return &ast.CallExpr{Fun: _astFortioNewFormat, Args: []ast.Expr{fmtStrExpr}}, nil
 			}
 			return nil, fmt.Errorf("unknown FMT identifier %q", format.Value)
 		case *f90.IntegerLiteral:

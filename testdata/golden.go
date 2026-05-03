@@ -49,6 +49,7 @@ func GOLDEN() {
 	LEVEL39()
 	LEVEL40()
 	LEVEL41()
+	LEVEL42()
 	fenv.Stop(0)
 }
 func LEVEL01() {
@@ -1268,6 +1269,24 @@ func LEVEL41() {
 	x = 41
 	fmt_str.SetFromString("(A,I2,A)")
 	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.NewFormat(fmt_str.String())}, "LEVEL ", x, ": SUCCESS")
+}
+func LEVEL42() {
+	var (
+		fmt = intrinsic.NewCharacterArrayArray(1, 5)
+		_   = fmt
+	)
+	var (
+		x int32
+		_ = x
+	)
+	x = 42
+	fmt.AtPtr(1).SetFromString("(")
+	fmt.AtPtr(2).SetFromString("I")
+	fmt.AtPtr(3).SetFromString("2")
+	fmt.AtPtr(4).SetFromString(")")
+	fmt.AtPtr(5).SetFromString(" ")
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.NewFormat(intrinsic.CharacterArrayJoin(fmt))}, x)
+	fenv.Print("LEVEL 42: ok")
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")
