@@ -37,6 +37,7 @@ testdata/golden.out
 /fortranpp
 # IDE
 .vscode/
+/fortran2go
 
 # For local development and testing create `local` directories.
 local
