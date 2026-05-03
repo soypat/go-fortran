@@ -44,6 +44,7 @@
       CALL LEVEL39()
       CALL LEVEL40()
       CALL LEVEL41()
+      CALL LEVEL42()
       STOP 0
       CONTAINS
 
@@ -1015,6 +1016,19 @@
         fmt_str = '(A,I2,A)'
         WRITE(*, fmt_str) 'LEVEL ', x, ': SUCCESS'
     END SUBROUTINE LEVEL41
+
+    SUBROUTINE LEVEL42() ! CHARACTER array as format specifier
+        CHARACTER*1 FMT(5)
+        INTEGER :: x
+        x = 42
+        FMT(1) = '('
+        FMT(2) = 'I'
+        FMT(3) = '2'
+        FMT(4) = ')'
+        FMT(5) = ' '
+        WRITE(*, FMT) x
+        PRINT *, 'LEVEL 42: ok'
+    END SUBROUTINE LEVEL42
 
 ! ==============================================================================
 ! Helper Subroutines and Functions
