@@ -4070,7 +4070,13 @@ func (p *Parser90) parsePrimaryExpr() ast.Expression {
 	if p.current.tok == token.Plus || p.current.tok == token.Minus || p.current.tok == token.NOT {
 		op := p.current.tok
 		p.nextToken()
-		operand := p.parseExpression(8) // Unary operators have precedence 8
+		// .NOT. has lower precedence than relational ops: .NOT.x.LT.y = .NOT.(x.LT.y)
+		// +/- bind tighter (only consume ** at prec 9)
+		operandPrec := 8
+		if op == token.NOT {
+			operandPrec = 4 // consume through relational (4) but not .AND.(3)/.OR.(2)
+		}
+		operand := p.parseExpression(operandPrec)
 		if operand == nil {
 			p.addError("expected expression after unary operator")
 			return nil

@@ -319,6 +319,8 @@ func (repl *REPL) SetScope(pu f90.Unit) (err error) {
 		v := &repl.scope.vars[i]
 		if v.decl == nil {
 			return fmt.Errorf("unresolved declaration for variable %s in %s", v.Identifier(), pu.UnitName())
+		} else if v.decl.Type == nil {
+			return fmt.Errorf("unresolved type for declaration of variable %s (%s) in %s", v.Identifier(), v.declPos.String(), pu.UnitName())
 		}
 		v.val.tok = v.decl.Type.Token // Initialize repl value type.
 		v._varname = sanitizeIdent(v._varname)

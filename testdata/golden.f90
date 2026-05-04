@@ -259,7 +259,7 @@
       SUBROUTINE LEVEL10()
           INTEGER :: i, j, k
           REAL :: x, y, z, expr_result
-          LOGICAL :: flag, cond1, cond2, cond3
+          LOGICAL :: flag, cond1, cond2, cond3, cond4
 
           i = 11
           j = 52
@@ -276,9 +276,11 @@
           cond1 = (i .GT. 5) .AND. (j .LT. 100)
           cond2 = (x .GE. 3.0) .OR. (y .LE. 1.0)
           cond3 = .NOT. flag
+          ! .NOT. lower precedence than relational: .NOT.x.LT.y = .NOT.(x.LT.y)
+          cond4 = .NOT.x.LT.y
 
           PRINT *, 'LEVEL 10: cond1 =', cond1, ', cond2 =', cond2
-          PRINT *, 'LEVEL 10: cond3 =', cond3
+          PRINT *, 'LEVEL 10: cond3 =', cond3, ', cond4=', cond4
       END SUBROUTINE LEVEL10
 
 ! ==============================================================================

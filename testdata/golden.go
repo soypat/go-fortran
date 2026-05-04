@@ -282,11 +282,12 @@ func LEVEL10() {
 		_, _, _, _  = x, y, z, expr_result
 	)
 	var (
-		flag       bool
-		cond1      bool
-		cond2      bool
-		cond3      bool
-		_, _, _, _ = flag, cond1, cond2, cond3
+		flag          bool
+		cond1         bool
+		cond2         bool
+		cond3         bool
+		cond4         bool
+		_, _, _, _, _ = flag, cond1, cond2, cond3, cond4
 	)
 	i = 11
 	j = 52
@@ -300,8 +301,9 @@ func LEVEL10() {
 	cond1 = (i > 5) && (j < 100)
 	cond2 = (x >= 3.0) || (y <= 1.0)
 	cond3 = !flag
+	cond4 = !(x < y)
 	fenv.Print("LEVEL 10: cond1 =", cond1, ", cond2 =", cond2)
-	fenv.Print("LEVEL 10: cond3 =", cond3)
+	fenv.Print("LEVEL 10: cond3 =", cond3, ", cond4=", cond4)
 }
 func LEVEL11() {
 	var (
