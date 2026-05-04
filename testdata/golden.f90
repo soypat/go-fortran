@@ -47,6 +47,7 @@
       CALL LEVEL42()
       CALL LEVEL43()
       CALL LEVEL44()
+      CALL LEVEL45()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1058,6 +1059,26 @@
         HRES = REAL(NVAL, KIND=KIND(HRES))
         PRINT *, 'LEVEL 44:', HRES
     END SUBROUTINE LEVEL44
+
+! LEVEL45: Alternate returns
+    SUBROUTINE LEVEL45()
+        INTEGER :: x
+        x = 2
+        CALL ALTRSUB(x, *10, *20)
+        PRINT *, 'LEVEL 45: normal'
+        GOTO 30
+10      PRINT *, 'LEVEL 45: alt 1'
+        GOTO 30
+20      PRINT *, 'LEVEL 45: alt 2'
+30      CONTINUE
+    END SUBROUTINE LEVEL45
+
+    SUBROUTINE ALTRSUB(n, *, *)
+        INTEGER, INTENT(IN) :: n
+        IF (n .EQ. 1) RETURN 1
+        IF (n .EQ. 2) RETURN 2
+        RETURN
+    END SUBROUTINE ALTRSUB
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

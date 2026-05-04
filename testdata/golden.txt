@@ -154,4 +154,5 @@ LEVEL 41: SUCCESS
  LEVEL 43: open failed as expected
  LEVEL 43: file absent as expected
  LEVEL 44:   7.0000000000000000     
+ LEVEL 45: alt 2
 STOP 0

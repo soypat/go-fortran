@@ -221,6 +221,17 @@ func (p *ParserUnitData) ProcedureParams() []Varinfo {
 	return p.vars
 }
 
+// AltReturnCount returns the number of alternate return (*) parameters declared.
+func (p *ParserUnitData) AltReturnCount() int {
+	n := 0
+	for _, v := range p.ProcedureParams() {
+		if v._varname == "*" {
+			n++
+		}
+	}
+	return n
+}
+
 func (p *ParserUnitData) resolveParameterTypes(params []ast.Parameter) error {
 	if len(params) > len(p.vars) {
 		return errors.New("too many parameters for varinfo size")
@@ -386,7 +397,9 @@ func (pud *ParserUnitData) varInit(sp sourcePos, name string, decl *ast.DeclEnti
 	if decl != nil && name != decl.Name {
 		panic("bad varInit name argument mismatch with decl")
 	}
-	vi = pud.Var(name)
+	if name != "*" { // Alternate return slots are positional; allow duplicates.
+		vi = pud.Var(name)
+	}
 	if vi != nil {
 		if decl != nil && vi.decl != nil {
 			// Both have decls - check if we can merge array specs

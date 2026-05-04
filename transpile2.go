@@ -121,6 +121,10 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 			results = &ast.FieldList{List: []*ast.Field{field}}
 			fallthrough
 		case f90token.SUBROUTINE, f90token.PROGRAM:
+			altReturn := unit.Token == f90token.SUBROUTINE && tg.repl.scope.AltReturnCount() > 0
+			if altReturn {
+				results = &ast.FieldList{List: []*ast.Field{{Type: ast.NewIdent("int")}}}
+			}
 			fn = &ast.FuncDecl{
 				Name: ast.NewIdent(unit.Name),
 				Type: &ast.FuncType{
@@ -138,7 +142,13 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 				return dst, tg.makeErrAtStmt("transforming statements of unit " + unit.Name + ": " + err.Error())
 			}
 			if results != nil {
-				fn.Body.List = append(fn.Body.List, &ast.ReturnStmt{}) // FUNCTION has return value.
+				var trailingReturn ast.Stmt
+				if altReturn {
+					trailingReturn = &ast.ReturnStmt{Results: []ast.Expr{_astZero}}
+				} else {
+					trailingReturn = &ast.ReturnStmt{}
+				}
+				fn.Body.List = append(fn.Body.List, trailingReturn)
 			}
 			dst = append(dst, fn)
 			if unit.Token == f90token.SUBROUTINE || unit.Token == f90token.FUNCTION {
@@ -167,7 +177,6 @@ func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 	for i := range params {
 		vi := &params[i]
 		if vi.decl.Name == "" || vi.decl.Name == "*" {
-			warn(vi.declPos.String() + " skip alternate parameters")
 			continue // skip alternate return parameters (*)
 		}
 		tp := tg.goType(vi)
@@ -259,9 +268,7 @@ func (tg *ToGo) transformStatement(dst []ast.Stmt, stmt f90.Statement) (_ []ast.
 	case *f90.DoLoop:
 		dst, err = tg.transformDoLoop(dst, s)
 	case *f90.ReturnStmt:
-		// RETURN statement in functions will be handled by convertFunctionResultToReturn
-		// For now, just generate empty return (will be filled with result value later)
-		// gostmt = &ast.ReturnStmt{}
+		dst, err = tg.transformReturnStmt(dst, s)
 	case *f90.CycleStmt:
 		// CYCLE → continue
 		dst = append(dst, &ast.BranchStmt{Tok: token.CONTINUE})
@@ -641,6 +648,25 @@ func (tg *ToGo) transformDeallocateStmt(dst []ast.Stmt, stmt *f90.DeallocateStmt
 	return dst, nil
 }
 
+func (tg *ToGo) transformReturnStmt(dst []ast.Stmt, s *f90.ReturnStmt) (_ []ast.Stmt, err error) {
+	altCount := tg.repl.scope.AltReturnCount()
+	if altCount == 0 {
+		// Plain subroutine or function — RETURN generates nothing; trailing return added by TransformUnits.
+		return dst, nil
+	}
+	if s.AlternateReturn == nil {
+		// RETURN with no index in an alt-return subroutine → normal exit.
+		dst = append(dst, &ast.ReturnStmt{Results: []ast.Expr{_astZero}})
+		return dst, nil
+	}
+	expr, _, err := tg.transformExpression(_tgtInt, s.AlternateReturn)
+	if err != nil {
+		return dst, err
+	}
+	dst = append(dst, &ast.ReturnStmt{Results: []ast.Expr{expr}})
+	return dst, nil
+}
+
 func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.Stmt, err error) {
 	fninfo := tg.ContainedOrUsed(stmt.Name)
 	if fninfo == nil {
@@ -651,35 +677,76 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 		return dst, tg.makeErr(stmt, "subroutine not found: "+stmt.Name)
 	}
 	params := fninfo.ProcedureParams()
-	// Legacy Fortran allows calling with fewer arguments (undefined behavior but permitted).
-	// We handle this by using type inference for excess arguments.
-	if len(stmt.Args) > len(params) {
-		return dst, tg.makeErr(stmt, fmt.Sprintf("too many args in call (expected %d, got %d)", len(params), len(stmt.Args)))
-	}
-	gstmt := &ast.CallExpr{
-		Fun: tg.astIdent(fninfo.name),
-	}
-	for i := range stmt.Args {
-		var info *Varinfo
-		if i < len(params) {
-			info = &params[i]
+
+	// Partition params and args: separate real params from * slots.
+	var realParams []Varinfo
+	altSlotCount := 0
+	for _, p := range params {
+		if p._varname == "*" {
+			altSlotCount++
+		} else {
+			realParams = append(realParams, p)
 		}
-		goexpr, _, err := tg.transformExpression(info, stmt.Args[i])
+	}
+
+	// Walk call args: collect alternate return labels (in * declaration order),
+	// build Go call args from the real args.
+	altLabels := make([]string, altSlotCount) // filled by *label args
+	altIdx := 0
+	paramIdx := 0
+	callExpr := &ast.CallExpr{Fun: tg.astIdent(fninfo.name)}
+	for _, arg := range stmt.Args {
+		if ara, ok := arg.(*f90.AlternateReturnArg); ok {
+			if altIdx < altSlotCount {
+				altLabels[altIdx] = ara.Label
+			}
+			altIdx++
+			continue
+		}
+		var info *Varinfo
+		if paramIdx < len(realParams) {
+			info = &realParams[paramIdx]
+		}
+		paramIdx++
+		goexpr, _, err := tg.transformExpression(info, arg)
 		if err != nil {
 			return dst, err
 		}
-		// For INTENT(OUT/INOUT) non-array scalar parameters, pass address.
-		// Convert .At() to .AtPtr() for array element access.
 		if info != nil && info.decl != nil {
 			intent := info.decl.Type.Intent()
 			if !info.IsArray() && (intent == f90.IntentOut || intent == f90.IntentInOut) {
 				goexpr = wrapPointer(goexpr)
 			}
 		}
-		gstmt.Args = append(gstmt.Args, goexpr)
+		callExpr.Args = append(callExpr.Args, goexpr)
 	}
-	dst = append(dst, &ast.ExprStmt{
-		X: gstmt,
+
+	if altSlotCount == 0 {
+		dst = append(dst, &ast.ExprStmt{X: callExpr})
+		return dst, nil
+	}
+
+	// _altRet := CALLEE(args...)
+	// switch _altRet { case 1: goto label10; case 2: goto label20 }
+	tmpVar := ast.NewIdent("_altRet")
+	dst = append(dst, &ast.AssignStmt{
+		Lhs: []ast.Expr{tmpVar},
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{callExpr},
+	})
+	var cases []ast.Stmt
+	for i, lbl := range altLabels {
+		if lbl == "" {
+			continue
+		}
+		cases = append(cases, &ast.CaseClause{
+			List: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", i+1)}},
+			Body: []ast.Stmt{&ast.BranchStmt{Tok: token.GOTO, Label: tg.astLabel(lbl)}},
+		})
+	}
+	dst = append(dst, &ast.SwitchStmt{
+		Tag:  tmpVar,
+		Body: &ast.BlockStmt{List: cases},
 	})
 	return dst, nil
 }

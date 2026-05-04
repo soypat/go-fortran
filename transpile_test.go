@@ -338,31 +338,6 @@ func TestModuleVariableImport(t *testing.T) {
 	}
 }
 
-// TestAlternateReturnError verifies that subroutines with alternate return
-// parameters (*) return an error instead of silently skipping them.
-func TestAlternateReturnError(t *testing.T) {
-	src := `      SUBROUTINE CHARLY(MAXCOR,RRCORE,NCORE,ICORE,*)
-      INTEGER MAXCOR, RRCORE, NCORE, ICORE
-      END SUBROUTINE`
-
-	var parser Parser90
-	err := parser.Reset("test.f90", strings.NewReader(src))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	unit := parser.ParseNextProgramUnit()
-	if !unit.IsValid() {
-		t.Fatal("ParseNextProgramUnit returned invalid unit")
-	}
-
-	var tg ToGo
-	tg.SetSource("test.f90", strings.NewReader(src))
-	_, err = tg.TransformUnits(nil, unit)
-	if err == nil {
-		t.Error("expected error for alternate return parameter (*), got nil")
-	}
-}
 
 // TestStatementFunction verifies that statement functions are correctly
 // detected and expanded during transpilation.

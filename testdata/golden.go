@@ -52,6 +52,7 @@ func GOLDEN() {
 	LEVEL42()
 	LEVEL43()
 	LEVEL44()
+	LEVEL45()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1324,6 +1325,47 @@ func LEVEL44() {
 	nval = 7
 	hres = float64(float64(nval))
 	fenv.Print("LEVEL 44:", hres)
+}
+func LEVEL45() {
+	var (
+		x int32
+		_ = x
+	)
+	x = 2
+	_altRet := ALTRSUB(x)
+	switch _altRet {
+	case 1:
+		goto label10
+	case 2:
+		goto label20
+	}
+	fenv.Print("LEVEL 45: normal")
+	goto label30
+	goto label10
+label10:
+	{
+		fenv.Print("LEVEL 45: alt 1")
+	}
+	goto label30
+	goto label20
+label20:
+	{
+		fenv.Print("LEVEL 45: alt 2")
+	}
+	goto label30
+label30:
+	{
+	}
+}
+func ALTRSUB(n int32) int {
+	if n == 1 {
+		return 1
+	}
+	if n == 2 {
+		return 2
+	}
+	return 0
+	return 0
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")
