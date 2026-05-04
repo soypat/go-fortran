@@ -1657,6 +1657,11 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 			break
 		}
 	}
+	if isRead {
+		for _, expr := range ioList {
+			p.registerImplicitFromTarget(expr)
+		}
+	}
 
 	// Build appropriate statement type
 	pos := ast.Pos(start, p.current.start)
@@ -1669,10 +1674,12 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 			if binExpr, ok := spec.(*ast.BinaryExpr); ok && binExpr.Op == token.Equals {
 				// keyword=value form
 				if ident, ok := binExpr.Left.(*ast.Identifier); ok {
+					key := strings.ToUpper(ident.Value)
 					specList = append(specList, ast.IOSpecifier{
-						Name:  strings.ToUpper(ident.Value),
+						Name:  key,
 						Value: binExpr.Right,
 					})
+					p.registerIOOutputSpecVar(key, binExpr.Right)
 				}
 			} else if isFirstSpec {
 				// First positional argument is UNIT
@@ -2936,7 +2943,7 @@ func (p *Parser90) parseAssignmentStmt() ast.Statement {
 // These specifiers receive values written by the IO runtime, so they act as assignment targets.
 func (p *Parser90) registerIOOutputSpecVar(keyword string, value ast.Expression) {
 	switch keyword {
-	case "IOSTAT", "IOMSG", "SIZE":
+	case "IOSTAT", "IOMSG", "SIZE", "EXIST", "OPENED", "NUMBER", "NAMED", "NEXTREC":
 		p.registerImplicitFromTarget(value)
 	}
 }

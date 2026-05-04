@@ -1291,11 +1291,21 @@ func LEVEL42() {
 }
 func LEVEL43() {
 	// Implicit declarations.
-	var ioerr int32
-	var _ = ioerr
+	var (
+		ioerr  int32
+		nval   int32
+		pexist bool
+	)
+	var _, _, _ = ioerr, nval, pexist
 	fenv.Open(fortio.OpenSpec{UNIT: 99, FILE: "no_such_file_43.txt", STATUS: fortio.StatusOLD, IOSTAT: &ioerr})
 	if ioerr != 0 {
 		fenv.Print("LEVEL 43: open failed as expected")
+	} else {
+		fenv.ReadWithSpec(fortio.IOSpec{UNIT: 99, FMT: fortio.DefaultFormat(), IOSTAT: &ioerr}, &nval)
+		fenv.Close(fortio.CloseSpec{UNIT: 99})
+	}
+	if !pexist {
+		fenv.Print("LEVEL 43: file absent as expected")
 	}
 }
 func SIMPLE_SUB() {

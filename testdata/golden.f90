@@ -1031,11 +1031,18 @@
         PRINT *, 'LEVEL 42: ok'
     END SUBROUTINE LEVEL42
 
-    SUBROUTINE LEVEL43() ! OPEN with implicitly declared IOSTAT variable
-        IMPLICIT INTEGER (I-N)
+    SUBROUTINE LEVEL43() ! OPEN/READ/INQUIRE with implicitly declared IOSTAT/EXIST/input var
+        IMPLICIT INTEGER (I-N), LOGICAL (P)
         OPEN(UNIT=99, FILE='no_such_file_43.txt', STATUS='OLD', IOSTAT=IOERR)
         IF (IOERR .NE. 0) THEN
             PRINT *, 'LEVEL 43: open failed as expected'
+        ELSE
+            READ(99, *, IOSTAT=IOERR) NVAL
+            CLOSE(99)
+        END IF
+        INQUIRE(FILE='no_such_file_43.txt', EXIST=PEXIST)
+        IF (.NOT.PEXIST) THEN
+            PRINT *, 'LEVEL 43: file absent as expected'
         END IF
     END SUBROUTINE LEVEL43
 

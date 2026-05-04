@@ -152,4 +152,5 @@ LEVEL 41: SUCCESS
 42
  LEVEL 42: ok
  LEVEL 43: open failed as expected
+ LEVEL 43: file absent as expected
 STOP 0
