@@ -647,6 +647,10 @@ func LEVEL20() {
 		repeat = intrinsic.NewCharacterArrayArray(3, 2)
 		_      = repeat
 	)
+	var (
+		mths = intrinsic.NewCharacterArrayArray(2, 3)
+		_    = mths
+	)
 	a = 10
 	b = 20
 	c = 30
@@ -657,6 +661,9 @@ func LEVEL20() {
 	vec1.Set(1.2, 1)
 	vec1.Set(1.2, 2)
 	vec1.Set(2.0, 3)
+	mths.AtPtr(int(i)).SetFromString("JA")
+	mths.AtPtr(int(i)).SetFromString("FE")
+	mths.AtPtr(int(i)).SetFromString("MA")
 	fenv.Print("LEVEL 20: a =", a)
 	fenv.Print("LEVEL 20: b =", b)
 	fenv.Print("LEVEL 20: c =", c)
@@ -664,6 +671,7 @@ func LEVEL20() {
 	fenv.Print("LEVEL 20: y =", y)
 	fenv.Print("LEVEL 20", repeat.At(1), repeat.At(2))
 	fenv.Print("LEVEL 20:", vec1.At(1), vec1.At(2), vec1.At(3))
+	fenv.Print("LEVEL 20: implied-do", mths.At(1), mths.At(2), mths.At(3))
 }
 func LEVEL21() {
 	var (

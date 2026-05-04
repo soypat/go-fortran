@@ -339,6 +339,37 @@ func TestModuleVariableImport(t *testing.T) {
 }
 
 
+// TestCallTooManyArgs verifies that calling a subroutine with more args than
+// declared returns an error, not a panic.
+func TestCallTooManyArgs(t *testing.T) {
+	src := `      SUBROUTINE CALLER()
+      CALL FOO(1, 2)
+      END SUBROUTINE
+      SUBROUTINE FOO(A)
+      INTEGER, INTENT(IN) :: A
+      END SUBROUTINE`
+
+	var parser Parser90
+	err := parser.Reset("test.f90", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var units []f90.Unit
+	for !parser.IsDone() {
+		unit := parser.ParseNextProgramUnit()
+		if !unit.IsValid() {
+			break
+		}
+		units = append(units, unit)
+	}
+	var tg ToGo
+	tg.SetSource("test.f90", strings.NewReader(src))
+	_, err = tg.TransformUnits(nil, units...)
+	if err == nil {
+		t.Error("expected error for too many args in call, got nil")
+	}
+}
+
 // TestStatementFunction verifies that statement functions are correctly
 // detected and expanded during transpilation.
 func TestStatementFunction(t *testing.T) {

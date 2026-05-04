@@ -593,10 +593,12 @@
           INTEGER :: a, b, c, i
           REAL :: x, y, vec1(3)
           CHARACTER(3) :: REPEAT(2)
+          CHARACTER(2) :: MTHS(3)
           DATA a, b, c / 10, 20, 30 /
           DATA x, y / 3.14, 2.71 /
           DATA REPEAT/2*"REP"/
           DATA vec1 /2*1.2, 2.0/
+          DATA (MTHS(i),i=1,3)/'JA','FE','MA'/
 
           PRINT *, 'LEVEL 20: a =', a
           PRINT *, 'LEVEL 20: b =', b
@@ -605,6 +607,7 @@
           PRINT *, 'LEVEL 20: y =', y
           PRINT *, 'LEVEL 20', REPEAT(1), REPEAT(2)
           PRINT *, 'LEVEL 20:',vec1(1), vec1(2), vec1(3)
+          PRINT *, 'LEVEL 20: implied-do', MTHS(1), MTHS(2), MTHS(3)
       END SUBROUTINE LEVEL20
 
       ! LEVEL 21: Advanced GOTO (Arithmetic IF and Computed GOTO)

@@ -689,6 +689,17 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 		}
 	}
 
+	// Count real (non-alternate-return) args to validate arg count.
+	realArgCount := 0
+	for _, arg := range stmt.Args {
+		if _, ok := arg.(*f90.AlternateReturnArg); !ok {
+			realArgCount++
+		}
+	}
+	if realArgCount > len(realParams) {
+		return dst, tg.makeErr(stmt, fmt.Sprintf("too many args in call (expected %d, got %d)", len(realParams), realArgCount))
+	}
+
 	// Walk call args: collect alternate return labels (in * declaration order),
 	// build Go call args from the real args.
 	altLabels := make([]string, altSlotCount) // filled by *label args

@@ -79,6 +79,7 @@
  LEVEL 20: y =   2.71000004    
  LEVEL 20REPREP
  LEVEL 20:   1.20000005       1.20000005       2.00000000    
+ LEVEL 20: implied-doJAFEMA
  LEVEL 21: x is negative
  LEVEL 21: Choice was 2
  LEVEL 23: MAX_SIZE =         100
