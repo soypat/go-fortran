@@ -124,9 +124,7 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 			fn = &ast.FuncDecl{
 				Name: ast.NewIdent(unit.Name),
 				Type: &ast.FuncType{
-					Params: &ast.FieldList{
-						List: tg.getScopeParams(nil),
-					},
+					Params:  &ast.FieldList{List: tg.getScopeParams(nil)},
 					Results: results,
 				},
 				Body: &ast.BlockStmt{},
