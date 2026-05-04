@@ -1704,6 +1704,7 @@ func (p *Parser90) parseIOStmt() ast.Statement {
 					format = binExpr.Right
 				default:
 					specList = append(specList, ast.IOSpecifier{Name: key, Value: binExpr.Right})
+					p.registerIOOutputSpecVar(key, binExpr.Right)
 				}
 			}
 		} else {
@@ -1830,6 +1831,7 @@ func (p *Parser90) parseOpenStmt() ast.Statement {
 			value := p.parseExpression(0)
 			if value != nil {
 				specList = append(specList, ast.IOSpecifier{Name: keyword, Value: value})
+				p.registerIOOutputSpecVar(keyword, value)
 			}
 			isFirstArg = false
 		} else if isFirstArg {
@@ -1913,6 +1915,7 @@ func (p *Parser90) parseCloseStmt() ast.Statement {
 			value := p.parseExpression(0)
 			if value != nil {
 				specList = append(specList, ast.IOSpecifier{Name: keyword, Value: value})
+				p.registerIOOutputSpecVar(keyword, value)
 			}
 			isFirstArg = false
 		} else if isFirstArg {
@@ -2927,6 +2930,15 @@ func (p *Parser90) parseAssignmentStmt() ast.Statement {
 		return nil
 	}
 	return assignment
+}
+
+// registerIOOutputSpecVar registers a variable as implicit when used as an IO write-context specifier (IOSTAT, IOMSG, SIZE).
+// These specifiers receive values written by the IO runtime, so they act as assignment targets.
+func (p *Parser90) registerIOOutputSpecVar(keyword string, value ast.Expression) {
+	switch keyword {
+	case "IOSTAT", "IOMSG", "SIZE":
+		p.registerImplicitFromTarget(value)
+	}
 }
 
 // registerImplicitFromTarget registers implicit variables found in assignment targets.

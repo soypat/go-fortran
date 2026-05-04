@@ -45,6 +45,7 @@
       CALL LEVEL40()
       CALL LEVEL41()
       CALL LEVEL42()
+      CALL LEVEL43()
       STOP 0
       CONTAINS
 
@@ -1029,6 +1030,14 @@
         WRITE(*, FMT) x
         PRINT *, 'LEVEL 42: ok'
     END SUBROUTINE LEVEL42
+
+    SUBROUTINE LEVEL43() ! OPEN with implicitly declared IOSTAT variable
+        IMPLICIT INTEGER (I-N)
+        OPEN(UNIT=99, FILE='no_such_file_43.txt', STATUS='OLD', IOSTAT=IOERR)
+        IF (IOERR .NE. 0) THEN
+            PRINT *, 'LEVEL 43: open failed as expected'
+        END IF
+    END SUBROUTINE LEVEL43
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

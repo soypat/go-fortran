@@ -50,6 +50,7 @@ func GOLDEN() {
 	LEVEL40()
 	LEVEL41()
 	LEVEL42()
+	LEVEL43()
 	fenv.Stop(0)
 }
 func LEVEL01() {
@@ -1287,6 +1288,15 @@ func LEVEL42() {
 	fmt.AtPtr(5).SetFromString(" ")
 	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.NewFormat(intrinsic.CharacterArrayJoin(fmt))}, x)
 	fenv.Print("LEVEL 42: ok")
+}
+func LEVEL43() {
+	// Implicit declarations.
+	var ioerr int32
+	var _ = ioerr
+	fenv.Open(fortio.OpenSpec{UNIT: 99, FILE: "no_such_file_43.txt", STATUS: fortio.StatusOLD, IOSTAT: &ioerr})
+	if ioerr != 0 {
+		fenv.Print("LEVEL 43: open failed as expected")
+	}
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")

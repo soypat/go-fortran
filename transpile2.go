@@ -1465,7 +1465,7 @@ func (tg *ToGo) transformParameterStmt(dst []ast.Stmt, stmt *f90.ParameterStmt) 
 	for _, v := range stmt.Decls {
 		vi := tg.repl.Var(v.Name)
 		if vi == nil {
-			return dst, tg.makeErr(stmt, "undeclared parameter?")
+			return dst, tg.makeErr(stmt, "undeclared parameter: "+v.Name)
 		}
 		tp := tg.goType(vi)
 		initVal, _, err := tg.transformExpression(vi, vi.decl.Init)
@@ -1747,7 +1747,11 @@ func (tg *ToGo) transformPointerCrayStmt(dst []ast.Stmt, stmt *f90.PointerCraySt
 		ptrVar := tg.repl.Var(pair.PointerVar)
 		pointeeVar := tg.repl.Var(pair.Pointee)
 		if ptrVar == nil || pointeeVar == nil {
-			return dst, tg.makeErr(stmt, "pointer or pointee variable not found")
+			missing := pair.PointerVar
+			if ptrVar != nil {
+				missing = pair.Pointee
+			}
+			return dst, tg.makeErr(stmt, "pointer or pointee variable not found: "+missing)
 		}
 
 		// Get the pointee's base type for PointerTo[T]
@@ -2444,7 +2448,7 @@ func (tg *ToGo) transformIO(dst []ast.Stmt, specSel, fenvSel *ast.SelectorExpr, 
 	for _, input := range inputs {
 		err = tg.repl.InferType(&vitgt, input)
 		if err != nil {
-			return nil, tg.makeErrAtStmt("inferring type of IO statement input")
+			return nil, tg.makeErrAtStmt("inferring type of IO statement input: " + err.Error())
 		}
 		arg, _, err := tg.transformExpression(&vitgt, input)
 		if err != nil {
