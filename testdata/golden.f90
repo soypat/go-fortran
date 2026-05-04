@@ -46,6 +46,7 @@
       CALL LEVEL41()
       CALL LEVEL42()
       CALL LEVEL43()
+      CALL LEVEL44()
       STOP 0
       CONTAINS
 
@@ -1045,6 +1046,14 @@
             PRINT *, 'LEVEL 43: file absent as expected'
         END IF
     END SUBROUTINE LEVEL43
+
+    SUBROUTINE LEVEL44() ! REAL(x, KIND=KIND(y)) type conversion with KIND argument
+        IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+        INTEGER NVAL
+        NVAL = 7
+        HRES = REAL(NVAL, KIND=KIND(HRES))
+        PRINT *, 'LEVEL 44:', HRES
+    END SUBROUTINE LEVEL44
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

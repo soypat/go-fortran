@@ -622,10 +622,19 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 	if fi == nil {
 		// Try standard intrinsic first
 		lookup := f90token.LookupIntrinsic(e.Name)
+		args := e.Args
 		if fnV2 := getIntrinsic(lookup); fnV2 != nil {
+			// Strip KIND= keyword arg and redirect intrinsic if needed (e.g. REAL(x, KIND=8) → float64)
+			if stripped, kindExpr := stripKindArg(args); kindExpr != nil {
+				args = stripped
+				if kindTok, _ := tg.resolveKindToken(kindExpr); kindTok != 0 {
+					lookup = redirectIntrinsicForKind(lookup, kindTok)
+					fnV2 = getIntrinsic(lookup)
+				}
+			}
 			// Infer argument types for better matching
-			argTypes := make([]*Varinfo, len(e.Args))
-			for i, arg := range e.Args {
+			argTypes := make([]*Varinfo, len(args))
+			for i, arg := range args {
 				var vi Varinfo
 				if err := tg.repl.InferType(&vi, arg); err == nil {
 					argTypes[i] = &vi
@@ -634,10 +643,10 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 			// Try type-aware matching first, fall back to arg count matching
 			call := fnV2.findBestCallWithTypes(argTypes)
 			if call == nil {
-				call = fnV2.findBestCall(len(e.Args))
+				call = fnV2.findBestCall(len(args))
 			}
 			if call != nil {
-				return tg.intrinsicExprV2(vitgt, fnV2, call, e.Args...)
+				return tg.intrinsicExprV2(vitgt, fnV2, call, args...)
 			}
 		}
 
@@ -1217,4 +1226,58 @@ func typeCompatible(paramType, argType *Varinfo) bool {
 	}
 	// Exact type match
 	return paramType.typeToken() == argType.typeToken()
+}
+
+// stripKindArg removes a KIND= keyword argument from args, returning (positional args, kind value expr).
+// Returns (args, nil) if no KIND= argument is found.
+func stripKindArg(args []f90.Expression) ([]f90.Expression, f90.Expression) {
+	for i, arg := range args {
+		binExpr, ok := arg.(*f90.BinaryExpr)
+		if !ok || binExpr.Op != f90token.Equals {
+			continue
+		}
+		ident, ok := binExpr.Left.(*f90.Identifier)
+		if !ok || strings.ToUpper(ident.Value) != "KIND" {
+			continue
+		}
+		stripped := make([]f90.Expression, 0, len(args)-1)
+		stripped = append(stripped, args[:i]...)
+		stripped = append(stripped, args[i+1:]...)
+		return stripped, binExpr.Right
+	}
+	return args, nil
+}
+
+// resolveKindToken infers the Fortran type token corresponding to a KIND expression.
+// Handles: KIND=8 → DOUBLEPRECISION, KIND=4 → REAL, KIND=KIND(expr) → type of expr.
+func (tg *ToGo) resolveKindToken(kindExpr f90.Expression) (f90token.Token, error) {
+	if lit, ok := kindExpr.(*f90.IntegerLiteral); ok {
+		switch lit.Value {
+		case 4:
+			return f90token.REAL, nil
+		case 8:
+			return f90token.DOUBLEPRECISION, nil
+		}
+		return 0, fmt.Errorf("unsupported KIND literal: %d", lit.Value)
+	}
+	if call, ok := kindExpr.(*f90.CallExpr); ok && strings.ToUpper(call.Name) == "KIND" && len(call.Args) == 1 {
+		var vi Varinfo
+		if err := tg.repl.InferType(&vi, call.Args[0]); err != nil {
+			return 0, fmt.Errorf("resolving KIND(expr): %w", err)
+		}
+		return vi.typeToken(), nil
+	}
+	return 0, fmt.Errorf("unsupported KIND expression")
+}
+
+// redirectIntrinsicForKind remaps a type conversion intrinsic based on a resolved KIND type.
+// Example: IntrinsicREAL + DOUBLEPRECISION → IntrinsicDBLE.
+func redirectIntrinsicForKind(base f90token.Intrinsic, kindTok f90token.Token) f90token.Intrinsic {
+	switch base {
+	case f90token.IntrinsicREAL:
+		if kindTok == f90token.DOUBLEPRECISION {
+			return f90token.IntrinsicDBLE
+		}
+	}
+	return base
 }

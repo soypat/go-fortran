@@ -51,6 +51,7 @@ func GOLDEN() {
 	LEVEL41()
 	LEVEL42()
 	LEVEL43()
+	LEVEL44()
 	fenv.Stop(0)
 }
 func LEVEL01() {
@@ -1307,6 +1308,18 @@ func LEVEL43() {
 	if !pexist {
 		fenv.Print("LEVEL 43: file absent as expected")
 	}
+}
+func LEVEL44() {
+	// Implicit declarations.
+	var hres float64
+	var _ = hres
+	var (
+		nval int32
+		_    = nval
+	)
+	nval = 7
+	hres = float64(float64(nval))
+	fenv.Print("LEVEL 44:", hres)
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")
