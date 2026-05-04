@@ -531,6 +531,14 @@ func (env *Environment) mapError(err error) IOStat {
 	return IOStatErrInternal
 }
 
+// Exit terminates the program with an optional exit code (default 0).
+func (env *Environment) Exit(code ...int32) {
+	if len(code) > 0 {
+		os.Exit(int(code[0]))
+	}
+	os.Exit(0)
+}
+
 // System executes a shell command via "sh -c". Returns the exit code.
 func (env *Environment) System(cmd string) int32 {
 	c := exec.Command("sh", "-c", cmd)

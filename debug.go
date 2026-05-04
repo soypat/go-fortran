@@ -1,6 +1,7 @@
 package fortran
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,20 @@ func (tg *ToGo) makeErr(node f90.Node, msg string) error {
 
 func (tg *ToGo) makeErrWithPos(pos f90.Position, msg string) error {
 	// If source is available, compute line:column
+	spos, err := tg.strPos(pos)
+	if err != nil {
+		return fmt.Errorf("%s @ %d", msg, pos.Start())
+	}
+	callStr := debugGetCallStack(2, -1)
+	return fmt.Errorf("%s: %s\n%s", spos, msg, callStr)
+}
+
+func (tg *ToGo) forceStrPos(pos f90.Position) string {
+	s, _ := tg.strPos(pos)
+	return s
+}
+
+func (tg *ToGo) strPos(pos f90.Position) (str string, err error) {
 	src := tg.sourceFile
 	if tg.source != "" {
 		if src == nil {
@@ -34,7 +49,7 @@ func (tg *ToGo) makeErrWithPos(pos f90.Position, msg string) error {
 				defer fp.Close()
 			}
 		}
-		callStr := debugGetCallStack(2)
+
 		var err error
 		var line, col int
 		if src != nil {
@@ -42,12 +57,25 @@ func (tg *ToGo) makeErrWithPos(pos f90.Position, msg string) error {
 			line, col, _, err = pos.ToLineCol(src, buf[:])
 		}
 		if err == nil && line > 0 {
-			return fmt.Errorf("%s:%d:%d: %s\n%s", tg.source, line, col, msg, callStr)
+			return fmt.Sprintf("%s:%d:%d", tg.source, line, col), nil
 		}
 	}
+	return "", errors.New("no cigar")
 
-	return fmt.Errorf("%s @ %d", msg, pos.Start())
 }
+
+// var line, col int
+// if src != nil {
+// 	var buf [1024]byte
+// 	line, col, _, err = pos.ToLineCol(tg.sourceFile, buf[:])
+// 	if err== nil && line > 0 {
+// 		return fmt.Sprintf("%s:%d:%d", tg.source, line, col), nil
+// 	}
+// 	if err != nil {
+// 		return "", err
+// 	}
+// }
+// return fmt.Sprintf("%s:%d:%d", tg.source, line, col), nil
 
 func (p *Parser90) addErrorWithPos(pos sourcePos, msg string) {
 	if p.died {
@@ -72,7 +100,7 @@ func (p *Parser90) addErrorFatal(msg string, callstackSkip int) {
 	if p.died {
 		p.addError(msg)
 	} else {
-		callstack := debugGetCallStack(callstackSkip)
+		callstack := debugGetCallStack(callstackSkip, -1)
 		p.addError("token state: " + p.strToks() + "\n" + callstack + "\nfatal error encountered, terminating run early: " + msg) // Only one unrecoverable message
 	}
 	p.died = true
@@ -81,7 +109,7 @@ func (p *Parser90) addErrorFatal(msg string, callstackSkip int) {
 // debugGetCallStack returns a formatted string of the current call stack
 // Format: "filename:line in TypeName.FunctionName"
 // Example: "parser.go:592 in Parser90.parseExecutableStatement"
-func debugGetCallStack(skipAdditional int) string {
+func debugGetCallStack(skipAdditional, indentAfterIdx int) string {
 	var result strings.Builder
 
 	// Get program counters for up to 32 frames
@@ -94,7 +122,7 @@ func debugGetCallStack(skipAdditional int) string {
 
 	pcs = pcs[:n]
 	frames := runtime.CallersFrames(pcs)
-
+	indent := indentAfterIdx >= 0
 	first := true
 	for {
 		frame, more := frames.Next()
@@ -119,8 +147,12 @@ func debugGetCallStack(skipAdditional int) string {
 		}
 
 		if !first {
-			result.WriteString("\n")
+			result.WriteByte('\n')
 		}
+		if indent && indentAfterIdx <= 0 {
+			result.WriteByte('\t')
+		}
+		indentAfterIdx--
 		first = false
 
 		fmt.Fprintf(&result, "%s:%d @%s", filename, frame.Line, funcName)
@@ -146,6 +178,6 @@ func stringsꞏCutLast(s, sep string) (before, after string, found bool) {
 
 // warn used to signal a very claudish poorly designed branch/function was hit and used.
 func warn(msg string) {
-	cs := debugGetCallStack(1)
+	cs := debugGetCallStack(1, 0)
 	fmt.Printf("\033[33m%s\n%s\033[0m\n", msg, cs)
 }

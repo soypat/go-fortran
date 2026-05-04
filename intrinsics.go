@@ -291,6 +291,15 @@ var vendoredIntrinsics = []intrinsicFn{
 	f90token.VendorATAN2D: {
 		calls: []intrinsicCall{makeCall("ATAN2D", nil, _tgtGenericFloat, _tgtGenericFloat)},
 	},
+
+	// Program control
+	f90token.VendorEXIT: {
+		isEnvSubroutine: true,
+		calls: []intrinsicCall{
+			{methodOrCall: "Exit"},
+			{methodOrCall: "Exit", args: []*Varinfo{_tgtInt32}},
+		},
+	},
 }
 
 // getIntrinsic looks up a V2 intrinsic by token.

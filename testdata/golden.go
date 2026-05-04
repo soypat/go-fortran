@@ -53,6 +53,8 @@ func GOLDEN() {
 	LEVEL43()
 	LEVEL44()
 	fenv.Stop(0)
+	fenv.Exit(0)
+	fenv.Exit()
 }
 func LEVEL01() {
 	fenv.Print("LEVEL 1: Hello, World!")
