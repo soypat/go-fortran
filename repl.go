@@ -183,9 +183,10 @@ func (repl *REPL) DefineStmtFunc(name string, params []string, expr f90.Expressi
 // Returns a function that removes the variable when called.
 // Usage: defer repl.PushLoopVar(name)()
 func (repl *REPL) PushVar(v Varinfo) (remove func()) {
+	repl._varCache = nil
 	repl.scope.vars = append(repl.scope.vars, v)
 	return func() {
-		// Remove the last variable (the one we just added)
+		repl._varCache = nil
 		repl.scope.vars = repl.scope.vars[:len(repl.scope.vars)-1]
 	}
 }

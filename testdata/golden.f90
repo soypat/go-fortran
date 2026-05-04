@@ -292,12 +292,20 @@
       SUBROUTINE LEVEL11()
           CHARACTER(LEN=10) :: str1, str2
           CHARACTER(LEN=20) :: str3
+          CHARACTER(3) :: sufx(2)
+          INTEGER :: idx
 
           str1 = 'Hello'
           str2 = 'World'
           str3 = str1 // ' ' // str2
 
+          sufx(1) = 'Go!'
+          sufx(2) = 'Hi!'
+          idx = 1
+          str3 = str1(1:5) // sufx(idx)
+
           PRINT *, 'LEVEL 11: concatenation:', str3
+          PRINT *, 'LEVEL 11: substr+array:', str3
       END SUBROUTINE LEVEL11
 
 ! ==============================================================================

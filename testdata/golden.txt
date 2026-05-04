@@ -30,7 +30,8 @@
  LEVEL 10: complex expr =   383.449127    
  LEVEL 10: cond1 = T , cond2 = T
  LEVEL 10: cond3 = F , cond4= F
- LEVEL 11: concatenation:Hello      World    
+ LEVEL 11: concatenation:HelloGo!            
+ LEVEL 11: substr+array:HelloGo!            
  LEVEL 12: SIN(0.5) =  0.479425550    
  LEVEL 12: COS(0.5) =  0.877582550    
  LEVEL 12: ABS(-5.5) =   5.50000000    

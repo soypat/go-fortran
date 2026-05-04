@@ -252,7 +252,7 @@ func (p *ParserUnitData) Varb(name []byte) (vi *Varinfo) {
 }
 
 func (p *ParserUnitData) Var(name string) (vi *Varinfo) {
-	for i := range p.vars {
+	for i := len(p.vars) - 1; i >= 0; i-- {
 		if strings.EqualFold(p.vars[i]._varname, name) {
 			return &p.vars[i]
 		}

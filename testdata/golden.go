@@ -318,10 +318,23 @@ func LEVEL11() {
 		str3 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
 		_                             = str3
 	)
+	var (
+		sufx = intrinsic.NewCharacterArrayArray(3, 2)
+		_    = sufx
+	)
+	var (
+		idx int32
+		_   = idx
+	)
 	str1.SetFromString("Hello")
 	str2.SetFromString("World")
 	str3.SetConcatString(str1.String(), " ", str2.String())
+	sufx.AtPtr(1).SetFromString("Go!")
+	sufx.AtPtr(2).SetFromString("Hi!")
+	idx = 1
+	str3.SetConcatString(str1.Substring(1, 5), sufx.At(int(idx)).String())
 	fenv.Print("LEVEL 11: concatenation:", str3)
+	fenv.Print("LEVEL 11: substr+array:", str3)
 }
 func LEVEL12() {
 	var (
@@ -661,9 +674,9 @@ func LEVEL20() {
 	vec1.Set(1.2, 1)
 	vec1.Set(1.2, 2)
 	vec1.Set(2.0, 3)
-	mths.AtPtr(int(i)).SetFromString("JA")
-	mths.AtPtr(int(i)).SetFromString("FE")
-	mths.AtPtr(int(i)).SetFromString("MA")
+	mths.AtPtr(1).SetFromString("JA")
+	mths.AtPtr(2).SetFromString("FE")
+	mths.AtPtr(3).SetFromString("MA")
 	fenv.Print("LEVEL 20: a =", a)
 	fenv.Print("LEVEL 20: b =", b)
 	fenv.Print("LEVEL 20: c =", c)

@@ -1478,7 +1478,6 @@ func (tg *ToGo) transformDataArray(dst []ast.Stmt, stmt *f90.DataStmt, varExpr f
 // Returns the number of values consumed.
 func (tg *ToGo) transformDataImpliedDo(dst []ast.Stmt, stmt *f90.DataStmt, loop *f90.ImpliedDoLoop,
 	iter *dataValueIter, targetVinfo *Varinfo) ([]ast.Stmt, int, error) {
-	warn(tg.forceStrPos(stmt.Position) + " claudish transformDataImpliedDo ")
 	// Evaluate loop bounds as integer constants.
 	var startVI, endVI, strideVI Varinfo
 	if err := tg.repl.Eval(&startVI, loop.Start); err != nil {
@@ -1501,7 +1500,7 @@ func (tg *ToGo) transformDataImpliedDo(dst []ast.Stmt, stmt *f90.DataStmt, loop 
 	}
 	consumed := 0
 	for k := start; (stride > 0 && k <= end) || (stride < 0 && k >= end); k += stride {
-		// Push loop variable as integer constant into scope.
+		// Push loop variable as integer constant into scope so index expressions evaluate to k.
 		loopVar := Varinfo{}
 		loopVar.decl = &f90.DeclEntity{Name: loop.LoopVar, Type: &f90.TypeSpec{Token: f90token.INTEGER}}
 		loopVar._varname = loop.LoopVar
@@ -1520,9 +1519,20 @@ func (tg *ToGo) transformDataImpliedDo(dst []ast.Stmt, stmt *f90.DataStmt, loop 
 				remove()
 				return dst, consumed, tg.makeErr(stmt, "DATA implied-DO: unknown variable "+callExpr.Name)
 			}
+			// Evaluate each index to a constant so generated code uses literals, not runtime variables.
+			evalArgs := make([]f90.Expression, len(callExpr.Args))
+			for i, arg := range callExpr.Args {
+				var idxVI Varinfo
+				if err := tg.repl.Eval(&idxVI, arg); err != nil {
+					remove()
+					return dst, consumed, tg.makeErr(stmt, "DATA implied-DO: evaluating index: "+err.Error())
+				}
+				evalArgs[i] = &f90.IntegerLiteral{Value: idxVI.val.i64}
+			}
+			syntheticRef := &f90.CallExpr{Name: callExpr.Name, Args: evalArgs, Position: callExpr.Position}
 			var n int
 			var err error
-			dst, n, err = tg.transformDataArrayElement(dst, stmt, callExpr, iter, vi)
+			dst, n, err = tg.transformDataArrayElement(dst, stmt, syntheticRef, iter, vi)
 			if err != nil {
 				remove()
 				return dst, consumed, err
@@ -1987,11 +1997,27 @@ func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, root *f90
 		case *f90.Identifier:
 			args = append(args, tg.astMethodCall(e.Value, "String"))
 		default:
+			// Handle CHARACTER variable access (substring or array element) explicitly
+			// to avoid the double-.String() and missing-.String() problems from wrapConversion.
+			if callExpr, ok := e.(*f90.CallExpr); ok {
+				if vi := tg.repl.Var(callExpr.Name); vi != nil && vi.decl.Type.Token == f90token.CHARACTER {
+					goexpr, aerr := tg.transformArrayRef(vi, callExpr)
+					if aerr != nil {
+						return dst, tg.makeErr(op, "string concat CHARACTER access: "+aerr.Error())
+					}
+					// Array element access (arr(i)) returns CharacterArray; call .String() to get Go string.
+					// Substring access (scalar str(s:e) or arr(i)(s:e)) already returns Go string.
+					if vi.IsArray() && !f90.IsRanged(callExpr.Args...) && callExpr.SecondaryAccess == nil {
+						goexpr = &ast.CallExpr{Fun: &ast.SelectorExpr{X: goexpr, Sel: ast.NewIdent("String")}}
+					}
+					args = append(args, goexpr)
+					continue
+				}
+			}
 			goexpr, _, err := tg.transformExpression(_tgtStringLit, e)
 			if err != nil {
 				return dst, tg.makeErr(op, "unsupported expression for string concat: "+err.Error())
 			}
-			warn(tg.forceStrPos(e.SourcePos()) + " potential unsupported expression for string concat")
 			args = append(args, goexpr)
 		}
 	}
