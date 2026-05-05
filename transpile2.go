@@ -139,7 +139,7 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 			}
 			fn.Body.List, err = tg.transformStatements(fn.Body.List, unit.Body)
 			if err != nil {
-				return dst, tg.makeErrAtStmt("transforming statements of unit " + unit.Name + ": " + err.Error())
+				return dst, tg.makeErrAtStmt(fmt.Sprintf("transforming unit %s (%s): %s", unit.UnitName(), tg.forceStrPos(unit.Position), err.Error()))
 			}
 			if results != nil {
 				var trailingReturn ast.Stmt
