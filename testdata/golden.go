@@ -54,6 +54,7 @@ func GOLDEN() {
 	LEVEL44()
 	LEVEL45()
 	LEVEL46()
+	LEVEL47()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1425,6 +1426,46 @@ func LEVEL46() {
 	}
 	fenv.Close(fortio.CloseSpec{UNIT: iounit})
 	fenv.Print("LEVEL 46:", readback.At(1), readback.At(2), readback.At(3), readback.At(4), readback.At(5))
+}
+func LEVEL47() {
+	var (
+		iounit  int32
+		i       int32
+		eof_hit int32
+		_, _, _ = iounit, i, eof_hit
+	)
+	var (
+		arr = intrinsic.NewArray[float32](nil, 3)
+		_   = arr
+	)
+	eof_hit = 0
+	iounit = 47
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_end_idl.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.DefaultFormat()}, 10.0, 20.0, 30.0)
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_end_idl.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
+	{
+		readArgs := make([]any, 0)
+		for i := 1; i <= 3; i += 1 {
+			readArgs = append(readArgs, arr.AtPtr(int(i)))
+		}
+		_iostat := fenv.ReadWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.DefaultFormat()}, readArgs...)
+		if _iostat == fortio.IOStatEOF {
+			goto label10
+		}
+	}
+	goto label20
+	goto label10
+label10:
+	{
+		eof_hit = 1
+	}
+	goto label20
+label20:
+	{
+		fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	}
+	fenv.Print("LEVEL 47:", arr.At(1), arr.At(2), arr.At(3), eof_hit)
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")

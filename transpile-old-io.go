@@ -210,9 +210,6 @@ func (tg *ToGo) transformWriteStmtWithImpliedDoLoop(dst []ast.Stmt, stmt *f90.Wr
 // Generates: { readArgs := make([]any, 0); ...; fenv.Read(unit, format, readArgs...) }
 func (tg *ToGo) transformReadWithImpliedDo(dst []ast.Stmt, stmt *f90.ReadStmt, unitArg, formatExpr ast.Expr) (_ []ast.Stmt, err error) {
 	endLabel, errLabel, _ := extractBranchLabels(stmt.Specifiers)
-	if endLabel != "" || errLabel != "" {
-		return dst, tg.makeErr(stmt, "READ with implied DO loop and END=/ERR= not yet implemented")
-	}
 	readArgsVar := ast.NewIdent("readArgs")
 	initStmt := &ast.AssignStmt{
 		Lhs: []ast.Expr{readArgsVar},
@@ -254,12 +251,34 @@ func (tg *ToGo) transformReadWithImpliedDo(dst []ast.Stmt, stmt *f90.ReadStmt, u
 			blockStmts = append(blockStmts, appendStmt)
 		}
 	}
-	readCall := &ast.CallExpr{
-		Fun:      _astFenvRead,
-		Args:     []ast.Expr{unitArg, formatExpr, readArgsVar},
-		Ellipsis: 1,
+	if endLabel != "" || errLabel != "" {
+		// END=/ERR= require ReadWithSpec to capture the IOStat return value.
+		// Gotos inside the block to labels outside are valid Go.
+		ioSpec := &ast.CompositeLit{
+			Type: _astFortioIOSpec,
+			Elts: []ast.Expr{
+				&ast.KeyValueExpr{Key: ast.NewIdent("UNIT"), Value: unitArg},
+				&ast.KeyValueExpr{Key: ast.NewIdent("FMT"), Value: formatExpr},
+			},
+		}
+		readCall := &ast.CallExpr{
+			Fun:      _astFenvReadWithSpec,
+			Args:     []ast.Expr{ioSpec, readArgsVar},
+			Ellipsis: 1,
+		}
+		blockStmts = append(blockStmts, &ast.ExprStmt{X: readCall})
+		blockStmts, err = tg.appendIOBranchStmts(blockStmts, endLabel, errLabel)
+		if err != nil {
+			return dst, err
+		}
+	} else {
+		readCall := &ast.CallExpr{
+			Fun:      _astFenvRead,
+			Args:     []ast.Expr{unitArg, formatExpr, readArgsVar},
+			Ellipsis: 1,
+		}
+		blockStmts = append(blockStmts, &ast.ExprStmt{X: readCall})
 	}
-	blockStmts = append(blockStmts, &ast.ExprStmt{X: readCall})
 	dst = append(dst, &ast.BlockStmt{List: blockStmts})
 	return dst, nil
 }

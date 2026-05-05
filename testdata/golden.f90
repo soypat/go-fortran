@@ -49,6 +49,7 @@
       CALL LEVEL44()
       CALL LEVEL45()
       CALL LEVEL46()
+      CALL LEVEL47()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1110,6 +1111,23 @@
         CLOSE(UNIT=iounit)
         PRINT *, 'LEVEL 46:', readback(1), readback(2), readback(3), readback(4), readback(5)
     END SUBROUTINE LEVEL46
+
+! LEVEL47: READ with implied DO and END= (EOF branch)
+    SUBROUTINE LEVEL47()
+        INTEGER :: iounit, i, eof_hit
+        REAL :: arr(3)
+        eof_hit = 0
+        iounit = 47
+        OPEN(UNIT=iounit, FILE='test_end_idl.txt', STATUS='REPLACE', ACTION='WRITE')
+        WRITE(iounit, *) 10.0, 20.0, 30.0
+        CLOSE(UNIT=iounit)
+        OPEN(UNIT=iounit, FILE='test_end_idl.txt', STATUS='OLD', ACTION='READ')
+        READ(iounit, *, END=10) (arr(i), i=1, 3)
+        GOTO 20
+10      eof_hit = 1
+20      CLOSE(UNIT=iounit)
+        PRINT *, 'LEVEL 47:', arr(1), arr(2), arr(3), eof_hit
+    END SUBROUTINE LEVEL47
 
 ! ==============================================================================
 ! Helper Subroutines and Functions
