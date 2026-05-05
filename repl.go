@@ -257,7 +257,7 @@ func (repl *REPL) appendUnitData(dst []*ParserUnitData, only []string, pu *f90.U
 			if only != nil && !identifierIn(only, contained.UnitName()) {
 				continue
 			}
-			dst, err = repl.appendUnitData(dst, only, contained)
+			dst, err = repl.appendUnitData(dst, nil, contained)
 			if err != nil {
 				return dst, fmt.Errorf("%s contained within %s: %w", contained.UnitName(), pu.Name, err)
 			}

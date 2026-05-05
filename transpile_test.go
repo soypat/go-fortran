@@ -339,6 +339,65 @@ func TestModuleVariableImport(t *testing.T) {
 }
 
 
+// TestModuleContainedSubroutineParams verifies that a subroutine contained in a
+// module is callable with the correct number of arguments via USE when the
+// module is defined in a separate source file from the caller — mirroring the
+// real use case (e.g. tragen_utils_module.f90 used from g2epp.f90).
+func TestModuleContainedSubroutineParams(t *testing.T) {
+	modSrc := `      module mymod
+      implicit none
+      type :: mytype
+          integer :: val
+      end type
+      type(mytype) :: store
+      integer :: count
+      contains
+      subroutine add_nums(a, b, c)
+          integer, intent(in) :: a, b
+          integer, intent(out) :: c
+          c = a + b
+      end subroutine
+      end module`
+
+	// The ONLY: clause is required to expose the bug — it causes the only filter
+	// to be passed into the recursive appendUnitData call for the contained
+	// subroutine, stripping its parameters.
+	callerSrc := `      subroutine caller()
+      use mymod, only: add_nums
+      integer :: x, y, z
+      x = 1
+      y = 2
+      call add_nums(x, y, z)
+      end subroutine`
+
+	// caller.f90 must be parsed first so the caller unit appears before the
+	// module in the units slice — mirroring the g2epp.f90 layout where
+	// subroutine F (which USEs the module) precedes tragen_utils_module.
+	var parser Parser90
+	var units []f90.Unit
+	for _, pair := range []struct{ name, src string }{
+		{"caller.f90", callerSrc},
+		{"mymod.f90", modSrc},
+	} {
+		if err := parser.Reset(pair.name, strings.NewReader(pair.src)); err != nil {
+			t.Fatal(err)
+		}
+		for !parser.IsDone() {
+			unit := parser.ParseNextProgramUnit()
+			if !unit.IsValid() {
+				break
+			}
+			units = append(units, unit)
+		}
+	}
+	var tg ToGo
+	tg.SetSource("caller.f90", strings.NewReader(callerSrc))
+	_, err := tg.TransformUnits(nil, units...)
+	if err != nil {
+		t.Errorf("module contained subroutine call failed: %v", err)
+	}
+}
+
 // TestCallTooManyArgs verifies that calling a subroutine with more args than
 // declared returns an error, not a panic.
 func TestCallTooManyArgs(t *testing.T) {
