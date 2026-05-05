@@ -1083,6 +1083,8 @@ func LEVEL32() {
 	fenv.Print("LEVEL 32:", a.At(1, 1), a.At(1, 2), a.At(2, 1), a.At(2, 2))
 	fenv.Print("LEVEL 32:", b.At(1), b.At(2))
 	fenv.Print("LEVEL 32: substr", a.At(1, 2).Substring(1, 3))
+	b.View(intrinsic.R(1, 2)).SetFrom(intrinsic.NewCharacterArrayFromStrings(3, []string{"XYZ", "PQR"}, 2))
+	fenv.Print("LEVEL 32: range assign", b.At(1), b.At(2))
 }
 func LEVEL33() {
 	var (

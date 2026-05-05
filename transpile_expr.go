@@ -955,7 +955,6 @@ func (tg *ToGo) transformSetCharacterArray(dst []ast.Stmt, fexpr *f90.CallExpr, 
 
 	// CHARACTER array with a single range subscript: ctmp(1:2) = arr → ctmp.View(R(1,2)).SetFrom(arr)
 	if vi.IsArray() && isRanged && len(fexpr.Args) == 1 && fexpr.SecondaryAccess == nil {
-		warn("character array with single range subscript")
 		viewExpr, err := tg.transformArrayView(fexpr, vi)
 		if err != nil {
 			return dst, err

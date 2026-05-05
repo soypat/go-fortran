@@ -872,6 +872,8 @@
         PRINT *, 'LEVEL 32:', A(1,1),A(1,2),A(2,1),A(2,2)
         PRINT *, 'LEVEL 32:', B(1), B(2)
         PRINT *, 'LEVEL 32: substr', A(1,2)(1:3)
+        B(1:2) = (/'XYZ', 'PQR'/)
+        PRINT *, 'LEVEL 32: range assign', B(1), B(2)
     END SUBROUTINE LEVEL32
     SUBROUTINE LEVEL33() ! ARRAY RANGES.
         INTEGER, PARAMETER :: NM=3
