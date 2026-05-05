@@ -51,6 +51,7 @@ claude-test
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 *.cov
+*.local
 
 # Log files and common data formats.
 *.log

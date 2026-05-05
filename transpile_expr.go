@@ -1036,7 +1036,8 @@ func (tg *ToGo) transformRangeToViewArg(rng *f90.RangeExpr, vi *Varinfo, dim int
 		if dims != nil && dim < len(dims.Bounds) && dims.Bounds[dim].Upper != nil {
 			end, _, err = tg.transformExpression(_tgtInt, dims.Bounds[dim].Upper)
 		} else {
-			warn(tg.forceStrPos(rng.Position) + " Allocatable/assumed-shape array: use runtime length vi.Len()")
+			// TODO(pato): Does this merit a warning or is it fine?
+			// warn(tg.forceStrPos(rng.Position) + " Allocatable/assumed-shape array: use runtime length vi.Len()")
 			// Allocatable/assumed-shape array: use runtime length vi.Len()
 			end = &ast.CallExpr{
 				Fun: &ast.SelectorExpr{
