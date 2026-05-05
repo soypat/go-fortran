@@ -48,6 +48,7 @@
       CALL LEVEL43()
       CALL LEVEL44()
       CALL LEVEL45()
+      CALL LEVEL46()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1092,6 +1093,23 @@
         IF (n .EQ. 2) RETURN 2
         RETURN
     END SUBROUTINE ALTRSUB
+
+! LEVEL46: READ with implied DO loop (array round-trip)
+    SUBROUTINE LEVEL46()
+        INTEGER :: iounit, i
+        REAL :: vals(5), readback(5)
+        DO i = 1, 5
+            vals(i) = REAL(i) * 1.5
+        END DO
+        iounit = 46
+        OPEN(UNIT=iounit, FILE='test_idl_read.txt', STATUS='REPLACE', ACTION='WRITE')
+        WRITE(iounit, *) (vals(i), i=1, 5)
+        CLOSE(UNIT=iounit)
+        OPEN(UNIT=iounit, FILE='test_idl_read.txt', STATUS='OLD', ACTION='READ')
+        READ(iounit, *) (readback(i), i=1, 5)
+        CLOSE(UNIT=iounit)
+        PRINT *, 'LEVEL 46:', readback(1), readback(2), readback(3), readback(4), readback(5)
+    END SUBROUTINE LEVEL46
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

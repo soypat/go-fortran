@@ -53,6 +53,7 @@ func GOLDEN() {
 	LEVEL43()
 	LEVEL44()
 	LEVEL45()
+	LEVEL46()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1389,6 +1390,41 @@ func ALTRSUB(n int32) int {
 	}
 	return 0
 	return 0
+}
+func LEVEL46() {
+	var (
+		iounit int32
+		i      int32
+		_, _   = iounit, i
+	)
+	var (
+		vals     = intrinsic.NewArray[float32](nil, 5)
+		readback = intrinsic.NewArray[float32](nil, 5)
+		_, _     = vals, readback
+	)
+	for i = 1; i <= 5; i++ {
+		vals.Set(float32(i)*1.5, int(i))
+	}
+	iounit = 46
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_idl_read.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
+	{
+		writeArgs := make([]any, 0)
+		for i := 1; i <= 5; i += 1 {
+			writeArgs = append(writeArgs, vals.At(int(i)))
+		}
+		fenv.Write(iounit, fortio.DefaultFormat(), writeArgs...)
+	}
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_idl_read.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
+	{
+		readArgs := make([]any, 0)
+		for i := 1; i <= 5; i += 1 {
+			readArgs = append(readArgs, readback.AtPtr(int(i)))
+		}
+		fenv.Read(iounit, fortio.DefaultFormat(), readArgs...)
+	}
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	fenv.Print("LEVEL 46:", readback.At(1), readback.At(2), readback.At(3), readback.At(4), readback.At(5))
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")
