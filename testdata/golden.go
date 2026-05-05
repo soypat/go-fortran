@@ -55,6 +55,7 @@ func GOLDEN() {
 	LEVEL45()
 	LEVEL46()
 	LEVEL47()
+	LEVEL48()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1466,6 +1467,27 @@ label20:
 		fenv.Close(fortio.CloseSpec{UNIT: iounit})
 	}
 	fenv.Print("LEVEL 47:", arr.At(1), arr.At(2), arr.At(3), eof_hit)
+}
+func LEVEL48() {
+	var (
+		i int32
+		_ = i
+	)
+	var (
+		arr = intrinsic.NewArray[float32](nil, 4)
+		_   = arr
+	)
+	for i = 1; i <= 4; i++ {
+		arr.Set(float32(i)*2.0, int(i))
+	}
+	{
+		printArgs := make([]any, 0)
+		printArgs = append(printArgs, "LEVEL 48:")
+		for i := 1; i <= 4; i += 1 {
+			printArgs = append(printArgs, arr.At(int(i)))
+		}
+		fenv.Print(printArgs...)
+	}
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")

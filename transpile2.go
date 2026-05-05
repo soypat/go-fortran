@@ -1000,6 +1000,12 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 }
 
 func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast.Stmt, err error) {
+	// Check for implied DO loops — build a []any slice and spread it.
+	for _, expr := range stmt.OutputList {
+		if _, ok := expr.(*f90.ImpliedDoLoop); ok {
+			return tg.transformPrintStmtWithImpliedDo(dst, stmt)
+		}
+	}
 	// Transform output list expressions to Go expressions
 	var args []ast.Expr
 	var tgt Varinfo
@@ -1030,6 +1036,63 @@ func (tg *ToGo) transformPrintStmt(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast
 		Args: args,
 	}
 	dst = append(dst, &ast.ExprStmt{X: callExpr})
+	return dst, nil
+}
+
+func (tg *ToGo) transformPrintStmtWithImpliedDo(dst []ast.Stmt, stmt *f90.PrintStmt) (_ []ast.Stmt, err error) {
+	printArgsVar := ast.NewIdent("printArgs")
+	initStmt := &ast.AssignStmt{
+		Lhs: []ast.Expr{printArgsVar},
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{
+			&ast.CallExpr{
+				Fun:  ast.NewIdent("make"),
+				Args: []ast.Expr{&ast.ArrayType{Elt: ast.NewIdent("any")}, _astZero},
+			},
+		},
+	}
+	blockStmts := []ast.Stmt{initStmt}
+	for _, expr := range stmt.OutputList {
+		if idl, ok := expr.(*f90.ImpliedDoLoop); ok {
+			loopStmts, err := tg.transformImpliedDoLoopAppend(idl, printArgsVar, false)
+			if err != nil {
+				return dst, err
+			}
+			blockStmts = append(blockStmts, loopStmts...)
+		} else {
+			var tgt Varinfo
+			if err := tg.repl.InferType(&tgt, expr); err != nil {
+				return dst, tg.makeErr(stmt, err.Error())
+			}
+			goExpr, tp, err := tg.transformExpression(&tgt, expr)
+			if err != nil {
+				return dst, err
+			}
+			if tp.IsPointer() {
+				goExpr = &ast.CallExpr{
+					Fun:  &ast.SelectorExpr{X: goExpr, Sel: ast.NewIdent("At")},
+					Args: []ast.Expr{_astOne},
+				}
+			}
+			blockStmts = append(blockStmts, &ast.AssignStmt{
+				Lhs: []ast.Expr{printArgsVar},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{
+					&ast.CallExpr{
+						Fun:  ast.NewIdent("append"),
+						Args: []ast.Expr{printArgsVar, goExpr},
+					},
+				},
+			})
+		}
+	}
+	printCall := &ast.CallExpr{
+		Fun:      _astFenvPrint,
+		Args:     []ast.Expr{printArgsVar},
+		Ellipsis: 1,
+	}
+	blockStmts = append(blockStmts, &ast.ExprStmt{X: printCall})
+	dst = append(dst, &ast.BlockStmt{List: blockStmts})
 	return dst, nil
 }
 

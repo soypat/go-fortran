@@ -50,6 +50,7 @@
       CALL LEVEL45()
       CALL LEVEL46()
       CALL LEVEL47()
+      CALL LEVEL48()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1128,6 +1129,16 @@
 20      CLOSE(UNIT=iounit)
         PRINT *, 'LEVEL 47:', arr(1), arr(2), arr(3), eof_hit
     END SUBROUTINE LEVEL47
+
+! LEVEL48: PRINT with implied DO loop
+    SUBROUTINE LEVEL48()
+        INTEGER :: i
+        REAL :: arr(4)
+        DO i = 1, 4
+            arr(i) = REAL(i) * 2.0
+        END DO
+        PRINT *, 'LEVEL 48:', (arr(i), i=1, 4)
+    END SUBROUTINE LEVEL48
 
 ! ==============================================================================
 ! Helper Subroutines and Functions
