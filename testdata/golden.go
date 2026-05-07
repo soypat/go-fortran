@@ -390,7 +390,7 @@ func LEVEL12() {
 	angle = 0.5
 	sin_val = intrinsic.SIN[float32](angle)
 	cos_val = intrinsic.COS[float32](angle)
-	abs_val = float32(intrinsic.ABS[float32](-5.5))
+	abs_val = intrinsic.ABS[float32](-5.5)
 	max_val = intrinsic.MAX[int32](i, j, k)
 	min_val = intrinsic.MIN[int32](10, 20, 5)
 	log_val = 2.0 * intrinsic.LOG[float32](angle)
@@ -839,6 +839,14 @@ func LEVEL25() {
 		_           = Int32
 	)
 	var (
+		dp_neg float64 = 2.71828182845904
+		_              = dp_neg
+	)
+	var (
+		sp_neg float32 = 2.71828
+		_              = sp_neg
+	)
+	var (
 		n_lapack int32
 		_        = n_lapack
 	)
@@ -880,6 +888,8 @@ func LEVEL25() {
 	fenv.Print("LEVEL 25: r4 =", r4)
 	fenv.Print("LEVEL 25: r8 =", r8)
 	fenv.Print("LEVEL 25: n_lapack =", n_lapack, " int32=", Int32)
+	fenv.Print("LEVEL 25: dp_neg =", dp_neg)
+	fenv.Print("LEVEL 25: sp_neg =", sp_neg)
 }
 func LEVEL26() {
 	var (

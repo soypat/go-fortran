@@ -325,6 +325,9 @@ func TestREPL_InferType(t *testing.T) {
 		18: {intrinsicF(4.0, "INT"), f90token.INTEGER},
 		// Paren
 		19: {&f90.ParenExpr{Expr: exprInt(5)}, f90token.INTEGER},
+		// Unary minus must preserve float type token (regression: promote(T,T)=0 erased val.tok)
+		20: {&f90.UnaryExpr{Op: f90token.Minus, Operand: exprFloat(2.5)}, f90token.REAL},
+		21: {&f90.UnaryExpr{Op: f90token.Minus, Operand: exprDouble(999.0)}, f90token.DOUBLEPRECISION},
 	}
 	var r REPL
 	for i, test := range tests {

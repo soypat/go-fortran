@@ -710,6 +710,10 @@
       SUBROUTINE LEVEL25()
           ! Test various KIND parameters
           INTEGER, PARAMETER :: int32 = 4
+          ! Test DOUBLEPRECISION and REAL PARAMETER constants in output list
+          ! (exercises InferType + Eval of float PARAMETER init)
+          REAL(KIND=8), PARAMETER :: dp_neg = 2.71828182845904D0
+          REAL(KIND=4), PARAMETER :: sp_neg = 2.71828
           INTEGER(int32) :: n_lapack
           INTEGER(KIND=1) :: i1
           INTEGER(KIND=2) :: i2
@@ -734,6 +738,9 @@
           PRINT *, 'LEVEL 25: r4 =', r4
           PRINT *, 'LEVEL 25: r8 =', r8
           PRINT *, 'LEVEL 25: n_lapack =', n_lapack, ' int32=', int32
+          PRINT *, 'LEVEL 25: dp_neg =', dp_neg
+          PRINT *, 'LEVEL 25: sp_neg =', sp_neg
+
       END SUBROUTINE LEVEL25
 
 ! ==============================================================================

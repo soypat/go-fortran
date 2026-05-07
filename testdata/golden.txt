@@ -100,6 +100,8 @@
  LEVEL 25: r4 =   3.14159012    
  LEVEL 25: r8 =   3.1415926535897931     
  LEVEL 25: n_lapack =          42  int32=           4
+ LEVEL 25: dp_neg =   2.7182818284590402     
+ LEVEL 25: sp_neg =   2.71828008    
  LEVEL 26: hex_val =         255
  LEVEL 26: oct_val =         255
  LEVEL 26: bin_val =         255

@@ -808,12 +808,12 @@ func (repl *REPL) promote(dst, src *Varinfo) (promotion f90token.Token, kind int
 		promotion = stok
 	case f90token.DOUBLEPRECISION:
 		switch stok {
-		case f90token.INTEGER, f90token.REAL:
+		case f90token.INTEGER, f90token.REAL, f90token.DOUBLEPRECISION:
 			promotion = f90token.DOUBLEPRECISION
 		}
 	case f90token.REAL:
 		switch stok {
-		case f90token.INTEGER:
+		case f90token.INTEGER, f90token.REAL:
 			promotion = f90token.REAL
 		case f90token.DOUBLEPRECISION:
 			promotion = f90token.DOUBLEPRECISION
