@@ -429,7 +429,7 @@ func (repl *REPL) Eval(dst *Varinfo, expr f90.Expression) (err error) {
 		if vi := repl.Var(e.Name); vi != nil {
 			// It's a variable (array element access) - infer element type
 			dst.decl = vi.decl
-			dst.val.tok = vi.typeToken()
+			dst.val.tok = vi.TypeToken()
 		} else {
 			// It's a function call (intrinsic or external)
 			if fn := repl.ContainedOrUsed(e.Name); fn != nil && fn.returnType != nil {
@@ -769,6 +769,12 @@ func (repl *REPL) getOrResolveKind(v *Varinfo) (int, error) {
 			return 0, nil
 		}
 		return v.kindFlag, nil
+	} else if v.decl == nil {
+		_, v.kindFlag = normalizeTokenKind(v.TypeToken(), 0)
+		if v.kindFlag == 0 {
+			return 0, fmt.Errorf("unable to resolve kind tok=%s, %q ", v.TypeToken(), v.Identifier())
+		}
+		return v.kindFlag, nil
 	}
 	kind := v.Kind()
 	if kind != nil {
@@ -791,8 +797,8 @@ func (repl *REPL) getOrResolveKind(v *Varinfo) (int, error) {
 
 // promote returns the resulting promoted type of a binary operation between two types.
 func (repl *REPL) promote(dst, src *Varinfo) (promotion f90token.Token, kind int) {
-	dtok := dst.typeToken()
-	stok := src.typeToken()
+	dtok := dst.TypeToken()
+	stok := src.TypeToken()
 	switch dtok {
 	case 0:
 		promotion = stok
@@ -819,17 +825,6 @@ func (repl *REPL) promote(dst, src *Varinfo) (promotion f90token.Token, kind int
 		}
 	}
 	return promotion, 0
-}
-
-// typeToken returns the effective type token (prefers val.tok, falls back to decl).
-func (v *Varinfo) typeToken() f90token.Token {
-	if v.val.tok != 0 {
-		return v.val.tok
-	}
-	if v.decl != nil {
-		return v.decl.Type.Token
-	}
-	return 0
 }
 
 func (repl *REPL) assignInt(dst *Varinfo, v int64) error {

@@ -16,7 +16,7 @@ import (
 func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result ast.Expr, resultType *Varinfo, err error) {
 	if expr == nil {
 		return nil, nil, tg.makeErrAtStmt("nil expression")
-	} else if vitgt == nil || vitgt.typeToken() == 0 {
+	} else if vitgt == nil || vitgt.TypeToken() == 0 {
 		panic("vitgt cannot be nil")
 	}
 	switch e := expr.(type) {
@@ -156,8 +156,8 @@ func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Ex
 			return expr
 		}
 	}
-	srcType := sourceType.typeToken()
-	targetType := target.typeToken()
+	srcType := sourceType.TypeToken()
+	targetType := target.TypeToken()
 	if srcType == targetType || targetType == f90token.FloatLit {
 		return expr
 	}
@@ -190,7 +190,7 @@ func (tg *ToGo) transformExprIdentifer(vitgt *Varinfo, e *f90.Identifier) (resul
 	}
 	// COMMON scalars (not EQUIVALENCED) are PointerTo[T], need .At(1) to read value.
 	// EQUIVALENCED scalars are handled by wrapConversion via IsPointer().
-	if !resultType.IsArray() && resultType.typeToken() != f90token.CHARACTER &&
+	if !resultType.IsArray() && resultType.TypeToken() != f90token.CHARACTER &&
 		resultType.flags.HasAny(VFlagCommon) && !resultType.flags.HasAny(VFlagEquivalenced) {
 		result = &ast.CallExpr{
 			Fun:  &ast.SelectorExpr{X: result, Sel: ast.NewIdent("At")},
@@ -212,10 +212,10 @@ func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructo
 		if err != nil {
 			return nil, nil, err
 		}
-		elemType = tg.baseGotype(elemVinfo.typeToken(), tg.resolveKind(elemVinfo))
+		elemType = tg.baseGotype(elemVinfo.TypeToken(), tg.resolveKind(elemVinfo))
 	} else {
 		// No values - try to use target type (but not DIMENSION which means "array of unknown type")
-		targetTok := vitgt.typeToken()
+		targetTok := vitgt.TypeToken()
 		if targetTok != f90token.Undefined && targetTok != f90token.DIMENSION {
 			elemVinfo = vitgt
 			elemType = tg.baseGotype(targetTok, tg.resolveKind(vitgt))
@@ -236,7 +236,7 @@ func (tg *ToGo) transformArrayConstructor(vitgt *Varinfo, e *f90.ArrayConstructo
 
 	// Create result type: array of the inferred element type
 	// Normalize literal tokens to concrete types (IntLit → INTEGER, FloatLit → REAL, StringLit → CHARACTER)
-	elemTok := elemVinfo.typeToken()
+	elemTok := elemVinfo.TypeToken()
 	switch elemTok {
 	case f90token.IntLit:
 		elemTok = f90token.INTEGER
@@ -333,8 +333,8 @@ func (tg *ToGo) checkPromotion(left, right *Varinfo) (lPromote, rPromote *Varinf
 		left == _tgtGenericFloat || left == _tgtGenericInt {
 		return nil, nil, nil // Do not promote literals, go auto promotes them.
 	}
-	ltok := left.typeToken()
-	rtok := right.typeToken()
+	ltok := left.TypeToken()
+	rtok := right.TypeToken()
 	lKind, err := tg.repl.getOrResolveKind(left)
 	if err != nil {
 		return nil, nil, err
@@ -383,7 +383,7 @@ func normalizeTokenKind(tok f90token.Token, kind int) (f90token.Token, int) {
 
 func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result ast.Expr, resultType *Varinfo, err error) {
 	exprTarget := vitgt
-	if vitgt == _tgtBool && e.Op.IsNumericalOperator() {
+	if vitgt.TypeToken() == f90token.LOGICAL && e.Op.IsNumericalOperator() {
 		// We are targeting boolean but likely have numerical values, infer type.
 		var leftType Varinfo
 		err = tg.repl.InferType(&leftType, e.Left)
@@ -431,14 +431,14 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 		left = tg.wrapConversion(vitgt, leftType, left)
 		right = tg.wrapConversion(vitgt, rightType, right)
 		fnName := "POW"
-		switch leftType.typeToken() {
+		switch leftType.TypeToken() {
 		case f90token.COMPLEX, f90token.DOUBLECOMPLEX:
 			fnName = "CPOW"
 		}
 		sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(fnName)}
 		var funcExpr ast.Expr = sel
 		if vitgt != nil && !isGenericVarinfo(vitgt) {
-			goType := goTypeBasic(vitgt.typeToken(), 0)
+			goType := goTypeBasic(vitgt.TypeToken(), 0)
 			funcExpr = &ast.IndexExpr{X: sel, Index: goType}
 		}
 		return &ast.CallExpr{
@@ -523,7 +523,7 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 func (tg *ToGo) transformArrayComparison(funcName string, left, right ast.Expr, leftType *Varinfo) (ast.Expr, *Varinfo, error) {
 	// Generate: intrinsic.ArraySetEqual[T](nil, left, right)
 	sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(funcName)}
-	goType := goTypeBasic(leftType.typeToken(), 0)
+	goType := goTypeBasic(leftType.TypeToken(), 0)
 	funcExpr := &ast.IndexExpr{X: sel, Index: goType}
 	call := &ast.CallExpr{
 		Fun:  funcExpr,
@@ -569,7 +569,7 @@ func (tg *ToGo) transformBinaryExprChar(vitgt *Varinfo, op f90token.Token, left,
 // charToGoString converts a character expression to a Go string expression.
 // String literals are already Go strings, CharacterArray variables need .String() call.
 func (tg *ToGo) charToGoString(expr ast.Expr, exprType *Varinfo) ast.Expr {
-	if exprType.typeToken() == f90token.StringLit {
+	if exprType.TypeToken() == f90token.StringLit {
 		// Already a Go string literal
 		return expr
 	}
@@ -777,7 +777,7 @@ func (tg *ToGo) transformMALLOC(vitgt *Varinfo, e *f90.CallExpr) (result ast.Exp
 	if vitgt.pointee != "" {
 		pointeeVar := tg.repl.Var(vitgt.pointee)
 		if pointeeVar != nil {
-			elemType = tg.baseGotype(pointeeVar.typeToken(), tg.resolveKind(pointeeVar))
+			elemType = tg.baseGotype(pointeeVar.TypeToken(), tg.resolveKind(pointeeVar))
 		}
 	}
 	if elemType == nil {
@@ -1217,15 +1217,15 @@ func typeCompatible(paramType, argType *Varinfo) bool {
 	}
 	// Generic types accept anything of their category
 	if paramType == _tgtGenericFloat {
-		tok := argType.typeToken()
+		tok := argType.TypeToken()
 		return tok == f90token.REAL || tok == f90token.DOUBLEPRECISION || tok == f90token.FloatLit
 	}
 	if paramType == _tgtGenericInt {
-		tok := argType.typeToken()
+		tok := argType.TypeToken()
 		return tok == f90token.INTEGER || tok == f90token.IntLit
 	}
 	// Exact type match
-	return paramType.typeToken() == argType.typeToken()
+	return paramType.TypeToken() == argType.TypeToken()
 }
 
 // stripKindArg removes a KIND= keyword argument from args, returning (positional args, kind value expr).
@@ -1265,7 +1265,7 @@ func (tg *ToGo) resolveKindToken(kindExpr f90.Expression) (f90token.Token, error
 		if err := tg.repl.InferType(&vi, call.Args[0]); err != nil {
 			return 0, fmt.Errorf("resolving KIND(expr): %w", err)
 		}
-		return vi.typeToken(), nil
+		return vi.TypeToken(), nil
 	}
 	return 0, fmt.Errorf("unsupported KIND expression")
 }

@@ -49,3 +49,16 @@ All these operations are prohibited. We require our implementation to be the mos
 We go as far as to not follow the Fortran specification: We treat implicit declarations as valid only on assignment, not on first use. We ask our users to fix their fortran code by declaring these variables beforehand. 
 
 We also do not solve glued statements like DO189 and SUBROUTINEABC. These are issues that will be solved with a preprocessor or manually.
+
+
+## Wrong argument count
+We may run into transpiler errors of the sort `mismatched args in call (expected 22, got 20)`. There are two cases to deal with:
+
+- Caller passes more arguments than expected. This is usually the simpler to deal with since the transpiler error message will show how arguments match and it is usually intuitive to get an idea of which argument does not belong due to naming semantic mismatch or even type mismatch.
+- Caller passes fewer arguments than expected. Again it should be intuitive to know which arguments are mismatched. The issue is the caller may have forgotten to declare the needed data entirely. In these cases we declare zeroed/dummy arguments so as to let transpiler continue transpiling the code, even if it yields invalid results.
+
+In these cases we do not adapt parser/transpiler to faulty code, we value correctness and try our best to fix the code and if not just use dummy arguments. Leave a comment prefixed with `! pato` so the intent of modifications are traceable.
+Add tags noting what characterized the call site arg mismatch:
+- missingarg: missing one or more arguments
+- stackcorrupt: Arguments provided in order leading to potential stack corruption
+- toomanyarg: too many arguments

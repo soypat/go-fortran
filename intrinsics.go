@@ -158,7 +158,7 @@ func (tg *ToGo) intrinsicExprV2(vitgt *Varinfo, fn *intrinsicFn, call *intrinsic
 		// Wrap method result to match Fortran return types
 		// Go methods return native types (int, CharacterArray) but Fortran expects specific types
 		if resultType != nil {
-			switch resultType.typeToken() {
+			switch resultType.TypeToken() {
 			case f90token.INTEGER:
 				// Go method returns int, Fortran expects INTEGER (int32)
 				return &ast.CallExpr{Fun: ast.NewIdent("int32"), Args: []ast.Expr{methodCall}}, resultType, nil
@@ -182,11 +182,11 @@ func (tg *ToGo) intrinsicExprV2(vitgt *Varinfo, fn *intrinsicFn, call *intrinsic
 			var goType ast.Expr
 			if firstArgType != nil && !isGenericVarinfo(firstArgType) {
 				// Use actual argument type
-				goType = goTypeBasic(firstArgType.typeToken(), 0)
+				goType = goTypeBasic(firstArgType.TypeToken(), 0)
 			} else if vitgt != nil && !isGenericVarinfo(vitgt) && typeCompatible(call.args[0], vitgt) {
 				// Use target type when argument is generic (e.g., literals) and types are compatible
 				// This handles cases like SQRT(3.0D0) where literal could be float32 or float64
-				goType = goTypeBasic(vitgt.typeToken(), 0)
+				goType = goTypeBasic(vitgt.TypeToken(), 0)
 			} else {
 				// Use default type for generic params: int32 for integers, float32 for floats
 				if call.args[0] == _tgtGenericInt {

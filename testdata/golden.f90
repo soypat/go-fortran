@@ -51,6 +51,7 @@
       CALL LEVEL46()
       CALL LEVEL47()
       CALL LEVEL48()
+      CALL LEVEL49()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1139,6 +1140,21 @@
         END DO
         PRINT *, 'LEVEL 48:', (arr(i), i=1, 4)
     END SUBROUTINE LEVEL48
+
+! LEVEL49: Power operator (**) inside a boolean comparison (IF and assignment)
+    SUBROUTINE LEVEL49()
+        IMPLICIT DOUBLE PRECISION (A-H, O-Z)
+        DOUBLE PRECISION :: A, B
+        LOGICAL :: C
+        A = 2.D0
+        B = 3.D0
+        C = A**2 .GT. B**2
+        IF (A**2 - B**2 .GT. 0.D0) THEN
+            PRINT *, 'A**2 > B**2'
+        ELSE
+            PRINT *, 'A**2 <= B**2'
+        END IF
+    END SUBROUTINE LEVEL49
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

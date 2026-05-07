@@ -386,7 +386,7 @@ func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Ex
 	}
 
 	// CHARACTER arrays need special initialization with charlen
-	if typ.typeToken() == f90token.CHARACTER {
+	if typ.TypeToken() == f90token.CHARACTER {
 		// Get charlen (default to 1)
 		var charlenExpr ast.Expr = _astOne
 		if charLen := typ.Charlen(); charLen != nil {
@@ -405,7 +405,7 @@ func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Ex
 	}
 
 	// Get element type for non-CHARACTER arrays
-	elemType := tg.baseGotype(typ.typeToken(), tg.resolveKind(typ))
+	elemType := tg.baseGotype(typ.TypeToken(), tg.resolveKind(typ))
 	expr := &ast.CallExpr{
 		Fun: &ast.IndexExpr{
 			X:     _astFnNewArray,
@@ -525,7 +525,7 @@ func (tg *ToGo) transformTypeDeclEntity(ent *f90.DeclEntity) (spec *ast.ValueSpe
 		initExpr = &ast.CallExpr{
 			Fun: ast.NewIdent("new"),
 			Args: []ast.Expr{
-				&ast.IndexExpr{X: _astTypeArray, Index: tg.baseGotype(vi.typeToken(), tg.resolveKind(vi))},
+				&ast.IndexExpr{X: _astTypeArray, Index: tg.baseGotype(vi.TypeToken(), tg.resolveKind(vi))},
 			},
 		}
 	}
@@ -991,8 +991,8 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		if targetPointee == nil || rhsPointee == nil {
 			return dst, tg.makeErr(stmt, "pointee(s) not found: "+targetVinfo.pointee+", "+rhsType.pointee)
 		}
-		tgtTok := targetPointee.typeToken()
-		rhsTok := rhsPointee.typeToken()
+		tgtTok := targetPointee.TypeToken()
+		rhsTok := rhsPointee.TypeToken()
 		if tgtTok != rhsTok {
 			// Different types - use PointerFrom for conversion
 			elemType := tg.baseGotype(tgtTok, tg.resolveKind(targetPointee))
@@ -1009,7 +1009,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	// Handle equivalenced/COMMON scalar assignment: f = value → f.Set(value, 1)
 	// CHARACTER types are excluded as they use SetFromString
 	isArray := targetVinfo.IsArray()
-	isCharacter := targetVinfo.typeToken() == f90token.CHARACTER
+	isCharacter := targetVinfo.TypeToken() == f90token.CHARACTER
 	if !isArray && !isCharacter && targetVinfo.flags.HasAny(VFlagEquivalenced|VFlagCommon) {
 		dst = append(dst, &ast.ExprStmt{
 			X: tg.astSetCall(lhs, rhs, &ast.BasicLit{Kind: token.INT, Value: "1"}),
@@ -1777,7 +1777,7 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 		if !hasArray {
 			// All scalars - allocate memory for primary and share with others
 			// Generate: primary = intrinsic.MALLOC[T](size)
-			primaryType := tg.baseGotype(primaryVinfo.typeToken(), tg.resolveKind(primaryVinfo))
+			primaryType := tg.baseGotype(primaryVinfo.TypeToken(), tg.resolveKind(primaryVinfo))
 			dst = append(dst, &ast.AssignStmt{
 				Tok: token.ASSIGN,
 				Lhs: []ast.Expr{primaryExpr},
@@ -1802,7 +1802,7 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 					return dst, tg.makeErrWithPos(stmt.Position, "unknown variable in EQUIVALENCE: "+ref.Name)
 				}
 				varExpr := tg.astVarExpr(vinfo)
-				elemType := tg.baseGotype(vinfo.typeToken(), tg.resolveKind(vinfo))
+				elemType := tg.baseGotype(vinfo.TypeToken(), tg.resolveKind(vinfo))
 
 				// Generate: other = intrinsic.PointerFrom[T](primary)
 				dst = append(dst, &ast.AssignStmt{
@@ -1830,7 +1830,7 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 
 				varExpr := tg.astVarExpr(vinfo)
 				isArray := vinfo.IsArray()
-				isCharacter := vinfo.typeToken() == f90token.CHARACTER
+				isCharacter := vinfo.TypeToken() == f90token.CHARACTER
 				isPointerTo := vinfo.IsPointer()
 
 				if len(ref.Args) == 0 {
@@ -1896,7 +1896,7 @@ func (tg *ToGo) transformEquivalenceStmt(dst []ast.Stmt, stmt *f90.EquivalenceSt
 // typeSize returns the size in bytes for a variable's base type.
 func (tg *ToGo) typeSize(v *Varinfo) int {
 	kind := tg.resolveKind(v)
-	switch v.typeToken() {
+	switch v.TypeToken() {
 	case f90token.REAL:
 		if kind == 8 {
 			return 8
@@ -1945,7 +1945,7 @@ func (tg *ToGo) transformPointerCrayStmt(dst []ast.Stmt, stmt *f90.PointerCraySt
 		}
 
 		// Get the pointee's base type for PointerTo[T]
-		pointeeType := tg.baseGotype(pointeeVar.typeToken(), tg.resolveKind(pointeeVar))
+		pointeeType := tg.baseGotype(pointeeVar.TypeToken(), tg.resolveKind(pointeeVar))
 		ptrType := goTypePointerTo(pointeeType)
 
 		// Generate: var ptrName intrinsic.PointerTo[T]
@@ -1975,7 +1975,7 @@ func (tg *ToGo) transformPointerCrayStmt(dst []ast.Stmt, stmt *f90.PointerCraySt
 //
 // Arrays are returned as pointer types (*intrinsic.Array[T]).
 func (tg *ToGo) goType(v *Varinfo) ast.Expr {
-	tok := v.typeToken()
+	tok := v.TypeToken()
 	isArray := v.IsArray()
 	// Handle Cray-style pointer variables (POINTER (ptr, pointee))
 	// The pointer variable's type is PointerTo[pointee_type]
@@ -1985,10 +1985,10 @@ func (tg *ToGo) goType(v *Varinfo) ast.Expr {
 			if pointeeVar == nil {
 				panic(tg.makeErrWithPos(v.decl.Position, "pointee variable not found: "+v.pointee))
 			}
-			pointeeType := tg.baseGotype(pointeeVar.typeToken(), tg.resolveKind(pointeeVar))
+			pointeeType := tg.baseGotype(pointeeVar.TypeToken(), tg.resolveKind(pointeeVar))
 			return goTypePointerTo(pointeeType)
 		}
-		return goTypePointerTo(tg.baseGotype(v.typeToken(), tg.resolveKind(v)))
+		return goTypePointerTo(tg.baseGotype(v.TypeToken(), tg.resolveKind(v)))
 	}
 
 	// Handle TYPE
@@ -2381,7 +2381,7 @@ func (tg *ToGo) transformCommonStmt(dst []ast.Stmt, stmt *f90.CommonStmt) (_ []a
 		}
 
 		varIdent := ast.NewIdent(vi.Identifier())
-		elemType := tg.baseGotype(vi.typeToken(), tg.resolveKind(vi))
+		elemType := tg.baseGotype(vi.TypeToken(), tg.resolveKind(vi))
 
 		var initExpr ast.Expr
 		if vi.IsArray() {
@@ -2483,10 +2483,11 @@ func (tg *ToGo) transformCommonStmt(dst []ast.Stmt, stmt *f90.CommonStmt) (_ []a
 }
 
 func (tg *ToGo) resolveKind(v *Varinfo) int {
-	if v.decl == nil {
-		panic(tg.makeErrAtStmt("nil declaration for variable " + v.Identifier()))
+	kind, err := tg.repl.getOrResolveKind(v)
+	if err != nil {
+		panic(tg.makeErrAtStmt("unable to resolve kind for " + v.Identifier() + " with type token " + v.TypeToken().String() + ": " + err.Error()))
 	}
-	return tg.resolveKindFromDecl(v.decl)
+	return kind
 }
 
 func (tg *ToGo) resolveKindFromDecl(decl *f90.DeclEntity) int {

@@ -474,7 +474,9 @@ func (p *Varinfo) DeclPos() (source string, line, col int) {
 	return p.declPos.Source, p.declPos.Line, p.declPos.Col
 }
 func (p *Varinfo) TypeToken() token.Token {
-	if p.decl == nil || p.decl.Type == nil {
+	if p.val.tok != 0 {
+		return p.val.tok
+	} else if p.decl == nil || p.decl.Type == nil {
 		return token.Undefined
 	}
 	return p.decl.Type.Token
