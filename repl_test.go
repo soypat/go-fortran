@@ -3,6 +3,7 @@ package fortran
 import (
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 
 	f90 "github.com/soypat/go-fortran/ast"
@@ -195,6 +196,47 @@ func TestREPL_ConstantNumericExpressions(t *testing.T) {
 			t.Fatalf("%d got %f, want %f (diff %f)", i, got, want, diff)
 		} else if want == 0 && diff > tol {
 			t.Fatalf("%d got %f, want %f (diff %f)", i, got, want, diff)
+		}
+	}
+}
+
+// TestREPL_ParameterConstantEval verifies that PARAMETER constants (e.g. INTEGER, PARAMETER :: k = 4)
+// are correctly evaluated when referenced by name via REPL.Eval.
+// Regression test for the bug where val.i64 was 0 because SetScope did not evaluate inits.
+func TestREPL_ParameterConstantEval(t *testing.T) {
+	const src = `SUBROUTINE level25_param()
+    INTEGER, PARAMETER :: k4 = 4
+    INTEGER, PARAMETER :: k8 = 8
+END SUBROUTINE`
+	var ps Parser90
+	err := ps.Reset("test", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := ps.ParseNextProgramUnit()
+	if !unit.IsValid() {
+		t.Fatal("invalid unit")
+	}
+	var repl REPL
+	if err := repl.SetScope(unit); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		wantVal int64
+	}{
+		{"k4", 4},
+		{"k8", 8},
+	}
+	for _, tc := range tests {
+		var got Varinfo
+		err := repl.Eval(&got, &f90.Identifier{Value: tc.name})
+		if err != nil {
+			t.Errorf("Eval(%s): %v", tc.name, err)
+			continue
+		}
+		if got.val.i64 != tc.wantVal {
+			t.Errorf("Eval(%s): got i64=%d, want %d", tc.name, got.val.i64, tc.wantVal)
 		}
 	}
 }

@@ -415,6 +415,10 @@ func (repl *REPL) Eval(dst *Varinfo, expr f90.Expression) (err error) {
 		vi := repl.Var(e.Value)
 		if vi == nil {
 			err = fmt.Errorf("var %s undefined", e.Value)
+		} else if vi.flags.HasAny(VFlagConstantParameter) && vi.decl != nil && vi.decl.Init != nil {
+			// PARAMETER constants store their value in decl.Init, not val.i64/f64.
+			// Evaluate the init expression to get the actual constant value.
+			err = repl.Eval(dst, vi.decl.Init)
 		} else {
 			*dst = *vi
 		}

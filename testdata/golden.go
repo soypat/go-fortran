@@ -835,6 +835,14 @@ func LEVEL24() {
 }
 func LEVEL25() {
 	var (
+		Int32 int32 = 4
+		_           = Int32
+	)
+	var (
+		n_lapack int32
+		_        = n_lapack
+	)
+	var (
 		i1 int8
 		_  = i1
 	)
@@ -864,12 +872,14 @@ func LEVEL25() {
 	i8 = 9223372036854775807
 	r4 = 3.14159
 	r8 = float64(3.141592653589793)
+	n_lapack = 42
 	fenv.Print("LEVEL 25: i1 =", i1)
 	fenv.Print("LEVEL 25: i2 =", i2)
 	fenv.Print("LEVEL 25: i4 =", i4)
 	fenv.Print("LEVEL 25: i8 =", i8)
 	fenv.Print("LEVEL 25: r4 =", r4)
 	fenv.Print("LEVEL 25: r8 =", r8)
+	fenv.Print("LEVEL 25: n_lapack =", n_lapack, " int32=", Int32)
 }
 func LEVEL26() {
 	var (
