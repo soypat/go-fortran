@@ -56,6 +56,7 @@ func GOLDEN() {
 	LEVEL46()
 	LEVEL47()
 	LEVEL48()
+	LEVEL49()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1487,6 +1488,25 @@ func LEVEL48() {
 			printArgs = append(printArgs, arr.At(int(i)))
 		}
 		fenv.Print(printArgs...)
+	}
+}
+func LEVEL49() {
+	var (
+		a    float64
+		b    float64
+		_, _ = a, b
+	)
+	var (
+		c bool
+		_ = c
+	)
+	a = 2.0
+	b = 3.0
+	c = intrinsic.POW[float64](a, float64(2)) > intrinsic.POW[float64](b, float64(2))
+	if intrinsic.POW[float64](a, float64(2))-intrinsic.POW[float64](b, float64(2)) > 0.0 {
+		fenv.Print("A**2 > B**2")
+	} else {
+		fenv.Print("A**2 <= B**2")
 	}
 }
 func SIMPLE_SUB() {

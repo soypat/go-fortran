@@ -1051,7 +1051,8 @@ func (de *DeclEntity) Element() token.Token {
 }
 
 func (de *DeclEntity) Kind() Expression {
-	if de.KindOrLen != nil {
+	if de.KindOrLen != nil && de.Type.Token != token.CHARACTER {
+		// KindOrLen is Len for characters, so don't return it here.
 		return de.KindOrLen
 	}
 	if de.Type == nil {
@@ -2171,8 +2172,8 @@ type IOSpecifier struct {
 //	INQUIRE(FILE='output.dat', EXIST=fexist, OPENED=fopen, NUMBER=inum)
 type InquireStmt struct {
 	Specifiers []IOSpecifier // INQUIRE specifiers: UNIT, FILE, EXIST, OPENED, etc.
-	OutputList []Expression          // Output items for IOLENGTH form: INQUIRE(IOLENGTH=var) output-list
-	Label      string                // Optional statement label
+	OutputList []Expression  // Output items for IOLENGTH form: INQUIRE(IOLENGTH=var) output-list
+	Label      string        // Optional statement label
 	Position
 }
 
@@ -2209,7 +2210,7 @@ func (is *InquireStmt) AppendString(dst []byte) []byte {
 //	OPEN(10, FILE='data.txt', STATUS='OLD')
 type OpenStmt struct {
 	Specifiers []IOSpecifier // OPEN specifiers: UNIT, FILE, STATUS, etc.
-	Label      string                // Optional statement label
+	Label      string        // Optional statement label
 	Position
 }
 
@@ -2249,7 +2250,7 @@ func (os *OpenStmt) AppendString(dst []byte) []byte {
 //	CLOSE(UNIT=20, STATUS='KEEP')
 type CloseStmt struct {
 	Specifiers []IOSpecifier // CLOSE specifiers: UNIT, STATUS, IOSTAT, ERR
-	Label      string                // Optional statement label
+	Label      string        // Optional statement label
 	Position
 }
 
@@ -2289,8 +2290,8 @@ type WriteStmt struct {
 	Unit       Expression    // Unit specifier (e.g., 91, *, variable)
 	Format     Expression    // Format specifier
 	Specifiers []IOSpecifier // I/O specifiers: END, ERR, IOSTAT, NML, etc.
-	OutputList []Expression          // List of expressions to write
-	Label      string                // Optional statement label
+	OutputList []Expression  // List of expressions to write
+	Label      string        // Optional statement label
 	Position
 }
 
@@ -2314,8 +2315,8 @@ type ReadStmt struct {
 	Unit       Expression    // Unit specifier (e.g., 91, *, variable)
 	Format     Expression    // Format specifier
 	Specifiers []IOSpecifier // I/O specifiers: END, ERR, IOSTAT, NML, etc.
-	InputList  []Expression          // List of variables to read into
-	Label      string                // Optional statement label
+	InputList  []Expression  // List of variables to read into
+	Label      string        // Optional statement label
 	Position
 }
 
@@ -2410,7 +2411,7 @@ func (ps *PrintStmt) AppendString(dst []byte) []byte {
 //	BACKSPACE(UNIT=15, IOSTAT=ierr)
 type BackspaceStmt struct {
 	Specifiers []IOSpecifier // BACKSPACE specifiers: UNIT, IOSTAT, ERR
-	Label      string                // Optional statement label
+	Label      string        // Optional statement label
 	Position
 }
 
@@ -2447,7 +2448,7 @@ func (bs *BackspaceStmt) AppendString(dst []byte) []byte {
 //	REWIND(UNIT=30, IOSTAT=ierr)
 type RewindStmt struct {
 	Specifiers []IOSpecifier // REWIND specifiers: UNIT, IOSTAT, ERR
-	Label      string                // Optional statement label
+	Label      string        // Optional statement label
 	Position
 }
 
@@ -2484,7 +2485,7 @@ func (rs *RewindStmt) AppendString(dst []byte) []byte {
 //	ENDFILE(UNIT=15, IOSTAT=ierr)
 type EndfileStmt struct {
 	Specifiers []IOSpecifier // ENDFILE specifiers: UNIT, IOSTAT, ERR
-	Label      string                // Optional statement label
+	Label      string        // Optional statement label
 	Position
 }
 
