@@ -709,6 +709,8 @@
 ! ==============================================================================
       SUBROUTINE LEVEL25()
           ! Test various KIND parameters
+          INTEGER, PARAMETER :: int32 = 4
+          INTEGER(int32) :: n_lapack
           INTEGER(KIND=1) :: i1
           INTEGER(KIND=2) :: i2
           INTEGER(KIND=4) :: i4
@@ -723,6 +725,7 @@
           i8 = 9223372036854775807_8  ! Max value for int64
           r4 = 3.14159
           r8 = 3.141592653589793D0
+          N_LAPACK = 42
 
           PRINT *, 'LEVEL 25: i1 =', i1
           PRINT *, 'LEVEL 25: i2 =', i2
@@ -730,6 +733,7 @@
           PRINT *, 'LEVEL 25: i8 =', i8
           PRINT *, 'LEVEL 25: r4 =', r4
           PRINT *, 'LEVEL 25: r8 =', r8
+          PRINT *, 'LEVEL 25: n_lapack =', n_lapack, ' int32=', int32
       END SUBROUTINE LEVEL25
 
 ! ==============================================================================
