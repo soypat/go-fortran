@@ -156,8 +156,10 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 			}
 			fallthrough
 		case f90token.MODULE:
-			// CONTAINS
+			// CONTAINS: expose module-level vars to contained subroutines via host association.
+			pop := tg.repl.PushHostScope(data.vars)
 			dst, err = tg.TransformUnits(dst, unit.Contains...)
+			pop()
 			if err != nil {
 				return dst, fmt.Errorf("transforming CONTAINS of %s: %w", unit.Name, err)
 			}
@@ -173,6 +175,22 @@ func (tg *ToGo) astIdent(name string) *ast.Ident {
 }
 
 func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
+	// Host-associated vars (module-level vars) come first — passed by reference.
+	// hostScope := tg.repl.HostScope()
+	// for i := range hostScope {
+	// 	vi := &hostScope[i]
+	// 	if vi.decl == nil || vi.decl.Name == "" || vi.decl.Name == "*" {
+	// 		continue
+	// 	}
+	// 	tp := tg.goType(vi)
+	// 	if !vi.IsArray() {
+	// 		tp = &ast.StarExpr{X: tp}
+	// 	}
+	// 	dst = append(dst, &ast.Field{
+	// 		Type:  tp,
+	// 		Names: []*ast.Ident{tg.astIdent(vi.decl.Name)},
+	// 	})
+	// }
 	params := tg.repl.ScopeParams()
 	for i := range params {
 		vi := &params[i]
@@ -676,12 +694,12 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 		}
 		return dst, tg.makeErr(stmt, "subroutine not found: "+stmt.Name)
 	}
-	params := fninfo.ProcedureParams()
+	expectParams := fninfo.ProcedureParams()
 
 	// Partition params and args: separate real params from * slots.
 	var realParams []Varinfo
 	altSlotCount := 0
-	for _, p := range params {
+	for _, p := range expectParams {
 		if p._varname == "*" {
 			altSlotCount++
 		} else {
@@ -690,14 +708,37 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 	}
 
 	// Count real (non-alternate-return) args to validate arg count.
-	realArgCount := 0
+	callArgCount := 0
 	for _, arg := range stmt.Args {
 		if _, ok := arg.(*f90.AlternateReturnArg); !ok {
-			realArgCount++
+			callArgCount++
 		}
 	}
-	if realArgCount > len(realParams) {
-		return dst, tg.makeErr(stmt, fmt.Sprintf("too many args in call (expected %d, got %d)", len(realParams), realArgCount))
+	if callArgCount != len(realParams) {
+		var arglist strings.Builder
+		for i := range max(callArgCount, len(realParams)) {
+			if i > 0 {
+				arglist.WriteByte('\n')
+			}
+			arglist.WriteString(strconv.Itoa(i))
+			arglist.WriteString(". ")
+			if i < len(realParams) {
+				arglist.WriteString(realParams[i].Identifier())
+				if realParams[i].decl != nil && realParams[i].decl.Type != nil {
+					arglist.WriteByte('<')
+					arglist.Write(realParams[i].decl.Type.AppendString(nil))
+					if realParams[i].decl.ArraySpec != nil {
+						arglist.Write(realParams[i].decl.ArraySpec.AppendString(nil))
+					}
+					arglist.WriteByte('>')
+				}
+			}
+			arglist.WriteString(" -> ")
+			if i < len(stmt.Args) {
+				arglist.WriteString(string(stmt.Args[i].AppendString(nil)))
+			}
+		}
+		return dst, tg.makeErr(stmt, fmt.Sprintf("mismatched args in call (expected %d, got %d)\n%s", len(realParams), callArgCount, arglist.String()))
 	}
 
 	// Walk call args: collect alternate return labels (in * declaration order),

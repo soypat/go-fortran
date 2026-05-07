@@ -236,6 +236,45 @@ END PROGRAM`,
 	}
 }
 
+// TestModuleHostAssociation verifies that CONTAINS subroutines inside a MODULE can access
+// module-level variables (host association), including ALLOCATE/DEALLOCATE on module-level
+// allocatable arrays.
+func TestModuleHostAssociation(t *testing.T) {
+	src := `
+MODULE MOD_HOST_TEST
+  IMPLICIT NONE
+  REAL, ALLOCATABLE :: GRID1(:)
+CONTAINS
+  SUBROUTINE ALLOC_GRID(n)
+    INTEGER, INTENT(IN) :: n
+    ALLOCATE(GRID1(n))
+  END SUBROUTINE ALLOC_GRID
+
+  SUBROUTINE DEALLOC_GRID()
+    DEALLOCATE(GRID1)
+  END SUBROUTINE DEALLOC_GRID
+END MODULE MOD_HOST_TEST`
+
+	var parser Parser90
+	err := parser.Reset("test.f90", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := parser.ParseNextProgramUnit()
+	if !unit.IsValid() {
+		t.Fatal("ParseNextProgramUnit returned invalid unit")
+	}
+	errs := parser.Errors()
+	for _, e := range errs {
+		t.Error("parse error:", e)
+	}
+	var tg ToGo
+	_, err = tg.TransformUnits(nil, unit)
+	if err != nil {
+		t.Errorf("TransformUnits failed: %v", err)
+	}
+}
+
 // TestComparisonOperatorReturnsLogical verifies that comparison operators (.GT., .LT., etc.)
 // return LOGICAL type, not the operand type. This was causing "unpromotable combo INTEGER LOGICAL"
 // when expressions like `NTIDE.GT.0.AND..NOT.LRAY` were transpiled - the .GT. was incorrectly

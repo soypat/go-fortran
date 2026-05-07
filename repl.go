@@ -76,6 +76,7 @@ type REPL struct {
 	// The used modules are flattened here, so _use contains functions/subroutines contained within modules as well.
 	_use              []*ParserUnitData
 	_contains         []*ParserUnitData
+	_hostScope        []Varinfo         // host-associated vars from enclosing MODULE (set during CONTAINS processing)
 	commonblocks      []commonBlockInfo // COMMON block name -> info (file-level, not reset per procedure)
 	formatSpecs       []ast.FormatStmt  // FORMAT statements collected per unit
 	noValueResolution bool              // When true, Eval skips value computation (type inference only)
@@ -159,6 +160,12 @@ func (repl *REPL) Var(name string) *Varinfo {
 			return vi
 		}
 	}
+	for i := range repl._hostScope {
+		if strings.EqualFold(repl._hostScope[i]._varname, name) {
+			repl._varCache = &repl._hostScope[i]
+			return &repl._hostScope[i]
+		}
+	}
 	return nil
 }
 
@@ -185,9 +192,34 @@ func (repl *REPL) DefineStmtFunc(name string, params []string, expr f90.Expressi
 func (repl *REPL) PushVar(v Varinfo) (remove func()) {
 	repl._varCache = nil
 	repl.scope.vars = append(repl.scope.vars, v)
+	name := v._varname
 	return func() {
+		vgot := &repl.scope.vars[len(repl.scope.vars)-1]
+		if name != vgot._varname {
+			panic("unordered variable pop")
+		}
 		repl._varCache = nil
 		repl.scope.vars = repl.scope.vars[:len(repl.scope.vars)-1]
+	}
+}
+
+// PushHostScope sets host-associated variables from an enclosing MODULE or PROGRAM
+// for contained procedure transpilation. Returns pop to restore prior state.
+// Call pop after CONTAINS processing is complete.
+func (repl *REPL) PushHostScope(vars []Varinfo) (pop func()) {
+	if len(vars) == 0 {
+		return func() {}
+	}
+	prevlen := len(repl._hostScope)
+	repl._hostScope = append(repl._hostScope, vars...)
+	name0 := vars[0]._varname
+	repl._varCache = nil
+	return func() {
+		if repl._hostScope[prevlen]._varname != name0 {
+			panic("invalid push/pop of host scope")
+		}
+		repl._hostScope = repl._hostScope[:prevlen]
+		repl._varCache = nil
 	}
 }
 
