@@ -295,6 +295,8 @@ func LookupIntrinsic(s string) Intrinsic {
 		return IntrinsicCPU_TIME
 	case strings.EqualFold(s, "NORM2"):
 		return IntrinsicNORM2
+	case strings.EqualFold(s, "MOVE_ALLOC"):
+		return IntrinsicMOVE_ALLOC
 	}
 	return 0
 }

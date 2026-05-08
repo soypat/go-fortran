@@ -825,7 +825,8 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 }
 
 // transformIntrinsicCallStmt handles CALL statements for intrinsic and vendor
-// subroutines marked isEnvSubroutine, emitting fenv.Method(args...).
+// subroutines, emitting either fenv.Method(args...) for isEnvSubroutine intrinsics
+// or args[0].Method(args[1:]...) for array-method intrinsics (e.g. MOVE_ALLOC).
 // Returns (dst, true, err) when the intrinsic was recognised, (dst, false, nil) otherwise.
 func (tg *ToGo) transformIntrinsicCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) ([]ast.Stmt, bool, error) {
 	var fn *intrinsicFn
@@ -837,12 +838,39 @@ func (tg *ToGo) transformIntrinsicCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (
 			fn = getVendoredIntrinsic(tok)
 		}
 	}
-	if fn == nil || !fn.isEnvSubroutine {
+	if fn == nil {
 		return dst, false, nil
 	}
 	call := fn.findBestCall(len(stmt.Args))
 	if call == nil {
-		return dst, true, tg.makeErr(stmt, "no matching call signature for env subroutine: "+stmt.Name)
+		if fn.isEnvSubroutine {
+			return dst, true, tg.makeErr(stmt, "no matching call signature for env subroutine: "+stmt.Name)
+		}
+		return dst, false, nil
+	}
+	// Array method subroutine: args[0].Method(args[1:]...)
+	// Only when not an env subroutine (env subroutines always dispatch via fenv).
+	if !fn.isEnvSubroutine && isArrayMethodCall(call) {
+		var args []ast.Expr
+		for i, argExpr := range stmt.Args {
+			var info *Varinfo
+			if i < len(call.args) {
+				info = call.args[i]
+			}
+			goexpr, _, err := tg.transformExpression(info, argExpr)
+			if err != nil {
+				return dst, true, err
+			}
+			args = append(args, goexpr)
+		}
+		callExpr := &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: args[0], Sel: ast.NewIdent(call.methodOrCall)},
+			Args: args[1:],
+		}
+		return append(dst, &ast.ExprStmt{X: callExpr}), true, nil
+	}
+	if !fn.isEnvSubroutine {
+		return dst, false, nil
 	}
 	var args []ast.Expr
 	for i, argExpr := range stmt.Args {
@@ -864,6 +892,18 @@ func (tg *ToGo) transformIntrinsicCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (
 		Args: args,
 	}
 	return append(dst, &ast.ExprStmt{X: callExpr}), true, nil
+}
+
+// isArrayMethodCall reports whether an intrinsicCall dispatches as a method on args[0].
+// Mirrors the isMethod logic in intrinsicExprV2.
+func isArrayMethodCall(call *intrinsicCall) bool {
+	if call == nil || len(call.args) == 0 {
+		return false
+	}
+	name := call.methodOrCall
+	return (call.args[0].IsArray() || call.args[0].IsChar()) &&
+		len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' &&
+		!strings.Contains(name, "_") && !isAllCaps(name)
 }
 
 // wrapPointer converts .At() to .AtPtr() or adds & prefix for pointer passing.

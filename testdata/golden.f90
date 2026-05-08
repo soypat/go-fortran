@@ -53,6 +53,7 @@
       CALL LEVEL48()
       CALL LEVEL49()
       CALL LEVEL50()
+      CALL LEVEL51()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1182,6 +1183,22 @@
             PRINT *, 'A**2 <= B**2'
         END IF
     END SUBROUTINE LEVEL49
+
+! LEVEL51: MOVE_ALLOC intrinsic subroutine
+    SUBROUTINE LEVEL51()
+        INTEGER, ALLOCATABLE :: arr(:), tmp(:)
+        ALLOCATE(arr(3))
+        arr(1) = 10
+        arr(2) = 20
+        arr(3) = 30
+        ALLOCATE(tmp(5))
+        tmp(1) = arr(1)
+        tmp(2) = arr(2)
+        tmp(3) = arr(3)
+        DEALLOCATE(arr)
+        CALL MOVE_ALLOC(tmp, arr)
+        PRINT *, 'LEVEL 51:', arr(1), arr(2), arr(3)
+    END SUBROUTINE LEVEL51
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

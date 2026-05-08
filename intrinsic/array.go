@@ -178,6 +178,16 @@ func (a *Array[T]) Allocated() bool {
 	return a.data != nil
 }
 
+// MoveAlloc moves the allocation from the receiver (FROM) to to (TO).
+// Implements Fortran MOVE_ALLOC(FROM, TO): TO gets FROM's allocation, FROM becomes unallocated.
+func (from *Array[T]) MoveAlloc(to *Array[T]) {
+	if to.data != nil {
+		to.Deallocate()
+	}
+	*to = *from
+	*from = Array[T]{}
+}
+
 // At returns the element at the given indices (using Fortran indexing with custom bounds)
 // Implements the subscript value formula from F77 Table 1 / F95 Table 6.1.
 //

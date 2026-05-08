@@ -58,6 +58,7 @@ func GOLDEN() {
 	LEVEL48()
 	LEVEL49()
 	LEVEL50()
+	LEVEL51()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1544,6 +1545,24 @@ func LEVEL49() {
 	} else {
 		fenv.Print("A**2 <= B**2")
 	}
+}
+func LEVEL51() {
+	var (
+		arr  = new(intrinsic.Array[int32])
+		tmp  = new(intrinsic.Array[int32])
+		_, _ = arr, tmp
+	)
+	arr.Allocate(3)
+	arr.Set(10, 1)
+	arr.Set(20, 2)
+	arr.Set(30, 3)
+	tmp.Allocate(5)
+	tmp.Set(arr.At(1), 1)
+	tmp.Set(arr.At(2), 2)
+	tmp.Set(arr.At(3), 3)
+	arr.Deallocate()
+	tmp.MoveAlloc(arr)
+	fenv.Print("LEVEL 51:", arr.At(1), arr.At(2), arr.At(3))
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")

@@ -578,6 +578,9 @@ var intrinsicsv2 = []intrinsicFn{
 	},
 
 	// Array methods
+	f90token.IntrinsicMOVE_ALLOC: {
+		calls: []intrinsicCall{makeCall("MoveAlloc", nil, _tgtArrayGeneric, _tgtArrayGeneric)},
+	},
 	f90token.IntrinsicSIZE: {
 		calls: []intrinsicCall{
 			makeCall("Size", _tgtInt32, _tgtArrayGeneric),
