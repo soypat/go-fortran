@@ -1520,11 +1520,11 @@ func LEVEL50() {
 		pts = intrinsic.NewArray[point_t](nil, 2)
 		_   = pts
 	)
-	pts.At(1).x = 10
-	pts.At(1).y = 20
-	pts.At(2).x = 30
-	pts.At(2).y = 40
-	fenv.Print("LEVEL 50:", pts.At(1).x, pts.At(1).y, pts.At(2).x, pts.At(2).y)
+	pts.AtPtr(1).x = 10
+	pts.AtPtr(1).y = 20
+	pts.AtPtr(2).x = 30
+	pts.AtPtr(2).y = 40
+	fenv.Print("LEVEL 50:", pts.AtPtr(1).x, pts.AtPtr(1).y, pts.AtPtr(2).x, pts.AtPtr(2).y)
 }
 func LEVEL49() {
 	var (

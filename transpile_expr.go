@@ -827,8 +827,13 @@ func (tg *ToGo) transformArrayRef(vitgt *Varinfo, e *f90.CallExpr) (result ast.E
 		args = append(args, arg)
 	}
 	receiver := tg.astVarExpr(vi)
+	// Derived-type array elements must use AtPtr so struct fields are addressable.
+	atMethod := "At"
+	if vi.TypeToken() == f90token.TYPE {
+		atMethod = "AtPtr"
+	}
 	atCall := &ast.CallExpr{
-		Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("At")},
+		Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent(atMethod)},
 		Args: args,
 	}
 	if e.SecondaryAccess == nil {
