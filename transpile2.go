@@ -405,7 +405,15 @@ func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Ex
 	}
 
 	// Get element type for non-CHARACTER arrays
-	elemType := tg.baseGotype(typ.TypeToken(), tg.resolveKind(typ))
+	var elemType ast.Expr
+	if typ.TypeToken() == f90token.TYPE {
+		if typ.decl.Type.Name == "" {
+			return nil, tg.makeErrWithPos(typ.decl.Position, "derived TYPE array without type name")
+		}
+		elemType = ast.NewIdent(typ.decl.Type.Name)
+	} else {
+		elemType = tg.baseGotype(typ.TypeToken(), tg.resolveKind(typ))
+	}
 	expr := &ast.CallExpr{
 		Fun: &ast.IndexExpr{
 			X:     _astFnNewArray,
@@ -522,10 +530,19 @@ func (tg *ToGo) transformTypeDeclEntity(ent *f90.DeclEntity) (spec *ast.ValueSpe
 		initExpr, err = tg.makeArrayInitializer(vi, ast.NewIdent("nil"))
 	case isArray && isAlloc:
 		spec.Type = nil // Cleaner.
+		var elemType ast.Expr
+		if vi.TypeToken() == f90token.TYPE {
+			if vi.decl.Type.Name == "" {
+				return nil, tg.makeErrWithPos(ent.Position, "derived TYPE allocatable array without type name")
+			}
+			elemType = ast.NewIdent(vi.decl.Type.Name)
+		} else {
+			elemType = tg.baseGotype(vi.TypeToken(), tg.resolveKind(vi))
+		}
 		initExpr = &ast.CallExpr{
 			Fun: ast.NewIdent("new"),
 			Args: []ast.Expr{
-				&ast.IndexExpr{X: _astTypeArray, Index: tg.baseGotype(vi.TypeToken(), tg.resolveKind(vi))},
+				&ast.IndexExpr{X: _astTypeArray, Index: elemType},
 			},
 		}
 	}
