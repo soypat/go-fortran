@@ -3593,7 +3593,9 @@ func (p *Parser90) expectTypeSpec(withAttrs bool) (ts ast.TypeSpec) {
 		ts.Name = string(p.current.lit)
 		p.nextToken() // consume identifier
 		p.nextToken() // consume )
-
+		if withAttrs {
+			ts.Attributes = p.parseTypeAttributess()
+		}
 		return ts // tok=TYPE
 	} else {
 		ts = p.parseTypeSpecIntrinsic()

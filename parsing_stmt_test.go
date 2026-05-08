@@ -2344,6 +2344,26 @@ END SELECT`,
 				}
 			},
 		},
+		{
+			name: "Derived type declaration with DIMENSION attribute",
+			src:  "type(vmf_def), dimension(10) :: arr",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				td := helperWantNode[*ast.TypeDeclaration](t, stmt, "")
+				if len(td.Entities) != 1 {
+					t.Errorf("expected 1 entity, got %d", len(td.Entities))
+					return
+				}
+				if !strings.EqualFold(td.Entities[0].Name, "arr") {
+					t.Errorf("expected entity name 'arr', got %q", td.Entities[0].Name)
+				}
+				if td.Type.Token != token.TYPE {
+					t.Errorf("expected TYPE token, got %v", td.Type.Token)
+				}
+				if !strings.EqualFold(td.Type.Name, "vmf_def") {
+					t.Errorf("expected type name 'vmf_def', got %q", td.Type.Name)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

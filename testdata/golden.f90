@@ -52,6 +52,7 @@
       CALL LEVEL47()
       CALL LEVEL48()
       CALL LEVEL49()
+      CALL LEVEL50()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1151,6 +1152,21 @@
         END DO
         PRINT *, 'LEVEL 48:', (arr(i), i=1, 4)
     END SUBROUTINE LEVEL48
+
+! LEVEL50: Derived-type variable declared with DIMENSION attribute; component assignment
+    SUBROUTINE LEVEL50()
+        IMPLICIT NONE
+        TYPE :: point_t
+            INTEGER :: x
+            INTEGER :: y
+        END TYPE point_t
+        type( point_t ), dimension( 2 ) :: pts
+        pts(1)%x = 10
+        pts(1)%y = 20
+        pts(2)%x = 30
+        pts(2)%y = 40
+        PRINT *, 'LEVEL 50:', pts(1)%x, pts(1)%y, pts(2)%x, pts(2)%y
+    END SUBROUTINE LEVEL50
 
 ! LEVEL49: Power operator (**) inside a boolean comparison (IF and assignment)
     SUBROUTINE LEVEL49()

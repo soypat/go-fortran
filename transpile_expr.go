@@ -158,7 +158,9 @@ func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Ex
 	}
 	srcType := sourceType.TypeToken()
 	targetType := target.TypeToken()
-	if srcType == targetType || targetType == f90token.FloatLit {
+	if srcType == targetType || targetType == f90token.FloatLit ||
+		// Derived types: field type unknown, pass through without conversion
+		srcType == f90token.TYPE || targetType == f90token.TYPE {
 		return expr
 	}
 	// Special case: converting real to complex requires complex(real, 0)
@@ -284,6 +286,9 @@ func (tg *ToGo) transformComponentAccess(vitgt *Varinfo, e *f90.ComponentAccess)
 	var baseVinfo *Varinfo
 	if ident, ok := e.Base.(*f90.Identifier); ok {
 		baseVinfo = tg.repl.Var(ident.Value)
+	} else if call, ok := e.Base.(*f90.CallExpr); ok {
+		// Array element access like vmf_array(idx)%field — look up the array variable
+		baseVinfo = tg.repl.Var(call.Name)
 	}
 
 	// Transform the base expression using the base variable info

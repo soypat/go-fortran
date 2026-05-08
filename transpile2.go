@@ -405,7 +405,10 @@ func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Ex
 	}
 
 	// Get element type for non-CHARACTER arrays
-	elemType := tg.baseGotype(typ.TypeToken(), tg.resolveKind(typ))
+	elemType, err := tg.varGoType(typ)
+	if err != nil {
+		return nil, err
+	}
 	expr := &ast.CallExpr{
 		Fun: &ast.IndexExpr{
 			X:     _astFnNewArray,
@@ -414,6 +417,20 @@ func (tg *ToGo) makeArrayInitializer(typ *Varinfo, initializer ast.Expr) (ast.Ex
 		Args: args,
 	}
 	return expr, nil
+}
+
+func (tg *ToGo) varGoType(vi *Varinfo) (elemType ast.Expr, err error) {
+	tok := vi.TypeToken()
+	switch tok {
+	case f90token.TYPE:
+		if vi.decl.Type.Name == "" {
+			return nil, tg.makeErrWithPos(vi.decl.Position, "derived TYPE array without type name")
+		}
+		elemType = ast.NewIdent(vi.decl.Type.Name)
+	default:
+		elemType = tg.baseGotype(vi.TypeToken(), tg.resolveKind(vi))
+	}
+	return elemType, nil
 }
 
 func (tg *ToGo) transformImplicitTypeDeclarations(dst []ast.Stmt) (_ []ast.Stmt, err error) {
@@ -522,10 +539,14 @@ func (tg *ToGo) transformTypeDeclEntity(ent *f90.DeclEntity) (spec *ast.ValueSpe
 		initExpr, err = tg.makeArrayInitializer(vi, ast.NewIdent("nil"))
 	case isArray && isAlloc:
 		spec.Type = nil // Cleaner.
+		elemType, err := tg.varGoType(vi)
+		if err != nil {
+			return nil, err
+		}
 		initExpr = &ast.CallExpr{
 			Fun: ast.NewIdent("new"),
 			Args: []ast.Expr{
-				&ast.IndexExpr{X: _astTypeArray, Index: tg.baseGotype(vi.TypeToken(), tg.resolveKind(vi))},
+				&ast.IndexExpr{X: _astTypeArray, Index: elemType},
 			},
 		}
 	}
@@ -902,8 +923,12 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 	case *f90.ComponentAccess:
 		// Component access: p%age = 30 → p.age = 30
 		// Get the base variable for type info
-		if ident, ok := tgt.Base.(*f90.Identifier); ok {
-			targetVinfo = tg.repl.Var(ident.Value)
+		switch base := tgt.Base.(type) {
+		case *f90.Identifier:
+			targetVinfo = tg.repl.Var(base.Value)
+		case *f90.CallExpr:
+			// Array element: pts(1)%x = 1
+			targetVinfo = tg.repl.Var(base.Name)
 		}
 	default:
 		err = tg.makeErr(tgt, "unknown target expression in assignment")

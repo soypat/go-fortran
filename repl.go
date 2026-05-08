@@ -444,6 +444,21 @@ func (repl *REPL) Eval(dst *Varinfo, expr f90.Expression) (err error) {
 		}
 	case *f90.ArrayConstructor:
 		err = repl.evalArrayConstructor(dst, e)
+	case *f90.ComponentAccess:
+		// Component access: var%field — infer type from base variable (field type unknown)
+		var baseName string
+		switch b := e.Base.(type) {
+		case *f90.Identifier:
+			baseName = b.Value
+		case *f90.CallExpr:
+			baseName = b.Name
+		}
+		if vi := repl.Var(baseName); vi != nil {
+			dst.decl = vi.decl
+			dst.val.tok = vi.TypeToken()
+		} else {
+			err = fmt.Errorf("component access base not found: %s", baseName)
+		}
 	default:
 		err = fmt.Errorf("unsupported expression: %T", expr)
 	}
