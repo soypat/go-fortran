@@ -6,8 +6,10 @@
 //
 // Flags:
 //
-//	-I dir    Add directory to include search path (can be repeated)
-//	-o file   Write output to file (default: stdout)
+//	-I dir         Add directory to include search path (can be repeated)
+//	-o file        Write output to file (default: stdout)
+//	-ccomments     Convert Fortran 77 fixed-form column-1 C/c/* comments to ! style
+//	-crlf          Normalize \r\n line endings to \n
 //
 // The tool reads a Fortran source file and replaces all INCLUDE statements
 // with the contents of the included files. Nested INCLUDEs are handled
@@ -15,7 +17,7 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -39,6 +41,8 @@ func (i *includePaths) Set(value string) error {
 var (
 	flagIncludePaths includePaths
 	flagOutput       = flag.String("o", "", "write output to file (default: stdout)")
+	flagCComments    = flag.Bool("ccomments", false, "convert Fortran 77 C/c/* in column 1 to ! comments")
+	flagCRLF         = flag.Bool("crlf", false, "normalize \\r\\n line endings to \\n")
 )
 
 // includeRe matches INCLUDE 'filename' or INCLUDE "filename" (case-insensitive)
@@ -95,28 +99,45 @@ func processFile(filename string, includeStack map[string]bool) (string, error) 
 		return "", fmt.Errorf("circular include detected: %s", filename)
 	}
 	includeStack[absPath] = true
-	defer delete(includeStack, absPath) // Remove from stack after processing
+	defer delete(includeStack, absPath)
 
-	file, err := os.Open(filename)
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+
+	if *flagCRLF {
+		data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+		data = bytes.ReplaceAll(data, []byte("\r"), []byte("\n"))
+	}
 
 	baseDir := filepath.Dir(absPath)
 	var result strings.Builder
-	scanner := bufio.NewScanner(file)
 
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
+	// Split on \n; each element may still carry a trailing \r for CRLF files.
+	rawLines := bytes.Split(data, []byte("\n"))
+	for i, rawLine := range rawLines {
+		isLast := i == len(rawLines)-1
 
-		if match := includeRe.FindStringSubmatch(line); match != nil {
+		// Detect and strip trailing \r so transforms work on clean content.
+		hasCR := len(rawLine) > 0 && rawLine[len(rawLine)-1] == '\r'
+		line := rawLine
+		if hasCR {
+			line = rawLine[:len(rawLine)-1]
+		}
+
+		// Convert Fortran 77 fixed-form column-1 comments (C/c/*) to ! style.
+		if *flagCComments && len(line) > 0 && (line[0] == 'C' || line[0] == 'c' || line[0] == '*') {
+			line = append([]byte{'!'}, line[1:]...)
+		}
+
+		lineStr := string(line)
+
+		if match := includeRe.FindStringSubmatch(lineStr); match != nil {
 			includeFile := match[1]
 			includePath, err := findIncludeFile(includeFile, baseDir)
 			if err != nil {
-				return "", fmt.Errorf("%s:%d: %w", filename, lineNum, err)
+				return "", fmt.Errorf("%s:%d: %w", filename, i+1, err)
 			}
 
 			// Recursively process the included file
@@ -126,13 +147,15 @@ func processFile(filename string, includeStack map[string]bool) (string, error) 
 			}
 			result.WriteString(content)
 		} else {
-			result.WriteString(line)
-			result.WriteString("\n")
+			result.WriteString(lineStr)
+			if !isLast {
+				if hasCR && !*flagCRLF {
+					result.WriteString("\r\n")
+				} else {
+					result.WriteString("\n")
+				}
+			}
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("reading %s: %w", filename, err)
 	}
 
 	return result.String(), nil

@@ -201,5 +201,12 @@ func helperFatalErrors(t transpileLogger, p *fortran.Parser90, msg string) {
 	if len(errs) == 0 {
 		return
 	}
-	t.Fatalf("%s: %v", msg, errs)
+	var sb strings.Builder
+	sb.WriteString(msg)
+	sb.WriteByte(':')
+	for _, e := range errs {
+		sb.WriteByte('\n')
+		sb.WriteString(e.Error())
+	}
+	t.Fatal(sb.String())
 }
