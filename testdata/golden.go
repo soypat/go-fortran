@@ -59,6 +59,7 @@ func GOLDEN() {
 	LEVEL49()
 	LEVEL50()
 	LEVEL51()
+	LEVEL52()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1564,6 +1565,19 @@ func LEVEL51() {
 	tmp.MoveAlloc(arr)
 	fenv.Print("LEVEL 51:", arr.At(1), arr.At(2), arr.At(3))
 }
+func LEVEL52() {
+	n := intrinsic.UnallocatedPtr[int32](1)
+	l52com.Reset()
+	intrinsic.DeclareCommon(&n, &l52com)
+	n.Set(0, 1)
+	fenv.Open(fortio.OpenSpec{UNIT: 52, FILE: "test_common_read.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 52, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1})}, 42)
+	fenv.Close(fortio.CloseSpec{UNIT: 52})
+	fenv.Open(fortio.OpenSpec{UNIT: 52, FILE: "test_common_read.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
+	fenv.ReadWithSpec(fortio.IOSpec{UNIT: 52, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1})}, n.AtPtr(1))
+	fenv.Close(fortio.CloseSpec{UNIT: 52})
+	fenv.Print("LEVEL 52:", n.At(1))
+}
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")
 }
@@ -1663,5 +1677,6 @@ func BLKDECL() {
 var fenv = fortio.NewEnvironment()
 var blk = intrinsic.NewCommonBlock("blk", 12)
 var holdrt = intrinsic.NewCommonBlock("holdrt", 3884)
+var l52com = intrinsic.NewCommonBlock("l52com", 4)
 var shared = intrinsic.NewCommonBlock("shared", 12)
 var stats = intrinsic.NewCommonBlock("stats", 416)

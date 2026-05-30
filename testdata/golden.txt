@@ -167,4 +167,5 @@ LEVEL 41: SUCCESS
  A**2 <= B**2
  LEVEL 50:          10          20          30          40
  LEVEL 51:          10          20          30
+ LEVEL 52:          42
 STOP 0

@@ -54,6 +54,7 @@
       CALL LEVEL49()
       CALL LEVEL50()
       CALL LEVEL51()
+      CALL LEVEL52()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1199,6 +1200,20 @@
         CALL MOVE_ALLOC(tmp, arr)
         PRINT *, 'LEVEL 51:', arr(1), arr(2), arr(3)
     END SUBROUTINE LEVEL51
+
+! LEVEL52: READ into COMMON block scalar variable
+      SUBROUTINE LEVEL52()
+          INTEGER :: n
+          COMMON /L52COM/ n
+          n = 0
+          OPEN(UNIT=52, FILE='test_common_read.txt', STATUS='REPLACE', ACTION='WRITE')
+          WRITE(52, '(I5)') 42
+          CLOSE(52)
+          OPEN(UNIT=52, FILE='test_common_read.txt', STATUS='OLD', ACTION='READ')
+          READ(52, '(I5)') n
+          CLOSE(52)
+          PRINT *, 'LEVEL 52:', n
+      END SUBROUTINE LEVEL52
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

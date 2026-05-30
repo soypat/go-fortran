@@ -2743,7 +2743,7 @@ func (tg *ToGo) transformIO(dst []ast.Stmt, specSel, fenvSel *ast.SelectorExpr, 
 			return nil, err
 		}
 		if refInputs {
-			arg = &ast.UnaryExpr{Op: token.AND, X: arg}
+			arg = wrapPointer(arg)
 		}
 		args = append(args, arg)
 	}

@@ -307,6 +307,11 @@ func (p PointerTo[T]) DataAt(idx int) *T {
 	return p.View(idx, idx+1).Data()
 }
 
+// AtPtr returns a pointer to the idx'th element (1-indexed), matching Array's interface.
+func (p PointerTo[T]) AtPtr(idx int) *T {
+	return &p.Slice()[idx-1]
+}
+
 func (p PointerTo[T]) DataUnsafe() unsafe.Pointer {
 	return p.v
 }
