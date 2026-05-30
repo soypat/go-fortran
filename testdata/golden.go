@@ -62,6 +62,7 @@ func GOLDEN() {
 	LEVEL52()
 	LEVEL53()
 	LEVEL54()
+	LEVEL55()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1586,10 +1587,10 @@ func LEVEL53() {
 		_ = n
 	)
 	n = 7
-	L53HELPER(n)
+	L53HELPER(&n)
 }
-func L53HELPER(x int32) {
-	fenv.Print("LEVEL 53:", x)
+func L53HELPER(x *int32) {
+	fenv.Print("LEVEL 53:", *x)
 }
 func LEVEL54() {
 	a := intrinsic.UnallocatedPtr[int32](1)
@@ -1698,6 +1699,21 @@ func BLKDECL() {
 	intrinsic.Equivalence(&d1k, delta)
 	fenv.Print("BLKDECL: Equiv delta(1..3)=", delta.At(1), delta.At(2), delta.At(3))
 	fenv.Print("BLKDECL: Equiv d1k,d2k,d3k=", d1k.At(1), d2k.At(1), d3k.At(1))
+}
+func LEVEL55() {
+	var (
+		a    float32
+		b    float32
+		_, _ = a, b
+	)
+	a = 0.0
+	b = 0.0
+	SCALAROUT(intrinsic.ScalarRef(float32(1.0)), &a, &b)
+	fenv.Print("LEVEL55:", a, b)
+}
+func SCALAROUT(x *float32, y *float32, z *float32) {
+	*y = *x + 1.0
+	*z = *x + 2.0
 }
 
 var fenv = fortio.NewEnvironment()

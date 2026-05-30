@@ -15,13 +15,14 @@ import (
 )
 
 type ToGo struct {
-	repl                REPL
-	containedStack      []f90.Unit
-	source              string
-	sourceFile          io.ReaderAt
-	currentNode         f90.Node
-	globalCommon        string
-	commonBlocksReset   map[string]bool // tracks which COMMON blocks had Reset() emitted in current function
+	repl           REPL
+	containedStack []f90.Unit
+	source         string
+	sourceFile     io.ReaderAt
+	currentNode    f90.Node
+	globalCommon   string
+	// TODO(pato): remove this. instead we iterate over used COMMON blocks in program unit and reset them at start of program unit.
+	commonBlocksReset map[string]bool // tracks which COMMON blocks had Reset() emitted in current function
 }
 
 // findIOSpecifier finds a specifier by name in a []f90.IOSpecifier slice (case-insensitive).
@@ -200,10 +201,11 @@ func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 			continue // skip alternate return parameters (*)
 		}
 		tp := tg.goType(vi)
-		// For INTENT(OUT) or INTENT(INOUT) non-array scalars, use pointer type
+		// Fortran passes all arguments by reference. Use pointer for non-array scalars
+		// unless explicitly INTENT(IN) (read-only, by-value is semantically equivalent).
 		intent := vi.decl.Type.Intent()
 		isArray := vi.IsArray()
-		if !isArray && (intent == f90.IntentOut || intent == f90.IntentInOut) {
+		if !isArray && intent != f90.IntentIn {
 			tp = &ast.StarExpr{X: tp}
 		}
 		dst = append(dst, &ast.Field{
@@ -226,14 +228,16 @@ func (tg *ToGo) getReturnParam() *ast.Field {
 
 func (tg *ToGo) astLabel(f90Label string) *ast.Ident { return ast.NewIdent("label" + f90Label) }
 
-// isGoPointer returns true if vi is a scalar INTENT(OUT/INOUT) parameter
-// that becomes a Go pointer (*T) and needs dereferencing when used as a value.
+// isGoPointer returns true if vi is a scalar parameter that becomes a Go pointer (*T)
+// and needs dereferencing when used as a value. Fortran passes all arguments by
+// reference; we use *T for every scalar parameter except INTENT(IN) (read-only).
 // This is distinct from Varinfo.IsPointer() which handles Fortran-level pointers.
 func (tg *ToGo) isGoPointer(vi *Varinfo) bool {
 	if vi == nil || vi.decl == nil {
 		return false
 	}
-	return !vi.IsArray() && vi.flags.HasAny(VFlagIntentOut)
+	intent := vi.decl.Type.Intent()
+	return !vi.IsArray() && vi.flags.HasAny(VFlagParameter) && intent != f90.IntentIn
 }
 
 func (tg *ToGo) transformStatements(dst []ast.Stmt, stmts []f90.Statement) (_ []ast.Stmt, err error) {
@@ -769,6 +773,7 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 	altLabels := make([]string, altSlotCount) // filled by *label args
 	altIdx := 0
 	paramIdx := 0
+	tmpCount := 0
 	callExpr := &ast.CallExpr{Fun: tg.astIdent(fninfo.name)}
 	for _, arg := range stmt.Args {
 		if ara, ok := arg.(*f90.AlternateReturnArg); ok {
@@ -789,8 +794,19 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 		}
 		if info != nil && info.decl != nil {
 			intent := info.decl.Type.Intent()
-			if !info.IsArray() && (intent == f90.IntentOut || intent == f90.IntentInOut) {
-				goexpr = wrapPointer(goexpr)
+			if !info.IsArray() && intent != f90.IntentIn {
+				if isGoAddressable(goexpr) {
+					goexpr = wrapPointer(goexpr)
+				} else {
+					// Fortran creates a temp for non-addressable args (literals, expressions).
+					// intrinsic.ScalarRef avoids goto-jumps-over-declaration issues.
+					tmpCount++ // used only to suppress unused-var warning on tmpCount
+					typedArg := &ast.CallExpr{Fun: tg.goType(info), Args: []ast.Expr{goexpr}}
+					goexpr = &ast.CallExpr{
+						Fun:  &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("ScalarRef")},
+						Args: []ast.Expr{typedArg},
+					}
+				}
 			}
 		}
 		callExpr.Args = append(callExpr.Args, goexpr)
@@ -906,6 +922,19 @@ func isArrayMethodCall(call *intrinsicCall) bool {
 	return (call.args[0].IsArray() || call.args[0].IsChar()) &&
 		len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' &&
 		!strings.Contains(name, "_") && !isAllCaps(name)
+}
+
+// isGoAddressable reports whether expr can have & applied to it in Go.
+// Variables and dereferenced pointers are addressable; literals and expressions are not.
+func isGoAddressable(expr ast.Expr) bool {
+	switch expr.(type) {
+	case *ast.Ident, *ast.StarExpr:
+		return true
+	case *ast.CallExpr:
+		// array.At(i) — wrapPointer converts this to .AtPtr(), handled separately
+		return false
+	}
+	return false
 }
 
 // wrapPointer converts .At() to .AtPtr() or adds & prefix for pointer passing.

@@ -159,6 +159,11 @@ func (q *ptrOff) SizeUnderlyingAlloc() int {
 	return q.ptr.LenBuffer() * q.ptr.SizeElement()
 }
 
+// ScalarRef returns a pointer to a copy of v. Used at Fortran call sites where
+// a non-addressable expression (literal, arithmetic result) is passed to a
+// by-reference scalar parameter with no INTENT(IN) declaration.
+func ScalarRef[T any](v T) *T { return &v }
+
 // Ptr creates a Pointer from a single element reference.
 // Used for passing scalar variables by reference to OUT/INOUT parameters.
 func Ptr[T any](v *T) PointerTo[T] {

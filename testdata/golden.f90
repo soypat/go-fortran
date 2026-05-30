@@ -57,6 +57,7 @@
       CALL LEVEL52()
       CALL LEVEL53()
       CALL LEVEL54()
+      CALL LEVEL55()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1327,5 +1328,20 @@
         PRINT *, 'BLKDECL: Equiv d1k,d2k,d3k=', d1k, d2k, d3k
       END SUBROUTINE BLKDECL
 
+
+! LEVEL55: scalar subroutine output args without INTENT declaration (pass-by-ref)
+      SUBROUTINE LEVEL55()
+        REAL A, B
+        A = 0.0
+        B = 0.0
+        CALL SCALAROUT(1.0, A, B)
+        PRINT *, 'LEVEL55:', A, B
+      END SUBROUTINE LEVEL55
+
+      SUBROUTINE SCALAROUT(X, Y, Z)
+        REAL X, Y, Z
+        Y = X + 1.0
+        Z = X + 2.0
+      END SUBROUTINE SCALAROUT
 
       END PROGRAM GOLDEN
