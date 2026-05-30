@@ -55,6 +55,7 @@
       CALL LEVEL50()
       CALL LEVEL51()
       CALL LEVEL52()
+      CALL LEVEL53()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1214,6 +1215,18 @@
           CLOSE(52)
           PRINT *, 'LEVEL 52:', n
       END SUBROUTINE LEVEL52
+
+! LEVEL53: Subroutine parameter names must match between signature and body
+      SUBROUTINE LEVEL53()
+          INTEGER :: N
+          N = 7
+          CALL L53HELPER(N)
+      END SUBROUTINE LEVEL53
+
+      SUBROUTINE L53HELPER(X)
+          INTEGER :: X
+          PRINT *, 'LEVEL 53:', X
+      END SUBROUTINE L53HELPER
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

@@ -206,7 +206,7 @@ func (tg *ToGo) getScopeParams(dst []*ast.Field) []*ast.Field {
 		}
 		dst = append(dst, &ast.Field{
 			Type:  tp,
-			Names: []*ast.Ident{tg.astIdent(vi.decl.Name)},
+			Names: []*ast.Ident{tg.astIdent(vi.Identifier())},
 		})
 	}
 	return dst

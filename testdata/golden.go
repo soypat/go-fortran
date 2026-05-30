@@ -60,6 +60,7 @@ func GOLDEN() {
 	LEVEL50()
 	LEVEL51()
 	LEVEL52()
+	LEVEL53()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1577,6 +1578,17 @@ func LEVEL52() {
 	fenv.ReadWithSpec(fortio.IOSpec{UNIT: 52, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1})}, n.AtPtr(1))
 	fenv.Close(fortio.CloseSpec{UNIT: 52})
 	fenv.Print("LEVEL 52:", n.At(1))
+}
+func LEVEL53() {
+	var (
+		n int32
+		_ = n
+	)
+	n = 7
+	L53HELPER(n)
+}
+func L53HELPER(x int32) {
+	fenv.Print("LEVEL 53:", x)
 }
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")
