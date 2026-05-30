@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/soypat/go-fortran/intrinsic"
@@ -142,7 +143,7 @@ func (env *Environment) Open(spec OpenSpec) IOStat {
 		flag |= os.O_CREATE
 	}
 
-	f, err := os.OpenFile(spec.FILE, flag, 0644)
+	f, err := os.OpenFile(strings.TrimRight(spec.FILE, " "), flag, 0644)
 	if err != nil {
 		stat := env.mapError(err)
 		if spec.IOSTAT != nil {

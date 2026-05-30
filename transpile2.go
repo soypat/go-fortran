@@ -15,12 +15,13 @@ import (
 )
 
 type ToGo struct {
-	repl           REPL
-	containedStack []f90.Unit
-	source         string
-	sourceFile     io.ReaderAt
-	currentNode    f90.Node
-	globalCommon   string
+	repl                REPL
+	containedStack      []f90.Unit
+	source              string
+	sourceFile          io.ReaderAt
+	currentNode         f90.Node
+	globalCommon        string
+	commonBlocksReset   map[string]bool // tracks which COMMON blocks had Reset() emitted in current function
 }
 
 // findIOSpecifier finds a specifier by name in a []f90.IOSpecifier slice (case-insensitive).
@@ -133,6 +134,7 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 				},
 				Body: &ast.BlockStmt{},
 			}
+			tg.commonBlocksReset = make(map[string]bool)
 			fn.Body.List, err = tg.transformImplicitTypeDeclarations(nil)
 			if err != nil {
 				return dst, fmt.Errorf("transforming implicit type declarations of %s: %w", unit.Name, err)
@@ -2542,15 +2544,20 @@ func (tg *ToGo) transformCommonStmt(dst []ast.Stmt, stmt *f90.CommonStmt) (_ []a
 		})
 	}
 
-	// Generate: BLK.Reset()
-	dst = append(dst, &ast.ExprStmt{
-		X: &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X:   blockIdent,
-				Sel: ast.NewIdent("Reset"),
+	// Generate: BLK.Reset() — only once per block per function.
+	// Multiple unnamed COMMON statements in Fortran contribute to a single contiguous block;
+	// resetting on each statement would re-map later variables to offset 0, overlapping earlier ones.
+	if !tg.commonBlocksReset[blockName] {
+		dst = append(dst, &ast.ExprStmt{
+			X: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   blockIdent,
+					Sel: ast.NewIdent("Reset"),
+				},
 			},
-		},
-	})
+		})
+		tg.commonBlocksReset[blockName] = true
+	}
 
 	// Append all DeclareCommon calls
 	dst = append(dst, declareStmts...)

@@ -56,6 +56,7 @@
       CALL LEVEL51()
       CALL LEVEL52()
       CALL LEVEL53()
+      CALL LEVEL54()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1227,6 +1228,19 @@
           INTEGER :: X
           PRINT *, 'LEVEL 53:', X
       END SUBROUTINE L53HELPER
+
+! LEVEL54: Multiple unnamed COMMON statements must map to contiguous memory (no overlap)
+      SUBROUTINE LEVEL54()
+          INTEGER :: a
+          REAL :: x
+          INTEGER :: b
+          COMMON a, x
+          COMMON b
+          a = 1
+          x = 2.5
+          b = 3
+          PRINT *, 'LEVEL 54:', a, x, b
+      END SUBROUTINE LEVEL54
 
 ! ==============================================================================
 ! Helper Subroutines and Functions

@@ -61,6 +61,7 @@ func GOLDEN() {
 	LEVEL51()
 	LEVEL52()
 	LEVEL53()
+	LEVEL54()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1590,6 +1591,19 @@ func LEVEL53() {
 func L53HELPER(x int32) {
 	fenv.Print("LEVEL 53:", x)
 }
+func LEVEL54() {
+	a := intrinsic.UnallocatedPtr[int32](1)
+	x := intrinsic.UnallocatedPtr[float32](1)
+	Global_Common.Reset()
+	intrinsic.DeclareCommon(&a, &Global_Common)
+	intrinsic.DeclareCommon(&x, &Global_Common)
+	b := intrinsic.UnallocatedPtr[int32](1)
+	intrinsic.DeclareCommon(&b, &Global_Common)
+	a.Set(1, 1)
+	x.Set(2.5, 1)
+	b.Set(3, 1)
+	fenv.Print("LEVEL 54:", a.At(1), x.At(1), b.At(1))
+}
 func SIMPLE_SUB() {
 	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")
 }
@@ -1687,6 +1701,7 @@ func BLKDECL() {
 }
 
 var fenv = fortio.NewEnvironment()
+var Global_Common = intrinsic.NewCommonBlock("Global_Common", 12)
 var blk = intrinsic.NewCommonBlock("blk", 12)
 var holdrt = intrinsic.NewCommonBlock("holdrt", 3884)
 var l52com = intrinsic.NewCommonBlock("l52com", 4)
