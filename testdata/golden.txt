@@ -174,4 +174,7 @@ LEVEL 41: SUCCESS
  LEVEL56:   6.00000000    
  LEVEL57:   20.0000000       26.0000000       32.0000000    
  LEVEL58:item A              
+ LEVEL59: F
+ LEVEL60:   1.50000000    
+ hello world!
 STOP 0

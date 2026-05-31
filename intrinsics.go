@@ -163,10 +163,11 @@ func (tg *ToGo) intrinsicExprV2(vitgt *Varinfo, fn *intrinsicFn, call *intrinsic
 				// Go method returns int, Fortran expects INTEGER (int32)
 				return &ast.CallExpr{Fun: ast.NewIdent("int32"), Args: []ast.Expr{methodCall}}, resultType, nil
 			case f90token.CHARACTER:
-				// Go method returns CharacterArray, convert to string via .String()
+				// Go method returns CharacterArray, convert to string via .String().
+				// Return _tgtStringLit so wrapConversion doesn't add a second .String().
 				return &ast.CallExpr{
 					Fun: &ast.SelectorExpr{X: methodCall, Sel: ast.NewIdent("String")},
-				}, resultType, nil
+				}, _tgtStringLit, nil
 			}
 		}
 		return methodCall, resultType, nil

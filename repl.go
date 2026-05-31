@@ -445,7 +445,9 @@ func (repl *REPL) Eval(dst *Varinfo, expr f90.Expression) (err error) {
 	case *f90.ArrayConstructor:
 		err = repl.evalArrayConstructor(dst, e)
 	case *f90.ComponentAccess:
-		// Component access: var%field — infer type from base variable (field type unknown)
+		// Component access: var%field — field type unknown, use base type as approximation.
+		// Do NOT set dst.decl: leaving it nil allows unary/binary ops (prepAssignment) to
+		// override the type without a spurious TYPE!=LOGICAL mismatch error.
 		var baseName string
 		switch b := e.Base.(type) {
 		case *f90.Identifier:
@@ -454,7 +456,6 @@ func (repl *REPL) Eval(dst *Varinfo, expr f90.Expression) (err error) {
 			baseName = b.Name
 		}
 		if vi := repl.Var(baseName); vi != nil {
-			dst.decl = vi.decl
 			dst.val.tok = vi.TypeToken()
 		} else {
 			err = fmt.Errorf("component access base not found: %s", baseName)

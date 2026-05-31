@@ -210,10 +210,8 @@ func (ch CharacterArray) LenTrim() int {
 // Corresponds to Fortran: TRIM(str)
 func (ch CharacterArray) Trim() CharacterArray {
 	lenTrim := ch.LenTrim()
-	result := NewCharacterArray(cap(ch.data))
-	n := copy(result.data[:cap(result.data)], ch.data[:lenTrim])
-	result.setToSpace(n)
-	// Rest is already spaces from NewCharacterArray
+	result := NewCharacterArray(lenTrim)
+	copy(result.data[:cap(result.data)], ch.data[:lenTrim])
 	return result
 }
 

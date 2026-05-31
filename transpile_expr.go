@@ -64,7 +64,8 @@ func (tg *ToGo) transformExpression(vitgt *Varinfo, expr f90.Expression) (result
 		result, resultType, err = tg.transformFunctionCall(vitgt, e)
 	case *f90.BinaryExpr:
 		if e.Op == f90token.StringConcat {
-			err = tg.makeErrAtStmt("string concat special handling needed")
+			result, err = tg.transformStringConcatExpr(e)
+			resultType = _tgtStringLit
 		} else {
 			result, resultType, err = tg.transformBinaryExpr(vitgt, e)
 		}
@@ -304,18 +305,28 @@ func (tg *ToGo) transformComponentAccess(vitgt *Varinfo, e *f90.ComponentAccess)
 	}
 
 	// Apply subscripts for array component access: obj%v(i) → obj.v.At(i)
+	// If all args are full-range (:), the whole array is referenced — no subscript needed.
 	if len(e.Args) > 0 {
-		var argExprs []ast.Expr
+		allFullRange := true
 		for _, arg := range e.Args {
-			argExpr, _, err := tg.transformExpression(_tgtInt, arg)
-			if err != nil {
-				return nil, nil, err
+			if r, ok := arg.(*f90.RangeExpr); !ok || r.Start != nil || r.End != nil {
+				allFullRange = false
+				break
 			}
-			argExprs = append(argExprs, argExpr)
 		}
-		result = &ast.CallExpr{
-			Fun:  &ast.SelectorExpr{X: result, Sel: ast.NewIdent("At")},
-			Args: argExprs,
+		if !allFullRange {
+			var argExprs []ast.Expr
+			for _, arg := range e.Args {
+				argExpr, _, err := tg.transformExpression(_tgtInt, arg)
+				if err != nil {
+					return nil, nil, err
+				}
+				argExprs = append(argExprs, argExpr)
+			}
+			result = &ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: result, Sel: ast.NewIdent("At")},
+				Args: argExprs,
+			}
 		}
 	}
 

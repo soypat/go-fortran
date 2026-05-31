@@ -61,6 +61,10 @@
       CALL LEVEL56()
       CALL LEVEL57()
       CALL LEVEL58()
+      CALL LEVEL59()
+      CALL LEVEL60()
+      CALL LEVEL61()
+      CALL LEVEL62(42, 0)
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1376,6 +1380,47 @@
         res2 = MATMUL(mat, mat)
         PRINT *, 'LEVEL57:', res1(1), res1(2), res1(3)
       END SUBROUTINE LEVEL57
+
+! LEVEL62: PRESENT intrinsic for optional arguments
+      SUBROUTINE LEVEL62(x, y)
+          INTEGER, INTENT(IN) :: x
+          INTEGER, INTENT(OUT), OPTIONAL :: y
+          IF (PRESENT(y)) y = x * 2
+          PRINT *, 'LEVEL62:', x
+      END SUBROUTINE LEVEL62
+
+! LEVEL61: string concat in expression context (WRITE arg)
+      SUBROUTINE LEVEL61()
+          CHARACTER(LEN=10) :: s
+          s = 'world'
+          PRINT *, 'hello '//TRIM(s)//'!'
+      END SUBROUTINE LEVEL61
+
+! LEVEL60: ALLOCATE on derived-type component array field
+      SUBROUTINE LEVEL60()
+          TYPE :: mesh_t
+              REAL, ALLOCATABLE :: x(:,:)
+          END TYPE mesh_t
+          TYPE(mesh_t) :: objs(2)
+          INTEGER :: i, j
+          i = 3
+          j = 4
+          ALLOCATE(objs(1)%x(i,j))
+          objs(1)%x(1,1) = 1.5
+          PRINT *, 'LEVEL60:', objs(1)%x(1,1)
+          DEALLOCATE(objs(1)%x)
+      END SUBROUTINE LEVEL60
+
+! LEVEL59: LOGICAL field of derived type assigned via .NOT. component access
+      SUBROUTINE LEVEL59()
+          TYPE :: flags_t
+              LOGICAL :: active
+          END TYPE flags_t
+          TYPE(flags_t) :: obj
+          obj%active = .TRUE.
+          obj%active = .NOT.obj%active
+          PRINT *, 'LEVEL59:', obj%active
+      END SUBROUTINE LEVEL59
 
 ! LEVEL58: string concat assignment to derived-type component field
       SUBROUTINE LEVEL58()

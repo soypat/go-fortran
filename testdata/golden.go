@@ -66,6 +66,9 @@ func GOLDEN() {
 	LEVEL56()
 	LEVEL57()
 	LEVEL58()
+	LEVEL59()
+	LEVEL60()
+	LEVEL61()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1760,6 +1763,46 @@ func LEVEL57() {
 	res1 = intrinsic.MATMUL(mat, vec)
 	res2 = intrinsic.MATMUL(mat, mat)
 	fenv.Print("LEVEL57:", res1.At(1), res1.At(2), res1.At(3))
+}
+func LEVEL61() {
+	var (
+		s intrinsic.CharacterArray = intrinsic.NewCharacterArray(10)
+		_                          = s
+	)
+	s.SetFromString("world")
+	fenv.Print("hello " + s.Trim().String() + "!")
+}
+func LEVEL60() {
+	type mesh_t struct {
+		x *intrinsic.Array[float32]
+	}
+	var (
+		objs = intrinsic.NewArray[mesh_t](nil, 2)
+		_    = objs
+	)
+	var (
+		i    int32
+		j    int32
+		_, _ = i, j
+	)
+	i = 3
+	j = 4
+	objs.AtPtr(1).x = intrinsic.NewArray[float32](nil, int(i), int(j))
+	objs.AtPtr(1).x.Set(1.5, 1, 1)
+	fenv.Print("LEVEL60:", objs.AtPtr(1).x.At(1, 1))
+	objs.AtPtr(1).x.Deallocate()
+}
+func LEVEL59() {
+	type flags_t struct {
+		active bool
+	}
+	var (
+		obj flags_t
+		_   = obj
+	)
+	obj.active = true
+	obj.active = !obj.active
+	fenv.Print("LEVEL59:", obj.active)
 }
 func LEVEL58() {
 	type named_t struct {

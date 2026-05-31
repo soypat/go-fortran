@@ -160,6 +160,15 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 			}
 			fallthrough
 		case f90token.MODULE:
+			// Register derived types defined in the module body so they are available
+			// when transforming contained subroutines.
+			for _, stmt := range unit.Body {
+				if dt, ok := stmt.(*f90.DerivedTypeStmt); ok {
+					if _, err2 := tg.transformDerivedType(nil, dt); err2 != nil {
+						return dst, err2
+					}
+				}
+			}
 			// CONTAINS: expose module-level vars to contained subroutines via host association.
 			pop := tg.repl.PushHostScope(data.vars)
 			dst, err = tg.TransformUnits(dst, unit.Contains...)
@@ -562,6 +571,17 @@ func (tg *ToGo) initDerivedTypeArrayFields(dst []ast.Stmt, objExpr ast.Expr, typ
 				}
 				continue
 			}
+			// Skip ALLOCATABLE fields (deferred-shape, upper bounds all nil): user must ALLOCATE them.
+			allDeferred := true
+			for _, bound := range arraySpec.Bounds {
+				if bound.Upper != nil {
+					allDeferred = false
+					break
+				}
+			}
+			if allDeferred {
+				continue
+			}
 			// Generate: obj.field = intrinsic.NewArray[T](nil, dims...)
 			baseType := tg.baseGotype(comp.Type.Token, 0)
 			var dimArgs []ast.Expr
@@ -742,52 +762,142 @@ func (tg *ToGo) componentGoType(ts *f90.TypeSpec, ent *f90.DeclEntity, attrs []f
 
 func (tg *ToGo) transformAllocateStmt(dst []ast.Stmt, stmt *f90.AllocateStmt) (_ []ast.Stmt, err error) {
 	for _, obj := range stmt.Objects {
-		arrRef, ok := obj.(*f90.CallExpr)
-		if !ok {
-			return dst, tg.makeErr(stmt, "ALLOCATE requires array reference")
-		}
-		vi := tg.repl.Var(arrRef.Name)
-		if vi == nil {
-			return dst, tg.makeErr(stmt, "unknown variable: "+arrRef.Name)
-		}
-		var args []ast.Expr
-		for _, sub := range arrRef.Args {
-			arg, _, err := tg.transformExpression(_tgtInt, sub)
+		switch arrRef := obj.(type) {
+		case *f90.CallExpr:
+			vi := tg.repl.Var(arrRef.Name)
+			if vi == nil {
+				return dst, tg.makeErr(stmt, "unknown variable: "+arrRef.Name)
+			}
+			var args []ast.Expr
+			for _, sub := range arrRef.Args {
+				arg, _, err := tg.transformExpression(_tgtInt, sub)
+				if err != nil {
+					return dst, err
+				}
+				args = append(args, arg)
+			}
+			// Generate: varname.Allocate(dims...)
+			call := &ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: tg.astVarExpr(vi), Sel: ast.NewIdent("Allocate")},
+				Args: args,
+			}
+			dst = append(dst, &ast.ExprStmt{X: call})
+		case *f90.ComponentAccess:
+			dst, err = tg.transformAllocateComponent(dst, stmt, arrRef)
 			if err != nil {
 				return dst, err
 			}
-			args = append(args, arg)
+		default:
+			return dst, tg.makeErr(stmt, "ALLOCATE requires array reference")
 		}
-		// Generate: varname.Allocate(dims...)
-		call := &ast.CallExpr{
-			Fun:  &ast.SelectorExpr{X: tg.astVarExpr(vi), Sel: ast.NewIdent("Allocate")},
-			Args: args,
-		}
-		dst = append(dst, &ast.ExprStmt{X: call})
 	}
+	return dst, nil
+}
+
+// transformAllocateComponent handles ALLOCATE(obj%field(dims...)).
+// Generates: obj.field = intrinsic.NewArray[T](nil, dims...)
+func (tg *ToGo) transformAllocateComponent(dst []ast.Stmt, stmt *f90.AllocateStmt, obj *f90.ComponentAccess) (_ []ast.Stmt, err error) {
+	var baseVinfo *Varinfo
+	switch b := obj.Base.(type) {
+	case *f90.Identifier:
+		baseVinfo = tg.repl.Var(b.Value)
+	case *f90.CallExpr:
+		baseVinfo = tg.repl.Var(b.Name)
+	}
+	if baseVinfo == nil {
+		return dst, tg.makeErr(stmt, "ALLOCATE: component base variable not found")
+	}
+	baseExpr, _, err := tg.transformExpression(baseVinfo, obj.Base)
+	if err != nil {
+		return dst, err
+	}
+	lhs := &ast.SelectorExpr{X: baseExpr, Sel: ast.NewIdent(obj.Component)}
+
+	// Find component type in derived type definition
+	typeName := strings.ToLower(baseVinfo.decl.Type.Name)
+	typeDef := tg.derivedTypes[typeName]
+	if typeDef == nil {
+		return dst, tg.makeErr(stmt, "ALLOCATE: derived type not found: "+typeName)
+	}
+	var compTok f90token.Token
+	var compKind int
+	for _, comp := range typeDef.Components {
+		for _, ent := range comp.Components {
+			if strings.EqualFold(ent.Name, obj.Component) {
+				compTok = comp.Type.Token
+				if k := comp.Type.Kind(); k != nil {
+					if lit, ok := k.(*f90.IntegerLiteral); ok {
+						compKind = int(lit.Value)
+					}
+				}
+			}
+		}
+	}
+	if compTok == 0 {
+		return dst, tg.makeErr(stmt, "ALLOCATE: field not found in type: "+obj.Component)
+	}
+
+	dimArgs := []ast.Expr{ast.NewIdent("nil")}
+	for _, arg := range obj.Args {
+		dimExpr, _, err := tg.transformExpression(_tgtInt, arg)
+		if err != nil {
+			return dst, err
+		}
+		dimArgs = append(dimArgs, dimExpr)
+	}
+	baseType := tg.baseGotype(compTok, compKind)
+	newCall := &ast.CallExpr{
+		Fun:  &ast.IndexExpr{X: _astFnNewArray, Index: baseType},
+		Args: dimArgs,
+	}
+	dst = append(dst, &ast.AssignStmt{
+		Tok: token.ASSIGN,
+		Lhs: []ast.Expr{lhs},
+		Rhs: []ast.Expr{newCall},
+	})
 	return dst, nil
 }
 
 func (tg *ToGo) transformDeallocateStmt(dst []ast.Stmt, stmt *f90.DeallocateStmt) (_ []ast.Stmt, err error) {
 	for _, obj := range stmt.Objects {
-		var varname string
+		var receiverExpr ast.Expr
 		switch e := obj.(type) {
 		case *f90.Identifier:
-			varname = e.Value
+			vi := tg.repl.Var(e.Value)
+			if vi == nil {
+				return dst, tg.makeErr(stmt, "DEALLOCATE identifier not found: "+e.Value)
+			}
+			receiverExpr = tg.astVarExpr(vi)
 		case *f90.CallExpr:
-			varname = e.Name
+			vi := tg.repl.Var(e.Name)
+			if vi == nil {
+				return dst, tg.makeErr(stmt, "DEALLOCATE identifier not found: "+e.Name)
+			}
+			receiverExpr = tg.astVarExpr(vi)
+		case *f90.ComponentAccess:
+			// DEALLOCATE(obj%field) → obj.field.Deallocate()
+			var baseVinfo *Varinfo
+			switch b := e.Base.(type) {
+			case *f90.Identifier:
+				baseVinfo = tg.repl.Var(b.Value)
+			case *f90.CallExpr:
+				baseVinfo = tg.repl.Var(b.Name)
+			}
+			if baseVinfo == nil {
+				return dst, tg.makeErr(stmt, "DEALLOCATE: component base not found")
+			}
+			baseExpr, _, err := tg.transformExpression(baseVinfo, e.Base)
+			if err != nil {
+				return dst, err
+			}
+			receiverExpr = &ast.SelectorExpr{X: baseExpr, Sel: ast.NewIdent(e.Component)}
 		default:
 			return dst, tg.makeErr(stmt, "DEALLOCATE requires variable")
 		}
-		vi := tg.repl.Var(varname)
-		if vi == nil {
-			return dst, tg.makeErr(stmt, "DEALLOCATE identifier not found: "+varname)
-		}
-		// Generate: varname.Deallocate()
-		call := &ast.CallExpr{
-			Fun: &ast.SelectorExpr{X: tg.astVarExpr(vi), Sel: ast.NewIdent("Deallocate")},
-		}
-		dst = append(dst, &ast.ExprStmt{X: call})
+		// Generate: receiver.Deallocate()
+		dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{X: receiverExpr, Sel: ast.NewIdent("Deallocate")},
+		}})
 	}
 	return dst, nil
 }
@@ -2299,6 +2409,34 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 }
 
 func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver ast.Expr, root *f90.BinaryExpr) (_ []ast.Stmt, err error) {
+	args, err := tg.buildStringConcatArgs(root)
+	if err != nil {
+		return dst, err
+	}
+	gstmt := &ast.ExprStmt{X: &ast.CallExpr{
+		Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("SetConcatString")},
+		Args: args,
+	}}
+	dst = append(dst, gstmt)
+	return dst, nil
+}
+
+// transformStringConcatExpr returns a Go string expression for a Fortran // chain.
+// Each operand is converted to a Go string; operands are joined with +.
+func (tg *ToGo) transformStringConcatExpr(root *f90.BinaryExpr) (ast.Expr, error) {
+	args, err := tg.buildStringConcatArgs(root)
+	if err != nil {
+		return nil, err
+	}
+	result := args[0]
+	for _, a := range args[1:] {
+		result = &ast.BinaryExpr{X: result, Op: token.ADD, Y: a}
+	}
+	return result, nil
+}
+
+// buildStringConcatArgs flattens a // chain and converts each operand to a Go string expression.
+func (tg *ToGo) buildStringConcatArgs(root *f90.BinaryExpr) ([]ast.Expr, error) {
 	// Flatten operands in left-to-right order (non-recursive)
 	var operands []f90.Expression
 	pending := []f90.Expression{root}
@@ -2314,7 +2452,6 @@ func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver ast.Expr, root *f
 		pending = append(pending, bin.Right, bin.Left)
 	}
 
-	// Transform operands
 	var args []ast.Expr
 	for _, op := range operands {
 		switch e := op.(type) {
@@ -2329,7 +2466,7 @@ func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver ast.Expr, root *f
 				if vi := tg.repl.Var(callExpr.Name); vi != nil && vi.decl.Type.Token == f90token.CHARACTER {
 					goexpr, aerr := tg.transformArrayRef(vi, callExpr)
 					if aerr != nil {
-						return dst, tg.makeErr(op, "string concat CHARACTER access: "+aerr.Error())
+						return nil, tg.makeErr(op, "string concat CHARACTER access: "+aerr.Error())
 					}
 					// Array element access (arr(i)) returns CharacterArray; call .String() to get Go string.
 					// Substring access (scalar str(s:e) or arr(i)(s:e)) already returns Go string.
@@ -2342,18 +2479,12 @@ func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver ast.Expr, root *f
 			}
 			goexpr, _, err := tg.transformExpression(_tgtStringLit, e)
 			if err != nil {
-				return dst, tg.makeErr(op, "unsupported expression for string concat: "+err.Error())
+				return nil, tg.makeErr(op, "unsupported expression for string concat: "+err.Error())
 			}
 			args = append(args, goexpr)
 		}
 	}
-
-	gstmt := &ast.ExprStmt{X: &ast.CallExpr{
-		Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("SetConcatString")},
-		Args: args,
-	}}
-	dst = append(dst, gstmt)
-	return dst, nil
+	return args, nil
 }
 
 // astMethodCall creates: receiver.methodName(args...)
