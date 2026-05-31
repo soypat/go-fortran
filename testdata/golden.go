@@ -64,6 +64,8 @@ func GOLDEN() {
 	LEVEL54()
 	LEVEL55()
 	LEVEL56()
+	LEVEL57()
+	LEVEL58()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1729,6 +1731,52 @@ func LEVEL56() {
 	obj.v.Set(2.0, 2)
 	obj.v.Set(3.0, 3)
 	fenv.Print("LEVEL56:", obj.v.At(1)+obj.v.At(2)+obj.v.At(3))
+}
+func LEVEL57() {
+	var (
+		mat = intrinsic.NewArray[float32](nil, 3, 3)
+		_   = mat
+	)
+	var (
+		vec  = intrinsic.NewArray[float32](nil, 3)
+		res1 = intrinsic.NewArray[float32](nil, 3)
+		_, _ = vec, res1
+	)
+	var (
+		res2 = intrinsic.NewArray[float32](nil, 3, 3)
+		_    = res2
+	)
+	var (
+		i    int32
+		j    int32
+		_, _ = i, j
+	)
+	for i = 1; i <= 3; i++ {
+		for j = 1; j <= 3; j++ {
+			mat.Set(float32(i+j), int(i), int(j))
+		}
+		vec.Set(float32(i), int(i))
+	}
+	res1 = intrinsic.MATMUL(mat, vec)
+	res2 = intrinsic.MATMUL(mat, mat)
+	fenv.Print("LEVEL57:", res1.At(1), res1.At(2), res1.At(3))
+}
+func LEVEL58() {
+	type named_t struct {
+		name *intrinsic.CharacterArray
+	}
+	var (
+		obj named_t
+		_   = obj
+	)
+	obj.name = intrinsic.NewCharacterArrayRef(20)
+	var (
+		prefix intrinsic.CharacterArray = intrinsic.NewCharacterArray(5)
+		_                               = prefix
+	)
+	prefix.SetFromString("item ")
+	obj.name.SetConcatString(prefix.String(), "A")
+	fenv.Print("LEVEL58:", obj.name)
 }
 
 var fenv = fortio.NewEnvironment()

@@ -540,7 +540,27 @@ func (tg *ToGo) initDerivedTypeArrayFields(dst []ast.Stmt, objExpr ast.Expr, typ
 				}
 			}
 			if arraySpec == nil || len(arraySpec.Bounds) == 0 {
-				continue // scalar field, no init needed
+				// Scalar CHARACTER field: init pointer with NewCharacterArrayRef
+				if comp.Type.Token == f90token.CHARACTER {
+					charlenExpr := ast.Expr(ast.NewIdent("1"))
+					if cl := comp.Type.Charlen(); cl != nil {
+						charlenExpr, _, err = tg.transformExpression(_tgtInt, cl)
+						if err != nil {
+							return dst, err
+						}
+					}
+					fieldSel := &ast.SelectorExpr{X: objExpr, Sel: ast.NewIdent(ent.Name)}
+					newCall := &ast.CallExpr{
+						Fun:  &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("NewCharacterArrayRef")},
+						Args: []ast.Expr{charlenExpr},
+					}
+					dst = append(dst, &ast.AssignStmt{
+						Tok: token.ASSIGN,
+						Lhs: []ast.Expr{fieldSel},
+						Rhs: []ast.Expr{newCall},
+					})
+				}
+				continue
 			}
 			// Generate: obj.field = intrinsic.NewArray[T](nil, dims...)
 			baseType := tg.baseGotype(comp.Type.Token, 0)
@@ -1097,7 +1117,16 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 			lhs = &ast.StarExpr{X: lhs}
 		}
 		if binop, ok := stmt.Value.(*f90.BinaryExpr); ok && binop.Op == f90token.StringConcat {
-			return tg.transformStringConcat(dst, targetVinfo._varname, binop)
+			return tg.transformStringConcat(dst, ast.NewIdent(sanitizeIdent(targetVinfo._varname)), binop)
+		}
+	}
+	if tgt, ok := stmt.Target.(*f90.ComponentAccess); ok {
+		if binop, ok := stmt.Value.(*f90.BinaryExpr); ok && binop.Op == f90token.StringConcat {
+			lhsExpr, _, err := tg.transformComponentAccess(nil, tgt)
+			if err != nil {
+				return dst, err
+			}
+			return tg.transformStringConcat(dst, lhsExpr, binop)
 		}
 	}
 	rhs, _, err := tg.transformExpression(targetVinfo, stmt.Value)
@@ -2269,7 +2298,7 @@ func (tg *ToGo) baseGotype(tok f90token.Token, kindValue int) (goType ast.Expr) 
 	return goType
 }
 
-func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, root *f90.BinaryExpr) (_ []ast.Stmt, err error) {
+func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver ast.Expr, root *f90.BinaryExpr) (_ []ast.Stmt, err error) {
 	// Flatten operands in left-to-right order (non-recursive)
 	var operands []f90.Expression
 	pending := []f90.Expression{root}
@@ -2319,7 +2348,10 @@ func (tg *ToGo) transformStringConcat(dst []ast.Stmt, receiver string, root *f90
 		}
 	}
 
-	gstmt := &ast.ExprStmt{X: tg.astMethodCall(receiver, "SetConcatString", args...)}
+	gstmt := &ast.ExprStmt{X: &ast.CallExpr{
+		Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("SetConcatString")},
+		Args: args,
+	}}
 	dst = append(dst, gstmt)
 	return dst, nil
 }

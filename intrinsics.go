@@ -624,6 +624,9 @@ var intrinsicsv2 = []intrinsicFn{
 	f90token.IntrinsicNORM2: {
 		calls: []intrinsicCall{makeCall("NORM2", nil, _tgtArrayGeneric)},
 	},
+	f90token.IntrinsicMATMUL: {
+		calls: []intrinsicCall{makeCall("MATMUL", nil, _tgtArrayGeneric, _tgtArrayGeneric)},
+	},
 	f90token.IntrinsicDOT_PRODUCT: {
 		calls: []intrinsicCall{makeCall("DOT_PRODUCT", nil, _tgtArray(f90token.FloatLit), _tgtArray(f90token.FloatLit))},
 	},

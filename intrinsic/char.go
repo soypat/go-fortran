@@ -31,6 +31,13 @@ func NewCharacterArray(length int) (ch CharacterArray) {
 	return ch
 }
 
+// NewCharacterArrayRef allocates and returns a pointer to a CharacterArray.
+// Used for initializing CHARACTER fields in derived type structs.
+func NewCharacterArrayRef(length int) *CharacterArray {
+	ch := NewCharacterArray(length)
+	return &ch
+}
+
 // NewCharacterArrayArray creates a multi-dimensional array of CHARACTER(LEN=charlen) strings.
 // Each CharacterArray element is pre-allocated with the specified character length.
 func NewCharacterArrayArray(charlen int, dims ...int) *Array[CharacterArray] {

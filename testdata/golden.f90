@@ -59,6 +59,8 @@
       CALL LEVEL54()
       CALL LEVEL55()
       CALL LEVEL56()
+      CALL LEVEL57()
+      CALL LEVEL58()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1357,5 +1359,34 @@
         obj%v(3) = 3.0
         PRINT *, 'LEVEL56:', obj%v(1) + obj%v(2) + obj%v(3)
       END SUBROUTINE LEVEL56
+
+! LEVEL57: MATMUL intrinsic - matrix-vector and matrix-matrix products
+      SUBROUTINE LEVEL57()
+        REAL, DIMENSION(3,3) :: mat
+        REAL, DIMENSION(3)   :: vec, res1
+        REAL, DIMENSION(3,3) :: res2
+        INTEGER :: i, j
+        DO i = 1, 3
+          DO j = 1, 3
+            mat(i,j) = REAL(i + j)
+          END DO
+          vec(i) = REAL(i)
+        END DO
+        res1 = MATMUL(mat, vec)
+        res2 = MATMUL(mat, mat)
+        PRINT *, 'LEVEL57:', res1(1), res1(2), res1(3)
+      END SUBROUTINE LEVEL57
+
+! LEVEL58: string concat assignment to derived-type component field
+      SUBROUTINE LEVEL58()
+          TYPE :: named_t
+              CHARACTER(LEN=20) :: name
+          END TYPE named_t
+          TYPE(named_t) :: obj
+          CHARACTER(LEN=5) :: prefix
+          prefix = 'item '
+          obj%name = prefix // 'A'
+          PRINT *, 'LEVEL58:', obj%name
+      END SUBROUTINE LEVEL58
 
       END PROGRAM GOLDEN

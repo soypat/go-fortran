@@ -721,6 +721,52 @@ func MINLOC[T arrNumeric](a *Array[T]) int32 {
 	return int32(idx + 1)
 }
 
+// MATMUL computes the matrix product of two arrays.
+// Corresponds to Fortran MATMUL(MATRIX_A, MATRIX_B) intrinsic.
+// Supports 2D×2D, 2D×1D, and 1D×2D cases using column-major layout.
+func MATMUL[T numeric](a, b *Array[T]) *Array[T] {
+	ndimA, ndimB := len(a.shape), len(b.shape)
+	switch {
+	case ndimA == 2 && ndimB == 2:
+		m, n := a.shape[0], b.shape[1]
+		result := NewArray[T](nil, m, n)
+		for j := 1; j <= n; j++ {
+			for i := 1; i <= m; i++ {
+				var sum T
+				for p := a.lower[1]; p <= a.upper[1]; p++ {
+					sum += a.At(i, p) * b.At(p, j)
+				}
+				result.Set(sum, i, j)
+			}
+		}
+		return result
+	case ndimA == 2 && ndimB == 1:
+		m := a.shape[0]
+		result := NewArray[T](nil, m)
+		for i := 1; i <= m; i++ {
+			var sum T
+			for p := a.lower[1]; p <= a.upper[1]; p++ {
+				sum += a.At(i, p) * b.At(p)
+			}
+			result.Set(sum, i)
+		}
+		return result
+	case ndimA == 1 && ndimB == 2:
+		n := b.shape[1]
+		result := NewArray[T](nil, n)
+		for j := 1; j <= n; j++ {
+			var sum T
+			for p := a.lower[0]; p <= a.upper[0]; p++ {
+				sum += a.At(p) * b.At(p, j)
+			}
+			result.Set(sum, j)
+		}
+		return result
+	default:
+		panic("MATMUL: invalid array dimensions")
+	}
+}
+
 // NORM2 returns the Euclidean norm of all elements. Corresponds to Fortran NORM2(array).
 func NORM2[T arrNumeric](a *Array[T]) T {
 	var sum float64

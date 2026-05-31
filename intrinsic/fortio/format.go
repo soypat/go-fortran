@@ -400,7 +400,10 @@ func fixExponent(dst []byte, start int) []byte {
 
 // isCharacterArray checks if val is an intrinsic.CharacterArray.
 func isCharacterArray(val any) bool {
-	_, ok := val.(intrinsic.CharacterArray)
+	if _, ok := val.(intrinsic.CharacterArray); ok {
+		return true
+	}
+	_, ok := val.(*intrinsic.CharacterArray)
 	return ok
 }
 
@@ -419,6 +422,9 @@ func formatValue(dst []byte, value any) []byte {
 	// Format value and determine padding (from gfortran libgfortran/io/write.c)
 	switch v := value.(type) {
 	case intrinsic.CharacterArray:
+		dst = append(dst, v.String()...)
+		return dst
+	case *intrinsic.CharacterArray:
 		dst = append(dst, v.String()...)
 		return dst
 	case string:
