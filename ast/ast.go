@@ -3019,7 +3019,7 @@ func (dts *DerivedTypeStmt) AppendString(dst []byte) []byte {
 //	TYPE(Date), POINTER :: birth_date
 type ComponentDecl struct {
 	Type       TypeSpec // Type with optional KIND/LEN
-	Attributes []token.Token
+	Attributes []TypeAttribute
 	Components []DeclEntity
 	Label      string
 	Position
@@ -3042,7 +3042,7 @@ func (cd *ComponentDecl) AppendString(dst []byte) []byte {
 			if i > 0 {
 				dst = append(dst, ", "...)
 			}
-			dst = append(dst, attr.String()...)
+			dst = attr.AppendString(dst)
 		}
 	}
 	dst = append(dst, " :: "...)
@@ -3272,6 +3272,8 @@ func (ac *ArrayConstructor) AppendString(dst []byte) []byte {
 type ComponentAccess struct {
 	Base      Expression
 	Component string
+	// Args holds subscript indices when accessing an array component: a%x(i,j)
+	Args []Expression
 	Position
 }
 
@@ -3285,6 +3287,16 @@ func (ca *ComponentAccess) AppendString(dst []byte) []byte {
 	dst = ca.Base.AppendString(dst)
 	dst = append(dst, '%')
 	dst = append(dst, ca.Component...)
+	if len(ca.Args) > 0 {
+		dst = append(dst, '(')
+		for i, arg := range ca.Args {
+			if i > 0 {
+				dst = append(dst, ',')
+			}
+			dst = arg.AppendString(dst)
+		}
+		dst = append(dst, ')')
+	}
 	return dst
 }
 

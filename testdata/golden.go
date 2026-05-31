@@ -63,6 +63,7 @@ func GOLDEN() {
 	LEVEL53()
 	LEVEL54()
 	LEVEL55()
+	LEVEL56()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1714,6 +1715,20 @@ func LEVEL55() {
 func SCALAROUT(x *float32, y *float32, z *float32) {
 	*y = *x + 1.0
 	*z = *x + 2.0
+}
+func LEVEL56() {
+	type vec3_t struct {
+		v *intrinsic.Array[float32]
+	}
+	var (
+		obj vec3_t
+		_   = obj
+	)
+	obj.v = intrinsic.NewArray[float32](nil, 3)
+	obj.v.Set(1.0, 1)
+	obj.v.Set(2.0, 2)
+	obj.v.Set(3.0, 3)
+	fenv.Print("LEVEL56:", obj.v.At(1)+obj.v.At(2)+obj.v.At(3))
 }
 
 var fenv = fortio.NewEnvironment()

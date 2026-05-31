@@ -58,6 +58,7 @@
       CALL LEVEL53()
       CALL LEVEL54()
       CALL LEVEL55()
+      CALL LEVEL56()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1343,5 +1344,18 @@
         Y = X + 1.0
         Z = X + 2.0
       END SUBROUTINE SCALAROUT
+
+! LEVEL56: TYPE component with DIMENSION attribute; subscripted component element assignment and read
+      SUBROUTINE LEVEL56()
+        IMPLICIT NONE
+        TYPE :: vec3_t
+          REAL, DIMENSION(3) :: v
+        END TYPE vec3_t
+        TYPE(vec3_t) :: obj
+        obj%v(1) = 1.0
+        obj%v(2) = 2.0
+        obj%v(3) = 3.0
+        PRINT *, 'LEVEL56:', obj%v(1) + obj%v(2) + obj%v(3)
+      END SUBROUTINE LEVEL56
 
       END PROGRAM GOLDEN

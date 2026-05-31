@@ -2345,6 +2345,30 @@ END SELECT`,
 			},
 		},
 		{
+			name: "CALL with keyword argument keyword=value",
+			src:  "CALL DATE_AND_TIME(VALUES=v)",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				call := helperWantNode[*ast.CallStmt](t, stmt, "")
+				if len(call.Args) != 1 {
+					t.Fatalf("expected 1 arg, got %d", len(call.Args))
+				}
+			},
+		},
+		{
+			name: "subscripted component assignment a%x(i,j)=v",
+			src:  "a%x(i,j) = 1.0",
+			validate: func(t *testing.T, stmt ast.Statement) {
+				assign := helperWantNode[*ast.AssignmentStmt](t, stmt, "")
+				ca := helperWantNode[*ast.ComponentAccess](t, assign.Target, "target")
+				if ca.Component != "x" {
+					t.Errorf("expected component 'x', got %q", ca.Component)
+				}
+				if len(ca.Args) != 2 {
+					t.Errorf("expected 2 subscript args, got %d", len(ca.Args))
+				}
+			},
+		},
+		{
 			name: "Derived type declaration with DIMENSION attribute",
 			src:  "type(vmf_def), dimension(10) :: arr",
 			validate: func(t *testing.T, stmt ast.Statement) {

@@ -698,6 +698,12 @@ func (p *Parser90) parseTopLevelUnit() (unit ast.Unit) {
 		// CONTAINS processed after ParserUnitData generated to not mix up variables.
 	case token.BLOCK:
 		unit = p.parseBlockData()
+	case token.INCLUDE:
+		p.nextToken() // consume INCLUDE
+		if p.currentTokenIs(token.StringLit) {
+			p.nextToken() // consume filename
+		}
+		return unit // return empty unit; ParseNextProgramUnit loops to next
 	default:
 		p.addError("unexpected token at top level: " + p.current.String())
 		p.nextToken()
@@ -1370,6 +1376,13 @@ func (p *Parser90) parseStatement(inExec bool) ast.Statement {
 		stmt = p.parseStopStmt()
 	case token.ALLOCATE, token.DEALLOCATE:
 		stmt = p.parseAllocateOrDeallocateStmt()
+
+	case token.INCLUDE:
+		p.nextToken() // consume INCLUDE
+		if p.currentTokenIs(token.StringLit) {
+			p.nextToken() // consume filename
+		}
+		return nil // not represented in AST
 
 	case token.Identifier, token.FormatSpec: // TODO: don't generate FormatSpec tokens in lexer- interpret them exclusively in parseIOStmt
 		stmt = p.parseAssignmentStmt()
@@ -2817,7 +2830,7 @@ func (p *Parser90) parseCallStmt() ast.Statement {
 	p.nextToken()
 
 	if p.consumeIf(token.LParen) {
-		parseOneArg := func() (ast.Expression, error) {
+		parseOneCallArg := func() (ast.Expression, error) {
 			// Check for alternate return argument (Fortran 77): *<label>
 			if p.current.tok == token.Asterisk {
 				argStart := p.current.start
@@ -2833,15 +2846,10 @@ func (p *Parser90) parseCallStmt() ast.Statement {
 					Position: ast.Pos(argStart, argEnd),
 				}, nil
 			}
-
-			arg := p.parseExpression(0)
-			if arg == nil {
-				return nil, fmt.Errorf("expected expression in argument list")
-			}
-			return arg, nil
+			return p.parseOneArg() // handles keyword=value and range subscripts
 		}
 
-		args, err := parseCommaSeparatedList(p, token.RParen, parseOneArg)
+		args, err := parseCommaSeparatedList(p, token.RParen, parseOneCallArg)
 		if err != nil {
 			p.addError(err.Error())
 		}
@@ -3121,12 +3129,8 @@ func (p *Parser90) parseComponentDecl() *ast.ComponentDecl {
 	startPos := p.current.start
 	ts := p.expectTypeSpec(false)
 	// KIND and LEN are allowed in component declarations (e.g., CHARACTER(LEN=50), REAL(KIND=8))
-	// Parse optional attributes
-	var attributes []token.Token
-	for p.loopUntil(token.DoubleColon) && p.consumeIf(token.Comma) {
-		attributes = append(attributes, p.current.tok) // Collect attribute tokens
-		p.nextToken()
-	}
+	// Parse optional attributes (POINTER, DIMENSION(:), ALLOCATABLE, etc.)
+	attributes := p.parseTypeAttributess()
 	// F77: REAL lat, lon (no ::)
 	// F90: REAL :: lat, lon (with ::)
 	p.consumeIf(token.DoubleColon)
@@ -3967,11 +3971,27 @@ func (p *Parser90) parseExpression(minPrec int, terminators ...token.Token) ast.
 			}
 			componentName := string(p.current.lit)
 			p.nextToken()
-			left = &ast.ComponentAccess{
+			ca := &ast.ComponentAccess{
 				Base:      left,
 				Component: componentName,
-				Position:  ast.Pos(start, p.current.start),
 			}
+			// Parse optional subscripts: a%x(i,j) or a%vec(:)
+			if p.currentTokenIs(token.LParen) {
+				p.nextToken() // consume (
+				for !p.currentTokenIs(token.RParen) && !p.IsDone() {
+					arg, err := p.parseOneArg()
+					if err != nil || arg == nil {
+						break
+					}
+					ca.Args = append(ca.Args, arg)
+					if !p.consumeIf(token.Comma) {
+						break
+					}
+				}
+				p.expect(token.RParen, "closing ) in component subscript")
+			}
+			ca.Position = ast.Pos(start, p.current.start)
+			left = ca
 			continue
 		}
 

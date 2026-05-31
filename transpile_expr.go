@@ -303,6 +303,22 @@ func (tg *ToGo) transformComponentAccess(vitgt *Varinfo, e *f90.ComponentAccess)
 		Sel: ast.NewIdent(e.Component), // This can fail on a field case mismatch. Varinfo should have a fields slice and then component be searched in there.
 	}
 
+	// Apply subscripts for array component access: obj%v(i) → obj.v.At(i)
+	if len(e.Args) > 0 {
+		var argExprs []ast.Expr
+		for _, arg := range e.Args {
+			argExpr, _, err := tg.transformExpression(_tgtInt, arg)
+			if err != nil {
+				return nil, nil, err
+			}
+			argExprs = append(argExprs, argExpr)
+		}
+		result = &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: result, Sel: ast.NewIdent("At")},
+			Args: argExprs,
+		}
+	}
+
 	// For now, return vitgt as resultType since we don't track derived type field types
 	// This works for simple cases where the target type is known
 	return result, vitgt, nil
@@ -337,6 +353,9 @@ func (tg *ToGo) checkPromotion(left, right *Varinfo) (lPromote, rPromote *Varinf
 	if right == _tgtGenericFloat || right == _tgtGenericInt ||
 		left == _tgtGenericFloat || left == _tgtGenericInt {
 		return nil, nil, nil // Do not promote literals, go auto promotes them.
+	}
+	if left.TypeToken() == f90token.TYPE || right.TypeToken() == f90token.TYPE {
+		return nil, nil, nil // Derived type fields: Go resolves actual types, no promotion needed.
 	}
 	ltok := left.TypeToken()
 	rtok := right.TypeToken()

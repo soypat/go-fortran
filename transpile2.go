@@ -22,7 +22,8 @@ type ToGo struct {
 	currentNode    f90.Node
 	globalCommon   string
 	// TODO(pato): remove this. instead we iterate over used COMMON blocks in program unit and reset them at start of program unit.
-	commonBlocksReset map[string]bool // tracks which COMMON blocks had Reset() emitted in current function
+	commonBlocksReset map[string]bool              // tracks which COMMON blocks had Reset() emitted in current function
+	derivedTypes      map[string]*f90.DerivedTypeStmt // registry of derived type definitions (key: lowercase name)
 }
 
 // findIOSpecifier finds a specifier by name in a []f90.IOSpecifier slice (case-insensitive).
@@ -501,6 +502,71 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	}
 	decl.Specs = append(decl.Specs, &useSpecs)
 	dst = append(dst, &ast.DeclStmt{Decl: decl})
+
+	// Initialize array fields of derived type variables: TYPE(t) :: obj → obj.field = NewArray[T](nil, dims...)
+	if stmt.Type.Token == f90token.TYPE {
+		typeDef := tg.derivedTypes[strings.ToLower(stmt.Type.Name)]
+		if typeDef != nil {
+			for i := range stmt.Entities {
+				ent := &stmt.Entities[i]
+				vi := tg.repl.Var(ent.Name)
+				if vi == nil || vi.flags.HasAny(VFlagParameter|VFlagImplicit|VFlagCommon) {
+					continue
+				}
+				objExpr := ast.NewIdent(vi.Identifier())
+				dst, err = tg.initDerivedTypeArrayFields(dst, objExpr, typeDef)
+				if err != nil {
+					return dst, err
+				}
+			}
+		}
+	}
+	return dst, nil
+}
+
+// initDerivedTypeArrayFields generates initialization for array fields of a derived type variable.
+// Example: obj.v = intrinsic.NewArray[float32](nil, 3)
+func (tg *ToGo) initDerivedTypeArrayFields(dst []ast.Stmt, objExpr ast.Expr, typeDef *f90.DerivedTypeStmt) (_ []ast.Stmt, err error) {
+	for _, comp := range typeDef.Components {
+		// Determine the array spec: from entity or DIMENSION attribute
+		for _, ent := range comp.Components {
+			arraySpec := ent.ArraySpec
+			if arraySpec == nil {
+				for i := range comp.Attributes {
+					if comp.Attributes[i].Token == f90token.DIMENSION && comp.Attributes[i].Dimension != nil {
+						arraySpec = comp.Attributes[i].Dimension
+						break
+					}
+				}
+			}
+			if arraySpec == nil || len(arraySpec.Bounds) == 0 {
+				continue // scalar field, no init needed
+			}
+			// Generate: obj.field = intrinsic.NewArray[T](nil, dims...)
+			baseType := tg.baseGotype(comp.Type.Token, 0)
+			var dimArgs []ast.Expr
+			dimArgs = append(dimArgs, ast.NewIdent("nil"))
+			for _, bound := range arraySpec.Bounds {
+				if bound.Upper != nil {
+					dimExpr, _, err := tg.transformExpression(_tgtInt, bound.Upper)
+					if err != nil {
+						return dst, err
+					}
+					dimArgs = append(dimArgs, dimExpr)
+				}
+			}
+			newCall := &ast.CallExpr{
+				Fun: &ast.IndexExpr{X: _astFnNewArray, Index: baseType},
+				Args: dimArgs,
+			}
+			fieldSel := &ast.SelectorExpr{X: objExpr, Sel: ast.NewIdent(ent.Name)}
+			dst = append(dst, &ast.AssignStmt{
+				Tok: token.ASSIGN,
+				Lhs: []ast.Expr{fieldSel},
+				Rhs: []ast.Expr{newCall},
+			})
+		}
+	}
 	return dst, nil
 }
 
@@ -580,13 +646,17 @@ func (tg *ToGo) transformTypeDeclEntity(ent *f90.DeclEntity) (spec *ast.ValueSpe
 //	    age  int32
 //	}
 func (tg *ToGo) transformDerivedType(dst []ast.Stmt, stmt *f90.DerivedTypeStmt) (_ []ast.Stmt, err error) {
+	if tg.derivedTypes == nil {
+		tg.derivedTypes = make(map[string]*f90.DerivedTypeStmt)
+	}
+	tg.derivedTypes[strings.ToLower(stmt.Name)] = stmt
 	fields := &ast.FieldList{
 		List: make([]*ast.Field, 0, len(stmt.Components)),
 	}
 
 	for _, comp := range stmt.Components {
 		for _, ent := range comp.Components {
-			fieldType := tg.componentGoType(&comp.Type, &ent)
+			fieldType := tg.componentGoType(&comp.Type, &ent, comp.Attributes)
 			field := &ast.Field{
 				Names: []*ast.Ident{ast.NewIdent(ent.Name)},
 				Type:  fieldType,
@@ -612,7 +682,7 @@ func (tg *ToGo) transformDerivedType(dst []ast.Stmt, stmt *f90.DerivedTypeStmt) 
 }
 
 // componentGoType returns the Go type for a derived type component.
-func (tg *ToGo) componentGoType(ts *f90.TypeSpec, ent *f90.DeclEntity) ast.Expr {
+func (tg *ToGo) componentGoType(ts *f90.TypeSpec, ent *f90.DeclEntity, attrs []f90.TypeAttribute) ast.Expr {
 	// TODO: integrate with goType method likely candidate for simplification.
 	tok := ts.Token
 	kind := 0
@@ -627,8 +697,17 @@ func (tg *ToGo) componentGoType(ts *f90.TypeSpec, ent *f90.DeclEntity) ast.Expr 
 		return &ast.StarExpr{X: _astTypeCharArray}
 	}
 
-	// Handle arrays
-	if ent.ArraySpec != nil && len(ent.ArraySpec.Bounds) > 0 {
+	// Array spec from entity name (e.g. REAL :: v(3)) or from DIMENSION attribute (e.g. REAL, DIMENSION(3) :: v)
+	arraySpec := ent.ArraySpec
+	if arraySpec == nil {
+		for i := range attrs {
+			if attrs[i].Token == f90token.DIMENSION && attrs[i].Dimension != nil {
+				arraySpec = attrs[i].Dimension
+				break
+			}
+		}
+	}
+	if arraySpec != nil && len(arraySpec.Bounds) > 0 {
 		baseType := tg.baseGotype(tok, kind)
 		return &ast.StarExpr{
 			X: &ast.IndexExpr{
@@ -1059,8 +1138,26 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
 		return tg.transformSetArrayRef(dst, tgt, rhs)
 	case *f90.ComponentAccess:
-		// Component access: p%age = 30 → p.age = 30
-		// Handle component access directly and return - no type conversion needed
+		if len(tgt.Args) > 0 {
+			// Array component element assignment: obj%v(i) = x → obj.v.Set(x, i)
+			// Build the selector for the component field (without subscripts)
+			base, _, err := tg.transformExpression(targetVinfo, tgt.Base)
+			if err != nil {
+				return dst, err
+			}
+			sel := &ast.SelectorExpr{X: base, Sel: ast.NewIdent(tgt.Component)}
+			indices := make([]ast.Expr, 0, len(tgt.Args))
+			for _, arg := range tgt.Args {
+				idx, _, err := tg.transformExpression(_tgtInt, arg)
+				if err != nil {
+					return dst, err
+				}
+				indices = append(indices, idx)
+			}
+			dst = append(dst, &ast.ExprStmt{X: tg.astSetCall(sel, rhs, indices...)})
+			return dst, nil
+		}
+		// Scalar component access: p%age = 30 → p.age = 30
 		lhs, _, err = tg.transformComponentAccess(nil, tgt)
 		if err != nil {
 			return dst, err

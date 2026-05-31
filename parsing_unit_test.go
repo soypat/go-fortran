@@ -507,6 +507,51 @@ END SUBROUTINE`,
 				}
 			},
 		},
+		{
+			name: "INCLUDE at top level is skipped without error",
+			src: `INCLUDE 'somefile.f90'
+SUBROUTINE test()
+  IMPLICIT NONE
+  INTEGER :: x
+  x = 1
+END SUBROUTINE`,
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				helperWantUnit(t, unit, token.SUBROUTINE, "")
+			},
+		},
+		{
+			name: "TYPE component with DIMENSION and POINTER attributes",
+			src: `SUBROUTINE test()
+  IMPLICIT NONE
+  TYPE :: matrix_t
+    REAL, POINTER, DIMENSION(:,:) :: data
+    REAL, DIMENSION(3) :: vec
+  END TYPE matrix_t
+END SUBROUTINE`,
+			validate: func(t *testing.T, unit *ast.Unit, data *ParserUnitData) {
+				helperWantUnit(t, unit, token.SUBROUTINE, "")
+				var dt *ast.DerivedTypeStmt
+				for _, s := range unit.Body {
+					if d, ok := s.(*ast.DerivedTypeStmt); ok {
+						dt = d
+						break
+					}
+				}
+				if dt == nil {
+					t.Fatal("expected DerivedTypeStmt in body")
+				}
+				if len(dt.Components) != 2 {
+					t.Fatalf("expected 2 components, got %d", len(dt.Components))
+				}
+				comp0 := dt.Components[0]
+				if len(comp0.Components) != 1 || comp0.Components[0].Name != "data" {
+					t.Errorf("expected component name 'data', got %v", comp0.Components)
+				}
+				if len(comp0.Attributes) == 0 {
+					t.Error("expected attributes on first component")
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
