@@ -66,6 +66,11 @@ func (tg *ToGo) ContainedOrUsed(name string) *ParserUnitData {
 	if data == nil {
 		data = tg.repl.GetUsed(name)
 	}
+	if data == nil {
+		if unit := tg.repl.RegisteredUnit(name); unit != nil {
+			data, _ = unit.UnitData().(*ParserUnitData)
+		}
+	}
 	return data
 }
 
@@ -160,18 +165,34 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 			}
 			fallthrough
 		case f90token.MODULE:
-			// Register derived types defined in the module body so they are available
-			// when transforming contained subroutines.
+			// Register derived types from module body as package-level type declarations.
 			for _, stmt := range unit.Body {
 				if dt, ok := stmt.(*f90.DerivedTypeStmt); ok {
-					if _, err2 := tg.transformDerivedType(nil, dt); err2 != nil {
+					stmts, err2 := tg.transformDerivedType(nil, dt)
+					if err2 != nil {
 						return dst, err2
+					}
+					// Promote local DeclStmt to package-level GenDecl.
+					for _, s := range stmts {
+						if ds, ok := s.(*ast.DeclStmt); ok {
+							if gd, ok := ds.Decl.(*ast.GenDecl); ok {
+								dst = append(dst, gd)
+							}
+						}
 					}
 				}
 			}
-			// CONTAINS: expose module-level vars to contained subroutines via host association.
+			// CONTAINS: expose module-level vars and USEd module vars to contained subroutines.
 			pop := tg.repl.PushHostScope(data.vars)
+			// Push vars from host's USEd modules (host association for USE-associated vars).
+			var usePops []func()
+			for _, mod := range tg.repl._use {
+				usePops = append(usePops, tg.repl.PushHostScope(mod.vars))
+			}
 			dst, err = tg.TransformUnits(dst, unit.Contains...)
+			for i := len(usePops) - 1; i >= 0; i-- {
+				usePops[i]()
+			}
 			pop()
 			if err != nil {
 				return dst, fmt.Errorf("transforming CONTAINS of %s: %w", unit.Name, err)
@@ -495,8 +516,8 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 	for i := range stmt.Entities {
 		ent := &stmt.Entities[i]
 		vi := tg.repl.Var(ent.Name)
-		if vi.flags.HasAny(VFlagParameter | VFlagImplicit | VFlagCommon) {
-			continue // VFlagParameter: function arguments declared in signature. VFlagImplicit: declared in implicit section. VFlagCommon: declared in COMMON handling.
+		if vi.flags.HasAny(VFlagParameter | VFlagImplicit | VFlagCommon | VFlagReturned) {
+			continue // VFlagParameter: function arguments declared in signature. VFlagImplicit: declared in implicit section. VFlagCommon: declared in COMMON handling. VFlagReturned: named return in signature.
 		}
 		spec, err := tg.transformTypeDeclEntity(ent)
 		if err != nil {
@@ -943,11 +964,45 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 		}
 	}
 
+	// Strip keyword names (NAME=val → val) and record for positional matching.
+	strippedArgs := make([]f90.Expression, 0, len(stmt.Args))
+	for _, arg := range stmt.Args {
+		if kw, ok := arg.(*f90.BinaryExpr); ok && kw.Op == f90token.Equals {
+			strippedArgs = append(strippedArgs, kw.Right)
+		} else {
+			strippedArgs = append(strippedArgs, arg)
+		}
+	}
 	// Count real (non-alternate-return) args to validate arg count.
 	callArgCount := 0
-	for _, arg := range stmt.Args {
+	for _, arg := range strippedArgs {
 		if _, ok := arg.(*f90.AlternateReturnArg); !ok {
 			callArgCount++
+		}
+	}
+	// For missing OPTIONAL args, allow if all remaining params are OPTIONAL.
+	missingOptional := 0
+	if callArgCount < len(realParams) {
+		allOptional := true
+		for i := callArgCount; i < len(realParams); i++ {
+			p := realParams[i]
+			hasOpt := false
+			if p.decl != nil && p.decl.Type != nil {
+				for _, attr := range p.decl.Type.Attributes {
+					if attr.Token == f90token.OPTIONAL {
+						hasOpt = true
+						break
+					}
+				}
+			}
+			if !hasOpt {
+				allOptional = false
+				break
+			}
+		}
+		if allOptional {
+			missingOptional = len(realParams) - callArgCount
+			callArgCount = len(realParams)
 		}
 	}
 	if callArgCount != len(realParams) {
@@ -984,7 +1039,7 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 	paramIdx := 0
 	tmpCount := 0
 	callExpr := &ast.CallExpr{Fun: tg.astIdent(fninfo.name)}
-	for _, arg := range stmt.Args {
+	for _, arg := range strippedArgs {
 		if ara, ok := arg.(*f90.AlternateReturnArg); ok {
 			if altIdx < altSlotCount {
 				altLabels[altIdx] = ara.Label
@@ -1019,6 +1074,9 @@ func (tg *ToGo) transformCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (_ []ast.S
 			}
 		}
 		callExpr.Args = append(callExpr.Args, goexpr)
+	}
+	for range missingOptional {
+		callExpr.Args = append(callExpr.Args, ast.NewIdent("nil"))
 	}
 
 	if altSlotCount == 0 {
@@ -1068,7 +1126,16 @@ func (tg *ToGo) transformIntrinsicCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (
 	if fn == nil {
 		return dst, false, nil
 	}
-	call := fn.findBestCall(len(stmt.Args))
+	// Strip keyword names from args: CALL SUB(NAME=val) → treat val as positional arg.
+	callArgs := make([]f90.Expression, len(stmt.Args))
+	for i, arg := range stmt.Args {
+		if kw, ok := arg.(*f90.BinaryExpr); ok && kw.Op == f90token.Equals {
+			callArgs[i] = kw.Right
+		} else {
+			callArgs[i] = arg
+		}
+	}
+	call := fn.findBestCall(len(callArgs))
 	if call == nil {
 		if fn.isEnvSubroutine {
 			return dst, true, tg.makeErr(stmt, "no matching call signature for env subroutine: "+stmt.Name)
@@ -1079,7 +1146,7 @@ func (tg *ToGo) transformIntrinsicCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (
 	// Only when not an env subroutine (env subroutines always dispatch via fenv).
 	if !fn.isEnvSubroutine && isArrayMethodCall(call) {
 		var args []ast.Expr
-		for i, argExpr := range stmt.Args {
+		for i, argExpr := range callArgs {
 			var info *Varinfo
 			if i < len(call.args) {
 				info = call.args[i]
@@ -1100,7 +1167,7 @@ func (tg *ToGo) transformIntrinsicCallStmt(dst []ast.Stmt, stmt *f90.CallStmt) (
 		return dst, false, nil
 	}
 	var args []ast.Expr
-	for i, argExpr := range stmt.Args {
+	for i, argExpr := range callArgs {
 		var info *Varinfo
 		if i < len(call.args) {
 			info = call.args[i]
@@ -1285,6 +1352,21 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 				return dst, err
 			}
 			sel := &ast.SelectorExpr{X: base, Sel: ast.NewIdent(tgt.Component)}
+			// Full-range (:) assignment: obj%v(:) = x → obj.v.SetAll(x)
+			allFullRange := true
+			for _, arg := range tgt.Args {
+				if r, ok := arg.(*f90.RangeExpr); !ok || r.Start != nil || r.End != nil {
+					allFullRange = false
+					break
+				}
+			}
+			if allFullRange {
+				dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{
+					Fun:  &ast.SelectorExpr{X: sel, Sel: ast.NewIdent("SetAll")},
+					Args: []ast.Expr{rhs},
+				}})
+				return dst, nil
+			}
 			indices := make([]ast.Expr, 0, len(tgt.Args))
 			for _, arg := range tgt.Args {
 				idx, _, err := tg.transformExpression(_tgtInt, arg)
@@ -2325,11 +2407,17 @@ func (tg *ToGo) goType(v *Varinfo) ast.Expr {
 
 	// Handle TYPE
 	if tok == f90token.TYPE {
+		var typeName ast.Expr
 		if v.decl.Type.Name != "" {
-			return ast.NewIdent(v.decl.Type.Name)
+			typeName = ast.NewIdent(v.decl.Type.Name)
+		} else {
+			tg.makeErrWithPos(v.decl.Position, "TYPE without name: "+v.decl.Name)
+			typeName = ast.NewIdent("")
 		}
-		tg.makeErrWithPos(v.decl.Position, "TYPE without name: "+v.decl.Name)
-		return ast.NewIdent("")
+		if isArray {
+			return &ast.StarExpr{X: &ast.IndexExpr{X: _astTypeArray, Index: typeName}}
+		}
+		return typeName
 	}
 
 	// Get base type for numeric types

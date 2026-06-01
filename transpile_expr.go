@@ -160,8 +160,9 @@ func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Ex
 	srcType := sourceType.TypeToken()
 	targetType := target.TypeToken()
 	if srcType == targetType || targetType == f90token.FloatLit ||
-		// Derived types: field type unknown, pass through without conversion
-		srcType == f90token.TYPE || targetType == f90token.TYPE {
+		// Derived types or arrays: type unknown or non-scalar, pass through without conversion
+		srcType == f90token.TYPE || targetType == f90token.TYPE ||
+		targetType == f90token.DIMENSION {
 		return expr
 	}
 	// Special case: converting real to complex requires complex(real, 0)
@@ -185,6 +186,13 @@ func (tg *ToGo) transformExprIdentifer(vitgt *Varinfo, e *f90.Identifier) (resul
 	if resultType == nil {
 		err = tg.makeErr(e, "identifier not found")
 		return nil, nil, err
+	}
+	// PARAMETER constant from host/use scope (not declared locally): inline its value.
+	if resultType.flags.HasAny(VFlagConstantParameter) &&
+		resultType.decl != nil && resultType.decl.Init != nil &&
+		tg.repl.scope.Var(e.Value) == nil {
+		result, resultType, err = tg.transformExpression(vitgt, resultType.decl.Init)
+		return result, resultType, err
 	}
 	result = tg.astVarExpr(resultType)
 	// Dereference INTENT(OUT/INOUT) scalar parameters when used as values
@@ -472,8 +480,12 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 		}
 		sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(fnName)}
 		var funcExpr ast.Expr = sel
-		if vitgt != nil && !isGenericVarinfo(vitgt) {
-			goType := goTypeBasic(vitgt.TypeToken(), 0)
+		typTok := vitgt.TypeToken()
+		if typTok == f90token.DIMENSION {
+			typTok = leftType.TypeToken() // use element type for array power
+		}
+		if vitgt != nil && !isGenericVarinfo(vitgt) && typTok != f90token.DIMENSION {
+			goType := goTypeBasic(typTok, 0)
 			funcExpr = &ast.IndexExpr{X: sel, Index: goType}
 		}
 		return &ast.CallExpr{
@@ -655,6 +667,17 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 
 	fi := tg.ContainedOrUsed(e.Name)
 	if fi == nil {
+		// Fall back to containedStack search (host-association from USEd modules not in direct scope)
+		for i := range tg.containedStack {
+			if strings.EqualFold(tg.containedStack[i].UnitName(), e.Name) {
+				if d, ok := tg.containedStack[i].UnitData().(*ParserUnitData); ok {
+					fi = d
+				}
+				break
+			}
+		}
+	}
+	if fi == nil {
 		// Try standard intrinsic first
 		lookup := f90token.LookupIntrinsic(e.Name)
 		args := e.Args
@@ -712,6 +735,16 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 			return nil, nil, tg.makeErr(e, "vendor intrinsic "+e.Name+" not implemented")
 		}
 
+		if lookup == f90token.IntrinsicPRESENT && len(e.Args) == 1 {
+			// PRESENT(arg) → arg != nil (optional args are pointers; always true if not optional)
+			if ident, ok := e.Args[0].(*f90.Identifier); ok {
+				if vi := tg.repl.Var(ident.Value); vi != nil && tg.isGoPointer(vi) {
+					argExpr := tg.astVarExpr(vi)
+					return &ast.BinaryExpr{X: argExpr, Op: token.NEQ, Y: ast.NewIdent("nil")}, _tgtBool, nil
+				}
+			}
+			return _astTrue, _tgtBool, nil
+		}
 		return nil, nil, tg.makeErr(e, "unknown intrinsic: "+e.Name)
 	}
 

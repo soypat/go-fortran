@@ -181,10 +181,10 @@ func (tg *ToGo) intrinsicExprV2(vitgt *Varinfo, fn *intrinsicFn, call *intrinsic
 		isGenericFn := len(call.args) > 0 && isGenericVarinfo(call.args[0])
 		if isGenericFn {
 			var goType ast.Expr
-			if firstArgType != nil && !isGenericVarinfo(firstArgType) {
+			if firstArgType != nil && !isGenericVarinfo(firstArgType) && firstArgType.TypeToken() != f90token.DIMENSION {
 				// Use actual argument type
 				goType = goTypeBasic(firstArgType.TypeToken(), 0)
-			} else if vitgt != nil && !isGenericVarinfo(vitgt) && typeCompatible(call.args[0], vitgt) {
+			} else if vitgt != nil && !isGenericVarinfo(vitgt) && vitgt.TypeToken() != f90token.DIMENSION && typeCompatible(call.args[0], vitgt) {
 				// Use target type when argument is generic (e.g., literals) and types are compatible
 				// This handles cases like SQRT(3.0D0) where literal could be float32 or float64
 				goType = goTypeBasic(vitgt.TypeToken(), 0)
@@ -644,6 +644,7 @@ var intrinsicsv2 = []intrinsicFn{
 		calls: []intrinsicCall{
 			{methodOrCall: "DateAndTime", args: []*Varinfo{_tgtChar, _tgtChar, _tgtChar}, outArgs: []bool{true, true, true}},
 			{methodOrCall: "DateAndTimeValues", args: []*Varinfo{_tgtChar, _tgtChar, _tgtChar, _tgtArrayGeneric}, outArgs: []bool{true, true, true, false}},
+			{methodOrCall: "DateAndTimeValuesOnly", args: []*Varinfo{_tgtArrayGeneric}, outArgs: []bool{false}},
 		},
 	},
 	f90token.IntrinsicRANDOM_SEED: {

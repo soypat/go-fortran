@@ -619,6 +619,11 @@ func (env *Environment) DateAndTimeValues(date, time_, zone *intrinsic.Character
 	}
 }
 
+// DateAndTimeValuesOnly fills the 8-element integer values array (VALUES= keyword only).
+func (env *Environment) DateAndTimeValuesOnly(values *intrinsic.Array[int32]) {
+	env.DateAndTimeValues(nil, nil, nil, values)
+}
+
 // RandomNumber sets harvest to a uniform pseudo-random number in [0,1).
 func (env *Environment) RandomNumber(harvest *float32) {
 	if harvest != nil {

@@ -3,6 +3,7 @@
 
       PROGRAM GOLDEN
       IMPLICIT NONE
+      INTEGER :: lv62y
 
       CALL LEVEL01()
       CALL LEVEL02()
@@ -64,7 +65,8 @@
       CALL LEVEL59()
       CALL LEVEL60()
       CALL LEVEL61()
-      CALL LEVEL62(42, 0)
+      CALL LEVEL62(42, lv62y)
+      CALL LEVEL63()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1380,6 +1382,17 @@
         res2 = MATMUL(mat, mat)
         PRINT *, 'LEVEL57:', res1(1), res1(2), res1(3)
       END SUBROUTINE LEVEL57
+
+! LEVEL63: full-range component array assignment: obj%arr(:) = scalar
+      SUBROUTINE LEVEL63()
+          TYPE :: vec_t
+              REAL, DIMENSION(3) :: v
+          END TYPE vec_t
+          TYPE(vec_t) :: obj
+          obj%v(:) = 0.0
+          obj%v(1) = 5.0
+          PRINT *, 'LEVEL63:', obj%v(1), obj%v(2), obj%v(3)
+      END SUBROUTINE LEVEL63
 
 ! LEVEL62: PRESENT intrinsic for optional arguments
       SUBROUTINE LEVEL62(x, y)

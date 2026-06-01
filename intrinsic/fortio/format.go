@@ -478,15 +478,18 @@ func formatValue(dst []byte, value any) []byte {
 		} else {
 			// Fixed format with variable precision based on magnitude
 			var decPlaces int
-			if absX < 1.0 {
+			if absX >= 1.0 || absX == 0.0 {
+				nIntDig := 1
+				if absX >= 1.0 {
+					nIntDig = int(math.Log10(absX)) + 1
+				}
+				decPlaces = width - nIntDig - 1
+			} else {
 				if width == 18 { // DOUBLE PRECISION
 					decPlaces = width - 2 // "0." takes 2 chars for float64
 				} else {
 					decPlaces = width - 1 // float32 uses different formula
 				}
-			} else {
-				nIntDig := int(math.Log10(absX)) + 1
-				decPlaces = width - nIntDig - 1
 			}
 			dst = strconv.AppendFloat(dst, x, 'f', decPlaces, 64)
 		}
@@ -495,7 +498,7 @@ func formatValue(dst []byte, value any) []byte {
 			// E format: use full width minus value (no separate left/right distribution)
 			leftPad = totalWidth - valueLen
 			rightPad = 0
-		} else if absX < 1.0 {
+		} else if absX < 1.0 && absX != 0.0 {
 			if width == 18 { // DOUBLE PRECISION needs more left padding
 				leftPad = 2
 			} else {

@@ -9,6 +9,10 @@ func main() {
 	GOLDEN()
 }
 func GOLDEN() {
+	var (
+		lv62y int32
+		_     = lv62y
+	)
 	LEVEL01()
 	LEVEL02()
 	LEVEL03()
@@ -69,6 +73,8 @@ func GOLDEN() {
 	LEVEL59()
 	LEVEL60()
 	LEVEL61()
+	LEVEL62(42, &lv62y)
+	LEVEL63()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1763,6 +1769,25 @@ func LEVEL57() {
 	res1 = intrinsic.MATMUL(mat, vec)
 	res2 = intrinsic.MATMUL(mat, mat)
 	fenv.Print("LEVEL57:", res1.At(1), res1.At(2), res1.At(3))
+}
+func LEVEL63() {
+	type vec_t struct {
+		v *intrinsic.Array[float32]
+	}
+	var (
+		obj vec_t
+		_   = obj
+	)
+	obj.v = intrinsic.NewArray[float32](nil, 3)
+	obj.v.SetAll(0.0)
+	obj.v.Set(5.0, 1)
+	fenv.Print("LEVEL63:", obj.v.At(1), obj.v.At(2), obj.v.At(3))
+}
+func LEVEL62(x int32, y *int32) {
+	if y != nil {
+		*y = x * 2
+	}
+	fenv.Print("LEVEL62:", x)
 }
 func LEVEL61() {
 	var (
