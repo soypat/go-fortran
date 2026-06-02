@@ -700,6 +700,10 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 		// It's a declared variable - route to array access handler
 		// which properly handles both element access and range expressions
 		result, err = tg.transformArrayRef(vitgt, e)
+		// Substring access of a CHARACTER scalar (ranged: str(s:e)) returns Go string, not CharacterArray.
+		if vi.decl.Type.Token == f90token.CHARACTER && !vi.IsArray() && f90.IsRanged(e.Args...) {
+			return result, _tgtStringLit, err
+		}
 		return result, vi, err
 	}
 

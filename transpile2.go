@@ -1349,27 +1349,34 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 			return tg.transformStringConcat(dst, lhsExpr, binop)
 		}
 	}
-	rhs, _, err := tg.transformExpression(targetVinfo, stmt.Value)
+	var rhs ast.Expr
+	var rhsResultType *Varinfo
+	rhs, rhsResultType, err = tg.transformExpression(targetVinfo, stmt.Value)
 	if err != nil {
 		return dst, err
 	}
-	// SetFromString only for scalar CHARACTER (identifier target), not array elements
+	// Infer RHS type for conversions (needed by ArrayRef/FunctionCall, CHARACTER, and default path)
+	var rhsType Varinfo
+	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
+		return dst, tg.makeErr(stmt, "inferring type: "+err.Error())
+	}
+
+	// SetFromString/SetConcat only for scalar CHARACTER (identifier target), not array elements
 	if targetVinfo.decl.Type.Token == f90token.CHARACTER && isIdentifier {
 		receiver := tg.astVarExpr(targetVinfo)
+		// Use SetConcat for CharacterArray source, SetFromString for Go string (literal or _tgtStringLit).
+		charMethod := "SetFromString"
+		if rhsResultType != nil && rhsResultType.TypeToken() == f90token.CHARACTER {
+			charMethod = "SetConcat"
+		}
 		stmt := &ast.ExprStmt{
 			X: &ast.CallExpr{
-				Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent("SetFromString")},
+				Fun:  &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent(charMethod)},
 				Args: []ast.Expr{rhs},
 			},
 		}
 		dst = append(dst, stmt)
 		return dst, nil
-	}
-
-	// Infer RHS type for conversions (needed by ArrayRef/FunctionCall and default path)
-	var rhsType Varinfo
-	if err := tg.repl.InferType(&rhsType, stmt.Value); err != nil {
-		return dst, tg.makeErr(stmt, "inferring type: "+err.Error())
 	}
 
 	switch tgt := stmt.Target.(type) {
@@ -1441,8 +1448,13 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 			}
 		}
 		if rhsType.IsChar() {
+			// Use SetConcat for CharacterArray source, SetFromString for Go string (literal or _tgtStringLit).
+			charMethod := "SetFromString"
+			if rhsResultType != nil && rhsResultType.TypeToken() == f90token.CHARACTER {
+				charMethod = "SetConcat"
+			}
 			dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{
-				Fun:  &ast.SelectorExpr{X: lhs, Sel: ast.NewIdent("SetFromString")},
+				Fun:  &ast.SelectorExpr{X: lhs, Sel: ast.NewIdent(charMethod)},
 				Args: []ast.Expr{rhs},
 			}})
 			return dst, nil
