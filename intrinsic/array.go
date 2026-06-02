@@ -559,6 +559,52 @@ func ArraySetDiv[T numeric](dst, a, b *Array[T]) {
 	})
 }
 
+// ArraySetNeg performs in-place element-wise negation: dst = -src
+// Corresponds to Fortran: dst = -src (array expression, in-place)
+func ArraySetNeg[T numeric](dst, src *Array[T]) {
+	dst.iteratePair(src, func(di, si int) { dst.data[di] = -src.data[si] })
+}
+
+// ArrayNeg returns a new array with each element negated: result = -a
+// Corresponds to Fortran: result = -a (unary array expression)
+func ArrayNeg[T numeric](a *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = -a.data[ai] })
+	return dst
+}
+
+// ArrayAdd returns a new array with element-wise addition: result = a + b
+// Corresponds to Fortran: result = a + b (array expression)
+func ArrayAdd[T numeric](a, b *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iterateTriple(a, b, func(di, ai, bi int) { dst.data[di] = a.data[ai] + b.data[bi] })
+	return dst
+}
+
+// ArraySub returns a new array with element-wise subtraction: result = a - b
+// Corresponds to Fortran: result = a - b (array expression)
+func ArraySub[T numeric](a, b *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iterateTriple(a, b, func(di, ai, bi int) { dst.data[di] = a.data[ai] - b.data[bi] })
+	return dst
+}
+
+// ArrayMul returns a new array with element-wise multiplication: result = a * b
+// Corresponds to Fortran: result = a * b (array expression)
+func ArrayMul[T numeric](a, b *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iterateTriple(a, b, func(di, ai, bi int) { dst.data[di] = a.data[ai] * b.data[bi] })
+	return dst
+}
+
+// ArrayDiv returns a new array with element-wise division: result = a / b
+// Corresponds to Fortran: result = a / b (array expression)
+func ArrayDiv[T numeric](a, b *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iterateTriple(a, b, func(di, ai, bi int) { dst.data[di] = a.data[ai] / b.data[bi] })
+	return dst
+}
+
 // DOT_PRODUCT computes the dot product of two 1D arrays.
 // Corresponds to Fortran DOT_PRODUCT(VECTOR_A, VECTOR_B) intrinsic.
 // For numeric arrays: result = sum(a(i) * b(i))

@@ -67,6 +67,12 @@
       CALL LEVEL61()
       CALL LEVEL62(42, lv62y)
       CALL LEVEL63()
+      CALL LEVEL64()
+      CALL LEVEL65()
+      CALL LEVEL66()
+      CALL LEVEL67()
+      CALL LEVEL68()
+      CALL LEVEL69()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1446,5 +1452,77 @@
           obj%name = prefix // 'A'
           PRINT *, 'LEVEL58:', obj%name
       END SUBROUTINE LEVEL58
+
+! LEVEL64: array-returning function assignment
+      SUBROUTINE LEVEL64()
+          REAL, DIMENSION(3) :: a, b
+          a(1) = 2.0
+          a(2) = 4.0
+          a(3) = 6.0
+          b = HalfArr(a)
+          PRINT *, 'LEVEL64:', b(1), b(2), b(3)
+      END SUBROUTINE LEVEL64
+
+! LEVEL65: scalar broadcast to whole array
+      SUBROUTINE LEVEL65()
+          REAL, DIMENSION(3) :: a
+          a = 0.0
+          a(2) = 5.0
+          PRINT *, 'LEVEL65:', a(1), a(2), a(3)
+      END SUBROUTINE LEVEL65
+
+! LEVEL66: whole-array binary arithmetic
+      SUBROUTINE LEVEL66()
+          REAL, DIMENSION(3) :: a, b, c
+          a(1) = 1.0
+          a(2) = 2.0
+          a(3) = 3.0
+          b(1) = 4.0
+          b(2) = 5.0
+          b(3) = 6.0
+          c = a + b
+          PRINT *, 'LEVEL66:', c(1), c(2), c(3)
+      END SUBROUTINE LEVEL66
+
+! LEVEL67: unary array negation
+      SUBROUTINE LEVEL67()
+          REAL, DIMENSION(3) :: a, b
+          a(1) = -1.0
+          a(2) = -2.0
+          a(3) = -3.0
+          b = -a
+          PRINT *, 'LEVEL67:', b(1), b(2), b(3)
+      END SUBROUTINE LEVEL67
+
+! LEVEL68: TYPE name case: define as Point, use as POINT
+      SUBROUTINE LEVEL68()
+          TYPE :: Point
+              REAL :: x, y
+          END TYPE Point
+          TYPE(POINT) :: p
+          p%x = 1.0
+          p%y = 2.0
+          PRINT *, 'LEVEL68:', p%x, p%y
+      END SUBROUTINE LEVEL68
+
+! LEVEL69: string concat with derived-type component access
+      SUBROUTINE LEVEL69()
+          TYPE :: named_t
+              CHARACTER(LEN=10) :: first
+              CHARACTER(LEN=20) :: full
+          END TYPE named_t
+          TYPE(named_t) :: obj
+          obj%first = 'hello'
+          obj%full = 'say: '//obj%first
+          PRINT *, 'LEVEL69:', obj%full
+      END SUBROUTINE LEVEL69
+
+      FUNCTION HalfArr(x) RESULT(y)
+          REAL, INTENT(IN), DIMENSION(:) :: x
+          REAL, DIMENSION(3) :: y
+          y(1) = x(1) * 0.5
+          y(2) = x(2) * 0.5
+          y(3) = x(3) * 0.5
+      END FUNCTION HalfArr
 
       END PROGRAM GOLDEN

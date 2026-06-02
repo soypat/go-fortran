@@ -75,6 +75,12 @@ func GOLDEN() {
 	LEVEL61()
 	LEVEL62(42, &lv62y)
 	LEVEL63()
+	LEVEL64()
+	LEVEL65()
+	LEVEL66()
+	LEVEL67()
+	LEVEL68()
+	LEVEL69()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1040,7 +1046,7 @@ func LEVEL29() {
 	fenv.Print("LEVEL 29: uint32 mat ", a)
 	f.Set(float32(float32(1)), 1)
 	fenv.Print("LEVEL 29: linked float=1,int", f.At(1), n.At(1))
-	n.Set(int32(1109917696), 1)
+	n.Set(1109917696, 1)
 	fenv.Print("LEVEL 29: linked float,int=1109917696", f.At(1), n.At(1))
 }
 func LEVEL30() {
@@ -1161,7 +1167,7 @@ func LEVEL33() {
 	}
 }
 func LEVEL34() {
-	fenv.Print("LEVEL 34:", (2*(2/2))*2, (3*(3/2))*2, 4.189*intrinsic.POW[float32](float32(23.0), float32(3)))
+	fenv.Print("LEVEL 34:", (2*(2/2))*2, (3*(3/2))*2, 4.189*intrinsic.POW[float32](23.0, float32(3)))
 }
 func LEVEL35() {
 	var (
@@ -1845,6 +1851,90 @@ func LEVEL58() {
 	prefix.SetFromString("item ")
 	obj.name.SetConcatString(prefix.String(), "A")
 	fenv.Print("LEVEL58:", obj.name)
+}
+func LEVEL64() {
+	var (
+		a    = intrinsic.NewArray[float32](nil, 3)
+		b    = intrinsic.NewArray[float32](nil, 3)
+		_, _ = a, b
+	)
+	a.Set(2.0, 1)
+	a.Set(4.0, 2)
+	a.Set(6.0, 3)
+	b = HalfArr(a)
+	fenv.Print("LEVEL64:", b.At(1), b.At(2), b.At(3))
+}
+func LEVEL65() {
+	var (
+		a = intrinsic.NewArray[float32](nil, 3)
+		_ = a
+	)
+	a.SetAll(0.0)
+	a.Set(5.0, 2)
+	fenv.Print("LEVEL65:", a.At(1), a.At(2), a.At(3))
+}
+func LEVEL66() {
+	var (
+		a       = intrinsic.NewArray[float32](nil, 3)
+		b       = intrinsic.NewArray[float32](nil, 3)
+		c       = intrinsic.NewArray[float32](nil, 3)
+		_, _, _ = a, b, c
+	)
+	a.Set(1.0, 1)
+	a.Set(2.0, 2)
+	a.Set(3.0, 3)
+	b.Set(4.0, 1)
+	b.Set(5.0, 2)
+	b.Set(6.0, 3)
+	c = intrinsic.ArrayAdd[float32](a, b)
+	fenv.Print("LEVEL66:", c.At(1), c.At(2), c.At(3))
+}
+func LEVEL67() {
+	var (
+		a    = intrinsic.NewArray[float32](nil, 3)
+		b    = intrinsic.NewArray[float32](nil, 3)
+		_, _ = a, b
+	)
+	a.Set(-1.0, 1)
+	a.Set(-2.0, 2)
+	a.Set(-3.0, 3)
+	b = intrinsic.ArrayNeg[float32](a)
+	fenv.Print("LEVEL67:", b.At(1), b.At(2), b.At(3))
+}
+func LEVEL68() {
+	type Point struct {
+		x float32
+		y float32
+	}
+	var (
+		p Point
+		_ = p
+	)
+	p.x = 1.0
+	p.y = 2.0
+	fenv.Print("LEVEL68:", p.x, p.y)
+}
+func LEVEL69() {
+	type named_t struct {
+		first *intrinsic.CharacterArray
+		full  *intrinsic.CharacterArray
+	}
+	var (
+		obj named_t
+		_   = obj
+	)
+	obj.first = intrinsic.NewCharacterArrayRef(10)
+	obj.full = intrinsic.NewCharacterArrayRef(20)
+	obj.first.SetFromString("hello")
+	obj.full.SetConcatString("say: ", obj.first.String())
+	fenv.Print("LEVEL69:", obj.full)
+}
+func HalfArr(x *intrinsic.Array[float32]) (y *intrinsic.Array[float32]) {
+	y = intrinsic.NewArray[float32](nil, 3)
+	y.Set(x.At(1)*0.5, 1)
+	y.Set(x.At(2)*0.5, 2)
+	y.Set(x.At(3)*0.5, 3)
+	return
 }
 
 var fenv = fortio.NewEnvironment()

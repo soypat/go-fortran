@@ -520,6 +520,10 @@ func (repl *REPL) evalBinary(dst *Varinfo, e *f90.BinaryExpr) error {
 	if err != nil {
 		return err
 	}
+	// Propagate array flag: if either operand is an array, result is array.
+	if left.IsArray() || right.IsArray() {
+		dst.flags |= VFlagDimension
+	}
 	switch e.Op {
 	// Logical operations
 	case f90token.AND:
@@ -765,10 +769,14 @@ func (repl *REPL) evalMin(dst *Varinfo, args []f90.Expression) error {
 func (repl *REPL) evalArrayConstructor(dst *Varinfo, e *f90.ArrayConstructor) error {
 	if len(e.Values) == 0 {
 		dst.val.tok = f90token.INTEGER // Default to integer for empty array
-		return nil
+	} else {
+		// Infer element type from first element
+		if err := repl.Eval(dst, e.Values[0]); err != nil {
+			return err
+		}
 	}
-	// Infer element type from first element
-	return repl.Eval(dst, e.Values[0])
+	dst.flags |= VFlagDimension // array constructor always produces an array
+	return nil
 }
 
 // Helper methods for creating varinfo with values

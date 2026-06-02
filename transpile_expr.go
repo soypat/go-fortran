@@ -159,7 +159,11 @@ func (tg *ToGo) wrapConversion(target *Varinfo, sourceType *Varinfo, expr ast.Ex
 	}
 	srcType := sourceType.TypeToken()
 	targetType := target.TypeToken()
+	// FloatLit/IntLit are untyped constants compatible with any matching numeric type.
+	compatibleLiteral := (srcType == f90token.FloatLit && (targetType == f90token.REAL || targetType == f90token.DOUBLEPRECISION)) ||
+		(srcType == f90token.IntLit && targetType == f90token.INTEGER)
 	if srcType == targetType || targetType == f90token.FloatLit ||
+		compatibleLiteral ||
 		// Derived types or arrays: type unknown or non-scalar, pass through without conversion
 		srcType == f90token.TYPE || targetType == f90token.TYPE ||
 		targetType == f90token.DIMENSION {
@@ -355,6 +359,16 @@ func (tg *ToGo) transformUnaryExpr(vitgt *Varinfo, e *f90.UnaryExpr) (result ast
 		// Unary plus: just return the operand
 		return operand, resultType, nil
 	case f90token.Minus:
+		// Unary negation of array → intrinsic.ArrayNeg[T](a)
+		if resultType.IsArray() && resultType.TypeToken() != f90token.TYPE {
+			elemTok := resultType.TypeToken()
+			goType := goTypeBasic(elemTok, 0)
+			sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("ArrayNeg")}
+			return &ast.CallExpr{
+				Fun:  &ast.IndexExpr{X: sel, Index: goType},
+				Args: []ast.Expr{operand},
+			}, resultType, nil
+		}
 		op = token.SUB
 	case f90token.NOT:
 		op = token.NOT
@@ -458,6 +472,30 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 		resultType = rpromote
 	}
 	needsPromotion := lpromote != nil || rpromote != nil
+	// Whole-array arithmetic: both operands arrays → intrinsic.ArrayAdd/Sub/Mul/Div[T](a, b)
+	if leftType != nil && rightType != nil && leftType.IsArray() && rightType.IsArray() &&
+		leftType.TypeToken() != f90token.TYPE && rightType.TypeToken() != f90token.TYPE {
+		var funcName string
+		switch e.Op {
+		case f90token.Plus:
+			funcName = "ArrayAdd"
+		case f90token.Minus:
+			funcName = "ArraySub"
+		case f90token.Asterisk:
+			funcName = "ArrayMul"
+		case f90token.Slash:
+			funcName = "ArrayDiv"
+		}
+		if funcName != "" {
+			elemTok := leftType.TypeToken()
+			goType := goTypeBasic(elemTok, 0)
+			sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(funcName)}
+			return &ast.CallExpr{
+				Fun:  &ast.IndexExpr{X: sel, Index: goType},
+				Args: []ast.Expr{left, right},
+			}, leftType, nil
+		}
+	}
 	// Map Fortran operator to Go operator
 	var op token.Token
 	switch e.Op {
@@ -1250,6 +1288,10 @@ func goTypeBasic(tok f90token.Token, kind int) (goType ast.Expr) {
 	switch tok {
 	case f90token.CHARACTER:
 		goType = _astTypeCharArray
+	case f90token.FloatLit:
+		goType = ast.NewIdent("float32") // untyped float literal defaults to float32
+	case f90token.IntLit:
+		goType = ast.NewIdent("int32") // untyped int literal defaults to int32
 	case f90token.INTEGER:
 		switch kind {
 		case 1:

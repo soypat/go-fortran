@@ -146,6 +146,21 @@ func (tg *ToGo) TransformUnits(dst []ast.Decl, units ...f90.Unit) (_ []ast.Decl,
 			if err != nil {
 				return dst, fmt.Errorf("transforming implicit type declarations of %s: %w", unit.Name, err)
 			}
+			// Initialize FUNCTION result array: named return arrays are nil by default.
+			if unit.Token == f90token.FUNCTION {
+				if ret := tg.repl.scope.returnType; ret != nil && ret.IsArray() {
+					initExpr, elemErr := tg.makeArrayInitializer(ret, ast.NewIdent("nil"))
+					if elemErr == nil {
+						fn.Body.List = append(fn.Body.List, &ast.AssignStmt{
+							Tok: token.ASSIGN,
+							Lhs: []ast.Expr{tg.astVarExpr(ret)},
+							Rhs: []ast.Expr{initExpr},
+						})
+					} else {
+						return dst, fmt.Errorf("initializing return array for %s: %w", unit.Name, elemErr)
+					}
+				}
+			}
 			fn.Body.List, err = tg.transformStatements(fn.Body.List, unit.Body)
 			if err != nil {
 				return dst, tg.makeErrAtStmt(fmt.Sprintf("transforming unit %s (%s): %s", unit.UnitName(), tg.forceStrPos(unit.Position), err.Error()))
@@ -463,7 +478,7 @@ func (tg *ToGo) varGoType(vi *Varinfo) (elemType ast.Expr, err error) {
 		if vi.decl.Type.Name == "" {
 			return nil, tg.makeErrWithPos(vi.decl.Position, "derived TYPE array without type name")
 		}
-		elemType = ast.NewIdent(vi.decl.Type.Name)
+		elemType = ast.NewIdent(tg.canonicalTypeName(vi.decl.Type.Name))
 	default:
 		elemType = tg.baseGotype(vi.TypeToken(), tg.resolveKind(vi))
 	}
@@ -740,6 +755,34 @@ func (tg *ToGo) transformDerivedType(dst []ast.Stmt, stmt *f90.DerivedTypeStmt) 
 
 	dst = append(dst, &ast.DeclStmt{Decl: decl})
 	return dst, nil
+}
+
+// isScalarFortranExpr returns true if expr is clearly a scalar value (literal or scalar variable).
+// Used to distinguish scalar broadcast `arr = 0.0` from array assignment `arr = other_arr`.
+func isScalarFortranExpr(expr f90.Expression, repl *REPL) bool {
+	switch e := expr.(type) {
+	case *f90.RealLiteral, *f90.IntegerLiteral, *f90.LogicalLiteral:
+		return true
+	case *f90.Identifier:
+		if vi := repl.Var(e.Value); vi != nil {
+			return !vi.IsArray()
+		}
+	case *f90.UnaryExpr:
+		return isScalarFortranExpr(e.Operand, repl)
+	}
+	return false
+}
+
+// canonicalTypeName returns the canonical Go struct name for a Fortran TYPE name.
+// Fortran is case-insensitive so TYPE(NETWORK) and TYPE(Network) refer to the same type;
+// this looks up the actual name used in the struct definition.
+func (tg *ToGo) canonicalTypeName(name string) string {
+	if tg.derivedTypes != nil {
+		if dt, ok := tg.derivedTypes[strings.ToLower(name)]; ok {
+			return dt.Name
+		}
+	}
+	return name
 }
 
 // componentGoType returns the Go type for a derived type component.
@@ -1379,9 +1422,30 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 			return dst, nil
 		}
 		// Scalar component access: p%age = 30 → p.age = 30
+		// CHARACTER component: p%name = "str" → p.name.SetFromString("str")
 		lhs, _, err = tg.transformComponentAccess(nil, tgt)
 		if err != nil {
 			return dst, err
+		}
+		// Array component negation: p%arr = -q%arr → intrinsic.ArraySetNeg(p.arr, q.arr)
+		if unary, ok := stmt.Value.(*f90.UnaryExpr); ok && unary.Op == f90token.Minus {
+			if rhsType.IsArray() || rhsType.TypeToken() == f90token.TYPE {
+				operandExpr, _, operandErr := tg.transformExpression(targetVinfo, unary.Operand)
+				if operandErr == nil {
+					dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{
+						Fun:  &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("ArraySetNeg")},
+						Args: []ast.Expr{lhs, operandExpr},
+					}})
+					return dst, nil
+				}
+			}
+		}
+		if rhsType.IsChar() {
+			dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: lhs, Sel: ast.NewIdent("SetFromString")},
+				Args: []ast.Expr{rhs},
+			}})
+			return dst, nil
 		}
 		gstmt := &ast.AssignStmt{
 			Tok: token.ASSIGN,
@@ -1419,11 +1483,24 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 			}
 		}
 	}
-	rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
-	// Handle equivalenced/COMMON scalar assignment: f = value → f.Set(value, 1)
-	// CHARACTER types are excluded as they use SetFromString
 	isArray := targetVinfo.IsArray()
 	isCharacter := targetVinfo.TypeToken() == f90token.CHARACTER
+	// Scalar broadcast to whole array: arr = scalar → arr.SetAll(scalar)
+	// Only trigger for clearly scalar RHS values, not function calls or complex expressions.
+	if isArray && isIdentifier && isScalarFortranExpr(stmt.Value, &tg.repl) {
+		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
+		lhsExpr := tg.astVarExpr(targetVinfo)
+		dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: lhsExpr, Sel: ast.NewIdent("SetAll")},
+			Args: []ast.Expr{rhs},
+		}})
+		return dst, nil
+	}
+	// For non-scalar-broadcast, skip numeric wrapConversion for whole-array identifier assignments
+	// (array-to-array assignments and function-returning-array assignments need no numeric conversion).
+	if !isArray || !isIdentifier {
+		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
+	}
 	if !isArray && !isCharacter && targetVinfo.flags.HasAny(VFlagEquivalenced|VFlagCommon) {
 		dst = append(dst, &ast.ExprStmt{
 			X: tg.astSetCall(lhs, rhs, &ast.BasicLit{Kind: token.INT, Value: "1"}),
@@ -2409,7 +2486,7 @@ func (tg *ToGo) goType(v *Varinfo) ast.Expr {
 	if tok == f90token.TYPE {
 		var typeName ast.Expr
 		if v.decl.Type.Name != "" {
-			typeName = ast.NewIdent(v.decl.Type.Name)
+			typeName = ast.NewIdent(tg.canonicalTypeName(v.decl.Type.Name))
 		} else {
 			tg.makeErrWithPos(v.decl.Position, "TYPE without name: "+v.decl.Name)
 			typeName = ast.NewIdent("")
@@ -2564,6 +2641,16 @@ func (tg *ToGo) buildStringConcatArgs(root *f90.BinaryExpr) ([]ast.Expr, error) 
 					args = append(args, goexpr)
 					continue
 				}
+			}
+			// ComponentAccess (struct%field) of CHARACTER type: transform then add .String()
+			if compAccess, ok := e.(*f90.ComponentAccess); ok {
+				goexpr, _, cerr := tg.transformExpression(_tgtChar, compAccess)
+				if cerr != nil {
+					return nil, tg.makeErr(op, "string concat component access: "+cerr.Error())
+				}
+				goexpr = &ast.CallExpr{Fun: &ast.SelectorExpr{X: goexpr, Sel: ast.NewIdent("String")}}
+				args = append(args, goexpr)
+				continue
 			}
 			goexpr, _, err := tg.transformExpression(_tgtStringLit, e)
 			if err != nil {
