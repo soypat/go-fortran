@@ -63,6 +63,9 @@ type CloseSpec struct {
 type IOSpec struct {
 	// UNIT number for I/O operation.
 	UNIT int32
+	// InternalBuffer holds the string for internal file reads (READ from character variable).
+	// When non-empty, reads are parsed from this string instead of a file unit.
+	InternalBuffer string
 	// FMT is the format specifier.
 	FMT *Format
 	// REC specifies record number for direct access.

@@ -73,6 +73,8 @@
       CALL LEVEL67()
       CALL LEVEL68()
       CALL LEVEL69()
+      CALL LEVEL70()
+      CALL LEVEL71()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1516,6 +1518,29 @@
           obj%full = 'say: '//obj%first
           PRINT *, 'LEVEL69:', obj%full
       END SUBROUTINE LEVEL69
+
+! LEVEL70: scalar-array arithmetic (scalar*array, array-scalar)
+      SUBROUTINE LEVEL70()
+          REAL, DIMENSION(3) :: a, b
+          REAL :: s
+          a(1) = 1.0
+          a(2) = 2.0
+          a(3) = 3.0
+          s = 2.0
+          b = s * a
+          PRINT *, 'LEVEL70:', b(1), b(2), b(3)
+      END SUBROUTINE LEVEL70
+
+! LEVEL71: ABS on array + MAXVAL
+      SUBROUTINE LEVEL71()
+          REAL, DIMENSION(3) :: a
+          REAL :: mx
+          a(1) = -1.0
+          a(2) = 2.0
+          a(3) = -3.0
+          mx = MAXVAL(ABS(a))
+          PRINT *, 'LEVEL71:', mx
+      END SUBROUTINE LEVEL71
 
       FUNCTION HalfArr(x) RESULT(y)
           REAL, INTENT(IN), DIMENSION(:) :: x

@@ -559,6 +559,56 @@ func ArraySetDiv[T numeric](dst, a, b *Array[T]) {
 	})
 }
 
+// ArrayAbs returns a new array with each element's absolute value: result = |a|
+// Corresponds to Fortran: result = ABS(a) (array expression)
+func ArrayAbs[T numeric](a *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) {
+		v := a.data[ai]
+		if v < 0 {
+			dst.data[di] = -v
+		} else {
+			dst.data[di] = v
+		}
+	})
+	return dst
+}
+
+// ArrayAddScalar returns a new array with each element incremented by scalar s: result = a + s
+func ArrayAddScalar[T numeric](a *Array[T], s T) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = a.data[ai] + s })
+	return dst
+}
+
+// ArraySubScalar returns a new array with scalar s subtracted: result = a - s
+func ArraySubScalar[T numeric](a *Array[T], s T) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = a.data[ai] - s })
+	return dst
+}
+
+// ScalarSubArray returns a new array: result = s - a
+func ScalarSubArray[T numeric](s T, a *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = s - a.data[ai] })
+	return dst
+}
+
+// ArrayMulScalar returns a new array with each element multiplied by scalar s: result = a * s
+func ArrayMulScalar[T numeric](a *Array[T], s T) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = a.data[ai] * s })
+	return dst
+}
+
+// ArrayDivScalar returns a new array with each element divided by scalar s: result = a / s
+func ArrayDivScalar[T numeric](a *Array[T], s T) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = a.data[ai] / s })
+	return dst
+}
+
 // ArraySetNeg performs in-place element-wise negation: dst = -src
 // Corresponds to Fortran: dst = -src (array expression, in-place)
 func ArraySetNeg[T numeric](dst, src *Array[T]) {

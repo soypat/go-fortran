@@ -757,6 +757,38 @@ func (tg *ToGo) transformDerivedType(dst []ast.Stmt, stmt *f90.DerivedTypeStmt) 
 	return dst, nil
 }
 
+// lookupFieldVarinfo returns a Varinfo approximating a derived type field's type.
+// isElementAccess true means the field was accessed with non-ranged subscripts → return scalar element type.
+// Returns nil if type information is unavailable.
+func (tg *ToGo) lookupFieldVarinfo(baseVinfo *Varinfo, component string, isElementAccess bool) *Varinfo {
+	if tg.derivedTypes == nil || baseVinfo == nil || baseVinfo.decl == nil || baseVinfo.decl.Type == nil {
+		return nil
+	}
+	if baseVinfo.decl.Type.Token != f90token.TYPE {
+		return nil
+	}
+	typeName := strings.ToLower(baseVinfo.decl.Type.Name)
+	dt, ok := tg.derivedTypes[typeName]
+	if !ok {
+		return nil
+	}
+	for i := range dt.Components {
+		comp := &dt.Components[i]
+		for j := range comp.Components {
+			ent := &comp.Components[j]
+			if strings.EqualFold(ent.Name, component) {
+				vi := defaultVarinfo(comp.Type.Token)
+				if ent.ArraySpec != nil && len(ent.ArraySpec.Bounds) > 0 && !isElementAccess {
+					vi.flags |= VFlagDimension
+					vi.decl.ArraySpec = ent.ArraySpec
+				}
+				return vi
+			}
+		}
+	}
+	return nil
+}
+
 // isScalarFortranExpr returns true if expr is clearly a scalar value (literal or scalar variable).
 // Used to distinguish scalar broadcast `arr = 0.0` from array assignment `arr = other_arr`.
 func isScalarFortranExpr(expr f90.Expression, repl *REPL) bool {
@@ -1411,8 +1443,13 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 				}
 			}
 			if allFullRange {
+				// SetFrom for array RHS, SetAll for scalar RHS
+				setMethod := "SetAll"
+				if rhsType.IsArray() || rhsResultType != nil && rhsResultType.IsArray() {
+					setMethod = "SetFrom"
+				}
 				dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{
-					Fun:  &ast.SelectorExpr{X: sel, Sel: ast.NewIdent("SetAll")},
+					Fun:  &ast.SelectorExpr{X: sel, Sel: ast.NewIdent(setMethod)},
 					Args: []ast.Expr{rhs},
 				}})
 				return dst, nil
@@ -3240,6 +3277,25 @@ func (tg *ToGo) specifiersToFields(specs []f90.IOSpecifier) ([]ast.Expr, error) 
 	var fields []ast.Expr
 	for _, spec := range specs {
 		name := strings.ToUpper(spec.Name)
+		// Special case: UNIT = CHARACTER variable → internal file read (InternalBuffer field).
+		if name == "UNIT" {
+			if ident, ok := spec.Value.(*f90.Identifier); ok {
+				if vi := tg.repl.Var(ident.Value); vi != nil && vi.IsChar() {
+					varExpr := tg.astVarExpr(vi)
+					stringExpr := &ast.CallExpr{
+						Fun: &ast.SelectorExpr{
+							X:   &ast.CallExpr{Fun: &ast.SelectorExpr{X: varExpr, Sel: ast.NewIdent("Trim")}},
+							Sel: ast.NewIdent("String"),
+						},
+					}
+					fields = append(fields, &ast.KeyValueExpr{
+						Key:   ast.NewIdent("InternalBuffer"),
+						Value: stringExpr,
+					})
+					continue
+				}
+			}
+		}
 		cfg, ok := ioSpecifierConfig[name]
 		if !ok {
 			return fields, errors.New("unknown specifier: " + spec.Name)

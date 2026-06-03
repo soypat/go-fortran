@@ -81,6 +81,8 @@ func GOLDEN() {
 	LEVEL67()
 	LEVEL68()
 	LEVEL69()
+	LEVEL70()
+	LEVEL71()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1928,6 +1930,38 @@ func LEVEL69() {
 	obj.first.SetFromString("hello")
 	obj.full.SetConcatString("say: ", obj.first.String())
 	fenv.Print("LEVEL69:", obj.full)
+}
+func LEVEL70() {
+	var (
+		a    = intrinsic.NewArray[float32](nil, 3)
+		b    = intrinsic.NewArray[float32](nil, 3)
+		_, _ = a, b
+	)
+	var (
+		s float32
+		_ = s
+	)
+	a.Set(1.0, 1)
+	a.Set(2.0, 2)
+	a.Set(3.0, 3)
+	s = 2.0
+	b = intrinsic.ArrayMulScalar[float32](a, s)
+	fenv.Print("LEVEL70:", b.At(1), b.At(2), b.At(3))
+}
+func LEVEL71() {
+	var (
+		a = intrinsic.NewArray[float32](nil, 3)
+		_ = a
+	)
+	var (
+		mx float32
+		_  = mx
+	)
+	a.Set(-1.0, 1)
+	a.Set(2.0, 2)
+	a.Set(-3.0, 3)
+	mx = intrinsic.MAXVAL(intrinsic.ArrayAbs[float32](a))
+	fenv.Print("LEVEL71:", mx)
 }
 func HalfArr(x *intrinsic.Array[float32]) (y *intrinsic.Array[float32]) {
 	y = intrinsic.NewArray[float32](nil, 3)

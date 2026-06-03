@@ -342,8 +342,12 @@ func (tg *ToGo) transformComponentAccess(vitgt *Varinfo, e *f90.ComponentAccess)
 		}
 	}
 
-	// For now, return vitgt as resultType since we don't track derived type field types
-	// This works for simple cases where the target type is known
+	// Look up the component's actual type from the derived type definition.
+	if baseVinfo != nil {
+		if fieldVi := tg.lookupFieldVarinfo(baseVinfo, e.Component, len(e.Args) > 0 && !f90.IsRanged(e.Args...)); fieldVi != nil {
+			return result, fieldVi, nil
+		}
+	}
 	return result, vitgt, nil
 }
 
@@ -472,6 +476,40 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 		resultType = rpromote
 	}
 	needsPromotion := lpromote != nil || rpromote != nil
+	// Mixed scalar-array arithmetic: one array, one scalar → ArrayXxxScalar[T](arr, scalar)
+	lIsArr := leftType != nil && leftType.IsArray() && leftType.TypeToken() != f90token.TYPE
+	rIsArr := rightType != nil && rightType.IsArray() && rightType.TypeToken() != f90token.TYPE
+	if lIsArr != rIsArr { // exactly one is array
+		arrExpr, arrType, scalarExpr := left, leftType, right
+		isScalarLeft := rIsArr
+		if isScalarLeft {
+			arrExpr, arrType, scalarExpr = right, rightType, left
+		}
+		elemTok := arrType.TypeToken()
+		goType := goTypeBasic(elemTok, 0)
+		sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("")}
+		switch e.Op {
+		case f90token.Plus:
+			sel.Sel = ast.NewIdent("ArrayAddScalar")
+		case f90token.Minus:
+			if isScalarLeft {
+				sel.Sel = ast.NewIdent("ScalarSubArray")
+				return &ast.CallExpr{Fun: &ast.IndexExpr{X: sel, Index: goType}, Args: []ast.Expr{scalarExpr, arrExpr}}, arrType, nil
+			}
+			sel.Sel = ast.NewIdent("ArraySubScalar")
+		case f90token.Asterisk:
+			sel.Sel = ast.NewIdent("ArrayMulScalar")
+		case f90token.Slash:
+			if isScalarLeft {
+				// scalar / array: not common, fall through to normal
+			} else {
+				sel.Sel = ast.NewIdent("ArrayDivScalar")
+			}
+		}
+		if sel.Sel.Name != "" {
+			return &ast.CallExpr{Fun: &ast.IndexExpr{X: sel, Index: goType}, Args: []ast.Expr{arrExpr, scalarExpr}}, arrType, nil
+		}
+	}
 	// Whole-array arithmetic: both operands arrays → intrinsic.ArrayAdd/Sub/Mul/Div[T](a, b)
 	if leftType != nil && rightType != nil && leftType.IsArray() && rightType.IsArray() &&
 		leftType.TypeToken() != f90token.TYPE && rightType.TypeToken() != f90token.TYPE {
@@ -703,6 +741,10 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 		// Substring access of a CHARACTER scalar (ranged: str(s:e)) returns Go string, not CharacterArray.
 		if vi.decl.Type.Token == f90token.CHARACTER && !vi.IsArray() && f90.IsRanged(e.Args...) {
 			return result, _tgtStringLit, err
+		}
+		// Array element access (non-ranged, no secondary) returns scalar, not array.
+		if vi.IsArray() && len(e.Args) > 0 && !f90.IsRanged(e.Args...) && e.SecondaryAccess == nil {
+			return result, defaultVarinfo(vi.TypeToken()), err
 		}
 		return result, vi, err
 	}

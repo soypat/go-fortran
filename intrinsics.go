@@ -136,6 +136,25 @@ func (tg *ToGo) intrinsicExprV2(vitgt *Varinfo, fn *intrinsicFn, call *intrinsic
 		resultType = firstArgType
 	}
 
+	// Dispatch scalar intrinsics to array versions when first argument is an array.
+	if len(gargs) == 1 && firstArgType != nil && firstArgType.IsArray() &&
+		firstArgType.TypeToken() != f90token.TYPE {
+		var arrayFuncName string
+		switch call.methodOrCall {
+		case "ABS":
+			arrayFuncName = "ArrayAbs"
+		}
+		if arrayFuncName != "" {
+			elemTok := firstArgType.TypeToken()
+			goType := goTypeBasic(elemTok, 0)
+			sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent(arrayFuncName)}
+			return &ast.CallExpr{
+				Fun:  &ast.IndexExpr{X: sel, Index: goType},
+				Args: gargs,
+			}, firstArgType, nil
+		}
+	}
+
 	// Determine function expression based on methodOrCall convention
 	var funcExpr ast.Expr
 	name := call.methodOrCall

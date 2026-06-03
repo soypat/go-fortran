@@ -450,7 +450,25 @@ func (env *Environment) Read(unit int32, f *Format, args ...any) IOStat {
 
 // ReadWithSpec performs formatted input with full I/O specifier support.
 func (env *Environment) ReadWithSpec(spec IOSpec, args ...any) IOStat {
-	stat := env.Read(spec.UNIT, spec.FMT, args...)
+	var stat IOStat
+	if spec.InternalBuffer != "" {
+		// Internal file read: parse directly from character buffer string.
+		var parseErr error
+		f := spec.FMT
+		if f.spec == "" && !f.parsed {
+			parseErr = readListDirected(spec.InternalBuffer, args)
+		} else {
+			f.ensureParsed()
+			parseErr = readFormatted(spec.InternalBuffer, f.descriptors, args)
+		}
+		if parseErr != nil {
+			stat = IOStatErrConversion
+		} else {
+			stat = IOStatOK
+		}
+	} else {
+		stat = env.Read(spec.UNIT, spec.FMT, args...)
+	}
 	if spec.IOSTAT != nil {
 		*spec.IOSTAT = int32(stat)
 	}
