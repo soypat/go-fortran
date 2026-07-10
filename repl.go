@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/soypat/go-fortran/ast"
 	f90 "github.com/soypat/go-fortran/ast"
 	f90token "github.com/soypat/go-fortran/token"
 )
@@ -21,14 +22,12 @@ import (
 // like 2+3.0), decl comes from templates (_tgtFloat32 etc), val.tok tracks
 // the actual evaluated type after promotion.
 type Value struct {
-	tok   f90token.Token // Evaluated type token. Can be used to check if set in REPL.
-	i64   int64          // INTEGER (all sizes)
-	f64   float64        // REAL/DOUBLE PRECISION
-	b     bool           // LOGICAL
-	s     string         // CHARACTER
-	arr   []Value        // Array elements (flattened, row-major)
-	shape []int          // Array dimensions
-	set   bool
+	tok f90token.Token // Evaluated type token. Can be used to check if set in REPL.
+	i64 int64          // INTEGER (all sizes)
+	f64 float64        // REAL/DOUBLE PRECISION
+	b   bool           // LOGICAL
+	s   string         // CHARACTER
+	set bool
 }
 
 func (v *Value) Token() f90token.Token { return v.tok }
@@ -68,14 +67,20 @@ func (cb *commonBlockInfo) addField(v *Varinfo) {
 
 type REPL struct {
 	scope ParserUnitData // currentScope variable data.
+	// registered stores all modules that have been registered
+	// using RegisterModule since Reset call. These modules can then be
+	// loaded to the USE scope via "Use".
+	registered []f90.Unit
+
 	// use stores modules/subroutines/functions/data blocks that have been loaded via Use.
 	// The used modules are flattened here, so _use contains functions/subroutines contained within modules as well.
 	_use              []*ParserUnitData
 	_contains         []*ParserUnitData
+	_hostScope        []Varinfo         // host-associated vars from enclosing MODULE (set during CONTAINS processing)
 	commonblocks      []commonBlockInfo // COMMON block name -> info (file-level, not reset per procedure)
+	formatSpecs       []ast.FormatStmt  // FORMAT statements collected per unit
 	noValueResolution bool              // When true, Eval skips value computation (type inference only)
-	// used contains flat used program units. Contains modules are not added here.
-	used []f90.ProgramUnit
+	_varCache         *Varinfo
 }
 
 func (repl *REPL) Reset() {
@@ -84,7 +89,8 @@ func (repl *REPL) Reset() {
 		_contains:    repl._contains[:0],
 		scope:        repl.scope,
 		commonblocks: repl.commonblocks[:0],
-		used:         repl.used[:0],
+		formatSpecs:  repl.formatSpecs[:0],
+		registered:   repl.registered[:0],
 	}
 	repl.scope.reset()
 }
@@ -123,43 +129,173 @@ func (tg *REPL) getCommon(name string) *commonBlockInfo {
 	return nil
 }
 
-func (repl *REPL) Var(name string) *Varinfo {
-	vi := repl.scope.Var(name)
-	if vi != nil {
-		return vi
-	}
-	for _, mod := range repl._use {
-		vi = mod.Var(name)
-		if vi != nil {
-			return vi
+// getFormat looks up a FORMAT statement by its label.
+func (repl *REPL) getFormat(label string) *ast.FormatStmt {
+	for i := range repl.formatSpecs {
+		if repl.formatSpecs[i].Label == label {
+			return &repl.formatSpecs[i]
 		}
 	}
 	return nil
 }
 
-func (repl *REPL) AddUsed(pu ...f90.ProgramUnit) error {
+// Namelist returns the NAMELIST group with the given name, or nil if not found.
+func (repl *REPL) Namelist(name string) *ast.NamelistGroup {
+	return repl.scope.Namelist(name)
+}
+
+func (repl *REPL) Var(name string) *Varinfo {
+	if repl._varCache != nil && repl._varCache._varname == name {
+		return repl._varCache
+	}
+	vi := repl.scope.Var(name)
+	if vi != nil {
+		repl._varCache = vi
+		return vi
+	}
+	for _, mod := range repl._use {
+		vi = mod.Var(name)
+		if vi != nil {
+			repl._varCache = vi
+			return vi
+		}
+	}
+	for i := range repl._hostScope {
+		if strings.EqualFold(repl._hostScope[i]._varname, name) {
+			repl._varCache = &repl._hostScope[i]
+			return &repl._hostScope[i]
+		}
+	}
+	return nil
+}
+
+// DefineStmtFunc registers a statement function in the current scope.
+// Statement functions are one-line inline functions like: FUNCNAME(X) = expr
+func (repl *REPL) DefineStmtFunc(name string, params []string, expr f90.Expression, decl *f90.DeclEntity) {
+	vi := repl.scope.Var(name)
+	if vi == nil {
+		// Add new varinfo for the statement function
+		repl.scope.vars = append(repl.scope.vars, Varinfo{
+			_varname: name,
+			decl:     decl,
+		})
+		vi = &repl.scope.vars[len(repl.scope.vars)-1]
+	}
+	vi.flags |= VFlagStmtFunc
+	vi.stmtFuncExpr = expr
+	vi.stmtFuncParams = params
+}
+
+// PushLoopVar temporarily adds an implied DO loop variable to the current scope.
+// Returns a function that removes the variable when called.
+// Usage: defer repl.PushLoopVar(name)()
+func (repl *REPL) PushVar(v Varinfo) (remove func()) {
+	repl._varCache = nil
+	repl.scope.vars = append(repl.scope.vars, v)
+	name := v._varname
+	return func() {
+		vgot := &repl.scope.vars[len(repl.scope.vars)-1]
+		if name != vgot._varname {
+			panic("unordered variable pop")
+		}
+		repl._varCache = nil
+		repl.scope.vars = repl.scope.vars[:len(repl.scope.vars)-1]
+	}
+}
+
+// PushHostScope sets host-associated variables from an enclosing MODULE or PROGRAM
+// for contained procedure transpilation. Returns pop to restore prior state.
+// Call pop after CONTAINS processing is complete.
+func (repl *REPL) PushHostScope(vars []Varinfo) (pop func()) {
+	if len(vars) == 0 {
+		return func() {}
+	}
+	prevlen := len(repl._hostScope)
+	repl._hostScope = append(repl._hostScope, vars...)
+	name0 := vars[0]._varname
+	repl._varCache = nil
+	return func() {
+		if repl._hostScope[prevlen]._varname != name0 {
+			panic("invalid push/pop of host scope")
+		}
+		repl._hostScope = repl._hostScope[:prevlen]
+		repl._varCache = nil
+	}
+}
+
+// RegisteredUnit returns a program unit that was previously registered with RegisterUnit.
+func (repl *REPL) RegisteredUnit(name string) *f90.Unit {
+	for i := range repl.registered {
+		if strings.EqualFold(repl.registered[i].UnitName(), name) {
+			return &repl.registered[i]
+		}
+	}
+	return nil
+}
+
+// RegisterUnits registers a set of program units to the REPL. These units
+// are registered at a top level and are not accessed except in the case of function/subroutine lookup.
+func (repl *REPL) RegisterUnits(pu ...f90.Unit) error {
 	for i := range pu {
-		data, ok := pu[i].UnitData().(*ParserUnitData)
-		if !ok {
-			return fmt.Errorf("extern program unit %s has incompatible UnitData %T", pu[i].UnitName(), pu[i].UnitData())
-		}
-		exists := repl.GetUsed(data.name)
+		name := pu[i].UnitName()
+		exists := repl.RegisteredUnit(name)
 		if exists != nil {
-			return fmt.Errorf("%s(%T) already added as %s(%s)", pu[i].UnitName(), pu[i], exists.name, exists.tok.String())
+			return fmt.Errorf("%s(%T) already added as %s(%s)", pu[i].UnitName(), pu[i], name, exists.AppendTokenLiteral(nil))
 		}
-		repl._use = append(repl._use, data)
-		// Also register module-contained procedures so they can be found by ContainedOrExtern.
-		if mod, ok := pu[i].(*f90.Module); ok {
-			for _, contained := range mod.Contains {
-				err := repl.AddUsed(contained)
-				if err != nil {
-					return fmt.Errorf("%s contained within %s: %w", contained.UnitName(), mod.Name, err)
-				}
+	}
+	repl.registered = append(repl.registered, pu...)
+	return nil
+}
+
+// Use loads a registered unit to the REPL scope until scope is reset.
+func (repl *REPL) Use(name string, only ...string) (err error) {
+	unit := repl.RegisteredUnit(name)
+	if unit == nil {
+		return errors.New("unit " + name + " not registered")
+	}
+	repl._use, err = repl.appendUnitData(repl._use, only, unit)
+	if err != nil {
+		return fmt.Errorf("using unit %s: %w", name, err)
+	}
+	return nil
+}
+
+func (repl *REPL) appendUnitData(dst []*ParserUnitData, only []string, pu *f90.Unit) (_ []*ParserUnitData, err error) {
+	data, ok := pu.UnitData().(*ParserUnitData)
+	if !ok {
+		return dst, fmt.Errorf("program unit %s has incompatible UnitData %T", pu.UnitName(), pu.UnitData())
+	}
+	for i := range dst {
+		if strings.EqualFold(dst[i].name, data.name) {
+			return dst, fmt.Errorf("%s(%T) already added as %s(%s)", pu.UnitName(), pu, dst[i].name, dst[i].tok.String())
+		}
+	}
+	if only != nil {
+		var filtered ParserUnitData
+		filtered.copyFrom(data)
+		filtered.vars = filtered.vars[:0]
+		for i := range data.vars {
+			if identifierIn(only, data.vars[i].Identifier()) {
+				filtered.vars = append(filtered.vars, data.vars[i])
+			}
+		}
+		data = &filtered
+	}
+	dst = append(dst, data)
+	// Also register module-contained procedures so they can be found by ContainedOrExtern.
+	if pu.Token == f90token.MODULE {
+		for i := range pu.Contains {
+			contained := &pu.Contains[i]
+			if only != nil && !identifierIn(only, contained.UnitName()) {
+				continue
+			}
+			dst, err = repl.appendUnitData(dst, nil, contained)
+			if err != nil {
+				return dst, fmt.Errorf("%s contained within %s: %w", contained.UnitName(), pu.Name, err)
 			}
 		}
 	}
-	repl.used = append(repl.used, pu...)
-	return nil
+	return dst, nil
 }
 
 func (repl *REPL) GetUsed(name string) *ParserUnitData {
@@ -185,6 +321,13 @@ func (repl *REPL) ContainedOrUsed(name string) *ParserUnitData {
 	if data == nil {
 		data = repl.GetUsed(name)
 	}
+	if data == nil {
+		// Search registered external procedures (globally visible in Fortran)
+		unit := repl.RegisteredUnit(name)
+		if unit != nil {
+			data, _ = unit.UnitData().(*ParserUnitData)
+		}
+	}
 	return data
 }
 
@@ -197,7 +340,8 @@ func (repl *REPL) ScopeParams() []Varinfo {
 	return repl.scope.vars // all variables are parameters... or no variables.
 }
 
-func (repl *REPL) SetScope(pu f90.ProgramUnit) error {
+func (repl *REPL) SetScope(pu f90.Unit) (err error) {
+	repl._varCache = nil
 	data, ok := pu.UnitData().(*ParserUnitData)
 	if !ok {
 		return errors.New("missing parser unit data")
@@ -208,37 +352,45 @@ func (repl *REPL) SetScope(pu f90.ProgramUnit) error {
 		v := &repl.scope.vars[i]
 		if v.decl == nil {
 			return fmt.Errorf("unresolved declaration for variable %s in %s", v.Identifier(), pu.UnitName())
+		} else if v.decl.Type == nil {
+			return fmt.Errorf("unresolved type for declaration of variable %s (%s) in %s", v.Identifier(), v.declPos.String(), pu.UnitName())
 		}
 		v.val.tok = v.decl.Type.Token // Initialize repl value type.
 		v._varname = sanitizeIdent(v._varname)
 		v.common = sanitizeIdent(v.common)
 		v.pointee = sanitizeIdent(v.pointee)
 	}
+	repl.formatSpecs = repl.formatSpecs[:0]
+	for _, stmt := range pu.Body {
+		if fs, ok := stmt.(*f90.FormatStmt); ok && fs.Label != "" {
+			repl.formatSpecs = append(repl.formatSpecs, *fs)
+		}
+	}
 	repl.collectCommonBlocks(repl.scope.vars)
-
-	var toAdd []f90.ProgramUnit
-	switch unit := pu.(type) {
-	case *f90.ProgramBlock:
-		toAdd = unit.Contains
-	case *f90.Module:
-		toAdd = unit.Contains
+	repl._use = repl._use[:0]
+	var toAdd []f90.Unit
+	if !ok {
+		return nil
+	}
+	switch pu.Token {
+	case f90token.PROGRAM, f90token.MODULE:
+		repl._contains = repl._contains[:0]
+		toAdd = pu.Contains
+	case f90token.FUNCTION, f90token.SUBROUTINE:
+		if pu.ResultType.Attr(f90token.RECURSIVE) != nil {
+			toAdd = []f90.Unit{pu}
+		}
 	default:
 		return nil
 	}
 	// reset contains on Module or Program block.
-	repl._contains = repl._contains[:0]
 	for i := range toAdd {
-		pu, ok := toAdd[i].UnitData().(*ParserUnitData)
-		if !ok {
-			return fmt.Errorf("contains program unit %s incompatible unit data", toAdd[i].UnitName())
+		add := &toAdd[i]
+		repl._contains, err = repl.appendUnitData(repl._contains, nil, add)
+		if err != nil {
+			return fmt.Errorf("adding contains %s: %w", pu.UnitName(), err)
 		}
-		exists := repl.Contained(pu.name) != nil
-		if exists {
-			return fmt.Errorf("contains program unit %s duplicated", toAdd[i].UnitName())
-		}
-		repl._contains = append(repl._contains, pu)
 	}
-
 	return nil
 }
 
@@ -263,6 +415,10 @@ func (repl *REPL) Eval(dst *Varinfo, expr f90.Expression) (err error) {
 		vi := repl.Var(e.Value)
 		if vi == nil {
 			err = fmt.Errorf("var %s undefined", e.Value)
+		} else if vi.flags.HasAny(VFlagConstantParameter) && vi.decl != nil && vi.decl.Init != nil {
+			// PARAMETER constants store their value in decl.Init, not val.i64/f64.
+			// Evaluate the init expression to get the actual constant value.
+			err = repl.Eval(dst, vi.decl.Init)
 		} else {
 			*dst = *vi
 		}
@@ -277,13 +433,33 @@ func (repl *REPL) Eval(dst *Varinfo, expr f90.Expression) (err error) {
 		if vi := repl.Var(e.Name); vi != nil {
 			// It's a variable (array element access) - infer element type
 			dst.decl = vi.decl
-			dst.val.tok = vi.typeToken()
+			dst.val.tok = vi.TypeToken()
 		} else {
 			// It's a function call (intrinsic or external)
+			if fn := repl.ContainedOrUsed(e.Name); fn != nil && fn.returnType != nil {
+				*dst = *fn.returnType
+				return nil
+			}
 			err = repl.evalIntrinsic(dst, e)
 		}
 	case *f90.ArrayConstructor:
 		err = repl.evalArrayConstructor(dst, e)
+	case *f90.ComponentAccess:
+		// Component access: var%field — field type unknown, use base type as approximation.
+		// Do NOT set dst.decl: leaving it nil allows unary/binary ops (prepAssignment) to
+		// override the type without a spurious TYPE!=LOGICAL mismatch error.
+		var baseName string
+		switch b := e.Base.(type) {
+		case *f90.Identifier:
+			baseName = b.Value
+		case *f90.CallExpr:
+			baseName = b.Name
+		}
+		if vi := repl.Var(baseName); vi != nil {
+			dst.val.tok = vi.TypeToken()
+		} else {
+			err = fmt.Errorf("component access base not found: %s", baseName)
+		}
 	default:
 		err = fmt.Errorf("unsupported expression: %T", expr)
 	}
@@ -343,6 +519,10 @@ func (repl *REPL) evalBinary(dst *Varinfo, e *f90.BinaryExpr) error {
 	err = repl.Eval(&right, e.Right)
 	if err != nil {
 		return err
+	}
+	// Propagate array flag: if either operand is an array, result is array.
+	if left.IsArray() || right.IsArray() {
+		dst.flags |= VFlagDimension
 	}
 	switch e.Op {
 	// Logical operations
@@ -429,88 +609,97 @@ func (repl *REPL) evalFloatBinary(dst, typ *Varinfo, l float64, op f90token.Toke
 }
 
 func (repl *REPL) evalIntrinsic(dst *Varinfo, e *f90.CallExpr) error {
-	name := strings.ToUpper(e.Name)
 	if len(e.Args) == 0 {
-		return fmt.Errorf("%s intrinsic requires arguments", name)
+		return fmt.Errorf("%s intrinsic requires arguments", e.Name)
 	}
+	var intr *intrinsicFn
+	intrTok := f90token.LookupIntrinsic(e.Name)
+	if intrTok == 0 {
+		// Try vendor intrinsic lookup
+		vendorTok := f90token.LookupVendorIntrinsic(e.Name)
+		if vendorTok != 0 {
+			intr = getVendoredIntrinsic(vendorTok)
+		}
+	} else {
+		intr = getIntrinsic(intrTok)
+	}
+	if intr == nil {
+		return fmt.Errorf("intrinsic %s not found", e.Name)
+	}
+	if repl.noValueResolution {
+		// No value resolution short circuit
+		if call := intr.findBestCall(len(e.Args)); call != nil {
+			if call.returnType != nil {
+				*dst = *call.returnType
+				if dst.val.tok == 0 && dst.decl != nil {
+					dst.val.tok = dst.decl.Type.Token
+				}
+				return nil
+			} else if len(e.Args) > 0 {
+				return repl.Eval(dst, e.Args[0])
+			}
+		}
+	}
+
 	var arg0 Varinfo
 	err := repl.Eval(&arg0, e.Args[0])
 	if err != nil {
 		return err
 	}
-
-	f0 := arg0.val.Float()
-	var fn0 func(float64) float64
-	switch name {
-	case "SQRT":
-		fn0 = math.Sqrt
-	case "SIN":
-		fn0 = math.Sin
-	case "COS":
-		fn0 = math.Cos
-	case "TAN":
-		fn0 = math.Tan
-	case "ASIN":
-		fn0 = math.Asin
-	case "ACOS":
-		fn0 = math.Acos
-	case "ATAN":
-		fn0 = math.Atan
-	case "EXP":
-		fn0 = math.Exp
-	case "LOG":
-		fn0 = math.Log
-	case "LOG10":
-		fn0 = math.Log10
-	case "ABS":
-		fn0 = math.Abs
-	}
-	if fn0 != nil {
-		return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(fn0, f0))
-	}
-	switch name {
-	case "REAL":
-		err = repl.assignFloat32(dst, f0)
-	case "DBLE":
-		err = repl.assignFloat64(dst, f0)
-	case "INT":
-		err = repl.assignInt(dst, int64(f0))
-	case "NINT":
-		err = repl.assignInt(dst, int64(repl.evalFloatFn0(math.Round, f0)))
-	case "FACTORIAL":
-		err = repl.assignInt(dst, repl.evalFactorial(arg0.val.Int()))
-	case "FLOOR":
-		err = repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(math.Floor, f0))
-	case "CEILING":
-		err = repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(math.Ceil, f0))
-	case "MAX":
-		err = repl.evalMax(dst, e.Args)
-	case "MIN":
-		err = repl.evalMin(dst, e.Args)
-	case "LEN", "LEN_TRIM", "INDEX", "ICHAR", "IACHAR", "SIZE", "LBOUND", "UBOUND", "MALLOC":
-		err = repl.assignInt(dst, int64(len(arg0.val.StringValue())))
-	case "TRIM", "ADJUSTL", "ADJUSTR", "CHAR", "ACHAR":
-		err = repl.assignString(dst, arg0.val.StringValue())
-	case "MOD":
+	if intr.f1 != nil {
+		return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn0(intr.f1, arg0.val.Float()))
+	} else if intr.f2 != nil {
 		if len(e.Args) < 2 {
-			return fmt.Errorf("MOD requires 2 arguments")
+			return fmt.Errorf("%s requires 2 arguments", e.Name)
 		}
 		var arg1 Varinfo
 		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
 			return err
 		}
-		if repl.noValueResolution || arg1.val.Int() == 0 {
-			err = repl.assignInt(dst, 0)
-		} else {
-			err = repl.assignInt(dst, arg0.val.Int()%arg1.val.Int())
+		return repl.assignFloatLike(dst, &arg0, repl.evalFloatFn2(intr.f2, arg0.val.Float(), arg1.val.Float()))
+	}
+
+	// Handle special cases not covered by lookup tables.
+	f0 := arg0.val.Float()
+	switch intrTok {
+	case f90token.IntrinsicREAL, f90token.IntrinsicFLOAT, f90token.IntrinsicSNGL:
+		err = repl.assignFloat32(dst, f0)
+	case f90token.IntrinsicDBLE:
+		err = repl.assignFloat64(dst, f0)
+	case f90token.IntrinsicINT, f90token.IntrinsicIFIX, f90token.IntrinsicIDINT:
+		err = repl.assignInt(dst, int64(f0))
+	case f90token.IntrinsicNINT, f90token.IntrinsicIDNINT:
+		err = repl.assignInt(dst, int64(repl.evalFloatFn0(math.Round, f0)))
+	case f90token.IntrinsicMAX, f90token.IntrinsicMAX0, f90token.IntrinsicMAX1, f90token.IntrinsicAMAX0, f90token.IntrinsicAMAX1, f90token.IntrinsicDMAX1:
+		err = repl.evalMax(dst, e.Args)
+	case f90token.IntrinsicMIN, f90token.IntrinsicMIN0, f90token.IntrinsicMIN1, f90token.IntrinsicAMIN0, f90token.IntrinsicAMIN1, f90token.IntrinsicDMIN1:
+		err = repl.evalMin(dst, e.Args)
+	case f90token.IntrinsicLEN, f90token.IntrinsicLEN_TRIM, f90token.IntrinsicINDEX, f90token.IntrinsicICHAR, f90token.IntrinsicSIZE, f90token.IntrinsicLBOUND, f90token.IntrinsicUBOUND:
+		err = repl.assignInt(dst, int64(len(arg0.val.StringValue())))
+	case f90token.IntrinsicTRIM, f90token.IntrinsicADJUSTL, f90token.IntrinsicADJUSTR, f90token.IntrinsicCHAR:
+		err = repl.assignString(dst, arg0.val.StringValue())
+	case f90token.IntrinsicIABS:
+		err = repl.assignInt(dst, int64(math.Abs(float64(arg0.val.Int()))))
+	case f90token.IntrinsicISIGN, f90token.IntrinsicDSIGN, f90token.IntrinsicSIGN:
+		if len(e.Args) < 2 {
+			return fmt.Errorf("%s requires 2 arguments", intrTok.String())
 		}
+		var arg1 Varinfo
+		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
+			return err
+		}
+		err = repl.assignFloatLike(dst, &arg0, math.Copysign(f0, arg1.val.Float()))
+	case f90token.IntrinsicDPROD:
+		if len(e.Args) < 2 {
+			return fmt.Errorf("%s requires 2 arguments", intrTok.String())
+		}
+		var arg1 Varinfo
+		if err := repl.Eval(&arg1, e.Args[1]); err != nil {
+			return err
+		}
+		err = repl.assignFloat64(dst, f0*arg1.val.Float())
 	default:
-		// Check for user-defined functions
-		if fn := repl.ContainedOrUsed(e.Name); fn != nil && fn.returnType != nil {
-			dst.val.tok = fn.returnType.typeToken()
-			return nil
-		}
-		err = fmt.Errorf("unknown intrinsic: %s", name)
+		err = fmt.Errorf("intrinsic not yet implemented: %s", intrTok.String())
 	}
 	return err
 }
@@ -520,6 +709,13 @@ func (repl *REPL) evalFloatFn0(fn func(float64) float64, val float64) float64 {
 		return 0
 	}
 	return fn(val)
+}
+
+func (repl *REPL) evalFloatFn2(fn func(float64, float64) float64, a, b float64) float64 {
+	if repl.noValueResolution {
+		return 0
+	}
+	return fn(a, b)
 }
 
 func (repl *REPL) evalMax(dst *Varinfo, args []f90.Expression) error {
@@ -573,10 +769,14 @@ func (repl *REPL) evalMin(dst *Varinfo, args []f90.Expression) error {
 func (repl *REPL) evalArrayConstructor(dst *Varinfo, e *f90.ArrayConstructor) error {
 	if len(e.Values) == 0 {
 		dst.val.tok = f90token.INTEGER // Default to integer for empty array
-		return nil
+	} else {
+		// Infer element type from first element
+		if err := repl.Eval(dst, e.Values[0]); err != nil {
+			return err
+		}
 	}
-	// Infer element type from first element
-	return repl.Eval(dst, e.Values[0])
+	dst.flags |= VFlagDimension // array constructor always produces an array
+	return nil
 }
 
 // Helper methods for creating varinfo with values
@@ -595,6 +795,12 @@ func (repl *REPL) getOrResolveKind(v *Varinfo) (int, error) {
 	if v.kindFlag != 0 {
 		if v.kindFlag == -1 {
 			return 0, nil
+		}
+		return v.kindFlag, nil
+	} else if v.decl == nil {
+		_, v.kindFlag = normalizeTokenKind(v.TypeToken(), 0)
+		if v.kindFlag == 0 {
+			return 0, fmt.Errorf("unable to resolve kind tok=%s, %q ", v.TypeToken(), v.Identifier())
 		}
 		return v.kindFlag, nil
 	}
@@ -619,19 +825,19 @@ func (repl *REPL) getOrResolveKind(v *Varinfo) (int, error) {
 
 // promote returns the resulting promoted type of a binary operation between two types.
 func (repl *REPL) promote(dst, src *Varinfo) (promotion f90token.Token, kind int) {
-	dtok := dst.typeToken()
-	stok := src.typeToken()
+	dtok := dst.TypeToken()
+	stok := src.TypeToken()
 	switch dtok {
 	case 0:
 		promotion = stok
 	case f90token.DOUBLEPRECISION:
 		switch stok {
-		case f90token.INTEGER, f90token.REAL:
+		case f90token.INTEGER, f90token.REAL, f90token.DOUBLEPRECISION:
 			promotion = f90token.DOUBLEPRECISION
 		}
 	case f90token.REAL:
 		switch stok {
-		case f90token.INTEGER:
+		case f90token.INTEGER, f90token.REAL:
 			promotion = f90token.REAL
 		case f90token.DOUBLEPRECISION:
 			promotion = f90token.DOUBLEPRECISION
@@ -647,17 +853,6 @@ func (repl *REPL) promote(dst, src *Varinfo) (promotion f90token.Token, kind int
 		}
 	}
 	return promotion, 0
-}
-
-// typeToken returns the effective type token (prefers val.tok, falls back to decl).
-func (v *Varinfo) typeToken() f90token.Token {
-	if v.val.tok != 0 {
-		return v.val.tok
-	}
-	if v.decl != nil {
-		return v.decl.Type.Token
-	}
-	return 0
 }
 
 func (repl *REPL) assignInt(dst *Varinfo, v int64) error {
@@ -748,13 +943,80 @@ func intPow(base, exp int64) int64 {
 	return result
 }
 
-func (repl *REPL) evalFactorial(n int64) int64 {
-	if repl.noValueResolution || n <= 1 {
-		return 1
+// Single-argument float intrinsics: f(float64) float64
+var _intrinsicEvalf1 = [...]func(float64) float64{
+	// Fortran 66 - Mathematical
+	f90token.IntrinsicABS:  math.Abs,
+	f90token.IntrinsicSQRT: math.Sqrt,
+	// Fortran 66 - Trigonometric
+	f90token.IntrinsicSIN:  math.Sin,
+	f90token.IntrinsicCOS:  math.Cos,
+	f90token.IntrinsicTAN:  math.Tan,
+	f90token.IntrinsicASIN: math.Asin,
+	f90token.IntrinsicACOS: math.Acos,
+	f90token.IntrinsicATAN: math.Atan,
+	// Fortran 66 - Hyperbolic
+	f90token.IntrinsicSINH: math.Sinh,
+	f90token.IntrinsicCOSH: math.Cosh,
+	f90token.IntrinsicTANH: math.Tanh,
+	// Fortran 66 - Exponential/Logarithmic
+	f90token.IntrinsicEXP:   math.Exp,
+	f90token.IntrinsicLOG:   math.Log,
+	f90token.IntrinsicLOG10: math.Log10,
+	// Fortran 66 - Truncation/Rounding
+	f90token.IntrinsicAINT:  math.Trunc,
+	f90token.IntrinsicANINT: math.Round,
+	// Fortran 66 - Double precision specific names
+	f90token.IntrinsicDABS:   math.Abs,
+	f90token.IntrinsicDSQRT:  math.Sqrt,
+	f90token.IntrinsicDSIN:   math.Sin,
+	f90token.IntrinsicDCOS:   math.Cos,
+	f90token.IntrinsicDTAN:   math.Tan,
+	f90token.IntrinsicDASIN:  math.Asin,
+	f90token.IntrinsicDACOS:  math.Acos,
+	f90token.IntrinsicDATAN:  math.Atan,
+	f90token.IntrinsicDSINH:  math.Sinh,
+	f90token.IntrinsicDCOSH:  math.Cosh,
+	f90token.IntrinsicDTANH:  math.Tanh,
+	f90token.IntrinsicDEXP:   math.Exp,
+	f90token.IntrinsicDLOG:   math.Log,
+	f90token.IntrinsicDLOG10: math.Log10,
+	f90token.IntrinsicDNINT:  math.Round,
+	// Fortran 90
+	f90token.IntrinsicCEILING: math.Ceil,
+	f90token.IntrinsicFLOOR:   math.Floor,
+	// Fortran 2008
+	f90token.IntrinsicACOSH:     math.Acosh,
+	f90token.IntrinsicASINH:     math.Asinh,
+	f90token.IntrinsicATANH:     math.Atanh,
+	f90token.IntrinsicBESSEL_J0: math.J0,
+	f90token.IntrinsicBESSEL_J1: math.J1,
+	f90token.IntrinsicBESSEL_Y0: math.Y0,
+	f90token.IntrinsicBESSEL_Y1: math.Y1,
+	f90token.IntrinsicERF:       math.Erf,
+	f90token.IntrinsicERFC:      math.Erfc,
+	f90token.IntrinsicGAMMA:     math.Gamma,
+}
+
+// Two-argument float intrinsics: f(float64, float64) float64
+var _intrinsicEvalf2 = [...]func(float64, float64) float64{
+	// Fortran 66
+	f90token.IntrinsicATAN2:  math.Atan2,
+	f90token.IntrinsicDATAN2: math.Atan2,
+	f90token.IntrinsicDIM:    math.Dim,
+	f90token.IntrinsicDDIM:   math.Dim,
+	f90token.IntrinsicMOD:    math.Mod,
+	// Fortran 90
+	f90token.IntrinsicMODULO: math.Mod,
+	// Fortran 2008
+	f90token.IntrinsicHYPOT: math.Hypot,
+}
+
+func identifierIn(s []string, id string) bool {
+	for i := range s {
+		if strings.EqualFold(s[i], id) {
+			return true
+		}
 	}
-	result := int64(1)
-	for i := int64(2); i <= n; i++ {
-		result *= i
-	}
-	return result
+	return false
 }

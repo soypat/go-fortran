@@ -2,6 +2,8 @@ package token
 
 import (
 	"errors"
+	"fmt"
+	"math/rand/v2"
 	"slices"
 	"testing"
 )
@@ -15,10 +17,10 @@ var foundCoefs = []Coef{
 	{Value: 8}, // Len coefficient.
 }
 
-// TestFindPerfectHash searches for a perfect hash function for the keywords.
-// This test is normally skipped unless -run=TestFindPerfectHash is specified.
+// TestFindPerfectHashKeywords searches for a perfect hash function for the keywords.
+// This test is normally skipped unless -run=TestFindPerfectHashKeywords is specified.
 // It found the current perfect hash: c0=4 c1=26 c2=17 c3=11 cLast=28 cLen=29
-func TestFindPerfectHash(t *testing.T) {
+func TestFindPerfectHashKeywords(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping hash search in short mode")
 	}
@@ -55,19 +57,90 @@ func TestFindPerfectHash(t *testing.T) {
 	coefs := foundCoefs
 	t.Logf("Searching perfect hash for %d keywords", len(keywords))
 	attempts := 0
-	tableBits := []uint{8}
+	tableBits := []int{8}
 	for _, tbits := range tableBits {
 		t.Log("searching for perfect hash table size", 1<<tbits)
+		phf.TableSizeBits = tbits
 		currentAttempts, err := phf.Search(coefs, keywords)
 		attempts += currentAttempts
 		if err == nil {
 			t.Logf("perfect hash found after %d attempts: %+v", attempts, coefs)
+			printCoefs(coefs)
 			return
 		} else if err != nil && currentAttempts == 0 {
 			t.Fatal(err)
 		}
 	}
 	t.Error("No perfect hash found after", attempts, "attempts")
+}
+
+func TestFindPerfectHashIntrinsics(t *testing.T) {
+	const maxCoef = 32
+	phf := PerfectHashFinder{
+		TableSizeBits:  10,
+		DefaultMaxCoef: maxCoef,
+	}
+
+	var intrinsics []string
+	for intr := fortran66Start + 1; intr < fortran2008End; intr++ {
+		if !intr.IsValid() {
+			continue
+		} else if intr.Version() > 95 {
+			break
+		}
+
+		name := intr.String()
+		got := LookupIntrinsic(name)
+		if got == 0 || got != intr {
+			t.Errorf("failed lookup %s, got %s", name, got.String())
+		}
+		intrinsics = append(intrinsics, name)
+	}
+	// t.Log(intrinsics)
+
+	// Randomizing coefficients requires we select indices of intrinisc we are hashing.
+	coefs := make([]Coef, 5)
+	for i := range coefs {
+		coefs[i].IndexApplied = i
+	}
+	for j := 0; j < 3; j++ {
+		c := &coefs[len(coefs)-j-1]
+		c.IndexApplied = -j
+	}
+	rng := rand.New(rand.NewPCG(1, 1))
+	t.Logf("Searching perfect hash for %d intrinsics with %d coefficients", len(intrinsics), len(coefs))
+	attempts := 0
+	tableBits := []int{10}
+	randomRetries := 100
+	for _, tbits := range tableBits {
+		t.Log("searching for perfect hash table size", 1<<tbits)
+		phf.TableSizeBits = tbits
+		for range randomRetries {
+			randomizeCoefs(coefs, rng, 64, 10)
+			currentAttempts, err := phf.Search(coefs, intrinsics)
+			attempts += currentAttempts
+			if err == nil {
+				t.Logf("perfect hash found after %d attempts: %+v", attempts, coefs)
+				printCoefs(coefs)
+				return
+			} else if err != nil && currentAttempts == 0 {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Error("No perfect hash found after", attempts, "attempts")
+}
+
+func printCoefs(coefs []Coef) {
+	lc := coefs[len(coefs)-1]
+	fmt.Printf("\nh := uint(len(s))*%d\n", lc.Value)
+	for _, c := range coefs[:len(coefs)-1] {
+		pfx := ""
+		if c.IndexApplied < 0 {
+			pfx = "len(s)"
+		}
+		fmt.Printf("h %s= uint(s[%s%d])*%d\n", c.Op.String(), pfx, c.IndexApplied, c.Value)
+	}
 }
 
 // TestVerifyCurrentHash verifies the current kwhash function is perfect.
@@ -102,6 +175,23 @@ type Coef struct {
 	StartValue   uint
 	OnlyPow2     bool
 	Op           Token
+}
+
+func randomizeCoefs(coefs []Coef, rng *rand.Rand, maxCoef, searchSpace int) {
+	ops := []Token{Plus, OR, Asterisk}
+	for i := range len(coefs) - 1 {
+		c := &coefs[i]
+		start := rng.IntN(maxCoef)
+		end := min(start+searchSpace, maxCoef)
+		*c = Coef{
+			IndexApplied: c.IndexApplied, // Keep indexing, user should provide intelligence here on best indexing.
+			Value:        0,
+			StartValue:   uint(start),
+			MaxValue:     uint(end),
+			OnlyPow2:     false,
+			Op:           ops[rng.IntN(len(ops))],
+		}
+	}
 }
 
 var ErrNoCoefficientsFound = errors.New("no coefficients found")

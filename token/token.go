@@ -11,7 +11,7 @@ type Token int
 // Install stringer tool:
 //  go install golang.org/x/tools/cmd/stringer@latest
 
-//go:generate stringer -type=Token -linecomment -output stringers.go .
+//go:generate stringer -type=Token,Intrinsic,VendorIntrinsic -linecomment -output stringers.go .
 
 // List of all tokens of the Fortran programming language.
 // When adding a new token add it in between blocks since we use comparison functions to check properties of tokens.
@@ -30,6 +30,7 @@ const (
 	CHARACTER       // CHARACTER
 	DOUBLE          // DOUBLE
 	PRECISION       // PRECISION
+	DOUBLECOMPLEX   // DOUBLECOMPLEX
 	DOUBLEPRECISION // DOUBLEPRECISION
 
 	// Program structure keywords
@@ -397,6 +398,19 @@ func (tok Token) IsLiteral() bool {
 	return tok > litStart && tok < litEnd
 }
 
+func (tok Token) IsNumericalOperator() bool {
+	if !tok.IsOperator() {
+		return false
+	}
+	switch tok {
+	case Plus, Asterisk, Slash, Minus, DoubleStar,
+		EQ, NE, LT, LE, GT, GE,
+		EqEq, NotEquals, Less, LessEq, Greater, GreaterEq:
+		return true
+	}
+	return false
+}
+
 // IsConstructWithParens returns true if the construct has parentheses
 // that follow after declaration.
 func (tok Token) IsConstructAdmitsParens() bool {
@@ -432,15 +446,20 @@ func (tok Token) CanBeUsedAsIdentifier() bool {
 	}
 }
 
-func (tok Token) EndConstructComposite() Token {
+func (tok Token) EndConstructComposite() (endTok Token) {
 	switch tok {
 	case IF:
-		return ENDIF
+		endTok = ENDIF
 	case DO:
-		return ENDDO
+		endTok = ENDDO
+	case PROGRAM:
+		endTok = ENDPROGRAM
+	case MODULE:
+		endTok = ENDMODULE
 	default:
 		panic(tok.String() + " has no composite")
 	}
+	return endTok
 }
 
 // IsExecutableStatement returns true if the token is a executable

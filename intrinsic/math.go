@@ -1,6 +1,9 @@
 package intrinsic
 
-import "math"
+import (
+	"math"
+	"math/cmplx"
+)
 
 type signed interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64
@@ -18,7 +21,7 @@ type float interface {
 	~float32 | ~float64
 }
 
-type complex interface {
+type complexNum interface {
 	~complex64 | ~complex128
 }
 
@@ -41,10 +44,87 @@ func ABS[T signed | float](x T) T {
 	return x
 }
 
+// IABS returns the absolute value of an integer
+// Fortran: IABS(i) - works with INTEGER
+func IABS[T signed](x T) T {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// CABS returns the absolute value (magnitude) of a complex number
+// Fortran: CABS(z) - returns REAL
+func CABS(z complex64) float32 {
+	return float32(cmplx.Abs(complex128(z)))
+}
+
+// CDABS returns the absolute value (magnitude) of a double complex number
+// Fortran: CDABS(z) - returns DOUBLE PRECISION
+func CDABS(z complex128) float64 {
+	return cmplx.Abs(z)
+}
+
+// CMPLX converts a real or integer to complex with zero imaginary part.
+// Fortran: CMPLX(x) - returns COMPLEX
+func CMPLX[T float | signed](x T) complex64 {
+	r := float64(x)
+	return complex64(complex(r, 0))
+}
+
+// CMPLX2 creates a complex number from real and imaginary parts.
+// Fortran: CMPLX(x, y) - returns COMPLEX
+func CMPLX2[T float | signed](x, y T) complex64 {
+	r, i := float64(x), float64(y)
+	return complex64(complex(r, i))
+}
+
+// DCMPLX converts to double complex with zero imaginary part.
+// Fortran: DCMPLX(x) - returns DOUBLE COMPLEX
+func DCMPLX[T float | signed](x T) complex128 {
+	return complex(float64(x), 0)
+}
+
+// DCMPLX2 creates a double complex number from real and imaginary parts.
+// Fortran: DCMPLX(x, y) - returns DOUBLE COMPLEX
+func DCMPLX2[T float | signed](x, y T) complex128 {
+	return complex(float64(x), float64(y))
+}
+
+// AIMAG returns the imaginary part of a complex number.
+// Fortran: AIMAG(z) - returns REAL
+func AIMAG(z complex64) float32 {
+	return imag(z)
+}
+
+// REALPART returns the real part of a complex number.
+// Fortran: REAL(z) when z is complex - returns REAL
+func REALPART(z complex64) float32 {
+	return real(z)
+}
+
+// DREALPART returns the real part of a double complex number.
+// Fortran: DREAL(z) - returns DOUBLE PRECISION
+func DREALPART(z complex128) float64 {
+	return real(z)
+}
+
+// DIMAG returns the imaginary part of a double complex number.
+// Fortran: DIMAG(z) - returns DOUBLE PRECISION
+func DIMAG(z complex128) float64 {
+	return imag(z)
+}
+
 // SQRT returns the square root of x
 // Fortran: SQRT(x) - works with REAL, COMPLEX
 func SQRT[T float](x T) T {
 	return T(math.Sqrt(float64(x)))
+}
+
+// CSQRT returns the complex square root of z
+// Fortran: CSQRT(z) - returns COMPLEX
+func CSQRT(z complex64) complex64 {
+	return complex64(cmplx.Sqrt(complex128(z)))
 }
 
 // EXP returns e raised to the power x
@@ -142,6 +222,11 @@ func MODREAL[T float](a, p T) T {
 // POW returns a to the power of exponent. In fortran represented as a**exponent.
 func POW[T float](a, exponent T) T {
 	return T(math.Pow(float64(a), float64(exponent)))
+}
+
+// POW returns a to the power of exponent. In fortran represented as a**exponent.
+func CPOW[T complexNum](a, exponent T) T {
+	return T(cmplx.Pow(complex128(a), complex128(exponent)))
 }
 
 // SIGN transfers the sign of b to the magnitude of a

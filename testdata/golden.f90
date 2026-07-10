@@ -3,6 +3,7 @@
 
       PROGRAM GOLDEN
       IMPLICIT NONE
+      INTEGER :: lv62y
 
       CALL LEVEL01()
       CALL LEVEL02()
@@ -34,7 +35,53 @@
       CALL LEVEL29()
       CALL LEVEL30()
       CALL LEVEL31()
+      CALL LEVEL32()
+      CALL LEVEL33()
+      CALL LEVEL34()
+      CALL LEVEL35()
+      CALL LEVEL36()
+      CALL LEVEL37()
+      CALL LEVEL38()
+      CALL LEVEL39()
+      CALL LEVEL40()
+      CALL LEVEL41()
+      CALL LEVEL42()
+      CALL LEVEL43()
+      CALL LEVEL44()
+      CALL LEVEL45()
+      CALL LEVEL46()
+      CALL LEVEL47()
+      CALL LEVEL48()
+      CALL LEVEL49()
+      CALL LEVEL50()
+      CALL LEVEL51()
+      CALL LEVEL52()
+      CALL LEVEL53()
+      CALL LEVEL54()
+      CALL LEVEL55()
+      CALL LEVEL56()
+      CALL LEVEL57()
+      CALL LEVEL58()
+      CALL LEVEL59()
+      CALL LEVEL60()
+      CALL LEVEL61()
+      CALL LEVEL62(42, lv62y)
+      CALL LEVEL63()
+      CALL LEVEL64()
+      CALL LEVEL65()
+      CALL LEVEL66()
+      CALL LEVEL67()
+      CALL LEVEL68()
+      CALL LEVEL69()
+      CALL LEVEL70()
+      CALL LEVEL71()
+      CALL LEVEL72()
+      CALL LEVEL73()
+      CALL LEVEL74()
+      CALL LEVEL75()
       STOP 0
+      CALL EXIT(0)
+      CALL EXIT
       CONTAINS
 
 ! ==============================================================================
@@ -90,17 +137,17 @@
 ! ==============================================================================
       SUBROUTINE LEVEL04()
           INTEGER :: i
-          REAL :: x
+          REAL :: x, test
           LOGICAL :: flag
 
           i = 42
           x = 3.14159
+          test = 0.
           flag = .TRUE.
-
+        
           IF (i .GT. 40) THEN
               PRINT *, 'LEVEL 4: i is greater than 40'
           END IF
-
           IF (flag) THEN
               PRINT *, 'LEVEL 4: flag is true'
           ELSE
@@ -188,6 +235,7 @@
       SUBROUTINE LEVEL07()
           INTEGER, DIMENSION(5) :: arr1
           INTEGER :: result
+          REAL :: x=1,y=2
 
           arr1(1) = 10
           arr1(2) = 20
@@ -201,6 +249,8 @@
 
           CALL MODIFY_ARRAY(arr1, 5)
           PRINT *, 'LEVEL 7: arr1 after modify:', arr1(1), arr1(2), arr1(3)
+          CALL MULDST(x,y)
+          PRINT *, 'LEVEL 7: x=x*y', x, y
       END SUBROUTINE LEVEL07
 
 ! ==============================================================================
@@ -243,7 +293,7 @@
       SUBROUTINE LEVEL10()
           INTEGER :: i, j, k
           REAL :: x, y, z, expr_result
-          LOGICAL :: flag, cond1, cond2, cond3
+          LOGICAL :: flag, cond1, cond2, cond3, cond4
 
           i = 11
           j = 52
@@ -260,9 +310,11 @@
           cond1 = (i .GT. 5) .AND. (j .LT. 100)
           cond2 = (x .GE. 3.0) .OR. (y .LE. 1.0)
           cond3 = .NOT. flag
+          ! .NOT. lower precedence than relational: .NOT.x.LT.y = .NOT.(x.LT.y)
+          cond4 = .NOT.x.LT.y
 
           PRINT *, 'LEVEL 10: cond1 =', cond1, ', cond2 =', cond2
-          PRINT *, 'LEVEL 10: cond3 =', cond3
+          PRINT *, 'LEVEL 10: cond3 =', cond3, ', cond4=', cond4
       END SUBROUTINE LEVEL10
 
 ! ==============================================================================
@@ -271,24 +323,40 @@
       SUBROUTINE LEVEL11()
           CHARACTER(LEN=10) :: str1, str2
           CHARACTER(LEN=20) :: str3
+          CHARACTER(3) :: sufx(2)
+          INTEGER :: idx
 
           str1 = 'Hello'
           str2 = 'World'
           str3 = str1 // ' ' // str2
 
+          sufx(1) = 'Go!'
+          sufx(2) = 'Hi!'
+          idx = 1
+          str3 = str1(1:5) // sufx(idx)
+
           PRINT *, 'LEVEL 11: concatenation:', str3
+          PRINT *, 'LEVEL 11: substr+array:', str3
       END SUBROUTINE LEVEL11
 
 ! ==============================================================================
 ! LEVEL 12: Intrinsic functions
 ! ==============================================================================
       SUBROUTINE LEVEL12()
-          REAL :: angle, sin_val, cos_val, abs_val
+          REAL :: angle, sin_val, cos_val, abs_val, log_val, v1(3),v2(3), dot_val,zabs,zreal,zimag
+          DOUBLEPRECISION :: zzabs, zzreal, zzimag
+          COMPLEX :: z, z2
+          DOUBLECOMPLEX :: zz
           INTEGER :: i, j, k, max_val, min_val
-
+          zz = DCMPLX(3.0D0, 1.0D0)
+          do i = 1, 3
+            v1(i) = i
+            v2(i) = i
+          end do
           i = 11
           j = 52
           k = 84
+          z = COMPLEX(1, 2)
 
           angle = 0.5
           sin_val = SIN(angle)
@@ -296,11 +364,23 @@
           abs_val = ABS(-5.5)
           max_val = MAX(i, j, k)
           min_val = MIN(10, 20, 5)
+          log_val = 2.*LOG(angle)
+          dot_val = DOT_PRODUCT(v1,v2)
+          zabs = CABS(z)
+          zreal = REAL(z)
+          zimag = AIMAG(z)
+          zzabs = CDABS(zz)
+          zzreal = DREAL(zz)
+          zzimag = DIMAG(zz)
 
+        !   PRINT *, 'LEVEL 12: LOG(0.5) = ', log_val
           PRINT *, 'LEVEL 12: SIN(0.5) =', sin_val
           PRINT *, 'LEVEL 12: COS(0.5) =', cos_val
           PRINT *, 'LEVEL 12: ABS(-5.5) =', abs_val
           PRINT *, 'LEVEL 12: MAX =', max_val, ', MIN =', min_val
+          PRINT *, 'LEVEL 12: dot product:', dot_val
+          PRINT *, 'LEVEL 12: z=1+2i, ZABS,ZREAL,ZIMAG ', zabs, zreal, zimag
+          PRINT *, 'LEVEL 12: zz=3+1i, ZZABS,ZZREAL,ZZIMAG',zzabs,zzreal,zzimag
       END SUBROUTINE LEVEL12
 
 ! ==============================================================================
@@ -344,6 +424,12 @@
               count = i
           END DO
           PRINT *, 'LEVEL 13: last count =', count
+          ! Test goto ENDDO
+          DO 30 i = 1, 2
+            PRINT *, 'LEVEL 13: do,goto,end do', i
+            goto 30
+            PRINT *, 'LEVEL 13: not printed', i
+30        END DO
       END SUBROUTINE LEVEL13
 
 ! ==============================================================================
@@ -543,33 +629,49 @@
 
       ! LEVEL 20: DATA Statements
       SUBROUTINE LEVEL20()
-          INTEGER :: a, b, c
-          REAL :: x, y
+          INTEGER :: a, b, c, i
+          REAL :: x, y, vec1(3)
+          CHARACTER(3) :: REPEAT(2)
+          CHARACTER(2) :: MTHS(3)
           DATA a, b, c / 10, 20, 30 /
           DATA x, y / 3.14, 2.71 /
+          DATA REPEAT/2*"REP"/
+          DATA vec1 /2*1.2, 2.0/
+          DATA (MTHS(i),i=1,3)/'JA','FE','MA'/
 
           PRINT *, 'LEVEL 20: a =', a
           PRINT *, 'LEVEL 20: b =', b
           PRINT *, 'LEVEL 20: c =', c
           PRINT *, 'LEVEL 20: x =', x
           PRINT *, 'LEVEL 20: y =', y
+          PRINT *, 'LEVEL 20', REPEAT(1), REPEAT(2)
+          PRINT *, 'LEVEL 20:',vec1(1), vec1(2), vec1(3)
+          PRINT *, 'LEVEL 20: implied-do', MTHS(1), MTHS(2), MTHS(3)
       END SUBROUTINE LEVEL20
 
       ! LEVEL 21: Advanced GOTO (Arithmetic IF and Computed GOTO)
       SUBROUTINE LEVEL21()
           INTEGER :: x, choice
-
+          REAL :: test
+          test = 0.
           ! Test Arithmetic IF: IF (expr) neg, zero, pos
           x = -5
           IF (x) 10, 20, 30
 10        PRINT *, 'LEVEL 21: x is negative'
-          GOTO 40
+          GOTO 90
 20        PRINT *, 'LEVEL 21: x is zero'
-          GOTO 40
+          GOTO 90
 30        PRINT *, 'LEVEL 21: x is positive'
+          
+          IF (test-.1e-13) 40,50,60
+40        PRINT *, 'LEVEL 21: test negative'
+          GOTO 90
+50        PRINT *, 'LEVEL 21: test zero'
+          GOTO 90
+60        PRINT *, 'LEVEL 21: test positive'
 
           ! Test Computed GOTO: GO TO (labels) index
-40        choice = 2
+90        choice = 2
           GO TO (100, 200, 300), choice
 100       PRINT *, 'LEVEL 21: Choice was 1'
           GOTO 400
@@ -578,6 +680,8 @@
 300       PRINT *, 'LEVEL 21: Choice was 3'
 
 400       CONTINUE
+
+
       END SUBROUTINE LEVEL21
 
       ! LEVEL 22: STOP Statement
@@ -600,7 +704,7 @@
 ! LEVEL 24: Array Constructors
 ! ==============================================================================
       SUBROUTINE LEVEL24()
-          INTEGER, DIMENSION(3) :: vec1
+          INTEGER, DIMENSION(3) :: vec1, vec3
           INTEGER, DIMENSION(5) :: vec2
 
           ! Array constructor with explicit values
@@ -612,9 +716,19 @@
 
           ! Array constructor with multiple values
           vec2 = (/ 100, 200, 300, 400, 500 /)
-
+          vec3 = (/ 20, 30, 40/)
           PRINT *, 'LEVEL 24: vec2(1) =', vec2(1)
           PRINT *, 'LEVEL 24: vec2(5) =', vec2(5)
+          if (ALL(vec1 == vec3)) then
+            PRINT *, 'LEVEL 24: vec eq'
+          else 
+            PRINT *, 'LEVEL 24: vec neq'
+          end if
+          if (ALL(vec1 == (/10, 20, 30/))) then
+            PRINT *, 'LEVEL 24: vecinline eq'
+          else
+            PRINT *, 'LEVEL 24: vecinline neq'
+          endif
       END SUBROUTINE LEVEL24
 
 ! ==============================================================================
@@ -622,6 +736,12 @@
 ! ==============================================================================
       SUBROUTINE LEVEL25()
           ! Test various KIND parameters
+          INTEGER, PARAMETER :: int32 = 4
+          ! Test DOUBLEPRECISION and REAL PARAMETER constants in output list
+          ! (exercises InferType + Eval of float PARAMETER init)
+          REAL(KIND=8), PARAMETER :: dp_neg = 2.71828182845904D0
+          REAL(KIND=4), PARAMETER :: sp_neg = 2.71828
+          INTEGER(int32) :: n_lapack
           INTEGER(KIND=1) :: i1
           INTEGER(KIND=2) :: i2
           INTEGER(KIND=4) :: i4
@@ -636,6 +756,7 @@
           i8 = 9223372036854775807_8  ! Max value for int64
           r4 = 3.14159
           r8 = 3.141592653589793D0
+          N_LAPACK = 42
 
           PRINT *, 'LEVEL 25: i1 =', i1
           PRINT *, 'LEVEL 25: i2 =', i2
@@ -643,6 +764,10 @@
           PRINT *, 'LEVEL 25: i8 =', i8
           PRINT *, 'LEVEL 25: r4 =', r4
           PRINT *, 'LEVEL 25: r8 =', r8
+          PRINT *, 'LEVEL 25: n_lapack =', n_lapack, ' int32=', int32
+          PRINT *, 'LEVEL 25: dp_neg =', dp_neg
+          PRINT *, 'LEVEL 25: sp_neg =', sp_neg
+
       END SUBROUTINE LEVEL25
 
 ! ==============================================================================
@@ -696,11 +821,12 @@
 
       SUBROUTINE LEVEL28()
           ! Test COMMON block arrays with initialization
+          IMPLICIT REAL (A-Z)
           REAL :: YQR(256), SUMXRQ(512), YMNRT(3)
           REAL :: MATRIX(10,20)
           INTEGER :: COUNTS(100)
           COMMON/HOLDRT/YQR,SUMXRQ,YMNRT,MATRIX
-          COMMON/STATS/COUNTS
+          COMMON/STATS/COUNTS,ALPHC(2,2)
 
           PRINT *, 'LEVEL 28: COMMON block arrays initialized'
           YQR(1) = 1.5
@@ -708,11 +834,16 @@
           YMNRT(2) = 3.14
           MATRIX(5,10) = 42.5
           COUNTS(50) = 42
+          ALPHC(1,1)=1.
+          ALPHC(1,2)=2.
+          ALPHC(2,1)=3.
+          ALPHC(2,2)=4.
           PRINT *, 'LEVEL 28: YQR(1) =', YQR(1)
           PRINT *, 'LEVEL 28: SUMXRQ(512) =', SUMXRQ(512)
           PRINT *, 'LEVEL 28: YMNRT(2) =', YMNRT(2)
           PRINT *, 'LEVEL 28: MATRIX(5,10) =', MATRIX(5,10)
           PRINT *, 'LEVEL 28: COUNTS(50) =', COUNTS(50)
+          PRINT *, 'LEVEL 28: IMPLICIT ALPHC=', ALPHC(1,1), ALPHC(1,2), ALPHC(2,1), ALPHC(2,2)
       END SUBROUTINE LEVEL28
 
     SUBROUTINE LEVEL29()
@@ -743,12 +874,18 @@
         CHARACTER :: A, B
         CHARACTER, DIMENSION(4) :: C
         INTEGER :: MAT(2,2)
+        DOUBLEPRECISION          :: DEFALT
+        INTEGER,DIMENSION(2)     :: I_DEFALT
+        DATA I_DEFALT(1) /Z'7777777'/
+        DATA I_DEFALT(2) /Z'7777777'/
+        EQUIVALENCE ( DEFALT, I_DEFALT )
         EQUIVALENCE (C(1), MAT(1,1))
         EQUIVALENCE (A, B, MAT(1,2))
         MAT(1,1) = 64 ! Affect C.
         MAT(1,2) = 97 ! Affect A and B.
         PRINT *, 'LEVEL 30: CHAR A,B:', A, B
         PRINT *, 'LEVEL 30: CHAR C:', C(1)
+        PRINT *, 'LEVEL 30: DEFALT', DEFALT, I_DEFALT(1), I_DEFALT(2)
     END SUBROUTINE LEVEL30
     SUBROUTINE LEVEL31()
         IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L),INTEGER (I,K)
@@ -769,44 +906,363 @@
     END SUBROUTINE LEVEL31
     SUBROUTINE LEVEL32()
         CHARACTER(LEN=10) :: A(2,2)
+        CHARACTER(3), DIMENSION(2) :: B=(/'ABC', 'CBA'/)
         A(1,1) = 'ABC'
-        A(1,2) = 'DEF'
+        A(1,2) = 'DEFGH'
         A(2,1) = 'GHI'
         A(2,2) = 'JKL'
         PRINT *, 'LEVEL 32:', A(1,1),A(1,2),A(2,1),A(2,2)
+        PRINT *, 'LEVEL 32:', B(1), B(2)
+        PRINT *, 'LEVEL 32: substr', A(1,2)(1:3)
+        B(1:2) = (/'XYZ', 'PQR'/)
+        PRINT *, 'LEVEL 32: range assign', B(1), B(2)
     END SUBROUTINE LEVEL32
-    SUBROUTINE LEVEL33()
-        ! Test advanced features: DIMENSION, MALLOC, DATA with hex, labeled DO
-        IMPLICIT DOUBLE PRECISION (A-H,O-Z),LOGICAL(L),INTEGER (I)
-        POINTER (NPAA,AA(1)), (NPII,II(1)), (NPLL,LL(1)) ! cray style pointer, implicit initialization.
-        INTEGER :: N, M, MAXMUM, MAXDM1, MAXDEF
-        ! Initialize with hex values (Cray-style hex literals)
-        DOUBLEPRECISION          :: DEFALT
-        INTEGER,DIMENSION(2)     :: I_DEFALT
-        DATA I_DEFALT(1) /Z'7777777'/
-        DATA I_DEFALT(2) /Z'7777777'/
-        EQUIVALENCE ( DEFALT, I_DEFALT )
-        PRINT *, 'LEVEL 32: Advanced features test'
-        ! Test MALLOC intrinsic
-        MAXDM1 = 100
-        NPAA = MALLOC(MAXDM1 * 8)
-        IF( NPAA .EQ. 0 ) THEN
-           STOP 69
-        ENDIF
-        NPII = NPAA
-        NPLL = NPII
-        M = 1
-        ! Initialize array using labeled DO loop
-         MAXDEF=MIN(200000,MAXDM1)
-         DO  900 M=1,MAXDEF,32768
-         MAXMUM=MIN(M+32767,MAXDEF)
-         DO  800 N=M,MAXMUM
-        !  AA(N)=DEFALT
-800      END DO
-900      END DO
-        PRINT *, 'LEVEL 32: AA(2) ', AA(2)
-        PRINT *, 'LEVEL 32: Initialized', MAXMUM - M + 1, 'elements'
+    SUBROUTINE LEVEL33() ! ARRAY RANGES.
+        INTEGER, PARAMETER :: NM=3
+        INTEGER :: i,j,range
+        DOUBLE PRECISION :: XSN(NM,NM), COF_COM_TOR(NM,NM)
+        do i = 1,NM
+            do j = 1,NM
+                XSN(i,j) = 0.0
+                COF_COM_TOR(i,j) = 1.0
+            end do
+        end do
+        XSN(1,1) = 1.0
+        COF_COM_TOR(1,1) = 10.0
+        COF_COM_TOR(2,2) = 20.0
+        COF_COM_TOR(3,3) = 20.0
+        range = 2
+        XSN(1:range,range:3) = XSN(1:range,range:3) + COF_COM_TOR(1:range,range:3)
+        do i = 1,NM
+            PRINT *, 'LEVEL 33:', XSN(i,1), XSN(i,2), XSN(i,3)
+        end do
     END SUBROUTINE LEVEL33
+    SUBROUTINE LEVEL34() ! Statement Function declarations
+        INTEGER :: IDX, M
+        IDX(M) = (M*(M/2))*2
+        REAL VOLUME, RADIUS
+        VOLUME(RADIUS) = 4.189*RADIUS**3
+        PRINT *, 'LEVEL 34:', IDX(2), IDX(3), VOLUME(23.0)
+    END SUBROUTINE LEVEL34
+
+    SUBROUTINE LEVEL35() ! WRITE statement variants
+        INTEGER :: m, n,i
+        REAL :: x, wh(6)=(/1.,2.,3.,0.5,1.,1.5/)
+        m = 3
+        n = 5
+        x = 2.5
+        ! List-directed with string
+        WRITE(*,*) "LEVEL 35: Hello from WRITE"
+        ! List-directed with multiple values
+        WRITE(*,*) m, n, x
+        ! List-directed with mixed string and values
+        WRITE(*,*) "LEVEL 35: Values:", m, n
+        ! Formatted with label (no outputs)
+        WRITE(*,220)
+        ! Formatted with label (with outputs)
+        WRITE(*,230) m, n, x
+220     FORMAT('LEVEL 35: Formatted output line')
+230     FORMAT('LEVEL35: m=',I3,' n=',I3,' x=',F5.2)
+        WRITE(*,240) (wh(i),i=1,n)
+        ! Slash is a conctrol character, is basically equivalent to inserting a '\n' byte in the format.
+240     FORMAT('LEVEL35: Newline:'/'LEVEL35: WHI/WR =', 6ES12.4)
+    END SUBROUTINE LEVEL35
+
+    SUBROUTINE LEVEL36() ! COMMON and EQUIVALENCE mixing
+        IMPLICIT REAL (A-H,O-Z)
+        REAL :: d1k,d2k,d3k
+        COMMON /BLK/d1k,d2k,d3k
+        DIMENSION delta(3)
+        EQUIVALENCE (d1k, delta)
+        delta(1) = 1.0
+        delta(2) = 2.0
+        delta(3) = 3.0
+        PRINT *, 'LEVEL 36: Equiv d=', d1k, d2k, d3k
+        CALL BLKINVDECL()
+        CALL BLKDECL()
+    END SUBROUTINE LEVEL36
+
+    SUBROUTINE LEVEL37() ! File IO: OPEN, WRITE, CLOSE, READ
+        INTEGER :: iounit, x, y,  rstat1=-1, rstat2=-1, wstat1=-1, wstat2=-1
+        CHARACTER(LEN=20) :: msg
+        iounit = 10
+        x = 42
+        y = 99
+        msg = 'Hello File IO'
+
+        ! Create and write to file
+        OPEN(UNIT=iounit, FILE='test_io.txt', STATUS='REPLACE', ACTION='WRITE')
+        WRITE(iounit, '(A)', IOSTAT=wstat1) msg
+        WRITE(iounit, '(I5,I5)', IOSTAT=wstat2) x, y
+        CLOSE(UNIT=iounit)
+
+        ! Reopen and read
+        x = 0
+        y = 0
+        OPEN(UNIT=iounit, FILE='test_io.txt', STATUS='OLD', ACTION='READ')
+        READ(iounit, '(A)', IOSTAT=rstat1) msg
+        READ(iounit, '(I5,I5)',IOSTAT=rstat2) x, y
+        CLOSE(UNIT=iounit)
+
+        ! Print results
+        PRINT *, 'LEVEL 37: READ BACK', msg, x, y
+        PRINT *, 'LEVEL 37: IOSTAT', rstat1, rstat2, wstat1, wstat2
+    END SUBROUTINE LEVEL37
+
+! ==============================================================================
+! LEVEL 38: Namelist READ/WRITE loopback test
+! ==============================================================================
+    SUBROUTINE LEVEL38()
+        INTEGER :: iounit = 99
+        INTEGER :: errCode
+        INTEGER :: x, y, z
+        REAL :: a, b
+        NAMELIST /TESTDATA/ x, y, z, a, b
+
+        ! Set values to write
+        x = 10
+        y = 20
+        z = 30
+        a = 1.5
+        b = 2.5
+
+        ! Write namelist to file
+        OPEN(UNIT=iounit, FILE='test_namelist.txt', STATUS='REPLACE', ACTION='WRITE')
+        WRITE(iounit, TESTDATA)
+        CLOSE(UNIT=iounit)
+
+        ! Reset values
+        x = 0
+        y = 0
+        z = 0
+        a = 0.0
+        b = 0.0
+
+        ! Read it back using namelist
+        OPEN(UNIT=iounit, FILE='test_namelist.txt', STATUS='OLD', ACTION='READ')
+        READ(iounit, TESTDATA, IOSTAT=errCode)
+        CLOSE(UNIT=iounit)
+
+        PRINT *, 'LEVEL 38: NAMELIST x,y,z=', x, y, z
+        PRINT *, 'LEVEL 38: NAMELIST a,b=', a, b
+    END SUBROUTINE LEVEL38
+
+! ==============================================================================
+! LEVEL39: READ with END= branch label (EOF handling)
+! ==============================================================================
+    SUBROUTINE LEVEL39()
+        INTEGER :: N
+        CHARACTER(LEN=20) :: CARD
+        N = 0
+        OPEN(39, FILE='test_io.txt', STATUS='OLD', ACTION='READ')
+10      READ(39, '(A)', END=20) CARD
+        N = N + 1
+        GO TO 10
+20      CLOSE(39)
+        PRINT *, 'LEVEL 39:', N
+    END SUBROUTINE LEVEL39
+
+! ==============================================================================
+! LEVEL40: Environment intrinsics.
+! ==============================================================================
+    SUBROUTINE LEVEL40()
+        REAL :: t
+        CALL SYSTEM("echo 'LEVEL 40: echo from shell'")
+        CALL CPU_TIME(t)
+    END SUBROUTINE LEVEL40
+
+    SUBROUTINE LEVEL41() ! Variable format WRITE
+        CHARACTER(LEN=30) :: fmt_str
+        INTEGER :: x
+        x = 41
+        fmt_str = '(A,I2,A)'
+        WRITE(*, fmt_str) 'LEVEL ', x, ': SUCCESS'
+    END SUBROUTINE LEVEL41
+
+    SUBROUTINE LEVEL42() ! CHARACTER array as format specifier
+        CHARACTER*1 FMT(5)
+        INTEGER :: x
+        x = 42
+        FMT(1) = '('
+        FMT(2) = 'I'
+        FMT(3) = '2'
+        FMT(4) = ')'
+        FMT(5) = ' '
+        WRITE(*, FMT) x
+        PRINT *, 'LEVEL 42: ok'
+    END SUBROUTINE LEVEL42
+
+    SUBROUTINE LEVEL43() ! OPEN/READ/INQUIRE with implicitly declared IOSTAT/EXIST/input var
+        IMPLICIT INTEGER (I-N), LOGICAL (P)
+        OPEN(UNIT=99, FILE='no_such_file_43.txt', STATUS='OLD', IOSTAT=IOERR)
+        IF (IOERR .NE. 0) THEN
+            PRINT *, 'LEVEL 43: open failed as expected'
+        ELSE
+            READ(99, *, IOSTAT=IOERR) NVAL
+            CLOSE(99)
+        END IF
+        INQUIRE(FILE='no_such_file_43.txt', EXIST=PEXIST)
+        IF (.NOT.PEXIST) THEN
+            PRINT *, 'LEVEL 43: file absent as expected'
+        END IF
+    END SUBROUTINE LEVEL43
+
+    SUBROUTINE LEVEL44() ! REAL(x, KIND=KIND(y)) type conversion with KIND argument
+        IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+        INTEGER NVAL
+        NVAL = 7
+        HRES = REAL(NVAL, KIND=KIND(HRES))
+        PRINT *, 'LEVEL 44:', HRES
+    END SUBROUTINE LEVEL44
+
+! LEVEL45: Alternate returns
+    SUBROUTINE LEVEL45()
+        INTEGER :: x
+        x = 2
+        CALL ALTRSUB(x, *10, *20)
+        PRINT *, 'LEVEL 45: normal'
+        GOTO 30
+10      PRINT *, 'LEVEL 45: alt 1'
+        GOTO 30
+20      PRINT *, 'LEVEL 45: alt 2'
+30      CONTINUE
+    END SUBROUTINE LEVEL45
+
+    SUBROUTINE ALTRSUB(n, *, *)
+        INTEGER, INTENT(IN) :: n
+        IF (n .EQ. 1) RETURN 1
+        IF (n .EQ. 2) RETURN 2
+        RETURN
+    END SUBROUTINE ALTRSUB
+
+! LEVEL46: READ with implied DO loop (array round-trip)
+    SUBROUTINE LEVEL46()
+        INTEGER :: iounit, i
+        REAL :: vals(5), readback(5)
+        DO i = 1, 5
+            vals(i) = REAL(i) * 1.5
+        END DO
+        iounit = 46
+        OPEN(UNIT=iounit, FILE='test_idl_read.txt', STATUS='REPLACE', ACTION='WRITE')
+        WRITE(iounit, *) (vals(i), i=1, 5)
+        CLOSE(UNIT=iounit)
+        OPEN(UNIT=iounit, FILE='test_idl_read.txt', STATUS='OLD', ACTION='READ')
+        READ(iounit, *) (readback(i), i=1, 5)
+        CLOSE(UNIT=iounit)
+        PRINT *, 'LEVEL 46:', readback(1), readback(2), readback(3), readback(4), readback(5)
+    END SUBROUTINE LEVEL46
+
+! LEVEL47: READ with implied DO and END= (EOF branch)
+    SUBROUTINE LEVEL47()
+        INTEGER :: iounit, i, eof_hit
+        REAL :: arr(3)
+        eof_hit = 0
+        iounit = 47
+        OPEN(UNIT=iounit, FILE='test_end_idl.txt', STATUS='REPLACE', ACTION='WRITE')
+        WRITE(iounit, *) 10.0, 20.0, 30.0
+        CLOSE(UNIT=iounit)
+        OPEN(UNIT=iounit, FILE='test_end_idl.txt', STATUS='OLD', ACTION='READ')
+        READ(iounit, *, END=10) (arr(i), i=1, 3)
+        GOTO 20
+10      eof_hit = 1
+20      CLOSE(UNIT=iounit)
+        PRINT *, 'LEVEL 47:', arr(1), arr(2), arr(3), eof_hit
+    END SUBROUTINE LEVEL47
+
+! LEVEL48: PRINT with implied DO loop
+    SUBROUTINE LEVEL48()
+        INTEGER :: i
+        REAL :: arr(4)
+        DO i = 1, 4
+            arr(i) = REAL(i) * 2.0
+        END DO
+        PRINT *, 'LEVEL 48:', (arr(i), i=1, 4)
+    END SUBROUTINE LEVEL48
+
+! LEVEL50: Derived-type variable declared with DIMENSION attribute; component assignment
+    SUBROUTINE LEVEL50()
+        IMPLICIT NONE
+        TYPE :: point_t
+            INTEGER :: x
+            INTEGER :: y
+        END TYPE point_t
+        type( point_t ), dimension( 2 ) :: pts
+        pts(1)%x = 10
+        pts(1)%y = 20
+        pts(2)%x = 30
+        pts(2)%y = 40
+        PRINT *, 'LEVEL 50:', pts(1)%x, pts(1)%y, pts(2)%x, pts(2)%y
+    END SUBROUTINE LEVEL50
+
+! LEVEL49: Power operator (**) inside a boolean comparison (IF and assignment)
+    SUBROUTINE LEVEL49()
+        IMPLICIT DOUBLE PRECISION (A-H, O-Z)
+        DOUBLE PRECISION :: A, B
+        LOGICAL :: C
+        A = 2.D0
+        B = 3.D0
+        C = A**2 .GT. B**2
+        IF (A**2 - B**2 .GT. 0.D0) THEN
+            PRINT *, 'A**2 > B**2'
+        ELSE
+            PRINT *, 'A**2 <= B**2'
+        END IF
+    END SUBROUTINE LEVEL49
+
+! LEVEL51: MOVE_ALLOC intrinsic subroutine
+    SUBROUTINE LEVEL51()
+        INTEGER, ALLOCATABLE :: arr(:), tmp(:)
+        ALLOCATE(arr(3))
+        arr(1) = 10
+        arr(2) = 20
+        arr(3) = 30
+        ALLOCATE(tmp(5))
+        tmp(1) = arr(1)
+        tmp(2) = arr(2)
+        tmp(3) = arr(3)
+        DEALLOCATE(arr)
+        CALL MOVE_ALLOC(tmp, arr)
+        PRINT *, 'LEVEL 51:', arr(1), arr(2), arr(3)
+    END SUBROUTINE LEVEL51
+
+! LEVEL52: READ into COMMON block scalar variable
+      SUBROUTINE LEVEL52()
+          INTEGER :: n
+          COMMON /L52COM/ n
+          n = 0
+          OPEN(UNIT=52, FILE='test_common_read.txt', STATUS='REPLACE', ACTION='WRITE')
+          WRITE(52, '(I5)') 42
+          CLOSE(52)
+          OPEN(UNIT=52, FILE='test_common_read.txt', STATUS='OLD', ACTION='READ')
+          READ(52, '(I5)') n
+          CLOSE(52)
+          PRINT *, 'LEVEL 52:', n
+      END SUBROUTINE LEVEL52
+
+! LEVEL53: Subroutine parameter names must match between signature and body
+      SUBROUTINE LEVEL53()
+          INTEGER :: N
+          N = 7
+          CALL L53HELPER(N)
+      END SUBROUTINE LEVEL53
+
+      SUBROUTINE L53HELPER(X)
+          INTEGER :: X
+          PRINT *, 'LEVEL 53:', X
+      END SUBROUTINE L53HELPER
+
+! LEVEL54: Multiple unnamed COMMON statements must map to contiguous memory (no overlap)
+      SUBROUTINE LEVEL54()
+          INTEGER :: a
+          REAL :: x
+          INTEGER :: b
+          COMMON a, x
+          COMMON b
+          a = 1
+          x = 2.5
+          b = 3
+          PRINT *, 'LEVEL 54:', a, x, b
+      END SUBROUTINE LEVEL54
 
 ! ==============================================================================
 ! Helper Subroutines and Functions
@@ -834,7 +1290,11 @@
           END DO
           PRINT *, 'LEVEL 7: Inside MODIFY_ARRAY'
       END SUBROUTINE MODIFY_ARRAY
-
+      SUBROUTINE MULDST(x,y)
+        REAL, INTENT(OUT) :: x
+        REAL, INTENT(IN) :: y
+        x = y*x
+      END SUBROUTINE
       INTEGER FUNCTION FACTORIAL(n)
           INTEGER, INTENT(IN) :: n
           INTEGER :: i, result
@@ -873,5 +1333,271 @@
 
           FIBONACCI = b
       END FUNCTION FIBONACCI
+
+      SUBROUTINE BLKINVDECL()
+        IMPLICIT REAL (A-H,O-Z)
+        COMMON /BLK/d3k,d2k,d1k
+        PRINT *, 'BLKINVDECL: Equiv d1k,d2k,d3k=', d1k, d2k, d3k
+      END SUBROUTINE BLKINVDECL
+
+      SUBROUTINE BLKDECL()
+        IMPLICIT REAL (A-H,O-Z)
+        COMMON /BLK/d1k,d2k,d3k
+        DIMENSION delta(3)
+        EQUIVALENCE (d1k, delta)
+        PRINT *, 'BLKDECL: Equiv delta(1..3)=', delta(1), delta(2), delta(3)
+        PRINT *, 'BLKDECL: Equiv d1k,d2k,d3k=', d1k, d2k, d3k
+      END SUBROUTINE BLKDECL
+
+
+! LEVEL55: scalar subroutine output args without INTENT declaration (pass-by-ref)
+      SUBROUTINE LEVEL55()
+        REAL A, B
+        A = 0.0
+        B = 0.0
+        CALL SCALAROUT(1.0, A, B)
+        PRINT *, 'LEVEL55:', A, B
+      END SUBROUTINE LEVEL55
+
+      SUBROUTINE SCALAROUT(X, Y, Z)
+        REAL X, Y, Z
+        Y = X + 1.0
+        Z = X + 2.0
+      END SUBROUTINE SCALAROUT
+
+! LEVEL56: TYPE component with DIMENSION attribute; subscripted component element assignment and read
+      SUBROUTINE LEVEL56()
+        IMPLICIT NONE
+        TYPE :: vec3_t
+          REAL, DIMENSION(3) :: v
+        END TYPE vec3_t
+        TYPE(vec3_t) :: obj
+        obj%v(1) = 1.0
+        obj%v(2) = 2.0
+        obj%v(3) = 3.0
+        PRINT *, 'LEVEL56:', obj%v(1) + obj%v(2) + obj%v(3)
+      END SUBROUTINE LEVEL56
+
+! LEVEL57: MATMUL intrinsic - matrix-vector and matrix-matrix products
+      SUBROUTINE LEVEL57()
+        REAL, DIMENSION(3,3) :: mat
+        REAL, DIMENSION(3)   :: vec, res1
+        REAL, DIMENSION(3,3) :: res2
+        INTEGER :: i, j
+        DO i = 1, 3
+          DO j = 1, 3
+            mat(i,j) = REAL(i + j)
+          END DO
+          vec(i) = REAL(i)
+        END DO
+        res1 = MATMUL(mat, vec)
+        res2 = MATMUL(mat, mat)
+        PRINT *, 'LEVEL57:', res1(1), res1(2), res1(3)
+      END SUBROUTINE LEVEL57
+
+! LEVEL63: full-range component array assignment: obj%arr(:) = scalar
+      SUBROUTINE LEVEL63()
+          TYPE :: vec_t
+              REAL, DIMENSION(3) :: v
+          END TYPE vec_t
+          TYPE(vec_t) :: obj
+          obj%v(:) = 0.0
+          obj%v(1) = 5.0
+          PRINT *, 'LEVEL63:', obj%v(1), obj%v(2), obj%v(3)
+      END SUBROUTINE LEVEL63
+
+! LEVEL62: PRESENT intrinsic for optional arguments
+      SUBROUTINE LEVEL62(x, y)
+          INTEGER, INTENT(IN) :: x
+          INTEGER, INTENT(OUT), OPTIONAL :: y
+          IF (PRESENT(y)) y = x * 2
+          PRINT *, 'LEVEL62:', x
+      END SUBROUTINE LEVEL62
+
+! LEVEL61: string concat in expression context (WRITE arg)
+      SUBROUTINE LEVEL61()
+          CHARACTER(LEN=10) :: s
+          s = 'world'
+          PRINT *, 'hello '//TRIM(s)//'!'
+      END SUBROUTINE LEVEL61
+
+! LEVEL60: ALLOCATE on derived-type component array field
+      SUBROUTINE LEVEL60()
+          TYPE :: mesh_t
+              REAL, ALLOCATABLE :: x(:,:)
+          END TYPE mesh_t
+          TYPE(mesh_t) :: objs(2)
+          INTEGER :: i, j
+          i = 3
+          j = 4
+          ALLOCATE(objs(1)%x(i,j))
+          objs(1)%x(1,1) = 1.5
+          PRINT *, 'LEVEL60:', objs(1)%x(1,1)
+          DEALLOCATE(objs(1)%x)
+      END SUBROUTINE LEVEL60
+
+! LEVEL59: LOGICAL field of derived type assigned via .NOT. component access
+      SUBROUTINE LEVEL59()
+          TYPE :: flags_t
+              LOGICAL :: active
+          END TYPE flags_t
+          TYPE(flags_t) :: obj
+          obj%active = .TRUE.
+          obj%active = .NOT.obj%active
+          PRINT *, 'LEVEL59:', obj%active
+      END SUBROUTINE LEVEL59
+
+! LEVEL58: string concat assignment to derived-type component field
+      SUBROUTINE LEVEL58()
+          TYPE :: named_t
+              CHARACTER(LEN=20) :: name
+          END TYPE named_t
+          TYPE(named_t) :: obj
+          CHARACTER(LEN=5) :: prefix
+          prefix = 'item '
+          obj%name = prefix // 'A'
+          PRINT *, 'LEVEL58:', obj%name
+      END SUBROUTINE LEVEL58
+
+! LEVEL64: array-returning function assignment
+      SUBROUTINE LEVEL64()
+          REAL, DIMENSION(3) :: a, b
+          a(1) = 2.0
+          a(2) = 4.0
+          a(3) = 6.0
+          b = HalfArr(a)
+          PRINT *, 'LEVEL64:', b(1), b(2), b(3)
+      END SUBROUTINE LEVEL64
+
+! LEVEL65: scalar broadcast to whole array
+      SUBROUTINE LEVEL65()
+          REAL, DIMENSION(3) :: a
+          a = 0.0
+          a(2) = 5.0
+          PRINT *, 'LEVEL65:', a(1), a(2), a(3)
+      END SUBROUTINE LEVEL65
+
+! LEVEL66: whole-array binary arithmetic
+      SUBROUTINE LEVEL66()
+          REAL, DIMENSION(3) :: a, b, c
+          a(1) = 1.0
+          a(2) = 2.0
+          a(3) = 3.0
+          b(1) = 4.0
+          b(2) = 5.0
+          b(3) = 6.0
+          c = a + b
+          PRINT *, 'LEVEL66:', c(1), c(2), c(3)
+      END SUBROUTINE LEVEL66
+
+! LEVEL67: unary array negation
+      SUBROUTINE LEVEL67()
+          REAL, DIMENSION(3) :: a, b
+          a(1) = -1.0
+          a(2) = -2.0
+          a(3) = -3.0
+          b = -a
+          PRINT *, 'LEVEL67:', b(1), b(2), b(3)
+      END SUBROUTINE LEVEL67
+
+! LEVEL68: TYPE name case: define as Point, use as POINT
+      SUBROUTINE LEVEL68()
+          TYPE :: Point
+              REAL :: x, y
+          END TYPE Point
+          TYPE(POINT) :: p
+          p%x = 1.0
+          p%y = 2.0
+          PRINT *, 'LEVEL68:', p%x, p%y
+      END SUBROUTINE LEVEL68
+
+! LEVEL69: string concat with derived-type component access
+      SUBROUTINE LEVEL69()
+          TYPE :: named_t
+              CHARACTER(LEN=10) :: first
+              CHARACTER(LEN=20) :: full
+          END TYPE named_t
+          TYPE(named_t) :: obj
+          obj%first = 'hello'
+          obj%full = 'say: '//obj%first
+          PRINT *, 'LEVEL69:', obj%full
+      END SUBROUTINE LEVEL69
+
+! LEVEL74: TYPE derived-type array element copy to scalar variable
+      SUBROUTINE LEVEL74()
+          TYPE :: pt_t
+              REAL :: x, y
+          END TYPE pt_t
+          TYPE(pt_t) :: arr(3), elem
+          arr(1)%x = 1.0
+          arr(1)%y = 2.0
+          elem = arr(1)
+          PRINT *, 'LEVEL74:', elem%x, elem%y
+      END SUBROUTINE LEVEL74
+
+! LEVEL75: ranged view assignment with array expression RHS
+      SUBROUTINE LEVEL75()
+          REAL, DIMENSION(2,4) :: a
+          REAL :: s
+          INTEGER :: i, j
+          s = 2.0
+          DO i=1,2
+            DO j=1,4
+              a(i,j) = REAL(i*10+j)
+            END DO
+          END DO
+          a(:,2:3) = a(:,2:3) / s
+          PRINT *, 'LEVEL75:', a(1,2), a(1,3)
+      END SUBROUTINE LEVEL75
+
+! LEVEL72: ranged array assignment with scalar RHS
+      SUBROUTINE LEVEL72()
+          REAL, DIMENSION(5) :: a
+          a = 9.0
+          a(2:4) = 1.0
+          PRINT *, 'LEVEL72:', a(1), a(2), a(3), a(4), a(5)
+      END SUBROUTINE LEVEL72
+
+! LEVEL73: array ** scalar (element-wise power)
+      SUBROUTINE LEVEL73()
+          REAL, DIMENSION(3) :: a
+          REAL :: s
+          a(1) = 2.0
+          a(2) = 3.0
+          a(3) = 4.0
+          s = SQRT(SUM(a**2))
+          PRINT *, 'LEVEL73:', s
+      END SUBROUTINE LEVEL73
+
+! LEVEL70: scalar-array arithmetic (scalar*array, array-scalar)
+      SUBROUTINE LEVEL70()
+          REAL, DIMENSION(3) :: a, b
+          REAL :: s
+          a(1) = 1.0
+          a(2) = 2.0
+          a(3) = 3.0
+          s = 2.0
+          b = s * a
+          PRINT *, 'LEVEL70:', b(1), b(2), b(3)
+      END SUBROUTINE LEVEL70
+
+! LEVEL71: ABS on array + MAXVAL
+      SUBROUTINE LEVEL71()
+          REAL, DIMENSION(3) :: a
+          REAL :: mx
+          a(1) = -1.0
+          a(2) = 2.0
+          a(3) = -3.0
+          mx = MAXVAL(ABS(a))
+          PRINT *, 'LEVEL71:', mx
+      END SUBROUTINE LEVEL71
+
+      FUNCTION HalfArr(x) RESULT(y)
+          REAL, INTENT(IN), DIMENSION(:) :: x
+          REAL, DIMENSION(3) :: y
+          y(1) = x(1) * 0.5
+          y(2) = x(2) * 0.5
+          y(3) = x(3) * 0.5
+      END FUNCTION HalfArr
 
       END PROGRAM GOLDEN

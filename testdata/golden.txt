@@ -22,21 +22,28 @@
  LEVEL 7: ADD_VALUES(10, 20) =          30
  LEVEL 7: Inside MODIFY_ARRAY
  LEVEL 7: arr1 after modify:          20          40          60
+ LEVEL 7: x=x*y   2.00000000       2.00000000    
  LEVEL 8: FACTORIAL(5) =         120
  LEVEL 8: SQUARE_ROOT(16.0) =   4.00000000    
  LEVEL 9: FIBONACCI(7) =          13
  LEVEL 9: sum 1 to 10 =          55
  LEVEL 10: complex expr =   383.449127    
  LEVEL 10: cond1 = T , cond2 = T
- LEVEL 10: cond3 = F
- LEVEL 11: concatenation:Hello      World    
+ LEVEL 10: cond3 = F , cond4= F
+ LEVEL 11: concatenation:HelloGo!            
+ LEVEL 11: substr+array:HelloGo!            
  LEVEL 12: SIN(0.5) =  0.479425550    
  LEVEL 12: COS(0.5) =  0.877582550    
  LEVEL 12: ABS(-5.5) =   5.50000000    
  LEVEL 12: MAX =          84 , MIN =           5
+ LEVEL 12: dot product:   14.0000000    
+ LEVEL 12: z=1+2i, ZABS,ZREAL,ZIMAG    2.23606801       1.00000000       2.00000000    
+ LEVEL 12: zz=3+1i, ZZABS,ZZREAL,ZZIMAG   3.1622776601683795        3.0000000000000000        1.0000000000000000     
  LEVEL 13: sum of positive =          38
  LEVEL 13: count before >7 =           4
  LEVEL 13: last count =           3
+ LEVEL 13: do,goto,end do           1
+ LEVEL 13: do,goto,end do           2
  LEVEL 14: x =          10 , y =           5
  LEVEL 15: choice =           2 , result =          20
  LEVEL 15: choice =           5 , result =         200
@@ -71,6 +78,9 @@
  LEVEL 20: c =          30
  LEVEL 20: x =   3.14000010    
  LEVEL 20: y =   2.71000004    
+ LEVEL 20REPREP
+ LEVEL 20:   1.20000005       1.20000005       2.00000000    
+ LEVEL 20: implied-doJAFEMA
  LEVEL 21: x is negative
  LEVEL 21: Choice was 2
  LEVEL 23: MAX_SIZE =         100
@@ -81,12 +91,17 @@
  LEVEL 24: vec1(3) =          30
  LEVEL 24: vec2(1) =         100
  LEVEL 24: vec2(5) =         500
+ LEVEL 24: vec neq
+ LEVEL 24: vecinline eq
  LEVEL 25: i1 =  127
  LEVEL 25: i2 =  32767
  LEVEL 25: i4 =  2147483647
  LEVEL 25: i8 =  9223372036854775807
  LEVEL 25: r4 =   3.14159012    
  LEVEL 25: r8 =   3.1415926535897931     
+ LEVEL 25: n_lapack =          42  int32=           4
+ LEVEL 25: dp_neg =   2.7182818284590402     
+ LEVEL 25: sp_neg =   2.71828008    
  LEVEL 26: hex_val =         255
  LEVEL 26: oct_val =         255
  LEVEL 26: bin_val =         255
@@ -104,12 +119,76 @@
  LEVEL 28: YMNRT(2) =   3.14000010    
  LEVEL 28: MATRIX(5,10) =   42.5000000    
  LEVEL 28: COUNTS(50) =          42
+ LEVEL 28: IMPLICIT ALPHC=   1.00000000       2.00000000       3.00000000       4.00000000    
  LEVEL 29: byte mat acbd
  LEVEL 29: uint32 mat dcba
  LEVEL 29: linked float=1,int   1.00000000      1065353216
  LEVEL 29: linked float,int=1109917696   42.0000000      1109917696
  LEVEL 30: CHAR A,B:aa
  LEVEL 30: CHAR C:@
+ LEVEL 30: DEFALT   1.0844641954813119E-272   125269879   125269879
  LEVEL 31: INITS           8
  LEVEL 31: AA(1),AA(2),AA(3),AA(4)   1.0000000000000000        0.0000000000000000        2.0000000000000000        0.0000000000000000     
+ LEVEL 32:ABC       DEFGH     GHI       JKL       
+ LEVEL 32:ABCCBA
+ LEVEL 32: substrDEF
+ LEVEL 32: range assignXYZPQR
+ LEVEL 33:   1.0000000000000000        1.0000000000000000        1.0000000000000000     
+ LEVEL 33:   0.0000000000000000        20.000000000000000        1.0000000000000000     
+ LEVEL 33:   0.0000000000000000        0.0000000000000000        0.0000000000000000     
+ LEVEL 34:           4           6   50967.5664    
+ LEVEL 35: Hello from WRITE
+           3           5   2.50000000    
+ LEVEL 35: Values:           3           5
+LEVEL 35: Formatted output line
+LEVEL35: m=  3 n=  5 x= 2.50
+LEVEL35: Newline:
+LEVEL35: WHI/WR =  1.0000E+00  2.0000E+00  3.0000E+00  5.0000E-01  1.0000E+00
+ LEVEL 36: Equiv d=   1.00000000       2.00000000       3.00000000    
+ BLKINVDECL: Equiv d1k,d2k,d3k=   3.00000000       2.00000000       1.00000000    
+ BLKDECL: Equiv delta(1..3)=   1.00000000       2.00000000       3.00000000    
+ BLKDECL: Equiv d1k,d2k,d3k=   1.00000000       2.00000000       3.00000000    
+ LEVEL 37: READ BACKHello File IO                 42          99
+ LEVEL 37: IOSTAT           0           0           0           0
+ LEVEL 38: NAMELIST x,y,z=          10          20          30
+ LEVEL 38: NAMELIST a,b=   1.50000000       2.50000000    
+ LEVEL 39:           2
+LEVEL 40: echo from shell
+LEVEL 41: SUCCESS
+42
+ LEVEL 42: ok
+ LEVEL 43: open failed as expected
+ LEVEL 43: file absent as expected
+ LEVEL 44:   7.0000000000000000     
+ LEVEL 45: alt 2
+ LEVEL 46:   1.50000000       3.00000000       4.50000000       6.00000000       7.50000000    
+ LEVEL 47:   10.0000000       20.0000000       30.0000000               0
+ LEVEL 48:   2.00000000       4.00000000       6.00000000       8.00000000    
+ A**2 <= B**2
+ LEVEL 50:          10          20          30          40
+ LEVEL 51:          10          20          30
+ LEVEL 52:          42
+ LEVEL 53:           7
+ LEVEL 54:           1   2.50000000               3
+ LEVEL55:   2.00000000       3.00000000    
+ LEVEL56:   6.00000000    
+ LEVEL57:   20.0000000       26.0000000       32.0000000    
+ LEVEL58:item A              
+ LEVEL59: F
+ LEVEL60:   1.50000000    
+ hello world!
+ LEVEL62:          42
+ LEVEL63:   5.00000000       0.00000000       0.00000000    
+ LEVEL64:   1.00000000       2.00000000       3.00000000    
+ LEVEL65:   0.00000000       5.00000000       0.00000000    
+ LEVEL66:   5.00000000       7.00000000       9.00000000    
+ LEVEL67:   1.00000000       2.00000000       3.00000000    
+ LEVEL68:   1.00000000       2.00000000    
+ LEVEL69:say: hello          
+ LEVEL70:   2.00000000       4.00000000       6.00000000    
+ LEVEL71:   3.00000000    
+ LEVEL72:   9.00000000       1.00000000       1.00000000       1.00000000       9.00000000    
+ LEVEL73:   5.38516474    
+ LEVEL74:   1.00000000       2.00000000    
+ LEVEL75:   6.00000000       6.50000000    
 STOP 0

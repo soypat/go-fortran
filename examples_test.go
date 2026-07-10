@@ -6,6 +6,7 @@ import (
 
 	"github.com/soypat/go-fortran"
 	"github.com/soypat/go-fortran/ast"
+	"github.com/soypat/go-fortran/token"
 )
 
 // Example_parseAndPrintAST demonstrates parsing a simple Fortran program
@@ -35,7 +36,7 @@ END PROGRAM hello
 
 	// Parse the first program unit
 	unit := parser.ParseNextProgramUnit()
-	if unit == nil {
+	if !unit.IsValid() {
 		fmt.Println("No program unit found")
 		return
 	}
@@ -253,7 +254,7 @@ END MODULE math_utils
 	}
 
 	unit := parser.ParseNextProgramUnit()
-	if unit == nil {
+	if !unit.IsValid() {
 		fmt.Println("No program unit found")
 		return
 	}
@@ -267,7 +268,8 @@ END MODULE math_utils
 	}
 
 	// Print just the module structure (not the full AST)
-	if mod, ok := unit.(*ast.Module); ok {
+	if unit.Token == token.MODULE {
+		mod := unit
 		fmt.Printf("Module: %s\n", mod.Name)
 		fmt.Printf("  Specification statements: %d\n", len(mod.Body))
 		fmt.Printf("  Contained procedures: %d\n", len(mod.Contains))
@@ -288,12 +290,7 @@ END MODULE math_utils
 
 		fmt.Println("\nContained procedures:")
 		for i, proc := range mod.Contains {
-			switch p := proc.(type) {
-			case *ast.Function:
-				fmt.Printf("  %d: FUNCTION %s\n", i, p.Name)
-			case *ast.Subroutine:
-				fmt.Printf("  %d: SUBROUTINE %s\n", i, p.Name)
-			}
+			fmt.Printf("  %d: %s %s\n", i, proc.Token.String(), proc.Name)
 		}
 	}
 
@@ -329,18 +326,19 @@ END SUBROUTINE swap
 	var parser fortran.Parser90
 	parser.Reset("swap.f90", strings.NewReader(src))
 
-	unit := parser.ParseNextProgramUnit()
-	if sub, ok := unit.(*ast.Subroutine); ok {
-		fmt.Printf("Subroutine: %s\n", sub.Name)
-
-		// Extract parameter names
-		var paramNames []string
-		for _, p := range sub.Parameters {
-			paramNames = append(paramNames, p.Name)
-		}
-		fmt.Printf("Parameters: %v\n", paramNames)
-		fmt.Printf("Specification statements: %d\n", len(sub.Body))
+	sub := parser.ParseNextProgramUnit()
+	if !sub.IsValid() {
+		panic("no program unit")
 	}
+	fmt.Printf("Subroutine: %s\n", sub.Name)
+
+	// Extract parameter names
+	var paramNames []string
+	for _, p := range sub.Parameters {
+		paramNames = append(paramNames, p.Name)
+	}
+	fmt.Printf("Parameters: %v\n", paramNames)
+	fmt.Printf("Specification statements: %d\n", len(sub.Body))
 
 	// Output:
 	// Subroutine: swap

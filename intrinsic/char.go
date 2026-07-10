@@ -31,6 +31,33 @@ func NewCharacterArray(length int) (ch CharacterArray) {
 	return ch
 }
 
+// NewCharacterArrayRef allocates and returns a pointer to a CharacterArray.
+// Used for initializing CHARACTER fields in derived type structs.
+func NewCharacterArrayRef(length int) *CharacterArray {
+	ch := NewCharacterArray(length)
+	return &ch
+}
+
+// NewCharacterArrayArray creates a multi-dimensional array of CHARACTER(LEN=charlen) strings.
+// Each CharacterArray element is pre-allocated with the specified character length.
+func NewCharacterArrayArray(charlen int, dims ...int) *Array[CharacterArray] {
+	arr := NewArray[CharacterArray](nil, dims...)
+	for i := range arr.data {
+		arr.data[i].Allocate(charlen)
+	}
+	return arr
+}
+
+// NewCharacterArrayFromStrings creates a 1D array of CHARACTER(LEN=charlen) strings
+// from a slice of Go strings. Each string is padded/truncated to charlen.
+func NewCharacterArrayFromStrings(charlen int, values []string, dims ...int) *Array[CharacterArray] {
+	arr := NewCharacterArrayArray(charlen, dims...)
+	for i, s := range values {
+		arr.data[i].SetFromString(s)
+	}
+	return arr
+}
+
 var _ Pointer = CharacterArray{} // compile time check of interface implementation.
 var _ PointerSetter = (*CharacterArray)(nil)
 
@@ -43,6 +70,12 @@ func (ch *CharacterArray) SetDataUnsafe(v unsafe.Pointer) {
 	ch.data = ch.data[:l]
 }
 
+// SetLenBufferUnsafe sets the capacity of the character array.
+func (ch *CharacterArray) SetLenBufferUnsafe(length int) {
+	l := min(length, cap(ch.data)) // The length of the characters is an intrinsic part of the character type, we preserve it.
+	ch.data = unsafe.Slice(unsafe.SliceData(ch.data), l)[:l]
+}
+
 func (ch *CharacterArray) Allocate(length int) {
 	if length < len(ch.inmem) {
 		ch.data = ch.inmem[:0:length]
@@ -53,6 +86,9 @@ func (ch *CharacterArray) Allocate(length int) {
 
 // DataUnsafe implements [Pointer] interface.
 func (ch CharacterArray) DataUnsafe() unsafe.Pointer {
+	if len(ch.data) == 0 {
+		return nil
+	}
 	return unsafe.Pointer(&ch.data[0])
 }
 
@@ -174,10 +210,8 @@ func (ch CharacterArray) LenTrim() int {
 // Corresponds to Fortran: TRIM(str)
 func (ch CharacterArray) Trim() CharacterArray {
 	lenTrim := ch.LenTrim()
-	result := NewCharacterArray(cap(ch.data))
-	n := copy(result.data[:cap(result.data)], ch.data[:lenTrim])
-	result.setToSpace(n)
-	// Rest is already spaces from NewCharacterArray
+	result := NewCharacterArray(lenTrim)
+	copy(result.data[:cap(result.data)], ch.data[:lenTrim])
 	return result
 }
 
@@ -230,6 +264,34 @@ func (ch CharacterArray) AdjustR() CharacterArray {
 // Corresponds to Fortran: str(start:end)
 func (ch CharacterArray) Substring(start, end int) string {
 	return ch.View(start, end).String()
+}
+
+// CHAR returns a 1-character string for the given ASCII code (Fortran CHAR intrinsic).
+func CHAR(i int32) string { return string([]byte{byte(i)}) }
+
+// ICHAR returns the ASCII value of the first character (Fortran ICHAR intrinsic).
+func ICHAR(ch CharacterArray) int32 {
+	if cap(ch.data) == 0 {
+		return 0
+	}
+	return int32(ch.data[0])
+}
+
+// CharacterArrayJoin concatenates all elements of a CHARACTER array into a single Go string.
+// Used when a CHARACTER array is passed as a format specifier to WRITE/READ.
+func CharacterArrayJoin(arr *Array[CharacterArray]) string {
+	if arr == nil || arr.Size() == 0 {
+		return ""
+	}
+	var b bytes.Buffer
+	lo, hi := arr.LowerDim(1), arr.UpperDim(1)
+	for i := lo; i <= hi; i++ {
+		elem := arr.At(i)
+		for _, c := range elem.data[:cap(elem.data)] {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // View returns a view into the substring from start to end (1-based, inclusive)

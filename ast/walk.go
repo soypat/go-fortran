@@ -21,43 +21,20 @@ func Walk(v Visitor, node Node) {
 	switch n := node.(type) {
 	// Root node
 	case *Program:
-		for _, unit := range n.Units {
-			Walk(v, unit)
+		for i := range n.Units {
+			Walk(v, &n.Units[i])
 		}
 
-	// Program units
-	case *ProgramBlock:
-		for _, stmt := range n.Body {
-			Walk(v, stmt)
-		}
-		for _, unit := range n.Contains {
-			Walk(v, unit)
-		}
-
-	case *Subroutine:
-		for _, stmt := range n.Body {
-			Walk(v, stmt)
-		}
-
-	case *Function:
-		if n.Type.KindOrLen != nil {
-			Walk(v, n.Type.KindOrLen)
+	// Program units (all represented by *Unit with Token discriminator)
+	case *Unit:
+		if n.ResultType.KindOrLen != nil {
+			Walk(v, n.ResultType.KindOrLen)
 		}
 		for _, stmt := range n.Body {
 			Walk(v, stmt)
 		}
-
-	case *Module:
-		for _, stmt := range n.Body {
-			Walk(v, stmt)
-		}
-		for _, proc := range n.Contains {
-			Walk(v, proc)
-		}
-
-	case *BlockData:
-		for _, stmt := range n.Body {
-			Walk(v, stmt)
+		for i := range n.Contains {
+			Walk(v, &n.Contains[i])
 		}
 
 	// Declaration statements
@@ -221,7 +198,7 @@ func Walk(v Visitor, node Node) {
 	// I/O statements
 	case *InquireStmt:
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 		for _, item := range n.OutputList {
 			Walk(v, item)
@@ -229,12 +206,12 @@ func Walk(v Visitor, node Node) {
 
 	case *OpenStmt:
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 
 	case *CloseStmt:
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 
 	case *WriteStmt:
@@ -245,7 +222,7 @@ func Walk(v Visitor, node Node) {
 			Walk(v, n.Format)
 		}
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 		for _, item := range n.OutputList {
 			Walk(v, item)
@@ -259,7 +236,7 @@ func Walk(v Visitor, node Node) {
 			Walk(v, n.Format)
 		}
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 		for _, item := range n.InputList {
 			Walk(v, item)
@@ -275,17 +252,17 @@ func Walk(v Visitor, node Node) {
 
 	case *BackspaceStmt:
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 
 	case *RewindStmt:
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 
 	case *EndfileStmt:
 		for _, spec := range n.Specifiers {
-			Walk(v, spec)
+			Walk(v, spec.Value)
 		}
 
 	case *StopStmt:

@@ -23,6 +23,9 @@ _old*
 testdata/golden
 testdata/golden.out
 /golden*
+/test_*.txt
+/testdata/test_*.txt
+*_exe
 # test transpile files.
 *.f90.go 
 
@@ -31,8 +34,10 @@ testdata/golden.out
 *bin
 /fortranvar
 /fortrangrep
+/fortranpp
 # IDE
 .vscode/
+/fortran2go
 
 # For local development and testing create `local` directories.
 local
@@ -46,6 +51,7 @@ claude-test
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 *.cov
+*.local
 
 # Log files and common data formats.
 *.log

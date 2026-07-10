@@ -22,29 +22,17 @@ var goldensrc string
 
 func TestTranspileGolden(t *testing.T) {
 	const filename = "testdata/golden.f90"
+	const goFilename = "testdata/golden.go"
 	var parser Parser90
 	err := parser.Reset(filename, strings.NewReader(goldensrc))
 	if err != nil {
 		t.Fatal(err)
 	}
-	program := parser.ParseNextProgramUnit().(*f90.ProgramBlock)
-	var tg ToGo
-	tg.SetSource(filename, strings.NewReader(goldensrc))
-	decls, err := tg.TransformProgram(program)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var progSrc bytes.Buffer
-	helperWriteGoAST(t, &progSrc, &ast.File{
-		Name:  ast.NewIdent("main"),
-		Decls: decls, // DO NOT ADD IMPORTS. i.e: STOP statement adds output: then we create an intrinsic.Stop function that does the same.
-	})
-	const goFile = "testdata/golden.go"
-	os.WriteFile(goFile, progSrc.Bytes(), 0777)
-	helperFormatGoSrc(t, goFile)
+	// units := helperParseUnits(t, &parser, filename)
+	helperTranspile(t, "GOLDEN", goFilename, filename)
 	expectedFull := helperRunFortran(t, "testdata/golden.f90")
 	os.WriteFile("testdata/golden.txt", expectedFull, 0777)
-	output := helperRunGoFile(t, goFile)
+	output := helperRunGoFile(t, goFilename)
 	expected := expectedFull
 	misses := 0
 	for {
@@ -86,7 +74,7 @@ func helperRunFortran(t *testing.T, filepath string) (output []byte) {
 	cmd = exec.Command(binFile)
 	output, err = cmd.CombinedOutput()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("running fortran:", string(output), err)
 	}
 	return output
 }
@@ -115,64 +103,57 @@ func helperFormatGoSrc(t testing.TB, filePath string) {
 	}
 }
 
-func helperTranspile(t testing.TB, dstfile string, programPath string, modules ...string) {
-	var tg ToGo
-	var ps Parser90
-	for _, module := range modules {
-		file, err := os.Open(module)
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = ps.Reset(module, file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		tg.SetSource(module, file)
-		for {
-			unit := ps.ParseNextProgramUnit()
-			if unit == nil {
-				break
-			}
-			helperFatalErrors(t, &ps, "parsing unit "+unit.UnitName())
-			err = tg.AddUsed(unit)
-			if err != nil {
-				t.Fatal("failed to use unit", unit.UnitName(), module, err)
-			}
-		}
-		file.Close()
-		helperFatalErrors(t, &ps, "parsing module "+module)
-	}
+func helperParseUnits(t testing.TB, ps *Parser90, programPath string) (units []f90.Unit) {
 	file, err := os.Open(programPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	ps.Reset(programPath, file)
-	tg.SetSource(programPath, file)
-	var mainBlock *f90.ProgramBlock
-	for {
-		unit := ps.ParseNextProgramUnit()
-		if unit == nil {
-			break
-		}
-		if pb, ok := unit.(*f90.ProgramBlock); ok {
-			if mainBlock != nil {
-				t.Fatal("two main blocks found")
-			}
-			mainBlock = pb
-			continue
-		}
-		err = tg.AddUsed(unit)
-		if err != nil {
-			err2 := tg.makeErr(unit, "failed to add")
-			t.Fatal("adding main program unit failed:", err, err2)
-		}
-	}
-	// helperFatalErrors(t, &ps, "parsing") // Temporarily disabled to see transpile errors
-	decls, err := tg.TransformProgram(mainBlock)
+	err = ps.Reset(programPath, file)
 	if err != nil {
 		t.Fatal(err)
 	}
+	for !ps.IsDone() {
+		unit := ps.ParseNextProgramUnit()
+		if !unit.IsValid() {
+			break
+		}
+		helperFatalErrors(t, ps, "parsing unit "+unit.UnitName())
+		units = append(units, unit)
+	}
+	helperFatalErrors(t, ps, "parsing module "+programPath)
+	return units
+}
+
+func helperTranspile(t testing.TB, programName, dstfile, programPath string, modules ...string) {
+	var ps Parser90
+	var units []f90.Unit = helperParseUnits(t, &ps, programPath)
+	for _, module := range modules {
+		modunits := helperParseUnits(t, &ps, module)
+		units = append(units, modunits...)
+	}
+	var tg ToGo
+	decls := []ast.Decl{
+		tg.ImportDecl(),
+		&ast.FuncDecl{
+			Name: ast.NewIdent("main"),
+			Type: &ast.FuncType{
+				Params: &ast.FieldList{}, // No parameters for main
+			},
+			Body: &ast.BlockStmt{
+				List: []ast.Stmt{
+					&ast.ExprStmt{X: &ast.CallExpr{
+						Fun: ast.NewIdent(programName),
+					}},
+				},
+			},
+		},
+	}
+	decls, err := tg.TransformUnits(decls, units...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decls = tg.AppendCommonDecls(decls)
 	var dst bytes.Buffer
 	helperWriteGoAST(t, &dst, &ast.File{
 		Name:  ast.NewIdent("main"),
@@ -235,15 +216,9 @@ END PROGRAM`,
 			}
 
 			unit := parser.ParseNextProgramUnit()
-			if unit == nil {
-				t.Fatal("ParseNextProgramUnit returned nil")
+			if !unit.IsValid() {
+				t.Fatal("ParseNextProgramUnit returned invalid unit")
 			}
-
-			program, ok := unit.(*f90.ProgramBlock)
-			if !ok {
-				t.Fatalf("Expected *ProgramBlock, got %T", unit)
-			}
-
 			// Verify no parsing errors
 			errs := parser.Errors()
 			for _, e := range errs {
@@ -253,11 +228,50 @@ END PROGRAM`,
 			// Transpile - this should not panic
 			var tg ToGo
 			tg.SetSource(tt.name+".f90", strings.NewReader(tt.src))
-			_, err = tg.TransformProgram(program)
+			_, err = tg.TransformUnits(nil, unit)
 			if err != nil {
 				t.Errorf("TransformProgram failed: %v", err)
 			}
 		})
+	}
+}
+
+// TestModuleHostAssociation verifies that CONTAINS subroutines inside a MODULE can access
+// module-level variables (host association), including ALLOCATE/DEALLOCATE on module-level
+// allocatable arrays.
+func TestModuleHostAssociation(t *testing.T) {
+	src := `
+MODULE MOD_HOST_TEST
+  IMPLICIT NONE
+  REAL, ALLOCATABLE :: GRID1(:)
+CONTAINS
+  SUBROUTINE ALLOC_GRID(n)
+    INTEGER, INTENT(IN) :: n
+    ALLOCATE(GRID1(n))
+  END SUBROUTINE ALLOC_GRID
+
+  SUBROUTINE DEALLOC_GRID()
+    DEALLOCATE(GRID1)
+  END SUBROUTINE DEALLOC_GRID
+END MODULE MOD_HOST_TEST`
+
+	var parser Parser90
+	err := parser.Reset("test.f90", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := parser.ParseNextProgramUnit()
+	if !unit.IsValid() {
+		t.Fatal("ParseNextProgramUnit returned invalid unit")
+	}
+	errs := parser.Errors()
+	for _, e := range errs {
+		t.Error("parse error:", e)
+	}
+	var tg ToGo
+	_, err = tg.TransformUnits(nil, unit)
+	if err != nil {
+		t.Errorf("TransformUnits failed: %v", err)
 	}
 }
 
@@ -282,13 +296,10 @@ func TestComparisonOperatorReturnsLogical(t *testing.T) {
 	}
 
 	unit := parser.ParseNextProgramUnit()
-	if unit == nil {
-		t.Fatal("ParseNextProgramUnit returned nil")
+	if !unit.IsValid() {
+		t.Fatal("ParseNextProgramUnit returned invalid")
 	}
-
-	program := unit.(*f90.ProgramBlock)
-	data := program.Data.(*ParserUnitData)
-
+	data := unit.Data.(*ParserUnitData)
 	// Verify LRAY gets LOGICAL type from IMPLICIT LOGICAL(L)
 	lray := data.Var("LRAY")
 	if lray == nil {
@@ -311,7 +322,7 @@ func TestComparisonOperatorReturnsLogical(t *testing.T) {
 	// because .GT. returned INTEGER instead of LOGICAL
 	var tg ToGo
 	tg.SetSource("test.f90", strings.NewReader(src))
-	_, err = tg.TransformProgram(program)
+	_, err = tg.TransformUnits(nil, unit)
 	if err != nil {
 		t.Errorf("TransformProgram failed: %v", err)
 	}
@@ -338,10 +349,10 @@ func TestModuleVariableImport(t *testing.T) {
 	}
 
 	// Parse all program units (module + program)
-	var units []f90.ProgramUnit
-	for {
+	var units []f90.Unit
+	for !parser.IsDone() {
 		unit := parser.ParseNextProgramUnit()
-		if unit == nil {
+		if !unit.IsValid() {
 			break
 		}
 		units = append(units, unit)
@@ -350,23 +361,141 @@ func TestModuleVariableImport(t *testing.T) {
 		t.Fatalf("Expected 2 program units (module + program), got %d", len(units))
 	}
 
-	mod, ok := units[0].(*f90.Module)
-	if !ok {
-		t.Fatalf("Expected Module, got %T", units[0])
-	}
-	program, ok := units[1].(*f90.ProgramBlock)
-	if !ok {
-		t.Fatalf("Expected ProgramBlock, got %T", units[1])
+	mod := units[0]
+	program := units[1]
+	if mod.Token != f90token.MODULE || program.Token != f90token.PROGRAM {
+		t.Fatalf("Expected MDOULE followed by ProgramBlock, got %s %s", units[0].Token, units[1].Token)
 	}
 
 	// Transpile with module as extern
 	var tg ToGo
 	tg.SetSource("test.f90", strings.NewReader(src))
-	err = tg.AddUsed(mod)
+
+	_, err = tg.TransformUnits(nil, units...)
+	if err != nil {
+		t.Errorf("TransformProgram failed: %v", err)
+	}
+}
+
+
+// TestModuleContainedSubroutineParams verifies that a subroutine contained in a
+// module is callable with the correct number of arguments via USE when the
+// module is defined in a separate source file from the caller — mirroring the
+// real use case (e.g. tragen_utils_module.f90 used from g2epp.f90).
+func TestModuleContainedSubroutineParams(t *testing.T) {
+	modSrc := `      module mymod
+      implicit none
+      type :: mytype
+          integer :: val
+      end type
+      type(mytype) :: store
+      integer :: count
+      contains
+      subroutine add_nums(a, b, c)
+          integer, intent(in) :: a, b
+          integer, intent(out) :: c
+          c = a + b
+      end subroutine
+      end module`
+
+	// The ONLY: clause is required to expose the bug — it causes the only filter
+	// to be passed into the recursive appendUnitData call for the contained
+	// subroutine, stripping its parameters.
+	callerSrc := `      subroutine caller()
+      use mymod, only: add_nums
+      integer :: x, y, z
+      x = 1
+      y = 2
+      call add_nums(x, y, z)
+      end subroutine`
+
+	// caller.f90 must be parsed first so the caller unit appears before the
+	// module in the units slice — mirroring the g2epp.f90 layout where
+	// subroutine F (which USEs the module) precedes tragen_utils_module.
+	var parser Parser90
+	var units []f90.Unit
+	for _, pair := range []struct{ name, src string }{
+		{"caller.f90", callerSrc},
+		{"mymod.f90", modSrc},
+	} {
+		if err := parser.Reset(pair.name, strings.NewReader(pair.src)); err != nil {
+			t.Fatal(err)
+		}
+		for !parser.IsDone() {
+			unit := parser.ParseNextProgramUnit()
+			if !unit.IsValid() {
+				break
+			}
+			units = append(units, unit)
+		}
+	}
+	var tg ToGo
+	tg.SetSource("caller.f90", strings.NewReader(callerSrc))
+	_, err := tg.TransformUnits(nil, units...)
+	if err != nil {
+		t.Errorf("module contained subroutine call failed: %v", err)
+	}
+}
+
+// TestCallTooManyArgs verifies that calling a subroutine with more args than
+// declared returns an error, not a panic.
+func TestCallTooManyArgs(t *testing.T) {
+	src := `      SUBROUTINE CALLER()
+      CALL FOO(1, 2)
+      END SUBROUTINE
+      SUBROUTINE FOO(A)
+      INTEGER, INTENT(IN) :: A
+      END SUBROUTINE`
+
+	var parser Parser90
+	err := parser.Reset("test.f90", strings.NewReader(src))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = tg.TransformProgram(program)
+	var units []f90.Unit
+	for !parser.IsDone() {
+		unit := parser.ParseNextProgramUnit()
+		if !unit.IsValid() {
+			break
+		}
+		units = append(units, unit)
+	}
+	var tg ToGo
+	tg.SetSource("test.f90", strings.NewReader(src))
+	_, err = tg.TransformUnits(nil, units...)
+	if err == nil {
+		t.Error("expected error for too many args in call, got nil")
+	}
+}
+
+// TestStatementFunction verifies that statement functions are correctly
+// detected and expanded during transpilation.
+func TestStatementFunction(t *testing.T) {
+	src := `      PROGRAM TEST
+      INTEGER :: MAPARM
+      MAPARM = 10
+      INDXNO(M) = MAPARM*(M-1)-(M*(M-1))/2
+      X = INDXNO(5)
+      PRINT *, X
+      END PROGRAM`
+
+	var parser Parser90
+	err := parser.Reset("test.f90", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unit := parser.ParseNextProgramUnit()
+	if !unit.IsValid() {
+		t.Fatal("Expected valid program unit")
+	}
+	if unit.Token != f90token.PROGRAM {
+		t.Fatalf("Expected ProgramBlock, got %s", unit.Token)
+	}
+
+	var tg ToGo
+	tg.SetSource("test.f90", strings.NewReader(src))
+	_, err = tg.TransformUnits(nil, unit)
 	if err != nil {
 		t.Errorf("TransformProgram failed: %v", err)
 	}

@@ -1,6 +1,9 @@
 package intrinsic
 
-import "unsafe"
+import (
+	"math"
+	"unsafe"
+)
 
 // Array represents a multi-dimensional Fortran array with column-major layout.
 // It uses a single contiguous memory allocation (slab allocation) for efficiency.
@@ -29,11 +32,13 @@ import "unsafe"
 // Column-major layout means the FIRST index varies fastest in memory.
 // For a 2D array A(3,4), memory order is: A(1,1), A(2,1), A(3,1), A(1,2), A(2,2), ...
 type Array[T any] struct {
-	data   []T   // Single contiguous allocation (slab allocation)
-	shape  []int // Size of each dimension: shape[i] = upper[i] - lower[i] + 1
-	lower  []int // Lower bounds for each dimension (typically 1, but can be negative)
-	upper  []int // Upper bounds for each dimension
-	stride []int // Column-major strides: stride[0]=1, stride[i]=stride[i-1]*shape[i-1]
+	data     []T   // Single contiguous allocation (slab allocation), shared by views
+	allocLen int   // Expected buffer length (used when data is nil for unallocated arrays)
+	base     int   // Offset into data for first element of this array/view
+	shape    []int // Size of each dimension: shape[i] = upper[i] - lower[i] + 1
+	lower    []int // Lower bounds for each dimension (typically 1, but can be negative)
+	upper    []int // Upper bounds for each dimension
+	stride   []int // Column-major strides: stride[0]=1, stride[i]=stride[i-1]*shape[i-1]
 }
 
 func NewArray[T any](data []T, dims ...int) *Array[T] {
@@ -52,6 +57,46 @@ func NewArray[T any](data []T, dims ...int) *Array[T] {
 	return NewArrayWithBounds(data, shape, lower, upper)
 }
 
+func UnallocatedArray[T any](dims ...int) *Array[T] {
+	if len(dims) > 7 {
+		panic("array dimension too large")
+	} else if len(dims) == 0 {
+		panic("zero dimension array")
+	}
+	// Calculate total size and set up bounds
+	totalSize := 1
+	for _, dim := range dims {
+		if dim < 0 {
+			panic("array: dimension size must be non-negative")
+		}
+		totalSize *= dim
+	}
+	// Calculate column-major strides
+	stride := make([]int, len(dims))
+	if len(dims) > 0 {
+		stride[0] = 1
+		for i := 1; i < len(dims); i++ {
+			stride[i] = stride[i-1] * dims[i-1]
+		}
+	}
+	// Set up bounds arrays
+	shape := make([]int, len(dims))
+	lower := make([]int, len(dims))
+	upper := make([]int, len(dims))
+	for i, d := range dims {
+		shape[i], lower[i], upper[i] = d, 1, d
+	}
+	// Create array with nil data but proper allocLen for DeclareCommon
+	return &Array[T]{
+		data:     nil,
+		allocLen: totalSize,
+		shape:    shape,
+		lower:    lower,
+		upper:    upper,
+		stride:   stride,
+	}
+}
+
 // NewArrayWithBounds creates an array with custom bounds for each dimension.
 // Supports arbitrary lower bounds as per F77 Section 5.1.1.2 (line 2120-2121).
 //
@@ -65,11 +110,6 @@ func NewArray[T any](data []T, dims ...int) *Array[T] {
 //   - stride[0] = 1
 //   - stride[i] = stride[i-1] * shape[i-1]
 func NewArrayWithBounds[T any](data []T, shape, lower, upper []int) *Array[T] {
-	if len(shape) != len(lower) || len(shape) != len(upper) {
-		panic("array: shape, lower, and upper must have same length")
-	}
-
-	// Calculate total size (product of all dimensions)
 	totalSize := 1
 	for _, dim := range shape {
 		if dim < 0 {
@@ -79,10 +119,17 @@ func NewArrayWithBounds[T any](data []T, shape, lower, upper []int) *Array[T] {
 	}
 	if data == nil {
 		data = make([]T, totalSize)
-	} else if len(data) != totalSize {
+	}
+	if len(data) != totalSize {
 		panic("array: mismatch data with shape")
 	}
+	return newArrayWithBounds(data, shape, lower, upper)
+}
 
+func newArrayWithBounds[T any](data []T, shape, lower, upper []int) *Array[T] {
+	if len(shape) != len(lower) || len(shape) != len(upper) {
+		panic("array: shape, lower, and upper must have same length")
+	}
 	// Calculate column-major strides (F77 Table 1, F95 Table 6.1)
 	// stride[0] = 1 (first index varies fastest - column-major)
 	// stride[i] = stride[i-1] * shape[i-1]
@@ -95,18 +142,19 @@ func NewArrayWithBounds[T any](data []T, shape, lower, upper []int) *Array[T] {
 	}
 
 	return &Array[T]{
-		data:   data, // Slab allocation: single contiguous memory
-		shape:  append([]int(nil), shape...),
-		lower:  append([]int(nil), lower...),
-		upper:  append([]int(nil), upper...),
-		stride: stride,
+		data:     data,
+		allocLen: len(data),
+		shape:    append([]int(nil), shape...),
+		lower:    append([]int(nil), lower...),
+		upper:    append([]int(nil), upper...),
+		stride:   stride,
 	}
 }
 
 // Allocate allocates the array with given dimensions (1-based bounds).
 // Panics if already allocated (Fortran semantics without STAT=).
 func (a *Array[T]) Allocate(dims ...int) {
-	if a.data != nil {
+	if unsafe.SliceData(a.data) != nil || a.data != nil {
 		panic("array already allocated")
 	}
 	*a = *NewArray[T](nil, dims...)
@@ -128,6 +176,16 @@ func (a *Array[T]) Deallocate() {
 // Allocated returns true if the array has allocated memory.
 func (a *Array[T]) Allocated() bool {
 	return a.data != nil
+}
+
+// MoveAlloc moves the allocation from the receiver (FROM) to to (TO).
+// Implements Fortran MOVE_ALLOC(FROM, TO): TO gets FROM's allocation, FROM becomes unallocated.
+func (from *Array[T]) MoveAlloc(to *Array[T]) {
+	if to.data != nil {
+		to.Deallocate()
+	}
+	*to = *from
+	*from = Array[T]{}
 }
 
 // At returns the element at the given indices (using Fortran indexing with custom bounds)
@@ -163,8 +221,27 @@ func (a *Array[T]) Set(value T, indices ...int) {
 // SetAll sets all elements of the array to the given value.
 // Corresponds to Fortran array(:) = value or array = value syntax.
 func (a *Array[T]) SetAll(value T) {
-	for i := range a.data {
-		a.data[i] = value
+	if len(a.stride) == 0 {
+		for i := range a.data {
+			a.data[i] = value
+		}
+		return
+	}
+	// Use shape/stride iteration to correctly handle views.
+	indices := make([]int, len(a.shape))
+	for i := range indices {
+		indices[i] = 1
+	}
+	total := a.Size()
+	for n := 0; n < total; n++ {
+		a.data[a.linearIndex(indices)] = value
+		for d := 0; d < len(indices); d++ {
+			indices[d]++
+			if indices[d] <= a.shape[d] {
+				break
+			}
+			indices[d] = 1
+		}
 	}
 }
 
@@ -236,7 +313,7 @@ func (a *Array[T]) UpperDim(dim int) int {
 }
 
 func (a *Array[T]) AtOffset(indices ...int) int {
-	return a.offset(indices) + 1
+	return a.offset(indices) - a.base + 1 // Return 1-based offset within view
 }
 
 // offset calculates the flat index for multi-dimensional access using column-major layout
@@ -257,7 +334,7 @@ func (a *Array[T]) offset(indices []int) int {
 		panic("array: wrong number of indices")
 	}
 
-	offset := 0
+	offset := a.base // Start from base offset for views
 	for i, idx := range indices {
 		// Bounds check (F77 Section 5.4.2, line 2341-2365)
 		if idx < a.lower[i] || idx > a.upper[i] {
@@ -267,6 +344,15 @@ func (a *Array[T]) offset(indices []int) int {
 		offset += (idx - a.lower[i]) * a.stride[i]
 	}
 	return offset
+}
+
+// linearIndex returns the flat index without bounds checking (for internal use)
+func (a *Array[T]) linearIndex(indices []int) int {
+	idx := a.base
+	for d, i := range indices {
+		idx += (i - a.lower[d]) * a.stride[d]
+	}
+	return idx
 }
 
 // Pointer returns the pointer to the underlying flat buffer.
@@ -287,14 +373,529 @@ func (a *Array[T]) DataUnsafe() unsafe.Pointer {
 	return unsafe.Pointer(&a.data[0])
 }
 
-// DataUnsafe implements [Pointer] interface.
+// SetDataUnsafe implements [PointerSetter] interface.
 //
 // Deprecated: Extremely unsafe.
 func (a *Array[T]) SetDataUnsafe(v unsafe.Pointer) {
-	a.data = unsafe.Slice((*T)(v), len(a.data))
+	a.data = unsafe.Slice((*T)(v), a.allocLen)
 }
 
-// SizeBuffer implements [Pointer] interface.
+// SetLenBufferUnsafe sets the number of elements in the backing data slice.
+func (a *Array[T]) SetLenBufferUnsafe(length int) {
+	a.allocLen = length
+	if a.data != nil {
+		a.data = unsafe.Slice(unsafe.SliceData(a.data), length)
+	}
+}
+
+// LenBuffer implements [Pointer] interface.
 func (a *Array[T]) LenBuffer() int {
-	return len(a.data)
+	return a.allocLen
+}
+
+// Range represents a Fortran array range expression: start:end:stride
+// Used with View to create array slices.
+type Range struct {
+	Start, End, Stride int
+}
+
+// R creates a Range with stride=1 (most common case).
+// Corresponds to Fortran syntax start:end
+func R(start, end int) Range {
+	return Range{Start: start, End: end, Stride: 1}
+}
+
+// RS creates a Range with explicit stride.
+// Corresponds to Fortran syntax start:end:stride
+func RS(start, end, stride int) Range {
+	return Range{Start: start, End: end, Stride: stride}
+}
+
+// View creates a view of the array with the given ranges applied to each dimension.
+// The view shares the underlying data with the original array (no copy).
+// Views can be nested: arr.View(...).View(...) works correctly.
+//
+// Example:
+//
+//	arr := NewArray[int32](nil, 10, 5)
+//	view := arr.View(R(2, 4), R(1, 3))  // rows 2-4, cols 1-3
+//	view.At(1, 1)  // equivalent to arr.At(2, 1)
+func (a *Array[T]) View(ranges ...Range) *Array[T] {
+	if len(ranges) != len(a.shape) {
+		panic("array: View requires one range per dimension")
+	}
+
+	view := &Array[T]{
+		data:   a.data, // Share backing storage
+		base:   a.base,
+		shape:  make([]int, len(ranges)),
+		lower:  make([]int, len(ranges)),
+		upper:  make([]int, len(ranges)),
+		stride: make([]int, len(ranges)),
+	}
+
+	for d, r := range ranges {
+		// Validate range bounds against array bounds
+		if r.Start < a.lower[d] || r.End > a.upper[d] {
+			panic("array: View range out of bounds")
+		}
+		if r.Stride == 0 {
+			panic("array: View stride cannot be zero")
+		}
+
+		// Adjust base offset to start of range
+		view.base += (r.Start - a.lower[d]) * a.stride[d]
+
+		// Calculate view shape (number of elements in this dimension)
+		if r.Stride > 0 {
+			view.shape[d] = (r.End - r.Start + r.Stride) / r.Stride
+		} else {
+			view.shape[d] = (r.Start - r.End - r.Stride) / (-r.Stride)
+		}
+
+		// View uses 1-based indexing
+		view.lower[d] = 1
+		view.upper[d] = view.shape[d]
+
+		// Stride scales by range stride
+		view.stride[d] = a.stride[d] * r.Stride
+	}
+
+	return view
+}
+
+// SetFrom copies all elements from src to dst element-wise.
+// Both arrays must have the same shape.
+// Corresponds to Fortran: dst = src (array assignment)
+func (dst *Array[T]) SetFrom(src *Array[T]) {
+	dst.iteratePair(src, func(di, si int) {
+		dst.data[di] = src.data[si]
+	})
+}
+
+// iteratePair iterates over corresponding elements of two arrays with same shape
+func (dst *Array[T]) iteratePair(src *Array[T], fn func(di, si int)) {
+	if !shapeEqual(dst.shape, src.shape) {
+		panic("array: shape mismatch in element-wise operation")
+	}
+
+	indices := make([]int, len(dst.shape))
+	for i := range indices {
+		indices[i] = 1
+	}
+
+	total := dst.Size()
+	for n := 0; n < total; n++ {
+		di := dst.linearIndex(indices)
+		si := src.linearIndex(indices)
+		fn(di, si)
+
+		// Increment indices column-major
+		for d := 0; d < len(indices); d++ {
+			indices[d]++
+			if indices[d] <= dst.shape[d] {
+				break
+			}
+			indices[d] = 1
+		}
+	}
+}
+
+// iterateTriple iterates over corresponding elements of three arrays with same shape
+func (dst *Array[T]) iterateTriple(a, b *Array[T], fn func(di, ai, bi int)) {
+	if !shapeEqual(dst.shape, a.shape) || !shapeEqual(dst.shape, b.shape) {
+		panic("array: shape mismatch in element-wise operation")
+	}
+
+	indices := make([]int, len(dst.shape))
+	for i := range indices {
+		indices[i] = 1
+	}
+
+	total := dst.Size()
+	for n := 0; n < total; n++ {
+		di := dst.linearIndex(indices)
+		ai := a.linearIndex(indices)
+		bi := b.linearIndex(indices)
+		fn(di, ai, bi)
+
+		// Increment indices column-major
+		for d := 0; d < len(indices); d++ {
+			indices[d]++
+			if indices[d] <= dst.shape[d] {
+				break
+			}
+			indices[d] = 1
+		}
+	}
+}
+
+func shapeEqual(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// ArraySetAdd performs element-wise addition: dst = a + b
+// All arrays must have the same shape.
+// Corresponds to Fortran: dst = a + b (array expressions)
+func ArraySetAdd[T numeric](dst, a, b *Array[T]) {
+	dst.iterateTriple(a, b, func(di, ai, bi int) {
+		dst.data[di] = a.data[ai] + b.data[bi]
+	})
+}
+
+// ArraySetSub performs element-wise subtraction: dst = a - b
+// All arrays must have the same shape.
+// Corresponds to Fortran: dst = a - b (array expressions)
+func ArraySetSub[T numeric](dst, a, b *Array[T]) {
+	dst.iterateTriple(a, b, func(di, ai, bi int) {
+		dst.data[di] = a.data[ai] - b.data[bi]
+	})
+}
+
+// ArraySetMul performs element-wise multiplication: dst = a * b
+// All arrays must have the same shape.
+// Corresponds to Fortran: dst = a * b (array expressions)
+func ArraySetMul[T numeric](dst, a, b *Array[T]) {
+	dst.iterateTriple(a, b, func(di, ai, bi int) {
+		dst.data[di] = a.data[ai] * b.data[bi]
+	})
+}
+
+// ArraySetDiv performs element-wise division: dst = a / b
+// All arrays must have the same shape.
+// Corresponds to Fortran: dst = a / b (array expressions)
+func ArraySetDiv[T numeric](dst, a, b *Array[T]) {
+	dst.iterateTriple(a, b, func(di, ai, bi int) {
+		dst.data[di] = a.data[ai] / b.data[bi]
+	})
+}
+
+// ArrayAbs returns a new array with each element's absolute value: result = |a|
+// Corresponds to Fortran: result = ABS(a) (array expression)
+func ArrayAbs[T numeric](a *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) {
+		v := a.data[ai]
+		if v < 0 {
+			dst.data[di] = -v
+		} else {
+			dst.data[di] = v
+		}
+	})
+	return dst
+}
+
+// ArrayAddScalar returns a new array with each element incremented by scalar s: result = a + s
+func ArrayAddScalar[T numeric](a *Array[T], s T) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = a.data[ai] + s })
+	return dst
+}
+
+// ArraySubScalar returns a new array with scalar s subtracted: result = a - s
+func ArraySubScalar[T numeric](a *Array[T], s T) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = a.data[ai] - s })
+	return dst
+}
+
+// ScalarSubArray returns a new array: result = s - a
+func ScalarSubArray[T numeric](s T, a *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = s - a.data[ai] })
+	return dst
+}
+
+// ArrayMulScalar returns a new array with each element multiplied by scalar s: result = a * s
+func ArrayMulScalar[T numeric](a *Array[T], s T) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = a.data[ai] * s })
+	return dst
+}
+
+// ArrayDivScalar returns a new array with each element divided by scalar s: result = a / s
+func ArrayDivScalar[T numeric](a *Array[T], s T) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = a.data[ai] / s })
+	return dst
+}
+
+// ArrayPow returns a new array with each element raised to scalar power s: result = a**s
+// Corresponds to Fortran: result = a**s (array expression)
+func ArrayPow[T numeric](a *Array[T], s T) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = T(POW(float64(a.data[ai]), float64(s))) })
+	return dst
+}
+
+// ArraySetNeg performs in-place element-wise negation: dst = -src
+// Corresponds to Fortran: dst = -src (array expression, in-place)
+func ArraySetNeg[T numeric](dst, src *Array[T]) {
+	dst.iteratePair(src, func(di, si int) { dst.data[di] = -src.data[si] })
+}
+
+// ArrayNeg returns a new array with each element negated: result = -a
+// Corresponds to Fortran: result = -a (unary array expression)
+func ArrayNeg[T numeric](a *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = -a.data[ai] })
+	return dst
+}
+
+// ArrayAdd returns a new array with element-wise addition: result = a + b
+// Corresponds to Fortran: result = a + b (array expression)
+func ArrayAdd[T numeric](a, b *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iterateTriple(a, b, func(di, ai, bi int) { dst.data[di] = a.data[ai] + b.data[bi] })
+	return dst
+}
+
+// ArraySub returns a new array with element-wise subtraction: result = a - b
+// Corresponds to Fortran: result = a - b (array expression)
+func ArraySub[T numeric](a, b *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iterateTriple(a, b, func(di, ai, bi int) { dst.data[di] = a.data[ai] - b.data[bi] })
+	return dst
+}
+
+// ArrayMul returns a new array with element-wise multiplication: result = a * b
+// Corresponds to Fortran: result = a * b (array expression)
+func ArrayMul[T numeric](a, b *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iterateTriple(a, b, func(di, ai, bi int) { dst.data[di] = a.data[ai] * b.data[bi] })
+	return dst
+}
+
+// ArrayDiv returns a new array with element-wise division: result = a / b
+// Corresponds to Fortran: result = a / b (array expression)
+func ArrayDiv[T numeric](a, b *Array[T]) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iterateTriple(a, b, func(di, ai, bi int) { dst.data[di] = a.data[ai] / b.data[bi] })
+	return dst
+}
+
+// DOT_PRODUCT computes the dot product of two 1D arrays.
+// Corresponds to Fortran DOT_PRODUCT(VECTOR_A, VECTOR_B) intrinsic.
+// For numeric arrays: result = sum(a(i) * b(i))
+func DOT_PRODUCT[T numeric](a, b *Array[T]) T {
+	if len(a.shape) != 1 || len(b.shape) != 1 {
+		panic("DOT_PRODUCT: arguments must be 1D arrays")
+	}
+	if a.shape[0] != b.shape[0] {
+		panic("DOT_PRODUCT: arrays must have same size")
+	}
+	var sum T
+	for i := a.lower[0]; i <= a.upper[0]; i++ {
+		sum += a.At(i) * b.At(i)
+	}
+	return sum
+}
+
+// ALL returns true if all elements of a logical array are true.
+// Corresponds to Fortran ALL(MASK) intrinsic.
+func ALL(a *Array[bool]) bool {
+	for i := 0; i < len(a.data); i++ {
+		if !a.data[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// ANY returns true if any element of the logical array is true. Corresponds to Fortran ANY(mask).
+func ANY(a *Array[bool]) bool {
+	for i := 0; i < len(a.data); i++ {
+		if a.data[i] {
+			return true
+		}
+	}
+	return false
+}
+
+// ArraySetEqual performs element-wise equality comparison: dst[i] = (a[i] == b[i])
+// If dst is nil, a new array with the same shape as a is allocated.
+// All arrays must have compatible shapes.
+// Corresponds to Fortran: a == b (array expressions)
+func ArraySetEqual[T comparable](dst *Array[bool], a, b *Array[T]) *Array[bool] {
+	if !shapeEqual(a.shape, b.shape) {
+		panic("array: shape mismatch in element-wise comparison")
+	}
+	if dst == nil {
+		dst = NewArray[bool](nil, a.shape...)
+	}
+	if !shapeEqual(dst.shape, a.shape) {
+		panic("array: destination shape mismatch")
+	}
+	// Iterate through all elements using linear indexing
+	indices := make([]int, len(a.shape))
+	for i := range indices {
+		indices[i] = 1
+	}
+	total := a.Size()
+	for n := 0; n < total; n++ {
+		ai := a.linearIndex(indices)
+		bi := b.linearIndex(indices)
+		di := dst.linearIndex(indices)
+		dst.data[di] = a.data[ai] == b.data[bi]
+		// Increment indices column-major
+		for d := 0; d < len(indices); d++ {
+			indices[d]++
+			if indices[d] <= a.shape[d] {
+				break
+			}
+			indices[d] = 1
+		}
+	}
+	return dst
+}
+
+// arrNumeric is the constraint for array reduction intrinsics.
+type arrNumeric interface {
+	~int32 | ~int64 | ~float32 | ~float64
+}
+
+// SUM returns the sum of all array elements. Corresponds to Fortran SUM(array).
+func SUM[T arrNumeric](a *Array[T]) T {
+	var result T
+	for _, v := range a.data {
+		result += v
+	}
+	return result
+}
+
+// MAXVAL returns the maximum element. Corresponds to Fortran MAXVAL(array).
+func MAXVAL[T arrNumeric](a *Array[T]) T {
+	if len(a.data) == 0 {
+		var zero T
+		return zero
+	}
+	m := a.data[0]
+	for _, v := range a.data[1:] {
+		if v > m {
+			m = v
+		}
+	}
+	return m
+}
+
+// MINVAL returns the minimum element. Corresponds to Fortran MINVAL(array).
+func MINVAL[T arrNumeric](a *Array[T]) T {
+	if len(a.data) == 0 {
+		var zero T
+		return zero
+	}
+	m := a.data[0]
+	for _, v := range a.data[1:] {
+		if v < m {
+			m = v
+		}
+	}
+	return m
+}
+
+// PRODUCT returns the product of all elements. Corresponds to Fortran PRODUCT(array).
+func PRODUCT[T arrNumeric](a *Array[T]) T {
+	if len(a.data) == 0 {
+		var zero T
+		return zero
+	}
+	result := a.data[0]
+	for _, v := range a.data[1:] {
+		result *= v
+	}
+	return result
+}
+
+// MAXLOC returns the 1-based index of the maximum element. Corresponds to Fortran MAXLOC(array).
+func MAXLOC[T arrNumeric](a *Array[T]) int32 {
+	if len(a.data) == 0 {
+		return 0
+	}
+	idx, m := 0, a.data[0]
+	for i, v := range a.data[1:] {
+		if v > m {
+			m = v
+			idx = i + 1
+		}
+	}
+	return int32(idx + 1)
+}
+
+// MINLOC returns the 1-based index of the minimum element. Corresponds to Fortran MINLOC(array).
+func MINLOC[T arrNumeric](a *Array[T]) int32 {
+	if len(a.data) == 0 {
+		return 0
+	}
+	idx, m := 0, a.data[0]
+	for i, v := range a.data[1:] {
+		if v < m {
+			m = v
+			idx = i + 1
+		}
+	}
+	return int32(idx + 1)
+}
+
+// MATMUL computes the matrix product of two arrays.
+// Corresponds to Fortran MATMUL(MATRIX_A, MATRIX_B) intrinsic.
+// Supports 2D×2D, 2D×1D, and 1D×2D cases using column-major layout.
+func MATMUL[T numeric](a, b *Array[T]) *Array[T] {
+	ndimA, ndimB := len(a.shape), len(b.shape)
+	switch {
+	case ndimA == 2 && ndimB == 2:
+		m, n := a.shape[0], b.shape[1]
+		result := NewArray[T](nil, m, n)
+		for j := 1; j <= n; j++ {
+			for i := 1; i <= m; i++ {
+				var sum T
+				for p := a.lower[1]; p <= a.upper[1]; p++ {
+					sum += a.At(i, p) * b.At(p, j)
+				}
+				result.Set(sum, i, j)
+			}
+		}
+		return result
+	case ndimA == 2 && ndimB == 1:
+		m := a.shape[0]
+		result := NewArray[T](nil, m)
+		for i := 1; i <= m; i++ {
+			var sum T
+			for p := a.lower[1]; p <= a.upper[1]; p++ {
+				sum += a.At(i, p) * b.At(p)
+			}
+			result.Set(sum, i)
+		}
+		return result
+	case ndimA == 1 && ndimB == 2:
+		n := b.shape[1]
+		result := NewArray[T](nil, n)
+		for j := 1; j <= n; j++ {
+			var sum T
+			for p := a.lower[0]; p <= a.upper[0]; p++ {
+				sum += a.At(p) * b.At(p, j)
+			}
+			result.Set(sum, j)
+		}
+		return result
+	default:
+		panic("MATMUL: invalid array dimensions")
+	}
+}
+
+// NORM2 returns the Euclidean norm of all elements. Corresponds to Fortran NORM2(array).
+func NORM2[T arrNumeric](a *Array[T]) T {
+	var sum float64
+	for _, v := range a.data {
+		f := float64(v)
+		sum += f * f
+	}
+	return T(math.Sqrt(sum))
 }

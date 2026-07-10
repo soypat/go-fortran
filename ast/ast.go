@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"strconv"
 
 	"github.com/soypat/go-fortran/token"
 )
 
 type Node interface {
+	// AppendTokenLiteral appends a simple tokenized form of a node to the buffer.
 	AppendTokenLiteral(dst []byte) []byte
+	// AppendString appends the valid Fortran representation of the AST node
+	// on to the buffer. AppendString appends a single line at most for statements/program units.
 	AppendString(dst []byte) []byte
 	// SourcePos returns the position of first character belonging to the node as start
 	// and the position of the first character immediately after the node as end in the file.
@@ -26,14 +30,6 @@ type Statement interface {
 	statementNode()
 	GetLabel() *string
 	IsExecutable() bool
-}
-
-// ProgramUnit represents a top-level construct (PROGRAM, SUBROUTINE, FUNCTION, MODULE)
-type ProgramUnit interface {
-	Statement
-	programUnitNode()
-	UnitName() string
-	UnitData() any
 }
 
 func Pos(start, end int) Position {
@@ -123,27 +119,24 @@ func (ts *TypeSpec) Intent() IntentType {
 }
 
 func (ts TypeSpec) AppendString(dst []byte) []byte {
-	dst = appendTypenameOrTok(dst, ts.Name, ts.Token)
-	if len(ts.Attributes) > 0 {
-		dst = append(dst, ", "...)
-		for i := range ts.Attributes {
-			if i > 0 {
-				dst = append(dst, ", "...)
-			}
-			dst = ts.Attributes[i].AppendString(dst)
-		}
+	dst = append(dst, ts.Token.String()...)
+	if ts.KindOrLen != nil {
+		dst = append(dst, '(')
+		dst = ts.KindOrLen.AppendString(dst)
+		dst = append(dst, ')')
 	}
-	return dst
-}
-
-func appendTypenameOrTok(dst []byte, typename string, tok token.Token) []byte {
-	if typename != "" {
-		dst = append(dst, typename...)
-	} else {
-		if tok != token.TYPE {
-			dst = append(dst, "<unexpected token type>"...)
+	for i := range ts.Attributes {
+		dst = append(dst, ',')
+		dst = ts.Attributes[i].AppendString(dst)
+	}
+	if ts.Name != "" {
+		dst = append(dst, "::"...)
+		if ts.Token != token.TYPE {
+			dst = append(dst, "<type name set for non TYPE spec>"...)
 		}
-		dst = append(dst, tok.String()...)
+		dst = append(dst, '(')
+		dst = append(dst, ts.Name...)
+		dst = append(dst, ')')
 	}
 	return dst
 }
@@ -164,7 +157,7 @@ func appendTypenameOrTok(dst []byte, typename string, tok token.Token) []byte {
 //	  ...
 //	END MODULE utilities
 type Program struct {
-	Units []ProgramUnit
+	Units []Unit
 	Label string
 }
 
@@ -193,254 +186,79 @@ func (p *Program) SourcePos() Position {
 	return Position{start: p0.start, end: pend.end}
 }
 
-// ProgramBlock represents the main executable program unit that serves as the
-// entry point for program execution. A Fortran program may contain at most one
-// PROGRAM block, though it may be omitted for simple programs.
+// Unit represents any Fortran program unit: PROGRAM, MODULE, FUNCTION, SUBROUTINE, or BLOCK DATA.
+// The Token field discriminates between unit kinds.
 //
-// Example:
-//
-//	PROGRAM <name>
-//	  <specification-statements>
-//	  <executable-statements>
-//	END PROGRAM [<name>]
+// Examples:
 //
 //	PROGRAM hello
-//	  PRINT *, 'Hello, World!'
-//	END PROGRAM hello
-type ProgramBlock struct {
-	Name     string
-	Body     []Statement   // Specification and executable statements
-	Contains []ProgramUnit // Internal procedures (CONTAINS section)
-	Label    string
-	Position
-	// Example: Parser result of variable resolved types and usage.
-	Data any
-}
-
-var _ ProgramUnit = (*ProgramBlock)(nil) // compile time check of interface implementation.
-
-func (pb *ProgramBlock) GetLabel() *string { return &pb.Label }
-func (pb *ProgramBlock) UnitData() any    { return pb.Data }
-func (pb *ProgramBlock) UnitName() string { return pb.Name }
-
-func (pb *ProgramBlock) statementNode()     {}
-func (pb *ProgramBlock) programUnitNode()   {}
-func (pb *ProgramBlock) IsExecutable() bool { return false }
-func (pb *ProgramBlock) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "PROGRAM"...)
-}
-func (pb *ProgramBlock) AppendString(dst []byte) []byte {
-	dst = append(dst, "PROGRAM "...)
-	dst = append(dst, pb.Name...)
-	return dst
-}
-
-// Subroutine represents a callable procedure that performs operations but does
-// not return a value. Subroutines are invoked using [CallStmt] and can modify
-// arguments, perform I/O, or change program state.
-//
-// Example:
-//
-//	SUBROUTINE <name>([<parameter-list>])
-//	  <specification-statements>
-//	  <executable-statements>
-//	END SUBROUTINE [<name>]
+//	  PRINT *, 'Hello!'
+//	END PROGRAM
 //
 //	SUBROUTINE swap(a, b)
-//	  REAL, INTENT(INOUT) :: a, b
-//	  REAL :: temp
-//	  temp = a
-//	  a = b
-//	  b = temp
-//	END SUBROUTINE swap
-type Subroutine struct {
-	Name       string
-	Parameters []Parameter   // Function/subroutine parameters with type information
-	Attributes []token.Token // RECURSIVE, PURE, etc.
-	Body       []Statement   // Specification and executable statements
-	Label      string
-	Position
-	// Example: Parser result of variable resolved types and usage.
-	Data any
-}
-
-var _ ProgramUnit = (*Subroutine)(nil) // compile time check of interface implementation.
-
-func (s *Subroutine) GetLabel() *string { return &s.Label }
-func (pb *Subroutine) UnitData() any    { return pb.Data }
-func (pb *Subroutine) UnitName() string { return pb.Name }
-
-func (s *Subroutine) statementNode()     {}
-func (s *Subroutine) programUnitNode()   {}
-func (s *Subroutine) IsExecutable() bool { return false }
-func (s *Subroutine) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "SUBROUTINE"...)
-}
-func (s *Subroutine) AppendString(dst []byte) []byte {
-	dst = append(dst, "SUBROUTINE "...)
-	dst = append(dst, s.Name...)
-	dst = append(dst, '(')
-	for i, p := range s.Parameters {
-		if i > 0 {
-			dst = append(dst, ", "...)
-		}
-		dst = append(dst, p.Name...)
-	}
-	dst = append(dst, ')')
-	return dst
-}
-
-// Function represents a callable procedure that returns a value. Functions can
-// be used in expressions and must assign a value to the function name or result
-// variable before returning.
+//	  REAL :: a, b, temp
+//	  temp = a; a = b; b = temp
+//	END SUBROUTINE
 //
-// Example:
-//
-//	[<type>] FUNCTION <name>([<parameter-list>]) [RESULT(<var>)]
-//	  <specification-statements>
-//	  <executable-statements>
-//	END FUNCTION [<name>]
-//
-//	REAL FUNCTION average(arr, n)
-//	  REAL :: arr(n)
-//	  INTEGER :: n
-//	  average = SUM(arr) / n
-//	END FUNCTION average
-type Function struct {
-	Name           string
-	Type           TypeSpec      // Result type with optional KIND/LEN
-	Parameters     []Parameter   // Function parameters with type information
-	ResultVariable string        // For RESULT(var) clause
-	Attributes     []token.Token // RECURSIVE, PURE, ELEMENTAL
-	Body           []Statement   // Specification and executable statements
-	Label          string
-	Position
-	// Example: Parser result of variable resolved types and usage.
-	Data any
-}
-
-var _ ProgramUnit = (*Function)(nil) // compile time check of interface implementation.
-
-func (f *Function) GetLabel() *string { return &f.Label }
-func (pb *Function) UnitData() any    { return pb.Data }
-func (pb *Function) UnitName() string { return pb.Name }
-
-func (f *Function) statementNode()     {}
-func (f *Function) programUnitNode()   {}
-func (f *Function) IsExecutable() bool { return false }
-func (f *Function) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "FUNCTION"...)
-}
-func (f *Function) AppendString(dst []byte) []byte {
-	if f.Type.Token != 0 {
-		dst = f.Type.AppendString(dst)
-	}
-	dst = append(dst, "FUNCTION "...)
-	dst = append(dst, f.Name...)
-	dst = append(dst, '(')
-	for i, p := range f.Parameters {
-		if i > 0 {
-			dst = append(dst, ", "...)
-		}
-		dst = append(dst, p.Name...)
-	}
-	dst = append(dst, ')')
-	if f.ResultVariable != "" {
-		dst = append(dst, " RESULT("...)
-		dst = append(dst, f.ResultVariable...)
-		dst = append(dst, ')')
-	}
-	return dst
-}
-
-// Module represents a namespace for data, type definitions, and procedures that
-// can be shared across program units via [UseStatement]. Modules support
-// encapsulation and information hiding through [PublicStmt] and [PrivateStmt].
-//
-// Example:
-//
-//	MODULE <name>
-//	  <specification-statements>
-//	  [CONTAINS
-//	    <module-procedures>]
-//	END MODULE [<name>]
-//
-//	MODULE constants
-//	  IMPLICIT NONE
-//	  REAL, PARAMETER :: PI = 3.14159
-//	END MODULE constants
-type Module struct {
-	Name     string
-	Body     []Statement   // Module-level declarations
-	Contains []ProgramUnit // Procedures in CONTAINS section
-	Label    string
-	Position
-	// Example: Parser result of variable resolved types and usage.
-	Data any
-}
-
-var _ ProgramUnit = (*Module)(nil) // compile time check of interface implementation.
-
-func (m *Module) GetLabel() *string { return &m.Label }
-func (pb *Module) UnitData() any    { return pb.Data }
-func (pb *Module) UnitName() string { return pb.Name }
-
-func (m *Module) statementNode()     {}
-func (m *Module) programUnitNode()   {}
-func (m *Module) IsExecutable() bool { return false }
-func (m *Module) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "MODULE"...)
-}
-func (m *Module) AppendString(dst []byte) []byte {
-	dst = append(dst, "MODULE "...)
-	dst = append(dst, m.Name...)
-	if len(m.Contains) > 0 {
-		dst = append(dst, " CONTAINS "...)
-	}
-	return dst
-}
-
-// BlockData represents a named or unnamed BLOCK DATA program unit used in
-// Fortran 77 to initialize variables in COMMON blocks. This feature is largely
-// obsolete in modern Fortran, replaced by module initialization.
-//
-// Example:
-//
-//	BLOCK DATA [<name>]
-//	  <specification-statements>
-//	END BLOCK DATA [<name>]
-//
-//	BLOCK DATA init_common
-//	  COMMON /shared/ x, y
-//	  DATA x, y /1.0, 2.0/
-//	END BLOCK DATA init_common
-type BlockData struct {
+//	REAL FUNCTION square(x)
+//	  REAL :: x
+//	  square = x * x
+//	END FUNCTION
+type Unit struct {
+	Token token.Token // FUNCTION/SUBROUTINE/PROGRAM/MODULE/BLOCK
 	Name  string
-	Body  []Statement
-	Label string
+	Body  []Statement // Specification and executable statements.
+
+	Contains   []Unit      // PROGRAM/MODULE contained procedures.
+	Parameters []Parameter // FUNCTION/SUBROUTINE parameters with type information
+	Label      string
+	ResultType TypeSpec // FUNCTION Result type with optional KIND/LEN. Is zero valued for non-function types.
 	Position
-	// Data stores program unit data.
-	// Example: Parser result of variable resolved types and usage.
+	// Example Parser result of variable resolved types and useage.
 	Data any
 }
 
-var _ ProgramUnit = (*BlockData)(nil) // compile time check of interface implementation.
-
-func (bd *BlockData) GetLabel() *string { return &bd.Label }
-func (pb *BlockData) UnitData() any    { return pb.Data }
-func (pb *BlockData) UnitName() string { return pb.Name }
-
-func (bd *BlockData) statementNode()     {}
-func (bd *BlockData) programUnitNode()   {}
-func (bd *BlockData) IsExecutable() bool { return false }
-func (bd *BlockData) AppendTokenLiteral(dst []byte) []byte {
-	return append(dst, "BLOCKDATA"...)
+func (pb *Unit) GetLabel() *string  { return &pb.Label }
+func (pb *Unit) UnitData() any      { return pb.Data }
+func (pb *Unit) UnitName() string   { return pb.Name }
+func (pb *Unit) IsValid() bool      { return pb.Token != 0 && pb.Position.end >= pb.Position.start }
+func (pb *Unit) statementNode()     {}
+func (pb *Unit) programUnitNode()   {}
+func (pb *Unit) IsExecutable() bool { return false }
+func (pb *Unit) AppendTokenLiteral(dst []byte) []byte {
+	dst = append(dst, pb.Token.String()...)
+	if pb.Token == token.BLOCK {
+		dst = append(dst, " DATA"...)
+	}
+	return dst
 }
-func (bd *BlockData) AppendString(dst []byte) []byte {
-	dst = append(dst, "BLOCK DATA"...)
-	if bd.Name != "" {
+func (pb *Unit) AppendString(dst []byte) []byte {
+	for i := range pb.ResultType.Attributes {
+		if i != 0 {
+			dst = append(dst, ',')
+		}
+		dst = append(dst, pb.ResultType.Attributes[i].Token.String()...)
+	}
+	dst = pb.AppendTokenLiteral(dst)
+	if pb.Name != "" {
 		dst = append(dst, ' ')
-		dst = append(dst, bd.Name...)
+		dst = append(dst, pb.Name...)
+	}
+	if pb.Token != token.SUBROUTINE && pb.Token != token.FUNCTION {
+		return dst
+	}
+	dst = append(dst, '(')
+	for i, param := range pb.Parameters {
+		if i != 0 {
+			dst = append(dst, ',')
+		}
+		dst = append(dst, param.Name...)
+	}
+	dst = append(dst, ')')
+	if pb.Name != "" {
+		dst = append(dst, " RESULT("...)
+		dst = append(dst, pb.Name...)
+		dst = append(dst, ')')
 	}
 	return dst
 }
@@ -724,6 +542,51 @@ func (is *IntrinsicStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// NamelistGroup represents one namelist group definition: /name/ var-list
+type NamelistGroup struct {
+	Name      string   // Group name (between slashes)
+	Variables []string // Variable names in this group
+}
+
+// NamelistStmt declares named groups of variables for namelist I/O.
+// A namelist group can be referenced by name in READ/WRITE statements
+// using the NML= specifier instead of FMT=.
+//
+// Example:
+//
+//	NAMELIST /NLIST/ A, B, C
+//	NAMELIST /INPUT/ x, y, /OUTPUT/ result
+type NamelistStmt struct {
+	Groups []NamelistGroup // One or more namelist groups
+	Label  string
+	Position
+}
+
+var _ Statement = (*NamelistStmt)(nil)
+
+func (ns *NamelistStmt) GetLabel() *string { return &ns.Label }
+
+func (ns *NamelistStmt) statementNode()     {}
+func (ns *NamelistStmt) IsExecutable() bool { return false }
+func (ns *NamelistStmt) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "NAMELIST"...)
+}
+func (ns *NamelistStmt) AppendString(dst []byte) []byte {
+	dst = append(dst, "NAMELIST"...)
+	for _, grp := range ns.Groups {
+		dst = append(dst, " /"...)
+		dst = append(dst, grp.Name...)
+		dst = append(dst, "/ "...)
+		for i, v := range grp.Variables {
+			if i > 0 {
+				dst = append(dst, ", "...)
+			}
+			dst = append(dst, v...)
+		}
+	}
+	return dst
+}
+
 // ParameterStmt declares named constants using F77 PARAMETER statement syntax.
 //
 // Example:
@@ -736,7 +599,7 @@ type ParameterStmt struct {
 
 var _ Statement = (*ParameterStmt)(nil)
 
-func (ps *ParameterStmt) GetLabel() *string { return nil }
+func (ps *ParameterStmt) GetLabel() *string  { return nil }
 func (ps *ParameterStmt) statementNode()     {}
 func (ps *ParameterStmt) IsExecutable() bool { return false }
 func (ps *ParameterStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -928,22 +791,73 @@ func (ps *PointerCrayStmt) AppendString(dst []byte) []byte {
 //	DATA (arr(i), i=1,10) / 10*0.0 /
 //	DATA a, b, c / 1, 2, 3 /
 type DataStmt struct {
-	Variables []Expression // Variable names (identifiers or array refs)
-	Values    []Expression // Initialization values
-	Label     string
+	Varlists []Varlist
+	Label    string
 	Position
 }
 
 var _ Statement = (*DataStmt)(nil)
 
-func (ds *DataStmt) GetLabel() *string { return &ds.Label }
+func (ds *DataStmt) GetLabel() *string  { return &ds.Label }
 func (ds *DataStmt) statementNode()     {}
 func (ds *DataStmt) IsExecutable() bool { return false }
 func (ds *DataStmt) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, "DATA"...)
 }
 func (ds *DataStmt) AppendString(dst []byte) []byte {
-	return append(dst, "DATA"...)
+	dst = append(dst, "DATA "...)
+	for i := range ds.Varlists {
+		if i != 0 {
+			dst = append(dst, ' ')
+		}
+		dst = ds.Varlists[i].AppendString(dst)
+	}
+	return dst
+}
+
+type Varlist struct {
+	Variables []Expression
+	Values    []Expression
+}
+
+func (ds *Varlist) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "VARLIST"...)
+}
+func (ds *Varlist) AppendString(dst []byte) []byte {
+	for i := range ds.Variables {
+		if i != 0 {
+			dst = append(dst, ',', ' ')
+		}
+		dst = ds.Variables[i].AppendString(dst)
+	}
+	for i := range ds.Values {
+		dst = append(dst, '/')
+		dst = ds.Values[i].AppendString(dst)
+	}
+	dst = append(dst, '/')
+	return dst
+}
+
+// DataRepeatExpr represents a repeat specifier in DATA statement values.
+// The syntax is: repeat-count * constant
+// Example: 10*0.0 means "repeat 0.0 ten times"
+type DataRepeatExpr struct {
+	Count Expression // Repeat count (must be integer constant per spec)
+	Value Expression // Value to repeat (must be constant per spec)
+	Position
+}
+
+var _ Expression = (*DataRepeatExpr)(nil)
+
+func (dr *DataRepeatExpr) expressionNode() {}
+func (dr *DataRepeatExpr) AppendTokenLiteral(dst []byte) []byte {
+	return append(dst, "DataRepeat"...)
+}
+func (dr *DataRepeatExpr) AppendString(dst []byte) []byte {
+	dst = dr.Count.AppendString(dst)
+	dst = append(dst, '*')
+	dst = dr.Value.AppendString(dst)
+	return dst
 }
 
 // TypeDeclaration declares variables with a specific type and optional attributes.
@@ -1041,6 +955,9 @@ type ArraySpec struct {
 }
 
 func (as *ArraySpec) IsDeferred() bool {
+	if as.Kind == ArraySpecDeferred {
+		return true
+	}
 	for i := range as.Bounds {
 		if as.Bounds[i].Upper == nil {
 			return true
@@ -1102,7 +1019,7 @@ func (te *TokenExpr) AppendTokenLiteral(dst []byte) []byte {
 	return append(dst, te.Token.String()...)
 }
 func (te *TokenExpr) AppendString(dst []byte) []byte {
-	return te.AppendString(dst)
+	return te.AppendTokenLiteral(dst)
 }
 
 // DeclEntity represents a single entity in a type declaration.
@@ -1126,8 +1043,16 @@ type DeclEntity struct {
 	Position
 }
 
+func (de *DeclEntity) Element() token.Token {
+	if de.Type != nil {
+		return de.Type.Token
+	}
+	return 0
+}
+
 func (de *DeclEntity) Kind() Expression {
-	if de.KindOrLen != nil {
+	if de.KindOrLen != nil && de.Type.Token != token.CHARACTER {
+		// KindOrLen is Len for characters, so don't return it here.
 		return de.KindOrLen
 	}
 	if de.Type == nil {
@@ -1550,13 +1475,17 @@ func IsRanged(expr ...Expression) bool {
 // to override operator precedence. The parentheses do not change the value
 // but may affect evaluation order.
 //
+// When Imag is non-nil, this represents a complex literal constructor: (real, imag)
+//
 // Example:
 //
 //	(<expression>)
 //	(a + b)
 //	(x * y) / z
+//	(0.0, 1.0)  // complex literal with Imag set
 type ParenExpr struct {
 	Expr Expression
+	Imag Expression // Optional: for complex literals (real, imag), nil for normal paren exprs
 	Position
 }
 
@@ -1564,11 +1493,18 @@ var _ Expression = (*ParenExpr)(nil) // compile time check of interface implemen
 
 func (pe *ParenExpr) expressionNode() {}
 func (pe *ParenExpr) AppendTokenLiteral(dst []byte) []byte {
+	if pe.Imag != nil {
+		return append(dst, "COMPLEXINIT"...)
+	}
 	return pe.Expr.AppendTokenLiteral(dst)
 }
 func (pe *ParenExpr) AppendString(dst []byte) []byte {
 	dst = append(dst, '(')
 	dst = pe.Expr.AppendString(dst)
+	if pe.Imag != nil {
+		dst = append(dst, ',')
+		dst = pe.Imag.AppendString(dst)
+	}
 	dst = append(dst, ')')
 	return dst
 }
@@ -1737,7 +1673,7 @@ type ArithmeticIfStmt struct {
 
 var _ Statement = (*ArithmeticIfStmt)(nil)
 
-func (ais *ArithmeticIfStmt) GetLabel() *string { return &ais.Label }
+func (ais *ArithmeticIfStmt) GetLabel() *string  { return &ais.Label }
 func (ais *ArithmeticIfStmt) statementNode()     {}
 func (ais *ArithmeticIfStmt) IsExecutable() bool { return true }
 func (ais *ArithmeticIfStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -1846,7 +1782,7 @@ type SelectCaseStmt struct {
 
 var _ Statement = (*SelectCaseStmt)(nil)
 
-func (s *SelectCaseStmt) GetLabel() *string { return &s.Label }
+func (s *SelectCaseStmt) GetLabel() *string  { return &s.Label }
 func (s *SelectCaseStmt) statementNode()     {}
 func (s *SelectCaseStmt) IsExecutable() bool { return true }
 func (s *SelectCaseStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2157,7 +2093,7 @@ type ComputedGotoStmt struct {
 
 var _ Statement = (*ComputedGotoStmt)(nil)
 
-func (cgs *ComputedGotoStmt) GetLabel() *string { return &cgs.Label }
+func (cgs *ComputedGotoStmt) GetLabel() *string  { return &cgs.Label }
 func (cgs *ComputedGotoStmt) statementNode()     {}
 func (cgs *ComputedGotoStmt) IsExecutable() bool { return true }
 func (cgs *ComputedGotoStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2196,7 +2132,7 @@ type AssignedGotoStmt struct {
 
 var _ Statement = (*AssignedGotoStmt)(nil)
 
-func (ags *AssignedGotoStmt) GetLabel() *string { return &ags.Label }
+func (ags *AssignedGotoStmt) GetLabel() *string  { return &ags.Label }
 func (ags *AssignedGotoStmt) statementNode()     {}
 func (ags *AssignedGotoStmt) IsExecutable() bool { return true }
 func (ags *AssignedGotoStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2218,6 +2154,12 @@ func (ags *AssignedGotoStmt) AppendString(dst []byte) []byte {
 	return dst
 }
 
+// IOSpecifier represents a single I/O control specifier (keyword=value pair).
+type IOSpecifier struct {
+	Name  string     // Keyword name (e.g., "IOSTAT", "ERR", "END", "NML")
+	Value Expression // Value expression
+}
+
 // InquireStmt queries properties of files or I/O units, such as whether a file
 // exists, is open, its name, access method, and other attributes. Results are
 // returned through variables specified in the inquiry specifiers.
@@ -2229,15 +2171,15 @@ func (ags *AssignedGotoStmt) AppendString(dst []byte) []byte {
 //	INQUIRE(UNIT=10, OPENED=lopen, NAME=fname)
 //	INQUIRE(FILE='output.dat', EXIST=fexist, OPENED=fopen, NUMBER=inum)
 type InquireStmt struct {
-	Specifiers map[string]Expression // INQUIRE specifiers: UNIT, FILE, EXIST, OPENED, etc.
-	OutputList []Expression          // Output items for IOLENGTH form: INQUIRE(IOLENGTH=var) output-list
-	Label      string                // Optional statement label
+	Specifiers []IOSpecifier // INQUIRE specifiers: UNIT, FILE, EXIST, OPENED, etc.
+	OutputList []Expression  // Output items for IOLENGTH form: INQUIRE(IOLENGTH=var) output-list
+	Label      string        // Optional statement label
 	Position
 }
 
 var _ Statement = (*InquireStmt)(nil)
 
-func (is *InquireStmt) GetLabel() *string { return &is.Label }
+func (is *InquireStmt) GetLabel() *string  { return &is.Label }
 func (is *InquireStmt) statementNode()     {}
 func (is *InquireStmt) IsExecutable() bool { return true }
 func (is *InquireStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2245,15 +2187,13 @@ func (is *InquireStmt) AppendTokenLiteral(dst []byte) []byte {
 }
 func (is *InquireStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "INQUIRE("...)
-	first := true
-	for key, value := range is.Specifiers {
-		if !first {
+	for i, spec := range is.Specifiers {
+		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		first = false
-		dst = append(dst, key...)
+		dst = append(dst, spec.Name...)
 		dst = append(dst, '=')
-		dst = value.AppendString(dst)
+		dst = spec.Value.AppendString(dst)
 	}
 	dst = append(dst, ')')
 	return dst
@@ -2269,8 +2209,8 @@ func (is *InquireStmt) AppendString(dst []byte) []byte {
 //	OPEN([UNIT=]<unit>, FILE=<filename> [, STATUS=<status>] [, IOSTAT=<var>])
 //	OPEN(10, FILE='data.txt', STATUS='OLD')
 type OpenStmt struct {
-	Specifiers map[string]Expression // OPEN specifiers: UNIT, FILE, STATUS, etc.
-	Label      string                // Optional statement label
+	Specifiers []IOSpecifier // OPEN specifiers: UNIT, FILE, STATUS, etc.
+	Label      string        // Optional statement label
 	Position
 }
 
@@ -2287,15 +2227,13 @@ func (os *OpenStmt) AppendTokenLiteral(dst []byte) []byte {
 
 func (os *OpenStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "OPEN("...)
-	first := true
-	for key, value := range os.Specifiers {
-		if !first {
+	for i, spec := range os.Specifiers {
+		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		first = false
-		dst = append(dst, key...)
+		dst = append(dst, spec.Name...)
 		dst = append(dst, '=')
-		dst = value.AppendString(dst)
+		dst = spec.Value.AppendString(dst)
 	}
 	dst = append(dst, ')')
 	return dst
@@ -2311,14 +2249,14 @@ func (os *OpenStmt) AppendString(dst []byte) []byte {
 //	CLOSE(10)
 //	CLOSE(UNIT=20, STATUS='KEEP')
 type CloseStmt struct {
-	Specifiers map[string]Expression // CLOSE specifiers: UNIT, STATUS, IOSTAT, ERR
-	Label      string                // Optional statement label
+	Specifiers []IOSpecifier // CLOSE specifiers: UNIT, STATUS, IOSTAT, ERR
+	Label      string        // Optional statement label
 	Position
 }
 
 var _ Statement = (*CloseStmt)(nil)
 
-func (cs *CloseStmt) GetLabel() *string { return &cs.Label }
+func (cs *CloseStmt) GetLabel() *string  { return &cs.Label }
 func (cs *CloseStmt) statementNode()     {}
 func (cs *CloseStmt) IsExecutable() bool { return true }
 func (cs *CloseStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2326,15 +2264,13 @@ func (cs *CloseStmt) AppendTokenLiteral(dst []byte) []byte {
 }
 func (cs *CloseStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "CLOSE("...)
-	first := true
-	for key, value := range cs.Specifiers {
-		if !first {
+	for i, spec := range cs.Specifiers {
+		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		first = false
-		dst = append(dst, key...)
+		dst = append(dst, spec.Name...)
 		dst = append(dst, '=')
-		dst = value.AppendString(dst)
+		dst = spec.Value.AppendString(dst)
 	}
 	dst = append(dst, ')')
 	return dst
@@ -2351,11 +2287,11 @@ func (cs *CloseStmt) AppendString(dst []byte) []byte {
 //	WRITE(10, 100) x, y, z
 //	WRITE(UNIT=20, FMT='(I5, F10.2)') num, val
 type WriteStmt struct {
-	Unit       Expression            // Unit specifier (e.g., 91, *, variable)
-	Format     Expression            // Format specifier
-	Specifiers map[string]Expression // I/O specifiers: END, ERR, IOSTAT, etc.
-	OutputList []Expression          // List of expressions to write
-	Label      string                // Optional statement label
+	Unit       Expression    // Unit specifier (e.g., 91, *, variable)
+	Format     Expression    // Format specifier
+	Specifiers []IOSpecifier // I/O specifiers: END, ERR, IOSTAT, NML, etc.
+	OutputList []Expression  // List of expressions to write
+	Label      string        // Optional statement label
 	Position
 }
 
@@ -2376,11 +2312,11 @@ func (ws *WriteStmt) IsExecutable() bool { return true }
 //	READ(10, 100) name, age
 //	READ(UNIT=15, FMT='(I5)', IOSTAT=ios, END=999) num
 type ReadStmt struct {
-	Unit       Expression            // Unit specifier (e.g., 91, *, variable)
-	Format     Expression            // Format specifier
-	Specifiers map[string]Expression // I/O specifiers: END, ERR, IOSTAT, etc.
-	InputList  []Expression          // List of variables to read into
-	Label      string                // Optional statement label
+	Unit       Expression    // Unit specifier (e.g., 91, *, variable)
+	Format     Expression    // Format specifier
+	Specifiers []IOSpecifier // I/O specifiers: END, ERR, IOSTAT, NML, etc.
+	InputList  []Expression  // List of variables to read into
+	Label      string        // Optional statement label
 	Position
 }
 
@@ -2474,14 +2410,14 @@ func (ps *PrintStmt) AppendString(dst []byte) []byte {
 //	BACKSPACE 10
 //	BACKSPACE(UNIT=15, IOSTAT=ierr)
 type BackspaceStmt struct {
-	Specifiers map[string]Expression // BACKSPACE specifiers: UNIT, IOSTAT, ERR
-	Label      string                // Optional statement label
+	Specifiers []IOSpecifier // BACKSPACE specifiers: UNIT, IOSTAT, ERR
+	Label      string        // Optional statement label
 	Position
 }
 
 var _ Statement = (*BackspaceStmt)(nil)
 
-func (bs *BackspaceStmt) GetLabel() *string { return &bs.Label }
+func (bs *BackspaceStmt) GetLabel() *string  { return &bs.Label }
 func (bs *BackspaceStmt) statementNode()     {}
 func (bs *BackspaceStmt) IsExecutable() bool { return true }
 func (bs *BackspaceStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2489,15 +2425,13 @@ func (bs *BackspaceStmt) AppendTokenLiteral(dst []byte) []byte {
 }
 func (bs *BackspaceStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "BACKSPACE("...)
-	first := true
-	for key, value := range bs.Specifiers {
-		if !first {
+	for i, spec := range bs.Specifiers {
+		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		first = false
-		dst = append(dst, key...)
+		dst = append(dst, spec.Name...)
 		dst = append(dst, '=')
-		dst = value.AppendString(dst)
+		dst = spec.Value.AppendString(dst)
 	}
 	dst = append(dst, ')')
 	return dst
@@ -2513,14 +2447,14 @@ func (bs *BackspaceStmt) AppendString(dst []byte) []byte {
 //	REWIND 25
 //	REWIND(UNIT=30, IOSTAT=ierr)
 type RewindStmt struct {
-	Specifiers map[string]Expression // REWIND specifiers: UNIT, IOSTAT, ERR
-	Label      string                // Optional statement label
+	Specifiers []IOSpecifier // REWIND specifiers: UNIT, IOSTAT, ERR
+	Label      string        // Optional statement label
 	Position
 }
 
 var _ Statement = (*RewindStmt)(nil)
 
-func (rs *RewindStmt) GetLabel() *string { return &rs.Label }
+func (rs *RewindStmt) GetLabel() *string  { return &rs.Label }
 func (rs *RewindStmt) statementNode()     {}
 func (rs *RewindStmt) IsExecutable() bool { return true }
 func (rs *RewindStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2528,15 +2462,13 @@ func (rs *RewindStmt) AppendTokenLiteral(dst []byte) []byte {
 }
 func (rs *RewindStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "REWIND("...)
-	first := true
-	for key, value := range rs.Specifiers {
-		if !first {
+	for i, spec := range rs.Specifiers {
+		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		first = false
-		dst = append(dst, key...)
+		dst = append(dst, spec.Name...)
 		dst = append(dst, '=')
-		dst = value.AppendString(dst)
+		dst = spec.Value.AppendString(dst)
 	}
 	dst = append(dst, ')')
 	return dst
@@ -2552,14 +2484,14 @@ func (rs *RewindStmt) AppendString(dst []byte) []byte {
 //	ENDFILE 10
 //	ENDFILE(UNIT=15, IOSTAT=ierr)
 type EndfileStmt struct {
-	Specifiers map[string]Expression // ENDFILE specifiers: UNIT, IOSTAT, ERR
-	Label      string                // Optional statement label
+	Specifiers []IOSpecifier // ENDFILE specifiers: UNIT, IOSTAT, ERR
+	Label      string        // Optional statement label
 	Position
 }
 
 var _ Statement = (*EndfileStmt)(nil)
 
-func (es *EndfileStmt) GetLabel() *string { return &es.Label }
+func (es *EndfileStmt) GetLabel() *string  { return &es.Label }
 func (es *EndfileStmt) statementNode()     {}
 func (es *EndfileStmt) IsExecutable() bool { return true }
 func (es *EndfileStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2567,15 +2499,13 @@ func (es *EndfileStmt) AppendTokenLiteral(dst []byte) []byte {
 }
 func (es *EndfileStmt) AppendString(dst []byte) []byte {
 	dst = append(dst, "ENDFILE("...)
-	first := true
-	for key, value := range es.Specifiers {
-		if !first {
+	for i, spec := range es.Specifiers {
+		if i > 0 {
 			dst = append(dst, ", "...)
 		}
-		first = false
-		dst = append(dst, key...)
+		dst = append(dst, spec.Name...)
 		dst = append(dst, '=')
-		dst = value.AppendString(dst)
+		dst = spec.Value.AppendString(dst)
 	}
 	dst = append(dst, ')')
 	return dst
@@ -2598,7 +2528,7 @@ type StopStmt struct {
 
 var _ Statement = (*StopStmt)(nil)
 
-func (ss *StopStmt) GetLabel() *string { return &ss.Label }
+func (ss *StopStmt) GetLabel() *string  { return &ss.Label }
 func (ss *StopStmt) statementNode()     {}
 func (ss *StopStmt) IsExecutable() bool { return true }
 func (ss *StopStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2624,14 +2554,14 @@ func (ss *StopStmt) AppendString(dst []byte) []byte {
 //	200 FORMAT(I5, F10.2, A)
 //	300 FORMAT('Result = ', F8.3)
 type FormatStmt struct {
-	Spec  string // Format specification (stored as string)
-	Label string // Statement label (always present for FORMAT)
+	Specs []FormatSpec // Parsed format specifications
+	Label string       // Statement label (always present for FORMAT)
 	Position
 }
 
 var _ Statement = (*FormatStmt)(nil)
 
-func (fs *FormatStmt) GetLabel() *string { return &fs.Label }
+func (fs *FormatStmt) GetLabel() *string  { return &fs.Label }
 func (fs *FormatStmt) statementNode()     {}
 func (fs *FormatStmt) IsExecutable() bool { return false } // FORMAT is a non-executable specification
 func (fs *FormatStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2643,9 +2573,312 @@ func (fs *FormatStmt) AppendString(dst []byte) []byte {
 		dst = append(dst, ' ')
 	}
 	dst = append(dst, "FORMAT("...)
-	dst = append(dst, fs.Spec...)
+	for i := range fs.Specs {
+		if i > 0 {
+			dst = append(dst, ',')
+		}
+		dst = fs.Specs[i].AppendString(dst)
+	}
 	dst = append(dst, ')')
 	return dst
+}
+
+// FormatSpec represents a specification argument to the [FormatStmt] which
+// can be any of the following:
+//   - String literal: 'value='
+//   - Descriptor: rXw.dEe where X is the descriptor byte, w is width, d is decimal places, and e is exponent and r is repeat counts.
+type FormatSpec struct {
+	// First Letter of format specifier stored in Descriptor[0]
+	//  - I,F,E,D,G,A,L,B,O,Z correspond to standard fortran descriptors.
+	//  - First letter can also be a newline control character '/'.
+	// Second letter stored in Descriptor[1].
+	Descriptor [2]byte
+	Width      uint8
+	Decimals   uint8
+	Exponent   uint8
+
+	// Repeat precedes the descriptor. -1 indicates unlimited repeat.
+	Repeat int
+
+	// Group stores grouped repeat. i.e: 3(I3,F6.2)
+	Group []FormatSpec
+	// StringLit stores a string literal for when FORMAT receives a string literal argument.
+	// If StringLit is set none of other fields are set.
+	StringLit string
+	// DT derived Type.
+	Vlist []int
+}
+
+// AppendString serializes the FormatSpec back to Fortran format string notation.
+func (spec *FormatSpec) AppendString(dst []byte) []byte {
+	// Handle string literal
+	if spec.StringLit != "" {
+		dst = append(dst, '\'')
+		dst = append(dst, spec.StringLit...)
+		dst = append(dst, '\'')
+		return dst
+	}
+
+	// Handle grouped repeat: 3(I3,F6.2)
+	if len(spec.Group) > 0 {
+		if spec.Repeat > 0 {
+			dst = strconv.AppendInt(dst, int64(spec.Repeat), 10)
+		} else if spec.Repeat == -1 {
+			dst = append(dst, '*')
+		}
+		dst = append(dst, '(')
+		for i := range spec.Group {
+			if i > 0 {
+				dst = append(dst, ',')
+			}
+			dst = spec.Group[i].AppendString(dst)
+		}
+		dst = append(dst, ')')
+		return dst
+	}
+
+	// Handle repeat count
+	if spec.Repeat > 0 {
+		dst = strconv.AppendInt(dst, int64(spec.Repeat), 10)
+	} else if spec.Repeat == -1 {
+		dst = append(dst, '*')
+	}
+
+	// Handle descriptor
+	if spec.Descriptor[0] != 0 {
+		dst = append(dst, spec.Descriptor[0])
+		if spec.Descriptor[1] != 0 {
+			dst = append(dst, spec.Descriptor[1])
+		}
+	}
+
+	// Handle width
+	if spec.Width > 0 {
+		dst = strconv.AppendInt(dst, int64(spec.Width), 10)
+	}
+
+	// Handle decimals (.d)
+	if spec.Decimals > 0 || (spec.Width > 0 && needsDecimal(spec.Descriptor[0])) {
+		dst = append(dst, '.')
+		dst = strconv.AppendInt(dst, int64(spec.Decimals), 10)
+	}
+
+	// Handle exponent (Ee)
+	if spec.Exponent > 0 {
+		dst = append(dst, 'E')
+		dst = strconv.AppendInt(dst, int64(spec.Exponent), 10)
+	}
+
+	return dst
+}
+
+// needsDecimal returns true if the descriptor typically requires decimal notation.
+func needsDecimal(desc byte) bool {
+	switch desc {
+	case 'F', 'f', 'E', 'e', 'D', 'd', 'G', 'g':
+		return true
+	default:
+		return false
+	}
+}
+
+// ParseFormatString parses a complete format string like "I5, F10.2, 'text'" into a slice of FormatSpec.
+// This is useful for parsing inline format strings in WRITE/PRINT statements.
+func ParseFormatString(spec string) []FormatSpec {
+	var specs []FormatSpec
+	i := 0
+	for i < len(spec) {
+		// Skip whitespace and commas
+		for i < len(spec) && (spec[i] == ' ' || spec[i] == ',' || spec[i] == '\t') {
+			i++
+		}
+		if i >= len(spec) {
+			break
+		}
+
+		var fs FormatSpec
+
+		// Handle newline control /
+		if spec[i] == '/' {
+			fs.Descriptor[0] = '/'
+			specs = append(specs, fs)
+			i++
+			continue
+		}
+
+		// Handle colon :
+		if spec[i] == ':' {
+			fs.Descriptor[0] = ':'
+			specs = append(specs, fs)
+			i++
+			continue
+		}
+
+		// Handle string literal 'text'
+		if spec[i] == '\'' {
+			i++ // skip opening quote
+			start := i
+			for i < len(spec) && spec[i] != '\'' {
+				i++
+			}
+			fs.StringLit = spec[start:i]
+			if i < len(spec) {
+				i++ // skip closing quote
+			}
+			specs = append(specs, fs)
+			continue
+		}
+
+		// Handle grouped repeat: 3(I3,F6.2) or (I3,F6.2)
+		// First check for repeat count before (
+		repeat := 0
+		startI := i
+		for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
+			repeat = repeat*10 + int(spec[i]-'0')
+			i++
+		}
+		if i < len(spec) && spec[i] == '(' {
+			i++ // skip (
+			// Parse nested specs until )
+			depth := 1
+			groupStart := i
+			for i < len(spec) && depth > 0 {
+				if spec[i] == '(' {
+					depth++
+				} else if spec[i] == ')' {
+					depth--
+				}
+				if depth > 0 {
+					i++
+				}
+			}
+			fs.Repeat = repeat
+			if fs.Repeat == 0 {
+				fs.Repeat = 1
+			}
+			fs.Group = ParseFormatString(spec[groupStart:i])
+			if i < len(spec) {
+				i++ // skip closing )
+			}
+			specs = append(specs, fs)
+			continue
+		}
+
+		// Not a group, restore position and parse as format spec
+		i = startI
+		consumed := fs.SetFromString(spec[i:])
+		if consumed > 0 {
+			specs = append(specs, fs)
+			i += consumed
+		} else {
+			// Skip unknown character
+			i++
+		}
+	}
+	return specs
+}
+
+// SetFromString parses a format spec string like "I3", "F10.2", "ES12.5", "6I3", "E12.5E3"
+// and sets the FormatSpec fields accordingly. Returns the number of bytes consumed.
+func (spec *FormatSpec) SetFromString(lit string) int {
+	*spec = FormatSpec{} // Reset
+	i := 0
+	n := len(lit)
+
+	// Parse leading repeat count (digits before letter)
+	for i < n && lit[i] >= '0' && lit[i] <= '9' {
+		spec.Repeat = spec.Repeat*10 + int(lit[i]-'0')
+		i++
+	}
+	if spec.Repeat == 0 {
+		spec.Repeat = 1
+	}
+
+	// Parse descriptor letter(s)
+	if i < n && isFormatDescLetter(lit[i]) {
+		spec.Descriptor[0] = lit[i]
+		i++
+		// Check for two-letter descriptor (ES, EN, TL, TR, SP, SS, BN, BZ, etc.)
+		if i < n && isFormatSecondLetter(spec.Descriptor[0], lit[i]) {
+			spec.Descriptor[1] = lit[i]
+			i++
+		}
+	}
+
+	// Parse width (digits after descriptor)
+	width := 0
+	for i < n && lit[i] >= '0' && lit[i] <= '9' {
+		width = width*10 + int(lit[i]-'0')
+		i++
+	}
+	spec.Width = uint8(width)
+
+	// Parse decimals (.d)
+	if i < n && lit[i] == '.' {
+		i++ // skip .
+		decimals := 0
+		for i < n && lit[i] >= '0' && lit[i] <= '9' {
+			decimals = decimals*10 + int(lit[i]-'0')
+			i++
+		}
+		spec.Decimals = uint8(decimals)
+	}
+
+	// Parse exponent (Ee)
+	if i < n && (lit[i] == 'E' || lit[i] == 'e') {
+		i++ // skip E
+		exponent := 0
+		for i < n && lit[i] >= '0' && lit[i] <= '9' {
+			exponent = exponent*10 + int(lit[i]-'0')
+			i++
+		}
+		spec.Exponent = uint8(exponent)
+	}
+
+	return i
+}
+
+// isFormatDescLetter returns true if c is a valid format descriptor first letter.
+func isFormatDescLetter(c byte) bool {
+	switch c {
+	case 'I', 'i', 'F', 'f', 'E', 'e', 'D', 'd', 'G', 'g',
+		'A', 'a', 'L', 'l', 'B', 'b', 'O', 'o', 'Z', 'z',
+		'X', 'x', 'T', 't', 'P', 'p', 'H', 'h', 'Q', 'q',
+		'S', 's', 'R', 'r':
+		return true
+	default:
+		return false
+	}
+}
+
+// isFormatSecondLetter returns true if second is valid as second letter after first.
+func isFormatSecondLetter(first, second byte) bool {
+	// Normalize to uppercase
+	if first >= 'a' && first <= 'z' {
+		first -= 32
+	}
+	if second >= 'a' && second <= 'z' {
+		second -= 32
+	}
+	switch first {
+	case 'E':
+		return second == 'S' || second == 'N' // ES, EN
+	case 'T':
+		return second == 'L' || second == 'R' // TL, TR
+	case 'S':
+		return second == 'P' || second == 'S' || second == 'U' // SP, SS, SU
+	case 'B':
+		return second == 'N' || second == 'Z' // BN, BZ
+	case 'D':
+		return second == 'C' || second == 'P' || second == 'T' // DC, DP, DT
+	case 'R':
+		return second == 'C' || second == 'D' || second == 'N' ||
+			second == 'P' || second == 'U' || second == 'Z' // RC, RD, RN, RP, RU, RZ
+	case 'G':
+		return second == '0' // G0
+	default:
+		return false
+	}
 }
 
 // AllocateStmt dynamically allocates memory for allocatable arrays and pointer
@@ -2667,7 +2900,7 @@ type AllocateStmt struct {
 
 var _ Statement = (*AllocateStmt)(nil)
 
-func (as *AllocateStmt) GetLabel() *string { return &as.Label }
+func (as *AllocateStmt) GetLabel() *string  { return &as.Label }
 func (as *AllocateStmt) statementNode()     {}
 func (as *AllocateStmt) IsExecutable() bool { return true }
 func (as *AllocateStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2710,7 +2943,7 @@ type DeallocateStmt struct {
 
 var _ Statement = (*DeallocateStmt)(nil)
 
-func (ds *DeallocateStmt) GetLabel() *string { return &ds.Label }
+func (ds *DeallocateStmt) GetLabel() *string  { return &ds.Label }
 func (ds *DeallocateStmt) statementNode()     {}
 func (ds *DeallocateStmt) IsExecutable() bool { return true }
 func (ds *DeallocateStmt) AppendTokenLiteral(dst []byte) []byte {
@@ -2786,7 +3019,7 @@ func (dts *DerivedTypeStmt) AppendString(dst []byte) []byte {
 //	TYPE(Date), POINTER :: birth_date
 type ComponentDecl struct {
 	Type       TypeSpec // Type with optional KIND/LEN
-	Attributes []token.Token
+	Attributes []TypeAttribute
 	Components []DeclEntity
 	Label      string
 	Position
@@ -2809,7 +3042,7 @@ func (cd *ComponentDecl) AppendString(dst []byte) []byte {
 			if i > 0 {
 				dst = append(dst, ", "...)
 			}
-			dst = append(dst, attr.String()...)
+			dst = attr.AppendString(dst)
 		}
 	}
 	dst = append(dst, " :: "...)
@@ -3039,6 +3272,8 @@ func (ac *ArrayConstructor) AppendString(dst []byte) []byte {
 type ComponentAccess struct {
 	Base      Expression
 	Component string
+	// Args holds subscript indices when accessing an array component: a%x(i,j)
+	Args []Expression
 	Position
 }
 
@@ -3052,6 +3287,16 @@ func (ca *ComponentAccess) AppendString(dst []byte) []byte {
 	dst = ca.Base.AppendString(dst)
 	dst = append(dst, '%')
 	dst = append(dst, ca.Component...)
+	if len(ca.Args) > 0 {
+		dst = append(dst, '(')
+		for i, arg := range ca.Args {
+			if i > 0 {
+				dst = append(dst, ',')
+			}
+			dst = arg.AppendString(dst)
+		}
+		dst = append(dst, ')')
+	}
 	return dst
 }
 
@@ -3148,4 +3393,14 @@ func (pos Position) ToLineCol(r io.ReaderAt, aux []byte) (line, col, lineLength 
 	}
 
 	return line, col, lineLength, nil
+}
+
+func appendSep[T Node](dst []byte, sep string, nodes ...T) []byte {
+	for i := range nodes {
+		if i != 0 {
+			dst = append(dst, sep...)
+		}
+		dst = nodes[i].AppendString(dst)
+	}
+	return dst
 }

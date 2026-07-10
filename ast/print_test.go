@@ -10,7 +10,8 @@ import (
 
 func TestPrint(t *testing.T) {
 	// Create a simple AST node
-	prog := &ProgramBlock{
+	prog := &Unit{
+		Token:    token.PROGRAM,
 		Name:     "test",
 		Position: Pos(0, 100),
 		Body: []Statement{
@@ -28,7 +29,7 @@ func TestPrint(t *testing.T) {
 
 	// Check that output contains expected fields
 	expected := []string{
-		"ProgramBlock",
+		"Unit",
 		"Name: \"test\"",
 		"Start: 0",
 		"End: 100",
@@ -43,7 +44,8 @@ func TestPrint(t *testing.T) {
 }
 
 func TestPrintWithFilter(t *testing.T) {
-	prog := &ProgramBlock{
+	prog := &Unit{
+		Token:    token.PROGRAM,
 		Name:     "test",
 		Position: Pos(0, 100),
 		Body:     nil, // nil slice
@@ -69,15 +71,18 @@ func TestPrintWithFilter(t *testing.T) {
 }
 
 func TestPrintSubroutine(t *testing.T) {
-	sub := &Subroutine{
-		Name: "factorial",
+	sub := &Unit{
+		Token: token.SUBROUTINE,
+		Name:  "factorial",
 		Parameters: []Parameter{{
 			Name: "n",
 		}, {
 			Name: "result",
 		}},
-		Attributes: []token.Token{token.RECURSIVE},
-		Position:   Pos(0, 50),
+		ResultType: TypeSpec{
+			Attributes: []TypeAttribute{{Token: token.RECURSIVE}},
+		},
+		Position: Pos(0, 50),
 	}
 
 	var buf bytes.Buffer
@@ -89,8 +94,8 @@ func TestPrintSubroutine(t *testing.T) {
 	output := buf.String()
 
 	// Check output contains expected content
-	if !strings.Contains(output, "Subroutine") {
-		t.Errorf("Expected type name Subroutine in output:\n%s", output)
+	if !strings.Contains(output, "Unit") {
+		t.Errorf("Expected type name Unit in output:\n%s", output)
 	}
 	if !strings.Contains(output, "factorial") {
 		t.Errorf("Expected function name in output:\n%s", output)

@@ -14,142 +14,147 @@ Fortran defines these **program units**, each a separate scoping unit:
 
 ### Association Types
 
-| Type | Mechanism | Example |
-|------|-----------|---------|
-| **Host Association** | Automatic via `CONTAINS` | Internal procedures see host's entities |
-| **Use Association** | `USE` statement required | Modules → other program units |
-| **Linkage Association** | `COMMON` / `EXTERNAL` | Cross-compilation-unit sharing |
+| Type | Mechanism | Fortran rule |
+|------|-----------|--------------|
+| **Host association** | Automatic via `CONTAINS` | Internal procedures see host's entities without any declaration |
+| **Use association** | `USE` statement required | Named entities from a MODULE become accessible |
+| **Linkage association** | `COMMON` / `EXTERNAL` | Cross-compilation-unit storage sharing |
 
 ### Key Rules
 
-1. **USE is required for modules** - even within the same file
-2. **CONTAINS gives automatic host association** - internal procedures see parent scope
-3. **External procedures are islands** - no automatic data sharing
-4. **File boundaries don't matter** - only program unit boundaries
+1. `USE` required for modules — even within the same file.
+2. `CONTAINS` gives automatic host association — internal procedures see parent scope.
+3. External procedures are islands — no automatic data sharing.
+4. File boundaries don't matter — only program unit boundaries.
+5. If a contained procedure declares a local entity with the same name as a host entity, the local declaration shadows the host (no host association for that name).
 
 ---
 
 ## REPL Architecture
 
-The `REPL` struct manages symbol resolution and type inference for transpilation.
+`REPL` manages symbol resolution and type inference for transpilation.
 
 ### Fields
 
 ```go
 type REPL struct {
     scope        ParserUnitData    // Current scope (program unit being transpiled)
-    _use         []*ParserUnitData // FLATTENED: all accessible units (modules + their contains)
-    _contains    []*ParserUnitData // Current scope's CONTAINS procedures
-    used         []f90.ProgramUnit // NOT FLATTENED: original program units for code gen
-    commonblocks []commonBlockInfo // COMMON block tracking
+    registered   []f90.Unit        // All units registered via RegisterUnits
+    _use         []*ParserUnitData // FLATTENED: all accessible units loaded via Use
+    _contains    []*ParserUnitData // Contained procedures of current scope
+    _hostScope   []Varinfo         // Host-associated vars from enclosing MODULE/PROGRAM
+    commonblocks []commonBlockInfo // COMMON block tracking (not reset per procedure)
+    formatSpecs  []ast.FormatStmt  // FORMAT statements for current unit
 }
 ```
 
-### `_use` vs `used` Distinction
+### `_use` Flattening
 
-| Field | Flattened? | Purpose |
-|-------|------------|---------|
-| `_use` | **Yes** | Name lookup - includes module-contained procedures |
-| `used` | **No** | Code generation - original program units only |
+`_use` stores modules and their contained procedures in a flat list for O(n) name lookup.
 
-**Example**: Adding a module with 2 contained subroutines:
 ```
-AddUse(moduleM) where moduleM.Contains = [subA, subB]
+RegisterUnits(moduleM) where moduleM.Contains = [subA, subB]
+Use("moduleM")
 
-_use  = [&moduleM.data, &subA.data, &subB.data]  // 3 entries (flattened)
-used  = [moduleM]                                  // 1 entry (not flattened)
+_use = [&moduleM.data, &subA.data, &subB.data]  // 3 entries (flattened)
 ```
 
-This design allows:
-- **Variable lookup**: `repl.Var("x")` searches `scope` then all `_use` entries
-- **Procedure lookup**: `repl.ContainedOrUsed("subA")` finds flattened entries
-- **Code generation**: `transformProcedures(used)` recursively handles modules
+### Variable Resolution Order
+
+`repl.Var(name)` searches in this order:
+1. Current scope (`scope.vars`) — local declarations
+2. Used modules (`_use`) — use association
+3. Host scope (`_hostScope`) — host association
 
 ---
 
-## API Methods
+## Host Association in the Transpiler
 
-### Adding External Units
+Fortran host association is lexical: contained procedures see the host's entities as if declared locally. Go has no equivalent — closures capture values, not named identifiers usable as function parameters.
+
+**Transpiler strategy:** host-associated variables are passed as explicit parameters to contained procedures. Scalars are passed by pointer (`*T`), arrays by pointer-to-array (`*intrinsic.Array[T]`).
+
+### API
 
 ```go
-// AddUse registers external program units (modules, subroutines, functions).
-// Modules are flattened: contained procedures are also registered in _use.
-func (repl *REPL) AddUse(pu ...f90.ProgramUnit) error
+// PushHostScope sets host-associated vars from the enclosing MODULE/PROGRAM.
+// Returns pop to restore prior state. Call pop after CONTAINS processing.
+func (repl *REPL) PushHostScope(vars []Varinfo) (pop func())
+
+// HostScope returns the current host-associated variables.
+func (repl *REPL) HostScope() []Varinfo
+```
+
+### Usage Pattern (TransformUnits)
+
+```go
+// Before processing CONTAINS:
+pop := tg.repl.PushHostScope(tg.repl.scope.vars)
+dst, err = tg.TransformUnits(dst, unit.Contains...)
+pop()
+```
+
+```go
+// In getScopeParams — host vars become first parameters:
+hostScope := tg.repl.HostScope()
+for i := range hostScope {
+    vi := &hostScope[i]
+    // scalars → *T, arrays → *intrinsic.Array[T]
+}
+```
+
+---
+
+## API Reference
+
+### Unit Registration & Loading
+
+```go
+// RegisterUnits registers program units so they can be loaded via Use.
+func (repl *REPL) RegisterUnits(pu ...f90.Unit) error
+
+// Use loads a registered unit into _use scope (use association).
+// only: optional list restricting which names are imported (ONLY clause).
+func (repl *REPL) Use(name string, only ...string) error
 
 // GetUsed returns ParserUnitData for a named unit from _use (flattened).
 func (repl *REPL) GetUsed(name string) *ParserUnitData
+
+// RegisteredUnit returns a unit from registered (before Use is called).
+func (repl *REPL) RegisteredUnit(name string) *f90.Unit
 ```
 
 ### Scope Management
 
 ```go
 // SetScope sets the current program unit being transpiled.
-// Populates _contains from the unit's CONTAINS section.
-func (repl *REPL) SetScope(pu f90.ProgramUnit) error
+func (repl *REPL) SetScope(pu f90.Unit) error
 
 // Contained returns data for a procedure in current scope's CONTAINS.
 func (repl *REPL) Contained(name string) *ParserUnitData
 
 // ContainedOrUsed searches _contains first, then _use.
 func (repl *REPL) ContainedOrUsed(name string) *ParserUnitData
+
+// ScopeParams returns dummy arguments of the current scope's procedure.
+func (repl *REPL) ScopeParams() []Varinfo
+
+// PushHostScope sets host-associated vars; returns restore function.
+func (repl *REPL) PushHostScope(vars []Varinfo) (pop func())
+
+// HostScope returns current host-associated variables.
+func (repl *REPL) HostScope() []Varinfo
 ```
 
-### Variable Resolution
+### Variable & Name Resolution
 
 ```go
-// Var searches scope first, then _use for variable by name.
+// Var looks up a variable: local → use → host association.
 func (repl *REPL) Var(name string) *Varinfo
+
+// Namelist looks up a NAMELIST group by name.
+func (repl *REPL) Namelist(name string) *ast.NamelistGroup
+
+// PushVar temporarily adds a variable (e.g. loop variable); returns remove func.
+func (repl *REPL) PushVar(v Varinfo) (remove func())
 ```
-
----
-
-## ToGo Wrapper
-
-`ToGo` wraps `REPL` for transpilation, forwarding methods:
-
-```go
-func (tg *ToGo) AddUsed(pu ...f90.ProgramUnit) error  // → repl.AddUse
-func (tg *ToGo) GetUsed(name string) *ParserUnitData  // → repl.GetUsed
-func (tg *ToGo) Contained(name string) *ParserUnitData
-func (tg *ToGo) ContainedOrExtern(name string) *ParserUnitData // → repl.ContainedOrUsed
-```
-
-### Code Generation Flow
-
-```go
-// In TransformProgram:
-decls, err = tg.transformProcedures(decls, prog.Contains)  // CONTAINS section
-decls, err = tg.transformProcedures(decls, tg.repl.used)   // External units
-
-// transformProcedures recursively handles modules:
-case *f90.Module:
-    dst, err = tg.transformProcedures(dst, c.Contains)  // Recurse into module
-```
-
----
-
-## Usage Example
-
-```go
-// Parse external module
-modUnit, _ := parser.ParseFile("mathlib.f90")
-mod := modUnit.(*f90.Module)
-
-// Add to transpiler
-tg := &ToGo{}
-tg.AddUsed(mod)  // Registers module + its contained procedures
-
-// Now transpile main program - can resolve calls to module procedures
-prog, _ := parser.ParseFile("main.f90")
-decls, _ := tg.TransformProgram(prog.(*f90.ProgramBlock))
-```
-
----
-
-## Design Rationale
-
-1. **Flattening `_use`**: Enables O(n) lookup for any accessible procedure name without traversing module hierarchies during transpilation.
-
-2. **Keeping `used` unflattened**: `transformProcedures` needs the original structure to properly recurse into modules and generate declarations in correct order.
-
-3. **Separate `_contains`**: Host association (CONTAINS) is different from USE association - `_contains` is reset per scope, while `_use` persists.

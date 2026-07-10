@@ -1,8 +1,18 @@
 package main
 
-import "github.com/soypat/go-fortran/intrinsic"
+import (
+	"github.com/soypat/go-fortran/intrinsic"
+	"github.com/soypat/go-fortran/intrinsic/fortio"
+)
 
 func main() {
+	GOLDEN()
+}
+func GOLDEN() {
+	var (
+		lv62y int32
+		_     = lv62y
+	)
 	LEVEL01()
 	LEVEL02()
 	LEVEL03()
@@ -33,10 +43,56 @@ func main() {
 	LEVEL29()
 	LEVEL30()
 	LEVEL31()
-	intrinsic.Stop(0)
+	LEVEL32()
+	LEVEL33()
+	LEVEL34()
+	LEVEL35()
+	LEVEL36()
+	LEVEL37()
+	LEVEL38()
+	LEVEL39()
+	LEVEL40()
+	LEVEL41()
+	LEVEL42()
+	LEVEL43()
+	LEVEL44()
+	LEVEL45()
+	LEVEL46()
+	LEVEL47()
+	LEVEL48()
+	LEVEL49()
+	LEVEL50()
+	LEVEL51()
+	LEVEL52()
+	LEVEL53()
+	LEVEL54()
+	LEVEL55()
+	LEVEL56()
+	LEVEL57()
+	LEVEL58()
+	LEVEL59()
+	LEVEL60()
+	LEVEL61()
+	LEVEL62(42, &lv62y)
+	LEVEL63()
+	LEVEL64()
+	LEVEL65()
+	LEVEL66()
+	LEVEL67()
+	LEVEL68()
+	LEVEL69()
+	LEVEL70()
+	LEVEL71()
+	LEVEL72()
+	LEVEL73()
+	LEVEL74()
+	LEVEL75()
+	fenv.Stop(0)
+	fenv.Exit(0)
+	fenv.Exit()
 }
 func LEVEL01() {
-	intrinsic.Print("LEVEL 1: Hello, World!")
+	fenv.Print("LEVEL 1: Hello, World!")
 }
 func LEVEL02() {
 	var (
@@ -52,26 +108,24 @@ func LEVEL02() {
 		_    = flag
 	)
 	var (
-		message intrinsic.CharacterArray
-		_       = message
+		message intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		_                                = message
 	)
-	message = intrinsic.NewCharacterArray(20)
 	var (
-		a intrinsic.CharacterArray
-		_ = a
+		a intrinsic.CharacterArray = intrinsic.NewCharacterArray(1)
+		_                          = a
 	)
-	a = intrinsic.NewCharacterArray(1)
 	a.SetFromString("a")
 	i = 42
 	x = 3.14159
 	flag = true
 	message.SetFromString("Variables assigned")
-	intrinsic.Print("LEVEL 2: i =", i, ", x =", x)
-	intrinsic.Print("LEVEL 2: flag =", flag)
-	intrinsic.Print("LEVEL 2:", message)
-	intrinsic.Print("LEVEL 2:", a, a)
-	intrinsic.Print(a, a, a, i, a)
-	intrinsic.Print(i, a, i, a)
+	fenv.Print("LEVEL 2: i =", i, ", x =", x)
+	fenv.Print("LEVEL 2: flag =", flag)
+	fenv.Print("LEVEL 2:", message)
+	fenv.Print("LEVEL 2:", a, a)
+	fenv.Print(a, a, a, i, a)
+	fenv.Print(i, a, i, a)
 }
 func LEVEL03() {
 	var (
@@ -92,8 +146,8 @@ func LEVEL03() {
 	k = i * 2
 	y = x * 2.0
 	z = float32(i) + x
-	intrinsic.Print("LEVEL 3: j =", j, ", k =", k)
-	intrinsic.Print("LEVEL 3: y =", y, ", z =", z)
+	fenv.Print("LEVEL 3: j =", j, ", k =", k)
+	fenv.Print("LEVEL 3: y =", y, ", z =", z)
 }
 func LEVEL04() {
 	var (
@@ -101,8 +155,9 @@ func LEVEL04() {
 		_ = i
 	)
 	var (
-		x float32
-		_ = x
+		x    float32
+		test float32
+		_, _ = x, test
 	)
 	var (
 		flag bool
@@ -110,42 +165,41 @@ func LEVEL04() {
 	)
 	i = 42
 	x = 3.14159
+	test = 0.0
 	flag = true
 	if i > 40 {
-		intrinsic.Print("LEVEL 4: i is greater than 40")
+		fenv.Print("LEVEL 4: i is greater than 40")
 	}
 	if flag {
-		intrinsic.Print("LEVEL 4: flag is true")
+		fenv.Print("LEVEL 4: flag is true")
 	} else {
-		intrinsic.Print("LEVEL 4: flag is false")
+		fenv.Print("LEVEL 4: flag is false")
 	}
 	if x < 3.0 {
-		intrinsic.Print("LEVEL 4: x < 3.0")
+		fenv.Print("LEVEL 4: x < 3.0")
 	} else if x < 4.0 {
-		intrinsic.Print("LEVEL 4: 3.0 <= x < 4.0")
+		fenv.Print("LEVEL 4: 3.0 <= x < 4.0")
 	} else {
-		intrinsic.Print("LEVEL 4: x >= 4.0")
+		fenv.Print("LEVEL 4: x >= 4.0")
 	}
 }
 func LEVEL05() {
 	var (
-		arr1 *intrinsic.Array[int32]
+		arr1 = intrinsic.NewArray[int32](nil, 5)
 		_    = arr1
 	)
-	arr1 = intrinsic.NewArray[int32](nil, 5)
 	var (
-		matrix *intrinsic.Array[float32]
+		matrix = intrinsic.NewArray[float32](nil, 3, 3)
 		_      = matrix
 	)
-	matrix = intrinsic.NewArray[float32](nil, 3, 3)
 	arr1.Set(10, 1)
 	arr1.Set(20, 2)
 	arr1.Set(30, 3)
 	arr1.Set(40, 4)
 	arr1.Set(50, 5)
-	intrinsic.Print("LEVEL 5: arr1(1) =", arr1.At(1))
-	intrinsic.Print("LEVEL 5: arr1(3) =", arr1.At(3))
-	intrinsic.Print("LEVEL 5: arr1(5) =", arr1.At(5))
+	fenv.Print("LEVEL 5: arr1(1) =", arr1.At(1))
+	fenv.Print("LEVEL 5: arr1(3) =", arr1.At(3))
+	fenv.Print("LEVEL 5: arr1(5) =", arr1.At(5))
 	matrix.Set(1.0, 1, 1)
 	matrix.Set(0.0, 1, 2)
 	matrix.Set(0.0, 1, 3)
@@ -155,8 +209,8 @@ func LEVEL05() {
 	matrix.Set(0.0, 3, 1)
 	matrix.Set(0.0, 3, 2)
 	matrix.Set(1.0, 3, 3)
-	intrinsic.Print("LEVEL 5: matrix(1,1) =", matrix.At(1, 1))
-	intrinsic.Print("LEVEL 5: matrix(2,2) =", matrix.At(2, 2))
+	fenv.Print("LEVEL 5: matrix(1,1) =", matrix.At(1, 1))
+	fenv.Print("LEVEL 5: matrix(2,2) =", matrix.At(2, 2))
 }
 func LEVEL06() {
 	var (
@@ -165,10 +219,9 @@ func LEVEL06() {
 		_, _ = i, j
 	)
 	var (
-		arr1 *intrinsic.Array[int32]
+		arr1 = intrinsic.NewArray[int32](nil, 5)
 		_    = arr1
 	)
-	arr1 = intrinsic.NewArray[int32](nil, 5)
 	var (
 		sum_val int32
 		_       = sum_val
@@ -182,24 +235,28 @@ func LEVEL06() {
 	for i = 1; i <= 5; i++ {
 		sum_val = sum_val + arr1.At(int(i))
 	}
-	intrinsic.Print("LEVEL 6: sum of arr1 =", sum_val)
+	fenv.Print("LEVEL 6: sum of arr1 =", sum_val)
 	sum_val = 0
 	for i = 1; i <= 3; i++ {
 		for j = 1; j <= 3; j++ {
 			sum_val = sum_val + 1
 		}
 	}
-	intrinsic.Print("LEVEL 6: nested loop count =", sum_val)
+	fenv.Print("LEVEL 6: nested loop count =", sum_val)
 }
 func LEVEL07() {
 	var (
-		arr1 *intrinsic.Array[int32]
+		arr1 = intrinsic.NewArray[int32](nil, 5)
 		_    = arr1
 	)
-	arr1 = intrinsic.NewArray[int32](nil, 5)
 	var (
 		result int32
 		_      = result
+	)
+	var (
+		x    float32 = 1
+		y    float32 = 2
+		_, _         = x, y
 	)
 	arr1.Set(10, 1)
 	arr1.Set(20, 2)
@@ -208,9 +265,11 @@ func LEVEL07() {
 	arr1.Set(50, 5)
 	SIMPLE_SUB()
 	ADD_VALUES(10, 20, &result)
-	intrinsic.Print("LEVEL 7: ADD_VALUES(10, 20) =", result)
+	fenv.Print("LEVEL 7: ADD_VALUES(10, 20) =", result)
 	MODIFY_ARRAY(arr1, 5)
-	intrinsic.Print("LEVEL 7: arr1 after modify:", arr1.At(1), arr1.At(2), arr1.At(3))
+	fenv.Print("LEVEL 7: arr1 after modify:", arr1.At(1), arr1.At(2), arr1.At(3))
+	MULDST(&x, y)
+	fenv.Print("LEVEL 7: x=x*y", x, y)
 }
 func LEVEL08() {
 	var (
@@ -222,9 +281,9 @@ func LEVEL08() {
 		_           = sqrt_result
 	)
 	fact_result = FACTORIAL(5)
-	intrinsic.Print("LEVEL 8: FACTORIAL(5) =", fact_result)
+	fenv.Print("LEVEL 8: FACTORIAL(5) =", fact_result)
 	sqrt_result = SQUARE_ROOT(16.0)
-	intrinsic.Print("LEVEL 8: SQUARE_ROOT(16.0) =", sqrt_result)
+	fenv.Print("LEVEL 8: SQUARE_ROOT(16.0) =", sqrt_result)
 }
 func LEVEL09() {
 	var (
@@ -236,14 +295,14 @@ func LEVEL09() {
 	)
 	n = 7
 	fib_result = FIBONACCI(n)
-	intrinsic.Print("LEVEL 9: FIBONACCI(7) =", fib_result)
+	fenv.Print("LEVEL 9: FIBONACCI(7) =", fib_result)
 	i = 1
 	sum_val = 0
 	for i <= 10 {
 		sum_val = sum_val + i
 		i = i + 1
 	}
-	intrinsic.Print("LEVEL 9: sum 1 to 10 =", sum_val)
+	fenv.Print("LEVEL 9: sum 1 to 10 =", sum_val)
 }
 func LEVEL10() {
 	var (
@@ -260,11 +319,12 @@ func LEVEL10() {
 		_, _, _, _  = x, y, z, expr_result
 	)
 	var (
-		flag       bool
-		cond1      bool
-		cond2      bool
-		cond3      bool
-		_, _, _, _ = flag, cond1, cond2, cond3
+		flag          bool
+		cond1         bool
+		cond2         bool
+		cond3         bool
+		cond4         bool
+		_, _, _, _, _ = flag, cond1, cond2, cond3, cond4
 	)
 	i = 11
 	j = 52
@@ -274,38 +334,71 @@ func LEVEL10() {
 	z = 45.14159
 	flag = true
 	expr_result = (x+y)*z - float32(k)/2.0
-	intrinsic.Print("LEVEL 10: complex expr =", expr_result)
+	fenv.Print("LEVEL 10: complex expr =", expr_result)
 	cond1 = (i > 5) && (j < 100)
 	cond2 = (x >= 3.0) || (y <= 1.0)
 	cond3 = !flag
-	intrinsic.Print("LEVEL 10: cond1 =", cond1, ", cond2 =", cond2)
-	intrinsic.Print("LEVEL 10: cond3 =", cond3)
+	cond4 = !(x < y)
+	fenv.Print("LEVEL 10: cond1 =", cond1, ", cond2 =", cond2)
+	fenv.Print("LEVEL 10: cond3 =", cond3, ", cond4=", cond4)
 }
 func LEVEL11() {
 	var (
-		str1 intrinsic.CharacterArray
-		str2 intrinsic.CharacterArray
-		_, _ = str1, str2
+		str1 intrinsic.CharacterArray = intrinsic.NewCharacterArray(10)
+		str2 intrinsic.CharacterArray = intrinsic.NewCharacterArray(10)
+		_, _                          = str1, str2
 	)
-	str1 = intrinsic.NewCharacterArray(10)
-	str2 = intrinsic.NewCharacterArray(10)
 	var (
-		str3 intrinsic.CharacterArray
-		_    = str3
+		str3 intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		_                             = str3
 	)
-	str3 = intrinsic.NewCharacterArray(20)
+	var (
+		sufx = intrinsic.NewCharacterArrayArray(3, 2)
+		_    = sufx
+	)
+	var (
+		idx int32
+		_   = idx
+	)
 	str1.SetFromString("Hello")
 	str2.SetFromString("World")
 	str3.SetConcatString(str1.String(), " ", str2.String())
-	intrinsic.Print("LEVEL 11: concatenation:", str3)
+	sufx.AtPtr(1).SetFromString("Go!")
+	sufx.AtPtr(2).SetFromString("Hi!")
+	idx = 1
+	str3.SetConcatString(str1.Substring(1, 5), sufx.At(int(idx)).String())
+	fenv.Print("LEVEL 11: concatenation:", str3)
+	fenv.Print("LEVEL 11: substr+array:", str3)
 }
 func LEVEL12() {
 	var (
-		angle      float32
-		sin_val    float32
-		cos_val    float32
-		abs_val    float32
-		_, _, _, _ = angle, sin_val, cos_val, abs_val
+		angle                           float32
+		sin_val                         float32
+		cos_val                         float32
+		abs_val                         float32
+		log_val                         float32
+		v1                              = intrinsic.NewArray[float32](nil, 3)
+		v2                              = intrinsic.NewArray[float32](nil, 3)
+		dot_val                         float32
+		zabs                            float32
+		zreal                           float32
+		zimag                           float32
+		_, _, _, _, _, _, _, _, _, _, _ = angle, sin_val, cos_val, abs_val, log_val, v1, v2, dot_val, zabs, zreal, zimag
+	)
+	var (
+		zzabs   float64
+		zzreal  float64
+		zzimag  float64
+		_, _, _ = zzabs, zzreal, zzimag
+	)
+	var (
+		z    complex64
+		z2   complex64
+		_, _ = z, z2
+	)
+	var (
+		zz complex128
+		_  = zz
 	)
 	var (
 		i             int32
@@ -315,19 +408,36 @@ func LEVEL12() {
 		min_val       int32
 		_, _, _, _, _ = i, j, k, max_val, min_val
 	)
+	zz = intrinsic.DCMPLX2[float64](3.0, 1.0)
+	for i = 1; i <= 3; i++ {
+		v1.Set(float32(i), int(i))
+		v2.Set(float32(i), int(i))
+	}
 	i = 11
 	j = 52
 	k = 84
+	z = intrinsic.CMPLX2[int32](1, 2)
 	angle = 0.5
-	sin_val = intrinsic.SIN(angle)
-	cos_val = intrinsic.COS(angle)
-	abs_val = float32(intrinsic.ABS[float32](-5.5))
+	sin_val = intrinsic.SIN[float32](angle)
+	cos_val = intrinsic.COS[float32](angle)
+	abs_val = intrinsic.ABS[float32](-5.5)
 	max_val = intrinsic.MAX[int32](i, j, k)
 	min_val = intrinsic.MIN[int32](10, 20, 5)
-	intrinsic.Print("LEVEL 12: SIN(0.5) =", sin_val)
-	intrinsic.Print("LEVEL 12: COS(0.5) =", cos_val)
-	intrinsic.Print("LEVEL 12: ABS(-5.5) =", abs_val)
-	intrinsic.Print("LEVEL 12: MAX =", max_val, ", MIN =", min_val)
+	log_val = 2.0 * intrinsic.LOG[float32](angle)
+	dot_val = intrinsic.DOT_PRODUCT(v1, v2)
+	zabs = intrinsic.CABS(z)
+	zreal = intrinsic.REALPART(z)
+	zimag = intrinsic.AIMAG(z)
+	zzabs = intrinsic.CDABS(zz)
+	zzreal = intrinsic.DREALPART(zz)
+	zzimag = intrinsic.DIMAG(zz)
+	fenv.Print("LEVEL 12: SIN(0.5) =", sin_val)
+	fenv.Print("LEVEL 12: COS(0.5) =", cos_val)
+	fenv.Print("LEVEL 12: ABS(-5.5) =", abs_val)
+	fenv.Print("LEVEL 12: MAX =", max_val, ", MIN =", min_val)
+	fenv.Print("LEVEL 12: dot product:", dot_val)
+	fenv.Print("LEVEL 12: z=1+2i, ZABS,ZREAL,ZIMAG ", zabs, zreal, zimag)
+	fenv.Print("LEVEL 12: zz=3+1i, ZZABS,ZZREAL,ZZIMAG", zzabs, zzreal, zzimag)
 }
 func LEVEL13() {
 	var (
@@ -337,10 +447,9 @@ func LEVEL13() {
 		_, _, _ = i, sum_val, count
 	)
 	var (
-		arr *intrinsic.Array[int32]
+		arr = intrinsic.NewArray[int32](nil, 10)
 		_   = arr
 	)
-	arr = intrinsic.NewArray[int32](nil, 10)
 	arr.Set(5, 1)
 	arr.Set(-3, 2)
 	arr.Set(7, 3)
@@ -358,7 +467,7 @@ func LEVEL13() {
 		}
 		sum_val = sum_val + arr.At(int(i))
 	}
-	intrinsic.Print("LEVEL 13: sum of positive =", sum_val)
+	fenv.Print("LEVEL 13: sum of positive =", sum_val)
 	count = 0
 	for i = 1; i <= 10; i++ {
 		if arr.At(int(i)) > 7 {
@@ -366,11 +475,18 @@ func LEVEL13() {
 		}
 		count = count + 1
 	}
-	intrinsic.Print("LEVEL 13: count before >7 =", count)
+	fenv.Print("LEVEL 13: count before >7 =", count)
 	for i = 1; i <= 3; i++ {
 		count = i
 	}
-	intrinsic.Print("LEVEL 13: last count =", count)
+	fenv.Print("LEVEL 13: last count =", count)
+	for i = 1; i <= 2; i++ {
+		fenv.Print("LEVEL 13: do,goto,end do", i)
+		goto label30
+		fenv.Print("LEVEL 13: not printed", i)
+		goto label30
+	label30:
+	}
 }
 func LEVEL14() {
 	var (
@@ -394,7 +510,7 @@ label100:
 label200:
 	{
 	}
-	intrinsic.Print("LEVEL 14: x =", x, ", y =", y)
+	fenv.Print("LEVEL 14: x =", x, ", y =", y)
 }
 func LEVEL15() {
 	var (
@@ -413,7 +529,7 @@ func LEVEL15() {
 	default:
 		result = 0
 	}
-	intrinsic.Print("LEVEL 15: choice =", choice, ", result =", result)
+	fenv.Print("LEVEL 15: choice =", choice, ", result =", result)
 	choice = 5
 	switch choice {
 	case 1, 2, 3:
@@ -423,7 +539,7 @@ func LEVEL15() {
 	default:
 		result = 999
 	}
-	intrinsic.Print("LEVEL 15: choice =", choice, ", result =", result)
+	fenv.Print("LEVEL 15: choice =", choice, ", result =", result)
 	choice = 99
 	switch choice {
 	case 1:
@@ -433,18 +549,15 @@ func LEVEL15() {
 	default:
 		result = 777
 	}
-	intrinsic.Print("LEVEL 15: choice =", choice, ", result =", result)
+	fenv.Print("LEVEL 15: choice =", choice, ", result =", result)
 }
 func LEVEL16() {
 	var (
-		str1    intrinsic.CharacterArray
-		str2    intrinsic.CharacterArray
-		str3    intrinsic.CharacterArray
-		_, _, _ = str1, str2, str3
+		str1    intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		str2    intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		str3    intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		_, _, _                          = str1, str2, str3
 	)
-	str1 = intrinsic.NewCharacterArray(20)
-	str2 = intrinsic.NewCharacterArray(20)
-	str3 = intrinsic.NewCharacterArray(20)
 	var (
 		len_val      int32
 		len_trim_val int32
@@ -453,36 +566,34 @@ func LEVEL16() {
 	)
 	str1.SetFromString("Hello")
 	len_val = int32(str1.Len())
-	intrinsic.Print("LEVEL 16: LEN =", len_val)
+	fenv.Print("LEVEL 16: LEN =", len_val)
 	len_trim_val = int32(str1.LenTrim())
-	intrinsic.Print("LEVEL 16: LEN_TRIM =", len_trim_val)
+	fenv.Print("LEVEL 16: LEN_TRIM =", len_trim_val)
 	str2.SetFromString(str1.Trim().String())
-	intrinsic.Print("LEVEL 16: TRIM =", str2)
+	fenv.Print("LEVEL 16: TRIM =", str2)
 	str1.SetFromString("Hello World")
 	index_val = int32(str1.Index("World"))
-	intrinsic.Print("LEVEL 16: INDEX =", index_val)
+	fenv.Print("LEVEL 16: INDEX =", index_val)
 	str1.SetFromString("   Left")
 	str2.SetFromString(str1.AdjustL().String())
-	intrinsic.Print("LEVEL 16: ADJUSTL =", str2)
+	fenv.Print("LEVEL 16: ADJUSTL =", str2)
 	str1.SetFromString("Right   ")
 	str3.SetFromString(str1.AdjustR().String())
-	intrinsic.Print("LEVEL 16: ADJUSTR =", str3)
+	fenv.Print("LEVEL 16: ADJUSTR =", str3)
 	str1.SetFromString("abcdef")
 	str3.SetFromString(str1.Substring(2, 4))
 	str1.SetSubstring(2, 3, "z")
-	intrinsic.Print("LEVEL 16: str3 =", str3)
+	fenv.Print("LEVEL 16: str3 =", str3)
 }
 func LEVEL17() {
 	var (
-		matrix *intrinsic.Array[int32]
+		matrix = intrinsic.NewArray[int32](nil, 3, 4)
 		_      = matrix
 	)
-	matrix = intrinsic.NewArray[int32](nil, 3, 4)
 	var (
-		vector *intrinsic.Array[int32]
+		vector = intrinsic.NewArray[int32](nil, 5)
 		_      = vector
 	)
-	vector = intrinsic.NewArray[int32](nil, 5)
 	var (
 		size_total int32
 		size_dim1  int32
@@ -495,104 +606,119 @@ func LEVEL17() {
 		_, _ = lb, ub
 	)
 	size_total = int32(matrix.Size())
-	intrinsic.Print("LEVEL 17: SIZE(matrix) =", size_total)
+	fenv.Print("LEVEL 17: SIZE(matrix) =", size_total)
 	size_dim1 = int32(matrix.SizeDim(1))
-	intrinsic.Print("LEVEL 17: SIZE(matrix,1) =", size_dim1)
+	fenv.Print("LEVEL 17: SIZE(matrix,1) =", size_dim1)
 	size_dim2 = int32(matrix.SizeDim(2))
-	intrinsic.Print("LEVEL 17: SIZE(matrix,2) =", size_dim2)
+	fenv.Print("LEVEL 17: SIZE(matrix,2) =", size_dim2)
 	size_total = int32(vector.Size())
-	intrinsic.Print("LEVEL 17: SIZE(vector) =", size_total)
+	fenv.Print("LEVEL 17: SIZE(vector) =", size_total)
 	lb = int32(matrix.LowerDim(1))
-	intrinsic.Print("LEVEL 17: LBOUND(matrix,1) =", lb)
+	fenv.Print("LEVEL 17: LBOUND(matrix,1) =", lb)
 	lb = int32(matrix.LowerDim(2))
-	intrinsic.Print("LEVEL 17: LBOUND(matrix,2) =", lb)
+	fenv.Print("LEVEL 17: LBOUND(matrix,2) =", lb)
 	ub = int32(matrix.UpperDim(1))
-	intrinsic.Print("LEVEL 17: UBOUND(matrix,1) =", ub)
+	fenv.Print("LEVEL 17: UBOUND(matrix,1) =", ub)
 	ub = int32(matrix.UpperDim(2))
-	intrinsic.Print("LEVEL 17: UBOUND(matrix,2) =", ub)
+	fenv.Print("LEVEL 17: UBOUND(matrix,2) =", ub)
 }
 func LEVEL18() {
 	var (
-		vec *intrinsic.Array[int32]
+		vec = new(intrinsic.Array[int32])
 		_   = vec
 	)
-	vec = new(intrinsic.Array[int32])
 	var (
-		mat *intrinsic.Array[int32]
+		mat = new(intrinsic.Array[int32])
 		_   = mat
 	)
-	mat = new(intrinsic.Array[int32])
 	vec.Allocate(5)
 	vec.Set(10, 1)
 	vec.Set(20, 2)
 	vec.Set(30, 3)
-	intrinsic.Print("LEVEL 18: vec(1) =", vec.At(1))
-	intrinsic.Print("LEVEL 18: vec(3) =", vec.At(3))
-	intrinsic.Print("LEVEL 18: SIZE(vec) =", int32(vec.Size()))
+	fenv.Print("LEVEL 18: vec(1) =", vec.At(1))
+	fenv.Print("LEVEL 18: vec(3) =", vec.At(3))
+	fenv.Print("LEVEL 18: SIZE(vec) =", int32(vec.Size()))
 	mat.Allocate(2, 3)
 	mat.Set(100, 1, 1)
 	mat.Set(200, 2, 3)
-	intrinsic.Print("LEVEL 18: mat(1,1) =", mat.At(1, 1))
-	intrinsic.Print("LEVEL 18: mat(2,3) =", mat.At(2, 3))
-	intrinsic.Print("LEVEL 18: SIZE(mat) =", int32(mat.Size()))
+	fenv.Print("LEVEL 18: mat(1,1) =", mat.At(1, 1))
+	fenv.Print("LEVEL 18: mat(2,3) =", mat.At(2, 3))
+	fenv.Print("LEVEL 18: SIZE(mat) =", int32(mat.Size()))
 	vec.Deallocate()
 	mat.Deallocate()
-	intrinsic.Print("LEVEL 18: Arrays deallocated")
+	fenv.Print("LEVEL 18: Arrays deallocated")
 }
 func LEVEL19() {
 	SET_COMMON_VALUES()
 	PRINT_COMMON_VALUES()
 }
 func SET_COMMON_VALUES() {
-	var (
-		x    int32
-		y    int32
-		_, _ = x, y
-	)
-	var (
-		z float32
-		_ = z
-	)
-	shared.x = 42
-	shared.y = 99
-	shared.z = 3.14159
+	x := intrinsic.UnallocatedPtr[int32](1)
+	y := intrinsic.UnallocatedPtr[int32](1)
+	z := intrinsic.UnallocatedPtr[float32](1)
+	shared.Reset()
+	intrinsic.DeclareCommon(&x, &shared)
+	intrinsic.DeclareCommon(&y, &shared)
+	intrinsic.DeclareCommon(&z, &shared)
+	x.Set(42, 1)
+	y.Set(99, 1)
+	z.Set(3.14159, 1)
 }
 func PRINT_COMMON_VALUES() {
-	var (
-		x    int32
-		y    int32
-		_, _ = x, y
-	)
-	var (
-		z float32
-		_ = z
-	)
-	intrinsic.Print("LEVEL 19: x =", shared.x)
-	intrinsic.Print("LEVEL 19: y =", shared.y)
-	intrinsic.Print("LEVEL 19: z =", shared.z)
+	x := intrinsic.UnallocatedPtr[int32](1)
+	y := intrinsic.UnallocatedPtr[int32](1)
+	z := intrinsic.UnallocatedPtr[float32](1)
+	shared.Reset()
+	intrinsic.DeclareCommon(&x, &shared)
+	intrinsic.DeclareCommon(&y, &shared)
+	intrinsic.DeclareCommon(&z, &shared)
+	fenv.Print("LEVEL 19: x =", x.At(1))
+	fenv.Print("LEVEL 19: y =", y.At(1))
+	fenv.Print("LEVEL 19: z =", z.At(1))
 }
 func LEVEL20() {
 	var (
-		a       int32
-		b       int32
-		c       int32
-		_, _, _ = a, b, c
+		a          int32
+		b          int32
+		c          int32
+		i          int32
+		_, _, _, _ = a, b, c, i
 	)
 	var (
-		x    float32
-		y    float32
-		_, _ = x, y
+		x       float32
+		y       float32
+		vec1    = intrinsic.NewArray[float32](nil, 3)
+		_, _, _ = x, y, vec1
+	)
+	var (
+		repeat = intrinsic.NewCharacterArrayArray(3, 2)
+		_      = repeat
+	)
+	var (
+		mths = intrinsic.NewCharacterArrayArray(2, 3)
+		_    = mths
 	)
 	a = 10
 	b = 20
 	c = 30
 	x = 3.14
 	y = 2.71
-	intrinsic.Print("LEVEL 20: a =", a)
-	intrinsic.Print("LEVEL 20: b =", b)
-	intrinsic.Print("LEVEL 20: c =", c)
-	intrinsic.Print("LEVEL 20: x =", x)
-	intrinsic.Print("LEVEL 20: y =", y)
+	repeat.AtPtr(1).SetFromString("REP")
+	repeat.AtPtr(2).SetFromString("REP")
+	vec1.Set(1.2, 1)
+	vec1.Set(1.2, 2)
+	vec1.Set(2.0, 3)
+	mths.AtPtr(1).SetFromString("JA")
+	mths.AtPtr(2).SetFromString("FE")
+	mths.AtPtr(3).SetFromString("MA")
+	fenv.Print("LEVEL 20: a =", a)
+	fenv.Print("LEVEL 20: b =", b)
+	fenv.Print("LEVEL 20: c =", c)
+	fenv.Print("LEVEL 20: x =", x)
+	fenv.Print("LEVEL 20: y =", y)
+	fenv.Print("LEVEL 20", repeat.At(1), repeat.At(2))
+	fenv.Print("LEVEL 20:", vec1.At(1), vec1.At(2), vec1.At(3))
+	fenv.Print("LEVEL 20: implied-do", mths.At(1), mths.At(2), mths.At(3))
 }
 func LEVEL21() {
 	var (
@@ -600,10 +726,15 @@ func LEVEL21() {
 		choice int32
 		_, _   = x, choice
 	)
+	var (
+		test float32
+		_    = test
+	)
+	test = 0.0
 	x = -5
-	if int(x) < 0 {
+	if jmpSelect := x; jmpSelect < 0 {
 		goto label10
-	} else if int(x) == 0 {
+	} else if jmpSelect == 0 {
 		goto label20
 	} else {
 		goto label30
@@ -611,22 +742,46 @@ func LEVEL21() {
 	goto label10
 label10:
 	{
-		intrinsic.Print("LEVEL 21: x is negative")
+		fenv.Print("LEVEL 21: x is negative")
 	}
-	goto label40
+	goto label90
 	goto label20
 label20:
 	{
-		intrinsic.Print("LEVEL 21: x is zero")
+		fenv.Print("LEVEL 21: x is zero")
 	}
-	goto label40
+	goto label90
 	goto label30
 label30:
 	{
-		intrinsic.Print("LEVEL 21: x is positive")
+		fenv.Print("LEVEL 21: x is positive")
+	}
+	if jmpSelect := test - 1e-14; jmpSelect < 0 {
+		goto label40
+	} else if jmpSelect == 0 {
+		goto label50
+	} else {
+		goto label60
 	}
 	goto label40
 label40:
+	{
+		fenv.Print("LEVEL 21: test negative")
+	}
+	goto label90
+	goto label50
+label50:
+	{
+		fenv.Print("LEVEL 21: test zero")
+	}
+	goto label90
+	goto label60
+label60:
+	{
+		fenv.Print("LEVEL 21: test positive")
+	}
+	goto label90
+label90:
 	{
 		choice = 2
 	}
@@ -641,19 +796,19 @@ label40:
 	goto label100
 label100:
 	{
-		intrinsic.Print("LEVEL 21: Choice was 1")
+		fenv.Print("LEVEL 21: Choice was 1")
 	}
 	goto label400
 	goto label200
 label200:
 	{
-		intrinsic.Print("LEVEL 21: Choice was 2")
+		fenv.Print("LEVEL 21: Choice was 2")
 	}
 	goto label400
 	goto label300
 label300:
 	{
-		intrinsic.Print("LEVEL 21: Choice was 3")
+		fenv.Print("LEVEL 21: Choice was 3")
 	}
 	goto label400
 label400:
@@ -675,30 +830,56 @@ func LEVEL23() {
 		tau float32 = 2.0 * pi
 		_           = tau
 	)
-	intrinsic.Print("LEVEL 23: MAX_SIZE =", max_size)
-	intrinsic.Print("LEVEL 23: PI =", pi)
-	intrinsic.Print("LEVEL 23: TAU =", tau)
+	fenv.Print("LEVEL 23: MAX_SIZE =", max_size)
+	fenv.Print("LEVEL 23: PI =", pi)
+	fenv.Print("LEVEL 23: TAU =", tau)
 }
 func LEVEL24() {
 	var (
-		vec1 *intrinsic.Array[int32]
-		_    = vec1
+		vec1 = intrinsic.NewArray[int32](nil, 3)
+		vec3 = intrinsic.NewArray[int32](nil, 3)
+		_, _ = vec1, vec3
 	)
-	vec1 = intrinsic.NewArray[int32](nil, 3)
 	var (
-		vec2 *intrinsic.Array[int32]
+		vec2 = intrinsic.NewArray[int32](nil, 5)
 		_    = vec2
 	)
-	vec2 = intrinsic.NewArray[int32](nil, 5)
 	vec1 = intrinsic.NewArray[int32]([]int32{10, 20, 30}, 3)
-	intrinsic.Print("LEVEL 24: vec1(1) =", vec1.At(1))
-	intrinsic.Print("LEVEL 24: vec1(2) =", vec1.At(2))
-	intrinsic.Print("LEVEL 24: vec1(3) =", vec1.At(3))
+	fenv.Print("LEVEL 24: vec1(1) =", vec1.At(1))
+	fenv.Print("LEVEL 24: vec1(2) =", vec1.At(2))
+	fenv.Print("LEVEL 24: vec1(3) =", vec1.At(3))
 	vec2 = intrinsic.NewArray[int32]([]int32{100, 200, 300, 400, 500}, 5)
-	intrinsic.Print("LEVEL 24: vec2(1) =", vec2.At(1))
-	intrinsic.Print("LEVEL 24: vec2(5) =", vec2.At(5))
+	vec3 = intrinsic.NewArray[int32]([]int32{20, 30, 40}, 3)
+	fenv.Print("LEVEL 24: vec2(1) =", vec2.At(1))
+	fenv.Print("LEVEL 24: vec2(5) =", vec2.At(5))
+	if intrinsic.ALL(intrinsic.ArraySetEqual[int32](nil, vec1, vec3)) {
+		fenv.Print("LEVEL 24: vec eq")
+	} else {
+		fenv.Print("LEVEL 24: vec neq")
+	}
+	if intrinsic.ALL(intrinsic.ArraySetEqual[int32](nil, vec1, intrinsic.NewArray[int32]([]int32{10, 20, 30}, 3))) {
+		fenv.Print("LEVEL 24: vecinline eq")
+	} else {
+		fenv.Print("LEVEL 24: vecinline neq")
+	}
 }
 func LEVEL25() {
+	var (
+		Int32 int32 = 4
+		_           = Int32
+	)
+	var (
+		dp_neg float64 = 2.71828182845904
+		_              = dp_neg
+	)
+	var (
+		sp_neg float32 = 2.71828
+		_              = sp_neg
+	)
+	var (
+		n_lapack int32
+		_        = n_lapack
+	)
 	var (
 		i1 int8
 		_  = i1
@@ -729,12 +910,16 @@ func LEVEL25() {
 	i8 = 9223372036854775807
 	r4 = 3.14159
 	r8 = float64(3.141592653589793)
-	intrinsic.Print("LEVEL 25: i1 =", i1)
-	intrinsic.Print("LEVEL 25: i2 =", i2)
-	intrinsic.Print("LEVEL 25: i4 =", i4)
-	intrinsic.Print("LEVEL 25: i8 =", i8)
-	intrinsic.Print("LEVEL 25: r4 =", r4)
-	intrinsic.Print("LEVEL 25: r8 =", r8)
+	n_lapack = 42
+	fenv.Print("LEVEL 25: i1 =", i1)
+	fenv.Print("LEVEL 25: i2 =", i2)
+	fenv.Print("LEVEL 25: i4 =", i4)
+	fenv.Print("LEVEL 25: i8 =", i8)
+	fenv.Print("LEVEL 25: r4 =", r4)
+	fenv.Print("LEVEL 25: r8 =", r8)
+	fenv.Print("LEVEL 25: n_lapack =", n_lapack, " int32=", Int32)
+	fenv.Print("LEVEL 25: dp_neg =", dp_neg)
+	fenv.Print("LEVEL 25: sp_neg =", sp_neg)
 }
 func LEVEL26() {
 	var (
@@ -752,15 +937,15 @@ func LEVEL26() {
 	hex_val = int32(255)
 	oct_val = int32(255)
 	bin_val = int32(255)
-	intrinsic.Print("LEVEL 26: hex_val =", hex_val)
-	intrinsic.Print("LEVEL 26: oct_val =", oct_val)
-	intrinsic.Print("LEVEL 26: bin_val =", bin_val)
+	fenv.Print("LEVEL 26: hex_val =", hex_val)
+	fenv.Print("LEVEL 26: oct_val =", oct_val)
+	fenv.Print("LEVEL 26: bin_val =", bin_val)
 	d1 = float64(1.0)
 	d2 = float64(123.0)
 	d4 = float64(2.718281828)
-	intrinsic.Print("LEVEL 26: d1 =", d1)
-	intrinsic.Print("LEVEL 26: d2 =", d2)
-	intrinsic.Print("LEVEL 26: d4 =", d4)
+	fenv.Print("LEVEL 26: d1 =", d1)
+	fenv.Print("LEVEL 26: d2 =", d2)
+	fenv.Print("LEVEL 26: d4 =", d4)
 }
 func LEVEL27() {
 	var (
@@ -772,11 +957,11 @@ func LEVEL27() {
 		_              = factor
 	)
 	var (
-		root3 float64 = intrinsic.SQRT(3.0)
+		root3 float64 = intrinsic.SQRT[float64](3.0)
 		_             = root3
 	)
 	var (
-		pi float64 = 4.0 * intrinsic.ATAN(1.0)
+		pi float64 = 4.0 * intrinsic.ATAN[float64](1.0)
 		_          = pi
 	)
 	var (
@@ -784,43 +969,46 @@ func LEVEL27() {
 		_      = result
 	)
 	result = float64(factor * root3 * float64(ncomp))
-	intrinsic.Print("LEVEL 27: ncomp =", ncomp)
-	intrinsic.Print("LEVEL 27: factor =", factor)
-	intrinsic.Print("LEVEL 27: root3 =", root3)
-	intrinsic.Print("LEVEL 27: PI =", pi)
-	intrinsic.Print("LEVEL 27: result =", result)
+	fenv.Print("LEVEL 27: ncomp =", ncomp)
+	fenv.Print("LEVEL 27: factor =", factor)
+	fenv.Print("LEVEL 27: root3 =", root3)
+	fenv.Print("LEVEL 27: PI =", pi)
+	fenv.Print("LEVEL 27: result =", result)
 }
 func LEVEL28() {
-	var (
-		yqr     *intrinsic.Array[float32]
-		sumxrq  *intrinsic.Array[float32]
-		ymnrt   *intrinsic.Array[float32]
-		_, _, _ = yqr, sumxrq, ymnrt
-	)
-	yqr = intrinsic.NewArray[float32](nil, 256)
-	sumxrq = intrinsic.NewArray[float32](nil, 512)
-	ymnrt = intrinsic.NewArray[float32](nil, 3)
-	var (
-		matrix *intrinsic.Array[float32]
-		_      = matrix
-	)
-	matrix = intrinsic.NewArray[float32](nil, 10, 20)
-	var (
-		counts *intrinsic.Array[int32]
-		_      = counts
-	)
-	counts = intrinsic.NewArray[int32](nil, 100)
-	intrinsic.Print("LEVEL 28: COMMON block arrays initialized")
-	holdrt.yqr.Set(1.5, 1)
-	holdrt.sumxrq.Set(99.90000000000001, 512)
-	holdrt.ymnrt.Set(3.14, 2)
-	holdrt.matrix.Set(42.5, 5, 10)
-	stats.counts.Set(42, 50)
-	intrinsic.Print("LEVEL 28: YQR(1) =", holdrt.yqr.At(1))
-	intrinsic.Print("LEVEL 28: SUMXRQ(512) =", holdrt.sumxrq.At(512))
-	intrinsic.Print("LEVEL 28: YMNRT(2) =", holdrt.ymnrt.At(2))
-	intrinsic.Print("LEVEL 28: MATRIX(5,10) =", holdrt.matrix.At(5, 10))
-	intrinsic.Print("LEVEL 28: COUNTS(50) =", stats.counts.At(50))
+	// Implicit declarations.
+	var alphc = intrinsic.NewArray[float32](nil, 2, 2)
+	var _ = alphc
+	yqr := intrinsic.UnallocatedArray[float32](256)
+	sumxrq := intrinsic.UnallocatedArray[float32](512)
+	ymnrt := intrinsic.UnallocatedArray[float32](3)
+	matrix := intrinsic.UnallocatedArray[float32](10, 20)
+	holdrt.Reset()
+	intrinsic.DeclareCommon(yqr, &holdrt)
+	intrinsic.DeclareCommon(sumxrq, &holdrt)
+	intrinsic.DeclareCommon(ymnrt, &holdrt)
+	intrinsic.DeclareCommon(matrix, &holdrt)
+	counts := intrinsic.UnallocatedArray[int32](100)
+	alphc = intrinsic.UnallocatedArray[float32](2, 2)
+	stats.Reset()
+	intrinsic.DeclareCommon(counts, &stats)
+	intrinsic.DeclareCommon(alphc, &stats)
+	fenv.Print("LEVEL 28: COMMON block arrays initialized")
+	yqr.Set(1.5, 1)
+	sumxrq.Set(99.90000000000001, 512)
+	ymnrt.Set(3.14, 2)
+	matrix.Set(42.5, 5, 10)
+	counts.Set(42, 50)
+	alphc.Set(1.0, 1, 1)
+	alphc.Set(2.0, 1, 2)
+	alphc.Set(3.0, 2, 1)
+	alphc.Set(4.0, 2, 2)
+	fenv.Print("LEVEL 28: YQR(1) =", yqr.At(1))
+	fenv.Print("LEVEL 28: SUMXRQ(512) =", sumxrq.At(512))
+	fenv.Print("LEVEL 28: YMNRT(2) =", ymnrt.At(2))
+	fenv.Print("LEVEL 28: MATRIX(5,10) =", matrix.At(5, 10))
+	fenv.Print("LEVEL 28: COUNTS(50) =", counts.At(50))
+	fenv.Print("LEVEL 28: IMPLICIT ALPHC=", alphc.At(1, 1), alphc.At(1, 2), alphc.At(2, 1), alphc.At(2, 2))
 }
 func LEVEL29() {
 	var (
@@ -832,20 +1020,17 @@ func LEVEL29() {
 		_       = letters
 	)
 	var (
-		mat *intrinsic.Array[int8]
+		mat = intrinsic.NewArray[int8](nil, 2, 2)
 		_   = mat
 	)
-	mat = intrinsic.NewArray[int8](nil, 2, 2)
 	var (
-		mat4 *intrinsic.Array[int32]
+		mat4 = intrinsic.NewArray[int32](nil, 1, 2)
 		_    = mat4
 	)
-	mat4 = intrinsic.NewArray[int32](nil, 1, 2)
 	var (
-		a intrinsic.CharacterArray
-		_ = a
+		a intrinsic.CharacterArray = intrinsic.NewCharacterArray(4)
+		_                          = a
 	)
-	a = intrinsic.NewCharacterArray(4)
 	intrinsic.Equivalence(&a, intrinsic.PointerOff(mat, mat.AtOffset(1, 1)), intrinsic.PointerOff(mat4, mat4.AtOffset(1, 2)))
 	letters = 1633837924
 	var (
@@ -862,38 +1047,46 @@ func LEVEL29() {
 	mat.Set(firstletter+1, 1, 2)
 	mat.Set(firstletter+2, 2, 1)
 	mat.Set(firstletter+3, 2, 2)
-	intrinsic.Print("LEVEL 29: byte mat ", a)
+	fenv.Print("LEVEL 29: byte mat ", a)
 	mat4.Set(letters, 1, 2)
-	intrinsic.Print("LEVEL 29: uint32 mat ", a)
+	fenv.Print("LEVEL 29: uint32 mat ", a)
 	f.Set(float32(float32(1)), 1)
-	intrinsic.Print("LEVEL 29: linked float=1,int", f.At(1), n.At(1))
-	n.Set(int32(1109917696), 1)
-	intrinsic.Print("LEVEL 29: linked float,int=1109917696", f.At(1), n.At(1))
+	fenv.Print("LEVEL 29: linked float=1,int", f.At(1), n.At(1))
+	n.Set(1109917696, 1)
+	fenv.Print("LEVEL 29: linked float,int=1109917696", f.At(1), n.At(1))
 }
 func LEVEL30() {
 	var (
-		a    intrinsic.CharacterArray
-		b    intrinsic.CharacterArray
-		_, _ = a, b
+		a    intrinsic.CharacterArray = intrinsic.NewCharacterArray(1)
+		b    intrinsic.CharacterArray = intrinsic.NewCharacterArray(1)
+		_, _                          = a, b
 	)
-	a = intrinsic.NewCharacterArray(1)
-	b = intrinsic.NewCharacterArray(1)
 	var (
-		c *intrinsic.Array[intrinsic.CharacterArray]
+		c = intrinsic.NewCharacterArrayArray(1, 4)
 		_ = c
 	)
-	c = intrinsic.NewArray[intrinsic.CharacterArray](nil, 4)
 	var (
-		mat *intrinsic.Array[int32]
+		mat = intrinsic.NewArray[int32](nil, 2, 2)
 		_   = mat
 	)
-	mat = intrinsic.NewArray[int32](nil, 2, 2)
+	var (
+		defalt intrinsic.PointerTo[float64]
+		_      = defalt
+	)
+	var (
+		i_defalt = intrinsic.NewArray[int32](nil, 2)
+		_        = i_defalt
+	)
+	i_defalt.Set(125269879, 1)
+	i_defalt.Set(125269879, 2)
+	intrinsic.Equivalence(&defalt, i_defalt)
 	intrinsic.Equivalence(c.AtPtr(1), intrinsic.PointerOff(mat, mat.AtOffset(1, 1)))
 	intrinsic.Equivalence(&a, &b, intrinsic.PointerOff(mat, mat.AtOffset(1, 2)))
 	mat.Set(64, 1, 1)
 	mat.Set(97, 1, 2)
-	intrinsic.Print("LEVEL 30: CHAR A,B:", a, b)
-	intrinsic.Print("LEVEL 30: CHAR C:", c.At(1))
+	fenv.Print("LEVEL 30: CHAR A,B:", a, b)
+	fenv.Print("LEVEL 30: CHAR C:", c.At(1))
+	fenv.Print("LEVEL 30: DEFALT", defalt.At(1), i_defalt.At(1), i_defalt.At(2))
 }
 func LEVEL31() {
 	const k int32 = 16
@@ -909,98 +1102,539 @@ func LEVEL31() {
 	)
 	var (
 		m     int32
-		inits int32
-		_, _  = m, inits
+		inits int32 = 0
+		_, _        = m, inits
 	)
 	npaa = intrinsic.MALLOC[float64](k * 8)
 	aa = npaa
 	if npaa.DataUnsafe() == nil {
-		intrinsic.Stop(69)
+		fenv.Stop(69)
 	}
 	npii = intrinsic.PointerFrom[int32](npaa)
 	ii = npii
 	for m = 1; m <= k; m += 2 {
 		inits = inits + 1
 		aa.Set(float64(inits), int(m))
+		goto label900
+	label900:
 	}
-	intrinsic.Print("LEVEL 31: INITS", inits)
-	intrinsic.Print("LEVEL 31: AA(1),AA(2),AA(3),AA(4)", aa.At(1), aa.At(2), aa.At(3), aa.At(4))
+	fenv.Print("LEVEL 31: INITS", inits)
+	fenv.Print("LEVEL 31: AA(1),AA(2),AA(3),AA(4)", aa.At(1), aa.At(2), aa.At(3), aa.At(4))
 }
 func LEVEL32() {
 	var (
-		a *intrinsic.Array[intrinsic.CharacterArray]
+		a = intrinsic.NewCharacterArrayArray(10, 2, 2)
 		_ = a
 	)
-	a = intrinsic.NewArray[intrinsic.CharacterArray](nil, 2, 2)
+	var (
+		b *intrinsic.Array[intrinsic.CharacterArray] = intrinsic.NewCharacterArrayFromStrings(3, []string{"ABC", "CBA"}, 2)
+		_                                            = b
+	)
 	a.AtPtr(1, 1).SetFromString("ABC")
-	a.AtPtr(1, 2).SetFromString("DEF")
+	a.AtPtr(1, 2).SetFromString("DEFGH")
 	a.AtPtr(2, 1).SetFromString("GHI")
 	a.AtPtr(2, 2).SetFromString("JKL")
-	intrinsic.Print("LEVEL 32:", a.At(1, 1), a.At(1, 2), a.At(2, 1), a.At(2, 2))
+	fenv.Print("LEVEL 32:", a.At(1, 1), a.At(1, 2), a.At(2, 1), a.At(2, 2))
+	fenv.Print("LEVEL 32:", b.At(1), b.At(2))
+	fenv.Print("LEVEL 32: substr", a.At(1, 2).Substring(1, 3))
+	b.View(intrinsic.R(1, 2)).SetFrom(intrinsic.NewCharacterArrayFromStrings(3, []string{"XYZ", "PQR"}, 2))
+	fenv.Print("LEVEL 32: range assign", b.At(1), b.At(2))
 }
 func LEVEL33() {
 	var (
-		npaa intrinsic.PointerTo[float64]
-		aa   intrinsic.PointerTo[float64]
-		_, _ = npaa, aa
+		nm int32 = 3
+		_        = nm
 	)
 	var (
-		npii intrinsic.PointerTo[int32]
-		ii   intrinsic.PointerTo[int32]
-		_, _ = npii, ii
+		i       int32
+		j       int32
+		Range   int32
+		_, _, _ = i, j, Range
 	)
 	var (
-		npll intrinsic.PointerTo[bool]
-		ll   intrinsic.PointerTo[bool]
-		_, _ = npll, ll
+		xsn         = intrinsic.NewArray[float64](nil, int(nm), int(nm))
+		cof_com_tor = intrinsic.NewArray[float64](nil, int(nm), int(nm))
+		_, _        = xsn, cof_com_tor
 	)
-	var (
-		n             int32
-		m             int32
-		maxmum        int32
-		maxdm1        int32
-		maxdef        int32
-		_, _, _, _, _ = n, m, maxmum, maxdm1, maxdef
-	)
-	var (
-		defalt intrinsic.PointerTo[float64]
-		_      = defalt
-	)
-	var (
-		i_defalt *intrinsic.Array[int32]
-		_        = i_defalt
-	)
-	i_defalt = intrinsic.NewArray[int32](nil, 2)
-	i_defalt.Set(125269879, 1)
-	i_defalt.Set(125269879, 2)
-	intrinsic.Equivalence(&defalt, i_defalt)
-	intrinsic.Print("LEVEL 32: Advanced features test")
-	maxdm1 = 100
-	npaa = intrinsic.MALLOC[float64](maxdm1 * 8)
-	aa = npaa
-	if npaa.DataUnsafe() == nil {
-		intrinsic.Stop(69)
-	}
-	npii = intrinsic.PointerFrom[int32](npaa)
-	ii = npii
-	npll = intrinsic.PointerFrom[bool](npii)
-	ll = npll
-	m = 1
-	maxdef = intrinsic.MIN[int32](200000, maxdm1)
-	for m = 1; m <= maxdef; m += 32768 {
-		maxmum = intrinsic.MIN[int32](m+32767, maxdef)
-		for n = m; n <= maxmum; n++ {
+	for i = 1; i <= nm; i++ {
+		for j = 1; j <= nm; j++ {
+			xsn.Set(float64(0.0), int(i), int(j))
+			cof_com_tor.Set(float64(1.0), int(i), int(j))
 		}
 	}
-	intrinsic.Print("LEVEL 32: AA(2) ", aa.At(2))
-	intrinsic.Print("LEVEL 32: Initialized", maxmum-m+1, "elements")
+	xsn.Set(float64(1.0), 1, 1)
+	cof_com_tor.Set(float64(10.0), 1, 1)
+	cof_com_tor.Set(float64(20.0), 2, 2)
+	cof_com_tor.Set(float64(20.0), 3, 3)
+	Range = 2
+	intrinsic.ArraySetAdd(xsn.View(intrinsic.R(1, int(Range)), intrinsic.R(int(Range), 3)), xsn.View(intrinsic.R(1, int(Range)), intrinsic.R(int(Range), 3)), cof_com_tor.View(intrinsic.R(1, int(Range)), intrinsic.R(int(Range), 3)))
+	for i = 1; i <= nm; i++ {
+		fenv.Print("LEVEL 33:", xsn.At(int(i), 1), xsn.At(int(i), 2), xsn.At(int(i), 3))
+	}
+}
+func LEVEL34() {
+	fenv.Print("LEVEL 34:", (2*(2/2))*2, (3*(3/2))*2, 4.189*intrinsic.POW[float32](23.0, float32(3)))
+}
+func LEVEL35() {
+	var (
+		m       int32
+		n       int32
+		i       int32
+		_, _, _ = m, n, i
+	)
+	var (
+		x    float32
+		wh   *intrinsic.Array[float32] = intrinsic.NewArray[float32]([]float32{1.0, 2.0, 3.0, 0.5, 1.0, 1.5}, 6)
+		_, _                           = x, wh
+	)
+	m = 3
+	n = 5
+	x = 2.5
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.DefaultFormat()}, "LEVEL 35: Hello from WRITE")
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.DefaultFormat()}, m, n, x)
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.DefaultFormat()}, "LEVEL 35: Values:", m, n)
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'S', Literal: "LEVEL 35: Formatted output line"})})
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'S', Literal: "LEVEL35: m="}, fortio.FormatDescriptor{Type: 'I', Width: 3, Repeat: 1}, fortio.FormatDescriptor{Type: 'S', Literal: " n="}, fortio.FormatDescriptor{Type: 'I', Width: 3, Repeat: 1}, fortio.FormatDescriptor{Type: 'S', Literal: " x="}, fortio.FormatDescriptor{Type: 'F', Width: 5, Precision: 2, Repeat: 1})}, m, n, x)
+	goto label220
+label220:
+	{
+	}
+	goto label230
+label230:
+	{
+	}
+	{
+		writeArgs := make([]any, 0)
+		for i := 1; i <= int(n); i += 1 {
+			writeArgs = append(writeArgs, wh.At(int(i)))
+		}
+		fenv.Write(6, fortio.NewFormat(fortio.FormatDescriptor{Type: 'S', Literal: "LEVEL35: Newline:"}, fortio.FmtNewline, fortio.FormatDescriptor{Type: 'S', Literal: "LEVEL35: WHI/WR ="}, fortio.FormatDescriptor{Type: 'E', Width: 12, Precision: 4, Repeat: 6}), writeArgs...)
+	}
+	goto label240
+label240:
+	{
+	}
+}
+func LEVEL36() {
+	// Implicit declarations.
+	var delta = intrinsic.NewArray[float32](nil, 3)
+	var _ = delta
+	d1k := intrinsic.UnallocatedPtr[float32](1)
+	d2k := intrinsic.UnallocatedPtr[float32](1)
+	d3k := intrinsic.UnallocatedPtr[float32](1)
+	blk.Reset()
+	intrinsic.DeclareCommon(&d1k, &blk)
+	intrinsic.DeclareCommon(&d2k, &blk)
+	intrinsic.DeclareCommon(&d3k, &blk)
+	intrinsic.Equivalence(&d1k, delta)
+	delta.Set(1.0, 1)
+	delta.Set(2.0, 2)
+	delta.Set(3.0, 3)
+	fenv.Print("LEVEL 36: Equiv d=", d1k.At(1), d2k.At(1), d3k.At(1))
+	BLKINVDECL()
+	BLKDECL()
+}
+func LEVEL37() {
+	var (
+		iounit              int32
+		x                   int32
+		y                   int32
+		rstat1              int32 = -1
+		rstat2              int32 = -1
+		wstat1              int32 = -1
+		wstat2              int32 = -1
+		_, _, _, _, _, _, _       = iounit, x, y, rstat1, rstat2, wstat1, wstat2
+	)
+	var (
+		msg intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		_                            = msg
+	)
+	iounit = 10
+	x = 42
+	y = 99
+	msg.SetFromString("Hello File IO")
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_io.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), IOSTAT: &wstat1}, msg)
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), IOSTAT: &wstat2}, x, y)
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	x = 0
+	y = 0
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_io.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
+	fenv.ReadWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1}), IOSTAT: &rstat1}, &msg)
+	fenv.ReadWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}, fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1}), IOSTAT: &rstat2}, &x, &y)
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	fenv.Print("LEVEL 37: READ BACK", msg, x, y)
+	fenv.Print("LEVEL 37: IOSTAT", rstat1, rstat2, wstat1, wstat2)
+}
+func LEVEL38() {
+	var (
+		iounit int32 = 99
+		_            = iounit
+	)
+	var (
+		errcode int32
+		_       = errcode
+	)
+	var (
+		x       int32
+		y       int32
+		z       int32
+		_, _, _ = x, y, z
+	)
+	var (
+		a    float32
+		b    float32
+		_, _ = a, b
+	)
+	x = 10
+	y = 20
+	z = 30
+	a = 1.5
+	b = 2.5
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_namelist.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
+	fenv.WriteNamelist(iounit, "TESTDATA", []fortio.NamelistVar{{Name: "x", Ptr: &x}, {Name: "y", Ptr: &y}, {Name: "z", Ptr: &z}, {Name: "a", Ptr: &a}, {Name: "b", Ptr: &b}})
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	x = 0
+	y = 0
+	z = 0
+	a = 0.0
+	b = 0.0
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_namelist.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
+	fenv.ReadNamelist(iounit, "TESTDATA", []fortio.NamelistVar{{Name: "x", Ptr: &x}, {Name: "y", Ptr: &y}, {Name: "z", Ptr: &z}, {Name: "a", Ptr: &a}, {Name: "b", Ptr: &b}})
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	fenv.Print("LEVEL 38: NAMELIST x,y,z=", x, y, z)
+	fenv.Print("LEVEL 38: NAMELIST a,b=", a, b)
+}
+func LEVEL39() {
+	var (
+		n int32
+		_ = n
+	)
+	var (
+		card intrinsic.CharacterArray = intrinsic.NewCharacterArray(20)
+		_                             = card
+	)
+	n = 0
+	fenv.Open(fortio.OpenSpec{UNIT: 39, FILE: "test_io.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
+	goto label10
+label10:
+	{
+		_iostat := fenv.ReadWithSpec(fortio.IOSpec{UNIT: 39, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'A', Repeat: 1})}, &card)
+		if _iostat == fortio.IOStatEOF {
+			goto label20
+		}
+	}
+	n = n + 1
+	goto label10
+	goto label20
+label20:
+	{
+		fenv.Close(fortio.CloseSpec{UNIT: 39})
+	}
+	fenv.Print("LEVEL 39:", n)
+}
+func LEVEL40() {
+	var (
+		t float32
+		_ = t
+	)
+	fenv.System("echo 'LEVEL 40: echo from shell'")
+	fenv.CpuTime(&t)
+}
+func LEVEL41() {
+	var (
+		fmt_str intrinsic.CharacterArray = intrinsic.NewCharacterArray(30)
+		_                                = fmt_str
+	)
+	var (
+		x int32
+		_ = x
+	)
+	x = 41
+	fmt_str.SetFromString("(A,I2,A)")
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.NewFormat(fmt_str.String())}, "LEVEL ", x, ": SUCCESS")
+}
+func LEVEL42() {
+	var (
+		fmt = intrinsic.NewCharacterArrayArray(1, 5)
+		_   = fmt
+	)
+	var (
+		x int32
+		_ = x
+	)
+	x = 42
+	fmt.AtPtr(1).SetFromString("(")
+	fmt.AtPtr(2).SetFromString("I")
+	fmt.AtPtr(3).SetFromString("2")
+	fmt.AtPtr(4).SetFromString(")")
+	fmt.AtPtr(5).SetFromString(" ")
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 6, FMT: fortio.NewFormat(intrinsic.CharacterArrayJoin(fmt))}, x)
+	fenv.Print("LEVEL 42: ok")
+}
+func LEVEL43() {
+	// Implicit declarations.
+	var (
+		ioerr  int32
+		nval   int32
+		pexist bool
+	)
+	var _, _, _ = ioerr, nval, pexist
+	fenv.Open(fortio.OpenSpec{UNIT: 99, FILE: "no_such_file_43.txt", STATUS: fortio.StatusOLD, IOSTAT: &ioerr})
+	if ioerr != 0 {
+		fenv.Print("LEVEL 43: open failed as expected")
+	} else {
+		fenv.ReadWithSpec(fortio.IOSpec{UNIT: 99, FMT: fortio.DefaultFormat(), IOSTAT: &ioerr}, &nval)
+		fenv.Close(fortio.CloseSpec{UNIT: 99})
+	}
+	if !pexist {
+		fenv.Print("LEVEL 43: file absent as expected")
+	}
+}
+func LEVEL44() {
+	// Implicit declarations.
+	var hres float64
+	var _ = hres
+	var (
+		nval int32
+		_    = nval
+	)
+	nval = 7
+	hres = float64(float64(nval))
+	fenv.Print("LEVEL 44:", hres)
+}
+func LEVEL45() {
+	var (
+		x int32
+		_ = x
+	)
+	x = 2
+	_altRet := ALTRSUB(x)
+	switch _altRet {
+	case 1:
+		goto label10
+	case 2:
+		goto label20
+	}
+	fenv.Print("LEVEL 45: normal")
+	goto label30
+	goto label10
+label10:
+	{
+		fenv.Print("LEVEL 45: alt 1")
+	}
+	goto label30
+	goto label20
+label20:
+	{
+		fenv.Print("LEVEL 45: alt 2")
+	}
+	goto label30
+label30:
+	{
+	}
+}
+func ALTRSUB(n int32) int {
+	if n == 1 {
+		return 1
+	}
+	if n == 2 {
+		return 2
+	}
+	return 0
+	return 0
+}
+func LEVEL46() {
+	var (
+		iounit int32
+		i      int32
+		_, _   = iounit, i
+	)
+	var (
+		vals     = intrinsic.NewArray[float32](nil, 5)
+		readback = intrinsic.NewArray[float32](nil, 5)
+		_, _     = vals, readback
+	)
+	for i = 1; i <= 5; i++ {
+		vals.Set(float32(i)*1.5, int(i))
+	}
+	iounit = 46
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_idl_read.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
+	{
+		writeArgs := make([]any, 0)
+		for i := 1; i <= 5; i += 1 {
+			writeArgs = append(writeArgs, vals.At(int(i)))
+		}
+		fenv.Write(iounit, fortio.DefaultFormat(), writeArgs...)
+	}
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_idl_read.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
+	{
+		readArgs := make([]any, 0)
+		for i := 1; i <= 5; i += 1 {
+			readArgs = append(readArgs, readback.AtPtr(int(i)))
+		}
+		fenv.Read(iounit, fortio.DefaultFormat(), readArgs...)
+	}
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	fenv.Print("LEVEL 46:", readback.At(1), readback.At(2), readback.At(3), readback.At(4), readback.At(5))
+}
+func LEVEL47() {
+	var (
+		iounit  int32
+		i       int32
+		eof_hit int32
+		_, _, _ = iounit, i, eof_hit
+	)
+	var (
+		arr = intrinsic.NewArray[float32](nil, 3)
+		_   = arr
+	)
+	eof_hit = 0
+	iounit = 47
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_end_idl.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.DefaultFormat()}, 10.0, 20.0, 30.0)
+	fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	fenv.Open(fortio.OpenSpec{UNIT: iounit, FILE: "test_end_idl.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
+	{
+		readArgs := make([]any, 0)
+		for i := 1; i <= 3; i += 1 {
+			readArgs = append(readArgs, arr.AtPtr(int(i)))
+		}
+		_iostat := fenv.ReadWithSpec(fortio.IOSpec{UNIT: iounit, FMT: fortio.DefaultFormat()}, readArgs...)
+		if _iostat == fortio.IOStatEOF {
+			goto label10
+		}
+	}
+	goto label20
+	goto label10
+label10:
+	{
+		eof_hit = 1
+	}
+	goto label20
+label20:
+	{
+		fenv.Close(fortio.CloseSpec{UNIT: iounit})
+	}
+	fenv.Print("LEVEL 47:", arr.At(1), arr.At(2), arr.At(3), eof_hit)
+}
+func LEVEL48() {
+	var (
+		i int32
+		_ = i
+	)
+	var (
+		arr = intrinsic.NewArray[float32](nil, 4)
+		_   = arr
+	)
+	for i = 1; i <= 4; i++ {
+		arr.Set(float32(i)*2.0, int(i))
+	}
+	{
+		printArgs := make([]any, 0)
+		printArgs = append(printArgs, "LEVEL 48:")
+		for i := 1; i <= 4; i += 1 {
+			printArgs = append(printArgs, arr.At(int(i)))
+		}
+		fenv.Print(printArgs...)
+	}
+}
+func LEVEL50() {
+	type point_t struct {
+		x int32
+		y int32
+	}
+	var (
+		pts = intrinsic.NewArray[point_t](nil, 2)
+		_   = pts
+	)
+	(*pts.AtPtr(1)).x = 10
+	(*pts.AtPtr(1)).y = 20
+	(*pts.AtPtr(2)).x = 30
+	(*pts.AtPtr(2)).y = 40
+	fenv.Print("LEVEL 50:", (*pts.AtPtr(1)).x, (*pts.AtPtr(1)).y, (*pts.AtPtr(2)).x, (*pts.AtPtr(2)).y)
+}
+func LEVEL49() {
+	var (
+		a    float64
+		b    float64
+		_, _ = a, b
+	)
+	var (
+		c bool
+		_ = c
+	)
+	a = 2.0
+	b = 3.0
+	c = intrinsic.POW[float64](a, float64(2)) > intrinsic.POW[float64](b, float64(2))
+	if intrinsic.POW[float64](a, float64(2))-intrinsic.POW[float64](b, float64(2)) > 0.0 {
+		fenv.Print("A**2 > B**2")
+	} else {
+		fenv.Print("A**2 <= B**2")
+	}
+}
+func LEVEL51() {
+	var (
+		arr  = new(intrinsic.Array[int32])
+		tmp  = new(intrinsic.Array[int32])
+		_, _ = arr, tmp
+	)
+	arr.Allocate(3)
+	arr.Set(10, 1)
+	arr.Set(20, 2)
+	arr.Set(30, 3)
+	tmp.Allocate(5)
+	tmp.Set(arr.At(1), 1)
+	tmp.Set(arr.At(2), 2)
+	tmp.Set(arr.At(3), 3)
+	arr.Deallocate()
+	tmp.MoveAlloc(arr)
+	fenv.Print("LEVEL 51:", arr.At(1), arr.At(2), arr.At(3))
+}
+func LEVEL52() {
+	n := intrinsic.UnallocatedPtr[int32](1)
+	l52com.Reset()
+	intrinsic.DeclareCommon(&n, &l52com)
+	n.Set(0, 1)
+	fenv.Open(fortio.OpenSpec{UNIT: 52, FILE: "test_common_read.txt", STATUS: fortio.StatusREPLACE, ACTION: fortio.ActionWRITE})
+	fenv.WriteWithSpec(fortio.IOSpec{UNIT: 52, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1})}, 42)
+	fenv.Close(fortio.CloseSpec{UNIT: 52})
+	fenv.Open(fortio.OpenSpec{UNIT: 52, FILE: "test_common_read.txt", STATUS: fortio.StatusOLD, ACTION: fortio.ActionREAD})
+	fenv.ReadWithSpec(fortio.IOSpec{UNIT: 52, FMT: fortio.NewFormat(fortio.FormatDescriptor{Type: 'I', Width: 5, Repeat: 1})}, n.AtPtr(1))
+	fenv.Close(fortio.CloseSpec{UNIT: 52})
+	fenv.Print("LEVEL 52:", n.At(1))
+}
+func LEVEL53() {
+	var (
+		n int32
+		_ = n
+	)
+	n = 7
+	L53HELPER(&n)
+}
+func L53HELPER(x *int32) {
+	fenv.Print("LEVEL 53:", *x)
+}
+func LEVEL54() {
+	a := intrinsic.UnallocatedPtr[int32](1)
+	x := intrinsic.UnallocatedPtr[float32](1)
+	Global_Common.Reset()
+	intrinsic.DeclareCommon(&a, &Global_Common)
+	intrinsic.DeclareCommon(&x, &Global_Common)
+	b := intrinsic.UnallocatedPtr[int32](1)
+	intrinsic.DeclareCommon(&b, &Global_Common)
+	a.Set(1, 1)
+	x.Set(2.5, 1)
+	b.Set(3, 1)
+	fenv.Print("LEVEL 54:", a.At(1), x.At(1), b.At(1))
 }
 func SIMPLE_SUB() {
-	intrinsic.Print("LEVEL 7: Inside SIMPLE_SUB")
+	fenv.Print("LEVEL 7: Inside SIMPLE_SUB")
 }
 func ADD_VALUES(a int32, b int32, result *int32) {
 	*result = a + b
-	intrinsic.Print("LEVEL 7: Inside ADD_VALUES")
+	fenv.Print("LEVEL 7: Inside ADD_VALUES")
 }
 func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 	var (
@@ -1010,7 +1644,10 @@ func MODIFY_ARRAY(arr *intrinsic.Array[int32], n int32) {
 	for i = 1; i <= n; i++ {
 		arr.Set(arr.At(int(i))*2, int(i))
 	}
-	intrinsic.Print("LEVEL 7: Inside MODIFY_ARRAY")
+	fenv.Print("LEVEL 7: Inside MODIFY_ARRAY")
+}
+func MULDST(x *float32, y float32) {
+	*x = y * *x
 }
 func FACTORIAL(n int32) (factorial int32) {
 	var (
@@ -1026,7 +1663,7 @@ func FACTORIAL(n int32) (factorial int32) {
 	return
 }
 func SQUARE_ROOT(x float32) (square_root float32) {
-	square_root = intrinsic.SQRT(x)
+	square_root = intrinsic.SQRT[float32](x)
 	return
 }
 func FIBONACCI(n int32) (fibonacci int32) {
@@ -1050,18 +1687,360 @@ func FIBONACCI(n int32) (fibonacci int32) {
 	fibonacci = b
 	return
 }
-
-var holdrt = struct {
-	yqr    *intrinsic.Array[float32]
-	sumxrq *intrinsic.Array[float32]
-	ymnrt  *intrinsic.Array[float32]
-	matrix *intrinsic.Array[float32]
-}{yqr: intrinsic.NewArray[float32](nil, 256), sumxrq: intrinsic.NewArray[float32](nil, 512), ymnrt: intrinsic.NewArray[float32](nil, 3), matrix: intrinsic.NewArray[float32](nil, 10, 20)}
-var shared struct {
-	x int32
-	y int32
-	z float32
+func BLKINVDECL() {
+	// Implicit declarations.
+	var (
+		d3k intrinsic.PointerTo[float32]
+		d2k intrinsic.PointerTo[float32]
+		d1k intrinsic.PointerTo[float32]
+	)
+	var _, _, _ = d3k, d2k, d1k
+	d3k = intrinsic.UnallocatedPtr[float32](1)
+	d2k = intrinsic.UnallocatedPtr[float32](1)
+	d1k = intrinsic.UnallocatedPtr[float32](1)
+	blk.Reset()
+	intrinsic.DeclareCommon(&d3k, &blk)
+	intrinsic.DeclareCommon(&d2k, &blk)
+	intrinsic.DeclareCommon(&d1k, &blk)
+	fenv.Print("BLKINVDECL: Equiv d1k,d2k,d3k=", d1k.At(1), d2k.At(1), d3k.At(1))
 }
-var stats = struct {
-	counts *intrinsic.Array[int32]
-}{counts: intrinsic.NewArray[int32](nil, 100)}
+func BLKDECL() {
+	// Implicit declarations.
+	var (
+		d1k   intrinsic.PointerTo[float32]
+		d2k   intrinsic.PointerTo[float32]
+		d3k   intrinsic.PointerTo[float32]
+		delta = intrinsic.NewArray[float32](nil, 3)
+	)
+	var _, _, _, _ = d1k, d2k, d3k, delta
+	d1k = intrinsic.UnallocatedPtr[float32](1)
+	d2k = intrinsic.UnallocatedPtr[float32](1)
+	d3k = intrinsic.UnallocatedPtr[float32](1)
+	blk.Reset()
+	intrinsic.DeclareCommon(&d1k, &blk)
+	intrinsic.DeclareCommon(&d2k, &blk)
+	intrinsic.DeclareCommon(&d3k, &blk)
+	intrinsic.Equivalence(&d1k, delta)
+	fenv.Print("BLKDECL: Equiv delta(1..3)=", delta.At(1), delta.At(2), delta.At(3))
+	fenv.Print("BLKDECL: Equiv d1k,d2k,d3k=", d1k.At(1), d2k.At(1), d3k.At(1))
+}
+func LEVEL55() {
+	var (
+		a    float32
+		b    float32
+		_, _ = a, b
+	)
+	a = 0.0
+	b = 0.0
+	SCALAROUT(intrinsic.ScalarRef(float32(1.0)), &a, &b)
+	fenv.Print("LEVEL55:", a, b)
+}
+func SCALAROUT(x *float32, y *float32, z *float32) {
+	*y = *x + 1.0
+	*z = *x + 2.0
+}
+func LEVEL56() {
+	type vec3_t struct {
+		v *intrinsic.Array[float32]
+	}
+	var (
+		obj vec3_t
+		_   = obj
+	)
+	obj.v = intrinsic.NewArray[float32](nil, 3)
+	obj.v.Set(1.0, 1)
+	obj.v.Set(2.0, 2)
+	obj.v.Set(3.0, 3)
+	fenv.Print("LEVEL56:", obj.v.At(1)+obj.v.At(2)+obj.v.At(3))
+}
+func LEVEL57() {
+	var (
+		mat = intrinsic.NewArray[float32](nil, 3, 3)
+		_   = mat
+	)
+	var (
+		vec  = intrinsic.NewArray[float32](nil, 3)
+		res1 = intrinsic.NewArray[float32](nil, 3)
+		_, _ = vec, res1
+	)
+	var (
+		res2 = intrinsic.NewArray[float32](nil, 3, 3)
+		_    = res2
+	)
+	var (
+		i    int32
+		j    int32
+		_, _ = i, j
+	)
+	for i = 1; i <= 3; i++ {
+		for j = 1; j <= 3; j++ {
+			mat.Set(float32(i+j), int(i), int(j))
+		}
+		vec.Set(float32(i), int(i))
+	}
+	res1 = intrinsic.MATMUL(mat, vec)
+	res2 = intrinsic.MATMUL(mat, mat)
+	fenv.Print("LEVEL57:", res1.At(1), res1.At(2), res1.At(3))
+}
+func LEVEL63() {
+	type vec_t struct {
+		v *intrinsic.Array[float32]
+	}
+	var (
+		obj vec_t
+		_   = obj
+	)
+	obj.v = intrinsic.NewArray[float32](nil, 3)
+	obj.v.SetAll(0.0)
+	obj.v.Set(5.0, 1)
+	fenv.Print("LEVEL63:", obj.v.At(1), obj.v.At(2), obj.v.At(3))
+}
+func LEVEL62(x int32, y *int32) {
+	if y != nil {
+		*y = x * 2
+	}
+	fenv.Print("LEVEL62:", x)
+}
+func LEVEL61() {
+	var (
+		s intrinsic.CharacterArray = intrinsic.NewCharacterArray(10)
+		_                          = s
+	)
+	s.SetFromString("world")
+	fenv.Print("hello " + s.Trim().String() + "!")
+}
+func LEVEL60() {
+	type mesh_t struct {
+		x *intrinsic.Array[float32]
+	}
+	var (
+		objs = intrinsic.NewArray[mesh_t](nil, 2)
+		_    = objs
+	)
+	var (
+		i    int32
+		j    int32
+		_, _ = i, j
+	)
+	i = 3
+	j = 4
+	(*objs.AtPtr(1)).x = intrinsic.NewArray[float32](nil, int(i), int(j))
+	(*objs.AtPtr(1)).x.Set(1.5, 1, 1)
+	fenv.Print("LEVEL60:", (*objs.AtPtr(1)).x.At(1, 1))
+	(*objs.AtPtr(1)).x.Deallocate()
+}
+func LEVEL59() {
+	type flags_t struct {
+		active bool
+	}
+	var (
+		obj flags_t
+		_   = obj
+	)
+	obj.active = true
+	obj.active = !obj.active
+	fenv.Print("LEVEL59:", obj.active)
+}
+func LEVEL58() {
+	type named_t struct {
+		name *intrinsic.CharacterArray
+	}
+	var (
+		obj named_t
+		_   = obj
+	)
+	obj.name = intrinsic.NewCharacterArrayRef(20)
+	var (
+		prefix intrinsic.CharacterArray = intrinsic.NewCharacterArray(5)
+		_                               = prefix
+	)
+	prefix.SetFromString("item ")
+	obj.name.SetConcatString(prefix.String(), "A")
+	fenv.Print("LEVEL58:", obj.name)
+}
+func LEVEL64() {
+	var (
+		a    = intrinsic.NewArray[float32](nil, 3)
+		b    = intrinsic.NewArray[float32](nil, 3)
+		_, _ = a, b
+	)
+	a.Set(2.0, 1)
+	a.Set(4.0, 2)
+	a.Set(6.0, 3)
+	b = HalfArr(a)
+	fenv.Print("LEVEL64:", b.At(1), b.At(2), b.At(3))
+}
+func LEVEL65() {
+	var (
+		a = intrinsic.NewArray[float32](nil, 3)
+		_ = a
+	)
+	a.SetAll(0.0)
+	a.Set(5.0, 2)
+	fenv.Print("LEVEL65:", a.At(1), a.At(2), a.At(3))
+}
+func LEVEL66() {
+	var (
+		a       = intrinsic.NewArray[float32](nil, 3)
+		b       = intrinsic.NewArray[float32](nil, 3)
+		c       = intrinsic.NewArray[float32](nil, 3)
+		_, _, _ = a, b, c
+	)
+	a.Set(1.0, 1)
+	a.Set(2.0, 2)
+	a.Set(3.0, 3)
+	b.Set(4.0, 1)
+	b.Set(5.0, 2)
+	b.Set(6.0, 3)
+	c = intrinsic.ArrayAdd[float32](a, b)
+	fenv.Print("LEVEL66:", c.At(1), c.At(2), c.At(3))
+}
+func LEVEL67() {
+	var (
+		a    = intrinsic.NewArray[float32](nil, 3)
+		b    = intrinsic.NewArray[float32](nil, 3)
+		_, _ = a, b
+	)
+	a.Set(-1.0, 1)
+	a.Set(-2.0, 2)
+	a.Set(-3.0, 3)
+	b = intrinsic.ArrayNeg[float32](a)
+	fenv.Print("LEVEL67:", b.At(1), b.At(2), b.At(3))
+}
+func LEVEL68() {
+	type Point struct {
+		x float32
+		y float32
+	}
+	var (
+		p Point
+		_ = p
+	)
+	p.x = 1.0
+	p.y = 2.0
+	fenv.Print("LEVEL68:", p.x, p.y)
+}
+func LEVEL69() {
+	type named_t struct {
+		first *intrinsic.CharacterArray
+		full  *intrinsic.CharacterArray
+	}
+	var (
+		obj named_t
+		_   = obj
+	)
+	obj.first = intrinsic.NewCharacterArrayRef(10)
+	obj.full = intrinsic.NewCharacterArrayRef(20)
+	obj.first.SetFromString("hello")
+	obj.full.SetConcatString("say: ", obj.first.String())
+	fenv.Print("LEVEL69:", obj.full)
+}
+func LEVEL74() {
+	type pt_t struct {
+		x float32
+		y float32
+	}
+	var (
+		arr  = intrinsic.NewArray[pt_t](nil, 3)
+		elem pt_t
+		_, _ = arr, elem
+	)
+	(*arr.AtPtr(1)).x = 1.0
+	(*arr.AtPtr(1)).y = 2.0
+	elem = *arr.AtPtr(1)
+	fenv.Print("LEVEL74:", elem.x, elem.y)
+}
+func LEVEL75() {
+	var (
+		a = intrinsic.NewArray[float32](nil, 2, 4)
+		_ = a
+	)
+	var (
+		s float32
+		_ = s
+	)
+	var (
+		i    int32
+		j    int32
+		_, _ = i, j
+	)
+	s = 2.0
+	for i = 1; i <= 2; i++ {
+		for j = 1; j <= 4; j++ {
+			a.Set(float32(i*10+j), int(i), int(j))
+		}
+	}
+	a.View(intrinsic.R(1, 2), intrinsic.R(2, 3)).SetFrom(intrinsic.ArrayDivScalar[float32](a.View(intrinsic.R(1, 2), intrinsic.R(2, 3)), s))
+	fenv.Print("LEVEL75:", a.At(1, 2), a.At(1, 3))
+}
+func LEVEL72() {
+	var (
+		a = intrinsic.NewArray[float32](nil, 5)
+		_ = a
+	)
+	a.SetAll(9.0)
+	a.View(intrinsic.R(2, 4)).SetAll(1.0)
+	fenv.Print("LEVEL72:", a.At(1), a.At(2), a.At(3), a.At(4), a.At(5))
+}
+func LEVEL73() {
+	var (
+		a = intrinsic.NewArray[float32](nil, 3)
+		_ = a
+	)
+	var (
+		s float32
+		_ = s
+	)
+	a.Set(2.0, 1)
+	a.Set(3.0, 2)
+	a.Set(4.0, 3)
+	s = intrinsic.SQRT[float32](intrinsic.SUM(intrinsic.ArrayPow[float32](a, 2)))
+	fenv.Print("LEVEL73:", s)
+}
+func LEVEL70() {
+	var (
+		a    = intrinsic.NewArray[float32](nil, 3)
+		b    = intrinsic.NewArray[float32](nil, 3)
+		_, _ = a, b
+	)
+	var (
+		s float32
+		_ = s
+	)
+	a.Set(1.0, 1)
+	a.Set(2.0, 2)
+	a.Set(3.0, 3)
+	s = 2.0
+	b = intrinsic.ArrayMulScalar[float32](a, s)
+	fenv.Print("LEVEL70:", b.At(1), b.At(2), b.At(3))
+}
+func LEVEL71() {
+	var (
+		a = intrinsic.NewArray[float32](nil, 3)
+		_ = a
+	)
+	var (
+		mx float32
+		_  = mx
+	)
+	a.Set(-1.0, 1)
+	a.Set(2.0, 2)
+	a.Set(-3.0, 3)
+	mx = intrinsic.MAXVAL(intrinsic.ArrayAbs[float32](a))
+	fenv.Print("LEVEL71:", mx)
+}
+func HalfArr(x *intrinsic.Array[float32]) (y *intrinsic.Array[float32]) {
+	y = intrinsic.NewArray[float32](nil, 3)
+	y.Set(x.At(1)*0.5, 1)
+	y.Set(x.At(2)*0.5, 2)
+	y.Set(x.At(3)*0.5, 3)
+	return
+}
+
+var fenv = fortio.NewEnvironment()
+var Global_Common = intrinsic.NewCommonBlock("Global_Common", 12)
+var blk = intrinsic.NewCommonBlock("blk", 12)
+var holdrt = intrinsic.NewCommonBlock("holdrt", 3884)
+var l52com = intrinsic.NewCommonBlock("l52com", 4)
+var shared = intrinsic.NewCommonBlock("shared", 12)
+var stats = intrinsic.NewCommonBlock("stats", 416)

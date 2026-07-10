@@ -89,35 +89,15 @@ func expectedErrors(src string) map[int]string {
 	return errors
 }
 
-func testTranspile(t testing.TB, tg *ToGo, pus []f90.ProgramUnit, srcPath string, src string) {
+func testTranspile(t testing.TB, tg *ToGo, pus []f90.Unit, srcPath string, src string) {
 	tg.SetSource(srcPath, strings.NewReader(src))
-	var mainProg *f90.ProgramBlock
-	for _, unit := range pus {
-		if block, ok := unit.(*f90.ProgramBlock); ok {
-			mainProg = block
-			continue
-		}
-		err := tg.AddUsed(unit)
-		if err != nil {
-			t.Fatal(srcPath, err)
-		}
+	_, err := tg.TransformUnits(nil, pus...)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if mainProg != nil {
-		_, err := tg.TransformProgram(mainProg)
-		if err != nil {
-			t.Fatal(srcPath, err)
-		}
-		// TODO: add other routines here.
-	} else {
-		_, err := tg.transformProcedures(nil, pus)
-		if err != nil {
-			t.Fatal(srcPath, err)
-		}
-	}
-
 }
 
-func testParse(t testing.TB, p *Parser90, srcPath string, src string, expectErrors bool) []f90.ProgramUnit {
+func testParse(t testing.TB, p *Parser90, srcPath string, src string, expectErrors bool) []f90.Unit {
 	expected := map[int]string{}
 	if expectErrors {
 		expected = expectedErrors(src)
@@ -127,10 +107,10 @@ func testParse(t testing.TB, p *Parser90, srcPath string, src string, expectErro
 		t.Fatalf("Failed to reset parser: %v", err)
 	}
 	// Parse all units
-	var units []f90.ProgramUnit
-	for {
+	var units []f90.Unit
+	for !p.IsDone() {
 		unit := p.ParseNextProgramUnit()
-		if unit == nil {
+		if !unit.IsValid() {
 			break
 		}
 		units = append(units, unit)

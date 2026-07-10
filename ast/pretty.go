@@ -24,11 +24,12 @@ func pp(buf *bytes.Buffer, node Node, indent int) {
 			if i > 0 {
 				buf.WriteString("\n\n")
 			}
-			pp(buf, unit, indent)
+			pp(buf, &unit, indent)
 		}
-	case *Subroutine:
+	case *Unit:
 		writeIndent(buf, indent)
-		buf.WriteString("SUBROUTINE ")
+		buf.WriteString(n.Token.String())
+		buf.WriteString(" ")
 		buf.WriteString(n.Name)
 		if len(n.Parameters) > 0 {
 			buf.WriteString("(")
@@ -44,11 +45,15 @@ func pp(buf *bytes.Buffer, node Node, indent int) {
 		for _, stmt := range n.Body {
 			pp(buf, stmt, indent+1)
 		}
+		for _, unit := range n.Contains {
+			pp(buf, &unit, indent+1)
+		}
 		writeIndent(buf, indent)
-		buf.WriteString("END SUBROUTINE ")
+		buf.WriteString("END ")
+		buf.WriteString(n.Token.String())
+		buf.WriteString(" ")
 		buf.WriteString(n.Name)
 		buf.WriteString("\n")
-	// Add cases for other ProgramUnit types (Function, Module, etc.) here
 
 	case *TypeDeclaration:
 		writeIndent(buf, indent)

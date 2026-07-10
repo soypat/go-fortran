@@ -5,17 +5,6 @@ import (
 	"unsafe"
 )
 
-func Int2Bool[T integer](v T) bool {
-	return v != 0
-}
-
-func Bool2Int[T integer](v bool) T {
-	if v {
-		return 1
-	}
-	return 0
-}
-
 type Pointer interface {
 	// DataUnsafe returns a pointer to the start of the backing buffer in memory.
 	DataUnsafe() unsafe.Pointer
@@ -32,6 +21,9 @@ type PointerSetter interface {
 	//
 	// Deprecated: Do not use this.
 	SetDataUnsafe(ptr unsafe.Pointer)
+	// SetLenBufferUnsafe sets the number of elements the pointer can access.
+	// Used by Equivalence to properly size destination pointers.
+	SetLenBufferUnsafe(length int)
 }
 
 // Equivalence implements Fortran's EQUIVALENCE statement by making multiple
@@ -69,8 +61,11 @@ type PointerSetter interface {
 // For type-punning (viewing memory as a different type), prefer [PointerFrom]
 // which returns a new typed view without modifying the original pointer.
 func Equivalence(toEquiv ...PointerSetter) {
-	largest := toEquiv[0]
-	maxAlloc := sizeUnderlyingAlloc(largest)
+	// Find the largest allocation and also identify variables with existing backing memory.
+	// Variables with non-nil data (e.g., from COMMON blocks) should be preferred as the source
+	// since they have "real" storage that should be shared.
+	var source PointerSetter
+	maxAlloc := 0
 	for _, buf := range toEquiv {
 		alloc := sizeUnderlyingAlloc(buf)
 		if alloc == 0 {
@@ -80,14 +75,30 @@ func Equivalence(toEquiv ...PointerSetter) {
 			}
 		}
 		if alloc > maxAlloc {
-			largest = buf
 			maxAlloc = alloc
+		}
+		// Prefer variables with existing backing memory (non-nil data pointer)
+		// These are typically from COMMON blocks or previous allocations
+		if source == nil && buf.DataUnsafe() != nil {
+			source = buf
+		}
+	}
+	// If no variable has backing memory, use the largest allocation
+	if source == nil {
+		source = toEquiv[0]
+		for _, buf := range toEquiv {
+			if sizeUnderlyingAlloc(buf) > sizeUnderlyingAlloc(source) {
+				source = buf
+			}
 		}
 	}
 
-	baseAddr := largest.DataUnsafe()
+	baseAddr := source.DataUnsafe()
 	for _, equiv := range toEquiv {
 		equiv.SetDataUnsafe(baseAddr)
+		// Set the allocation length based on total bytes / element size
+		newLen := maxAlloc / equiv.SizeElement()
+		equiv.SetLenBufferUnsafe(newLen)
 	}
 }
 
@@ -135,6 +146,9 @@ func (q *ptrOff) SizeElement() int {
 func (q *ptrOff) LenBuffer() int {
 	return q.ptr.LenBuffer() - q.elemOffset
 }
+func (q *ptrOff) SetLenBufferUnsafe(length int) {
+	q.ptr.SetLenBufferUnsafe(length + q.elemOffset)
+}
 func (q *ptrOff) Offset() int {
 	return q.ptr.SizeElement() * q.elemOffset
 }
@@ -145,12 +159,26 @@ func (q *ptrOff) SizeUnderlyingAlloc() int {
 	return q.ptr.LenBuffer() * q.ptr.SizeElement()
 }
 
+// ScalarRef returns a pointer to a copy of v. Used at Fortran call sites where
+// a non-addressable expression (literal, arithmetic result) is passed to a
+// by-reference scalar parameter with no INTENT(IN) declaration.
+func ScalarRef[T any](v T) *T { return &v }
+
 // Ptr creates a Pointer from a single element reference.
 // Used for passing scalar variables by reference to OUT/INOUT parameters.
 func Ptr[T any](v *T) PointerTo[T] {
 	return PointerTo[T]{
 		v:        unsafe.Pointer(v),
 		alloclen: 1,
+	}
+}
+
+// UnallocatedPtr declares a pointer with a length without assigning it a data portion.
+// This is typical for ALLOCATABLE declarations.
+func UnallocatedPtr[T any](numElements int) PointerTo[T] {
+	return PointerTo[T]{
+		v:        nil,
+		alloclen: numElements,
 	}
 }
 
@@ -284,6 +312,11 @@ func (p PointerTo[T]) DataAt(idx int) *T {
 	return p.View(idx, idx+1).Data()
 }
 
+// AtPtr returns a pointer to the idx'th element (1-indexed), matching Array's interface.
+func (p PointerTo[T]) AtPtr(idx int) *T {
+	return &p.Slice()[idx-1]
+}
+
 func (p PointerTo[T]) DataUnsafe() unsafe.Pointer {
 	return p.v
 }
@@ -293,6 +326,11 @@ func (p PointerTo[T]) DataUnsafe() unsafe.Pointer {
 // Deprecated: Extremely unsafe. Do not use.
 func (p *PointerTo[T]) SetDataUnsafe(v unsafe.Pointer) {
 	p.v = v
+}
+
+// SetLenBufferUnsafe sets the number of elements this pointer can access.
+func (p *PointerTo[T]) SetLenBufferUnsafe(length int) {
+	p.alloclen = length
 }
 
 // View creates a sub-pointer viewing a range of the original allocation.

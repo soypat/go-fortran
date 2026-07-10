@@ -364,3 +364,292 @@ func TestNewArrayFromValues(t *testing.T) {
 		t.Errorf("Expected upper bound 3, got %d", arr.UpperDim(1))
 	}
 }
+
+// Test View on 1D array
+func TestArray_View1D(t *testing.T) {
+	arr := NewArray[int32](nil, 10)
+	// Fill with values 1-10
+	for i := 1; i <= 10; i++ {
+		arr.Set(int32(i*10), i)
+	}
+
+	// View of elements 3:7
+	view := arr.View(R(3, 7))
+
+	// Check shape
+	shape := view.Shape()
+	if len(shape) != 1 || shape[0] != 5 {
+		t.Errorf("Expected view shape [5], got %v", shape)
+	}
+
+	// Check bounds (view uses 1-based indexing)
+	if view.LowerDim(1) != 1 || view.UpperDim(1) != 5 {
+		t.Errorf("Expected view bounds [1:5], got [%d:%d]", view.LowerDim(1), view.UpperDim(1))
+	}
+
+	// Check access: view(1) should equal arr(3) = 30
+	if view.At(1) != 30 {
+		t.Errorf("Expected view(1) = 30, got %d", view.At(1))
+	}
+	// view(5) should equal arr(7) = 70
+	if view.At(5) != 70 {
+		t.Errorf("Expected view(5) = 70, got %d", view.At(5))
+	}
+
+	// Test writing through view
+	view.Set(999, 3) // Should modify arr(5)
+	if arr.At(5) != 999 {
+		t.Errorf("Expected arr(5) = 999 after view write, got %d", arr.At(5))
+	}
+}
+
+// Test View on 2D array
+func TestArray_View2D(t *testing.T) {
+	// Create 10x5 matrix, fill with (row*100 + col)
+	arr := NewArray[int32](nil, 10, 5)
+	for i := 1; i <= 10; i++ {
+		for j := 1; j <= 5; j++ {
+			arr.Set(int32(i*100+j), i, j)
+		}
+	}
+
+	// View of rows 2:4, cols 1:3
+	view := arr.View(R(2, 4), R(1, 3))
+
+	// Check shape: should be [3, 3]
+	shape := view.Shape()
+	if len(shape) != 2 || shape[0] != 3 || shape[1] != 3 {
+		t.Errorf("Expected view shape [3, 3], got %v", shape)
+	}
+
+	// view(1, 1) should equal arr(2, 1) = 201
+	if view.At(1, 1) != 201 {
+		t.Errorf("Expected view(1,1) = 201, got %d", view.At(1, 1))
+	}
+
+	// view(3, 3) should equal arr(4, 3) = 403
+	if view.At(3, 3) != 403 {
+		t.Errorf("Expected view(3,3) = 403, got %d", view.At(3, 3))
+	}
+
+	// view(2, 2) should equal arr(3, 2) = 302
+	if view.At(2, 2) != 302 {
+		t.Errorf("Expected view(2,2) = 302, got %d", view.At(2, 2))
+	}
+}
+
+// Test nested views
+func TestArray_ViewNested(t *testing.T) {
+	arr := NewArray[int32](nil, 10, 10)
+	for i := 1; i <= 10; i++ {
+		for j := 1; j <= 10; j++ {
+			arr.Set(int32(i*100+j), i, j)
+		}
+	}
+
+	// First view: rows 2:8, cols 2:8 (7x7)
+	v1 := arr.View(R(2, 8), R(2, 8))
+	if v1.Shape()[0] != 7 || v1.Shape()[1] != 7 {
+		t.Errorf("Expected v1 shape [7, 7], got %v", v1.Shape())
+	}
+
+	// v1(1,1) = arr(2,2) = 202
+	if v1.At(1, 1) != 202 {
+		t.Errorf("Expected v1(1,1) = 202, got %d", v1.At(1, 1))
+	}
+
+	// Second view: rows 2:4, cols 2:4 of v1 (3x3)
+	v2 := v1.View(R(2, 4), R(2, 4))
+	if v2.Shape()[0] != 3 || v2.Shape()[1] != 3 {
+		t.Errorf("Expected v2 shape [3, 3], got %v", v2.Shape())
+	}
+
+	// v2(1,1) = v1(2,2) = arr(3,3) = 303
+	if v2.At(1, 1) != 303 {
+		t.Errorf("Expected v2(1,1) = 303, got %d", v2.At(1, 1))
+	}
+
+	// v2(3,3) = v1(4,4) = arr(5,5) = 505
+	if v2.At(3, 3) != 505 {
+		t.Errorf("Expected v2(3,3) = 505, got %d", v2.At(3, 3))
+	}
+}
+
+// Test View with stride
+func TestArray_ViewWithStride(t *testing.T) {
+	arr := NewArray[int32](nil, 10)
+	for i := 1; i <= 10; i++ {
+		arr.Set(int32(i), i)
+	}
+
+	// View with stride 2: elements 1, 3, 5, 7, 9
+	view := arr.View(RS(1, 10, 2))
+
+	shape := view.Shape()
+	if shape[0] != 5 {
+		t.Errorf("Expected view shape [5], got %v", shape)
+	}
+
+	// view(1) = arr(1) = 1
+	if view.At(1) != 1 {
+		t.Errorf("Expected view(1) = 1, got %d", view.At(1))
+	}
+	// view(2) = arr(3) = 3
+	if view.At(2) != 3 {
+		t.Errorf("Expected view(2) = 3, got %d", view.At(2))
+	}
+	// view(5) = arr(9) = 9
+	if view.At(5) != 9 {
+		t.Errorf("Expected view(5) = 9, got %d", view.At(5))
+	}
+}
+
+// Test SetFrom (element-wise copy)
+func TestArray_SetFrom(t *testing.T) {
+	src := NewArray[int32](nil, 5)
+	dst := NewArray[int32](nil, 5)
+	for i := 1; i <= 5; i++ {
+		src.Set(int32(i*10), i)
+	}
+
+	dst.SetFrom(src)
+
+	for i := 1; i <= 5; i++ {
+		if dst.At(i) != int32(i*10) {
+			t.Errorf("Expected dst(%d) = %d, got %d", i, i*10, dst.At(i))
+		}
+	}
+}
+
+// Test SetFrom with views
+func TestArray_SetFrom_Views(t *testing.T) {
+	src := NewArray[int32](nil, 10)
+	dst := NewArray[int32](nil, 10)
+	for i := 1; i <= 10; i++ {
+		src.Set(int32(i*10), i)
+	}
+
+	// Copy src(3:7) to dst(1:5)
+	dst.View(R(1, 5)).SetFrom(src.View(R(3, 7)))
+
+	// dst(1) should be src(3) = 30
+	if dst.At(1) != 30 {
+		t.Errorf("Expected dst(1) = 30, got %d", dst.At(1))
+	}
+	// dst(5) should be src(7) = 70
+	if dst.At(5) != 70 {
+		t.Errorf("Expected dst(5) = 70, got %d", dst.At(5))
+	}
+	// dst(6) should be unchanged (0)
+	if dst.At(6) != 0 {
+		t.Errorf("Expected dst(6) = 0, got %d", dst.At(6))
+	}
+}
+
+// Test ArraySetAdd
+func TestArraySetAdd(t *testing.T) {
+	a := NewArray[float32](nil, 5)
+	b := NewArray[float32](nil, 5)
+	dst := NewArray[float32](nil, 5)
+
+	for i := 1; i <= 5; i++ {
+		a.Set(float32(i), i)
+		b.Set(float32(i*10), i)
+	}
+
+	ArraySetAdd(dst, a, b)
+
+	// dst(i) should be a(i) + b(i) = i + i*10 = i*11
+	for i := 1; i <= 5; i++ {
+		expected := float32(i * 11)
+		if dst.At(i) != expected {
+			t.Errorf("Expected dst(%d) = %f, got %f", i, expected, dst.At(i))
+		}
+	}
+}
+
+// Test the main use case: XSN(1:NM,1:3) = XSN(1:NM,1:3) + COF(1:NM,1:3)
+func TestArray_ViewSetAdd(t *testing.T) {
+	XSN := NewArray[float32](nil, 100, 10)
+	COF := NewArray[float32](nil, 100, 10)
+
+	// Initialize with test data
+	for i := 1; i <= 100; i++ {
+		for j := 1; j <= 10; j++ {
+			XSN.Set(float32(i+j), i, j)
+			COF.Set(float32(i*j), i, j)
+		}
+	}
+
+	NM := 50
+
+	// XSN(1:NM,1:3) = XSN(1:NM,1:3) + COF(1:NM,1:3)
+	ArraySetAdd(
+		XSN.View(R(1, NM), R(1, 3)),
+		XSN.View(R(1, NM), R(1, 3)),
+		COF.View(R(1, NM), R(1, 3)),
+	)
+
+	// Check a few values
+	// Original XSN(1,1) = 1+1 = 2, COF(1,1) = 1*1 = 1, result = 3
+	if XSN.At(1, 1) != 3 {
+		t.Errorf("Expected XSN(1,1) = 3, got %f", XSN.At(1, 1))
+	}
+
+	// XSN(50,3) was 50+3 = 53, COF(50,3) = 50*3 = 150, result = 203
+	if XSN.At(50, 3) != 203 {
+		t.Errorf("Expected XSN(50,3) = 203, got %f", XSN.At(50, 3))
+	}
+
+	// XSN(51,1) should be unchanged (outside the view)
+	if XSN.At(51, 1) != 52 { // 51+1 = 52
+		t.Errorf("Expected XSN(51,1) = 52 (unchanged), got %f", XSN.At(51, 1))
+	}
+
+	// XSN(1,4) should be unchanged (outside the view)
+	if XSN.At(1, 4) != 5 { // 1+4 = 5
+		t.Errorf("Expected XSN(1,4) = 5 (unchanged), got %f", XSN.At(1, 4))
+	}
+}
+
+// Test ArraySetSub
+func TestArraySetSub(t *testing.T) {
+	a := NewArray[int32](nil, 5)
+	b := NewArray[int32](nil, 5)
+	dst := NewArray[int32](nil, 5)
+
+	for i := 1; i <= 5; i++ {
+		a.Set(int32(i*10), i)
+		b.Set(int32(i), i)
+	}
+
+	ArraySetSub(dst, a, b)
+
+	for i := 1; i <= 5; i++ {
+		expected := int32(i*10 - i)
+		if dst.At(i) != expected {
+			t.Errorf("Expected dst(%d) = %d, got %d", i, expected, dst.At(i))
+		}
+	}
+}
+
+// Test ArraySetMul
+func TestArraySetMul(t *testing.T) {
+	a := NewArray[int32](nil, 5)
+	b := NewArray[int32](nil, 5)
+	dst := NewArray[int32](nil, 5)
+
+	for i := 1; i <= 5; i++ {
+		a.Set(int32(i), i)
+		b.Set(int32(i+1), i)
+	}
+
+	ArraySetMul(dst, a, b)
+
+	for i := 1; i <= 5; i++ {
+		expected := int32(i * (i + 1))
+		if dst.At(i) != expected {
+			t.Errorf("Expected dst(%d) = %d, got %d", i, expected, dst.At(i))
+		}
+	}
+}
