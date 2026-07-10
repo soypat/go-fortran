@@ -83,6 +83,10 @@ func GOLDEN() {
 	LEVEL69()
 	LEVEL70()
 	LEVEL71()
+	LEVEL72()
+	LEVEL73()
+	LEVEL74()
+	LEVEL75()
 	fenv.Stop(0)
 	fenv.Exit(0)
 	fenv.Exit()
@@ -1545,11 +1549,11 @@ func LEVEL50() {
 		pts = intrinsic.NewArray[point_t](nil, 2)
 		_   = pts
 	)
-	pts.AtPtr(1).x = 10
-	pts.AtPtr(1).y = 20
-	pts.AtPtr(2).x = 30
-	pts.AtPtr(2).y = 40
-	fenv.Print("LEVEL 50:", pts.AtPtr(1).x, pts.AtPtr(1).y, pts.AtPtr(2).x, pts.AtPtr(2).y)
+	(*pts.AtPtr(1)).x = 10
+	(*pts.AtPtr(1)).y = 20
+	(*pts.AtPtr(2)).x = 30
+	(*pts.AtPtr(2)).y = 40
+	fenv.Print("LEVEL 50:", (*pts.AtPtr(1)).x, (*pts.AtPtr(1)).y, (*pts.AtPtr(2)).x, (*pts.AtPtr(2)).y)
 }
 func LEVEL49() {
 	var (
@@ -1820,10 +1824,10 @@ func LEVEL60() {
 	)
 	i = 3
 	j = 4
-	objs.AtPtr(1).x = intrinsic.NewArray[float32](nil, int(i), int(j))
-	objs.AtPtr(1).x.Set(1.5, 1, 1)
-	fenv.Print("LEVEL60:", objs.AtPtr(1).x.At(1, 1))
-	objs.AtPtr(1).x.Deallocate()
+	(*objs.AtPtr(1)).x = intrinsic.NewArray[float32](nil, int(i), int(j))
+	(*objs.AtPtr(1)).x.Set(1.5, 1, 1)
+	fenv.Print("LEVEL60:", (*objs.AtPtr(1)).x.At(1, 1))
+	(*objs.AtPtr(1)).x.Deallocate()
 }
 func LEVEL59() {
 	type flags_t struct {
@@ -1930,6 +1934,68 @@ func LEVEL69() {
 	obj.first.SetFromString("hello")
 	obj.full.SetConcatString("say: ", obj.first.String())
 	fenv.Print("LEVEL69:", obj.full)
+}
+func LEVEL74() {
+	type pt_t struct {
+		x float32
+		y float32
+	}
+	var (
+		arr  = intrinsic.NewArray[pt_t](nil, 3)
+		elem pt_t
+		_, _ = arr, elem
+	)
+	(*arr.AtPtr(1)).x = 1.0
+	(*arr.AtPtr(1)).y = 2.0
+	elem = *arr.AtPtr(1)
+	fenv.Print("LEVEL74:", elem.x, elem.y)
+}
+func LEVEL75() {
+	var (
+		a = intrinsic.NewArray[float32](nil, 2, 4)
+		_ = a
+	)
+	var (
+		s float32
+		_ = s
+	)
+	var (
+		i    int32
+		j    int32
+		_, _ = i, j
+	)
+	s = 2.0
+	for i = 1; i <= 2; i++ {
+		for j = 1; j <= 4; j++ {
+			a.Set(float32(i*10+j), int(i), int(j))
+		}
+	}
+	a.View(intrinsic.R(1, 2), intrinsic.R(2, 3)).SetFrom(intrinsic.ArrayDivScalar[float32](a.View(intrinsic.R(1, 2), intrinsic.R(2, 3)), s))
+	fenv.Print("LEVEL75:", a.At(1, 2), a.At(1, 3))
+}
+func LEVEL72() {
+	var (
+		a = intrinsic.NewArray[float32](nil, 5)
+		_ = a
+	)
+	a.SetAll(9.0)
+	a.View(intrinsic.R(2, 4)).SetAll(1.0)
+	fenv.Print("LEVEL72:", a.At(1), a.At(2), a.At(3), a.At(4), a.At(5))
+}
+func LEVEL73() {
+	var (
+		a = intrinsic.NewArray[float32](nil, 3)
+		_ = a
+	)
+	var (
+		s float32
+		_ = s
+	)
+	a.Set(2.0, 1)
+	a.Set(3.0, 2)
+	a.Set(4.0, 3)
+	s = intrinsic.SQRT[float32](intrinsic.SUM(intrinsic.ArrayPow[float32](a, 2)))
+	fenv.Print("LEVEL73:", s)
 }
 func LEVEL70() {
 	var (

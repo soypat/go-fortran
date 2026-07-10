@@ -221,8 +221,27 @@ func (a *Array[T]) Set(value T, indices ...int) {
 // SetAll sets all elements of the array to the given value.
 // Corresponds to Fortran array(:) = value or array = value syntax.
 func (a *Array[T]) SetAll(value T) {
-	for i := range a.data {
-		a.data[i] = value
+	if len(a.stride) == 0 {
+		for i := range a.data {
+			a.data[i] = value
+		}
+		return
+	}
+	// Use shape/stride iteration to correctly handle views.
+	indices := make([]int, len(a.shape))
+	for i := range indices {
+		indices[i] = 1
+	}
+	total := a.Size()
+	for n := 0; n < total; n++ {
+		a.data[a.linearIndex(indices)] = value
+		for d := 0; d < len(indices); d++ {
+			indices[d]++
+			if indices[d] <= a.shape[d] {
+				break
+			}
+			indices[d] = 1
+		}
 	}
 }
 
@@ -606,6 +625,14 @@ func ArrayMulScalar[T numeric](a *Array[T], s T) *Array[T] {
 func ArrayDivScalar[T numeric](a *Array[T], s T) *Array[T] {
 	dst := NewArray[T](nil, a.shape...)
 	dst.iteratePair(a, func(di, ai int) { dst.data[di] = a.data[ai] / s })
+	return dst
+}
+
+// ArrayPow returns a new array with each element raised to scalar power s: result = a**s
+// Corresponds to Fortran: result = a**s (array expression)
+func ArrayPow[T numeric](a *Array[T], s T) *Array[T] {
+	dst := NewArray[T](nil, a.shape...)
+	dst.iteratePair(a, func(di, ai int) { dst.data[di] = T(POW(float64(a.data[ai]), float64(s))) })
 	return dst
 }
 

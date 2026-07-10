@@ -558,6 +558,9 @@ func (tg *ToGo) transformTypeDeclaration(dst []ast.Stmt, stmt *f90.TypeDeclarati
 				if vi == nil || vi.flags.HasAny(VFlagParameter|VFlagImplicit|VFlagCommon) {
 					continue
 				}
+				if vi.IsArray() {
+					continue // TYPE arrays: elements initialized per-element via AtPtr, not at array level
+				}
 				objExpr := ast.NewIdent(vi.Identifier())
 				dst, err = tg.initDerivedTypeArrayFields(dst, objExpr, typeDef)
 				if err != nil {
@@ -778,9 +781,20 @@ func (tg *ToGo) lookupFieldVarinfo(baseVinfo *Varinfo, component string, isEleme
 			ent := &comp.Components[j]
 			if strings.EqualFold(ent.Name, component) {
 				vi := defaultVarinfo(comp.Type.Token)
-				if ent.ArraySpec != nil && len(ent.ArraySpec.Bounds) > 0 && !isElementAccess {
+				// Check per-entity ArraySpec first, then type-level DIMENSION attribute.
+				arraySpec := ent.ArraySpec
+				if arraySpec == nil {
+					// DIMENSION can be in comp.Attributes (from `REAL,DIMENSION(3)::field`)
+					for ai := range comp.Attributes {
+						if comp.Attributes[ai].Token == f90token.DIMENSION && comp.Attributes[ai].Dimension != nil {
+							arraySpec = comp.Attributes[ai].Dimension
+							break
+						}
+					}
+				}
+				if arraySpec != nil && len(arraySpec.Bounds) > 0 && !isElementAccess {
 					vi.flags |= VFlagDimension
-					vi.decl.ArraySpec = ent.ArraySpec
+					vi.decl.ArraySpec = arraySpec
 				}
 				return vi
 			}
@@ -1424,7 +1438,8 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		}
 		// CallExpr as target: array element access or substring
 		rhs = tg.wrapConversion(targetVinfo, &rhsType, rhs)
-		return tg.transformSetArrayRef(dst, tgt, rhs)
+		rhsIsArray := rhsType.IsArray() || (rhsResultType != nil && rhsResultType.IsArray())
+		return tg.transformSetArrayRef(dst, tgt, rhs, rhsIsArray)
 	case *f90.ComponentAccess:
 		if len(tgt.Args) > 0 {
 			// Array component element assignment: obj%v(i) = x → obj.v.Set(x, i)
@@ -1473,7 +1488,7 @@ func (tg *ToGo) transformAssignment(dst []ast.Stmt, stmt *f90.AssignmentStmt) (_
 		}
 		// Array component negation: p%arr = -q%arr → intrinsic.ArraySetNeg(p.arr, q.arr)
 		if unary, ok := stmt.Value.(*f90.UnaryExpr); ok && unary.Op == f90token.Minus {
-			if rhsType.IsArray() || rhsType.TypeToken() == f90token.TYPE {
+			if rhsResultType != nil && rhsResultType.IsArray() {
 				operandExpr, _, operandErr := tg.transformExpression(targetVinfo, unary.Operand)
 				if operandErr == nil {
 					dst = append(dst, &ast.ExprStmt{X: &ast.CallExpr{
@@ -2078,7 +2093,7 @@ func (tg *ToGo) transformDataArrayElement(dst []ast.Stmt, stmt *f90.DataStmt, ca
 		return dst, 0, err
 	}
 
-	dst, err = tg.transformSetArrayRef(dst, callExpr, rhs)
+	dst, err = tg.transformSetArrayRef(dst, callExpr, rhs, false)
 	return dst, 1, err
 }
 
@@ -2108,7 +2123,7 @@ func (tg *ToGo) transformDataArray(dst []ast.Stmt, stmt *f90.DataStmt, varExpr f
 			Position: varExpr.SourcePos(),
 		}
 
-		dst, err = tg.transformSetArrayRef(dst, syntheticRef, rhs)
+		dst, err = tg.transformSetArrayRef(dst, syntheticRef, rhs, false)
 		if err != nil {
 			return dst, consumed, err
 		}

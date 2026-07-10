@@ -137,12 +137,17 @@ func (tg *ToGo) intrinsicExprV2(vitgt *Varinfo, fn *intrinsicFn, call *intrinsic
 	}
 
 	// Dispatch scalar intrinsics to array versions when first argument is an array.
-	if len(gargs) == 1 && firstArgType != nil && firstArgType.IsArray() &&
-		firstArgType.TypeToken() != f90token.TYPE {
+	if firstArgType != nil && firstArgType.IsArray() && firstArgType.TypeToken() != f90token.TYPE {
 		var arrayFuncName string
 		switch call.methodOrCall {
 		case "ABS":
-			arrayFuncName = "ArrayAbs"
+			if len(gargs) == 1 {
+				arrayFuncName = "ArrayAbs"
+			}
+		case "POW":
+			if len(gargs) == 2 {
+				arrayFuncName = "ArrayPow"
+			}
 		}
 		if arrayFuncName != "" {
 			elemTok := firstArgType.TypeToken()
@@ -653,7 +658,7 @@ var intrinsicsv2 = []intrinsicFn{
 		calls: []intrinsicCall{makeCall("MATMUL", nil, _tgtArrayGeneric, _tgtArrayGeneric)},
 	},
 	f90token.IntrinsicDOT_PRODUCT: {
-		calls: []intrinsicCall{makeCall("DOT_PRODUCT", nil, _tgtArray(f90token.FloatLit), _tgtArray(f90token.FloatLit))},
+		calls: []intrinsicCall{makeCall("DOT_PRODUCT", _tgtGenericFloat, _tgtArray(f90token.FloatLit), _tgtArray(f90token.FloatLit))},
 	},
 	f90token.IntrinsicALL: {
 		calls: []intrinsicCall{makeCall("ALL", _tgtBool, _tgtArray(f90token.LOGICAL))},

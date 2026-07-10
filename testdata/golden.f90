@@ -75,6 +75,10 @@
       CALL LEVEL69()
       CALL LEVEL70()
       CALL LEVEL71()
+      CALL LEVEL72()
+      CALL LEVEL73()
+      CALL LEVEL74()
+      CALL LEVEL75()
       STOP 0
       CALL EXIT(0)
       CALL EXIT
@@ -1518,6 +1522,52 @@
           obj%full = 'say: '//obj%first
           PRINT *, 'LEVEL69:', obj%full
       END SUBROUTINE LEVEL69
+
+! LEVEL74: TYPE derived-type array element copy to scalar variable
+      SUBROUTINE LEVEL74()
+          TYPE :: pt_t
+              REAL :: x, y
+          END TYPE pt_t
+          TYPE(pt_t) :: arr(3), elem
+          arr(1)%x = 1.0
+          arr(1)%y = 2.0
+          elem = arr(1)
+          PRINT *, 'LEVEL74:', elem%x, elem%y
+      END SUBROUTINE LEVEL74
+
+! LEVEL75: ranged view assignment with array expression RHS
+      SUBROUTINE LEVEL75()
+          REAL, DIMENSION(2,4) :: a
+          REAL :: s
+          INTEGER :: i, j
+          s = 2.0
+          DO i=1,2
+            DO j=1,4
+              a(i,j) = REAL(i*10+j)
+            END DO
+          END DO
+          a(:,2:3) = a(:,2:3) / s
+          PRINT *, 'LEVEL75:', a(1,2), a(1,3)
+      END SUBROUTINE LEVEL75
+
+! LEVEL72: ranged array assignment with scalar RHS
+      SUBROUTINE LEVEL72()
+          REAL, DIMENSION(5) :: a
+          a = 9.0
+          a(2:4) = 1.0
+          PRINT *, 'LEVEL72:', a(1), a(2), a(3), a(4), a(5)
+      END SUBROUTINE LEVEL72
+
+! LEVEL73: array ** scalar (element-wise power)
+      SUBROUTINE LEVEL73()
+          REAL, DIMENSION(3) :: a
+          REAL :: s
+          a(1) = 2.0
+          a(2) = 3.0
+          a(3) = 4.0
+          s = SQRT(SUM(a**2))
+          PRINT *, 'LEVEL73:', s
+      END SUBROUTINE LEVEL73
 
 ! LEVEL70: scalar-array arithmetic (scalar*array, array-scalar)
       SUBROUTINE LEVEL70()

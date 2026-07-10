@@ -546,6 +546,16 @@ func (tg *ToGo) transformBinaryExpr(vitgt *Varinfo, e *f90.BinaryExpr) (result a
 	case f90token.Slash:
 		op = token.QUO
 	case f90token.DoubleStar:
+		// Array ** scalar → intrinsic.ArrayPow[T](arr, scalar)
+		if leftType != nil && leftType.IsArray() && leftType.TypeToken() != f90token.TYPE {
+			elemTok := leftType.TypeToken()
+			goType := goTypeBasic(elemTok, 0)
+			sel := &ast.SelectorExpr{X: _astIntrinsic, Sel: ast.NewIdent("ArrayPow")}
+			return &ast.CallExpr{
+				Fun:  &ast.IndexExpr{X: sel, Index: goType},
+				Args: []ast.Expr{left, right},
+			}, leftType, nil
+		}
 		// Power operator: x ** y → intrinsic.POW[T](x, y)
 		left = tg.wrapConversion(vitgt, leftType, left)
 		right = tg.wrapConversion(vitgt, rightType, right)
@@ -744,6 +754,10 @@ func (tg *ToGo) transformFunctionCall(vitgt *Varinfo, e *f90.CallExpr) (result a
 		}
 		// Array element access (non-ranged, no secondary) returns scalar, not array.
 		if vi.IsArray() && len(e.Args) > 0 && !f90.IsRanged(e.Args...) && e.SecondaryAccess == nil {
+			// Derived-type elements use AtPtr (returns *T); dereference for value access.
+			if vi.TypeToken() == f90token.TYPE {
+				result = &ast.StarExpr{X: result}
+			}
 			return result, defaultVarinfo(vi.TypeToken()), err
 		}
 		return result, vi, err
@@ -1021,7 +1035,7 @@ func (tg *ToGo) astSetCall(receiver, value ast.Expr, indices ...ast.Expr) *ast.C
 	}
 }
 
-func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.CallExpr, rhs ast.Expr) (_ []ast.Stmt, err error) {
+func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.CallExpr, rhs ast.Expr, rhsIsArray bool) (_ []ast.Stmt, err error) {
 	if fexpr.SecondaryAccess != nil {
 		return dst, tg.makeErr(fexpr, "chained CallExpr assignment not yet implemented")
 	}
@@ -1051,14 +1065,18 @@ func (tg *ToGo) transformSetArrayRef(dst []ast.Stmt, fexpr *f90.CallExpr, rhs as
 				return dst, nil
 			}
 		}
-		// Partial range assignment: arr(1:N, 2:M) = v → arr.View(...).SetFrom(v)
+		// Partial range assignment: arr(1:N, 2:M) = scalar → SetAll; = array → SetFrom
 		viewExpr, err := tg.transformArrayView(fexpr, vitgt)
 		if err != nil {
 			return dst, err
 		}
+		setMethod := "SetFrom"
+		if !rhsIsArray {
+			setMethod = "SetAll"
+		}
 		gstmt := &ast.ExprStmt{
 			X: &ast.CallExpr{
-				Fun:  &ast.SelectorExpr{X: viewExpr, Sel: ast.NewIdent("SetFrom")},
+				Fun:  &ast.SelectorExpr{X: viewExpr, Sel: ast.NewIdent(setMethod)},
 				Args: []ast.Expr{rhs},
 			},
 		}
